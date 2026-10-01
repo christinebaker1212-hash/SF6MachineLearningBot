@@ -8,6 +8,17 @@ experimental outcome we're working toward, not a promised capability.
   F8, F7 and focus-loss release confirmed by the user (Ryu idle after Alt-Tab). Thumbstick kill
   untested.
 - **Current milestone: 2 (observations).** Step 1 is the REFramework state exporter.
+  - **VERIFIED IN GAME (0.2.5, script v3, 2026-10-01): state-check 13/13 PASS.**
+    - Rate: 59 lines/s; all fields present.
+    - Facing: `facing_right` (bit 128 set = facing right) confirmed at non-default positions.
+    - Walking back and forward changes distance: 1.68 → 2.94 → 1.10.
+    - `pose`: 0 standing, 1 crouching.
+    - Jab: `action_id` 600 (5/5). Input → state p50 65 ms, mean 60 ms; the screen probe
+      measured 70 ms.
+    - Jump: y up to 2.11.
+    - cr.MK at contact distance 0.70: P2 hp 9400 → 8900, P2 hitstun 23, P1 super +500.
+    - stage_timer: 117/118 steps +1, 1 skip, coinciding with a 557 ms capture stall.
+    - Note: menu.bat must run normally for G. Admin is only needed for R.
   - **First in-game attempt:** `dinput8.dll` and the script were found in the game folder, but
     no data lines arrived in 2 s (two runs). The cause is unknown: no restart after install,
     REFramework not loading, or an io.open path issue.
@@ -298,6 +309,7 @@ The safety tests are part of acceptance. During a run:
 | Debug overlay (no-activate, topmost) | not testable headless | **unverified** |
 | Latency probe | yes (reactive mock, known 50 ms delay) | **verified**: 30/30, median 70 ms input-sent to visible |
 | Live loop (random policy) | yes | **verified**. Present->input sent p50 10 ms, p95 16 ms. Preprocess about 1 ms. |
+| REFramework game state (HP, meters, x/y, facing, action, stun, frame clock) | simulated exporter | **verified**: state-check 13/13, input → state about 60 ms |
 | PyTorch inference in loop | yes, torch 2.14.1 CPU in container (numbers not representative) | **unverified** (torch not installed on the PC yet) |
 
 ## Unresolved issues / risks
