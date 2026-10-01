@@ -1,5 +1,8 @@
 # SF6 Machine Learning Bot — project notes for Claude and the user
 
+> **New agent? Start with `HANDOFF.md`.** It gives the current state, how to work with the
+> user, open items and next steps. This file is the detailed evidence log.
+
 Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** That goal is an
 experimental outcome we're working toward, not a promised capability.
 
@@ -76,8 +79,8 @@ experimental outcome we're working toward, not a promised capability.
     versus 2.1 ms in the random run (multi-key batches). The cause is inconclusive; it's minor.
   - Unique-content fps dropped to about 45 in the random run, during the focus-loss and pause
     tests. Probably the game throttles when unfocused (unverified).
-- Next step: the user runs the M1 acceptance procedure below on the game PC and sends back the
-  `report.md`, `acceptance_checklist.md` files and `sysinfo` output.
+- Next steps and open items: see `HANDOFF.md` §6-7. The M1 procedure below is kept for
+  reference; M1 is complete.
 
 ## User setup and constraints
 | item | value | source |
