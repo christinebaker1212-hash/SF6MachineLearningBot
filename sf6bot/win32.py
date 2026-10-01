@@ -67,6 +67,8 @@ if IS_WINDOWS:
     user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
     user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
     user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+    user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+    user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                     ctypes.c_int, ctypes.c_int, wintypes.UINT]
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -241,6 +243,11 @@ def make_window_noactivate_topmost(title: str) -> bool:
     HWND_TOPMOST = -1
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE = 0x2, 0x1, 0x10
     user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+    # Hide the overlay from screen capture (Windows 10 2004+): it stays visible on the monitor
+    # but should not appear in Desktop Duplication frames. Confirm with capture-bench snapshot.png.
+    WDA_EXCLUDEFROMCAPTURE = 0x11
+    make_window_noactivate_topmost.excluded_from_capture = bool(
+        user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE))
     return True
 
 

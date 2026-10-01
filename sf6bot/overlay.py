@@ -127,6 +127,11 @@ class DebugOverlay:
                     if self.pos is not None:
                         cv2.moveWindow(TITLE, int(self.pos[0]), int(self.pos[1]))
                     made_noactivate = win32.make_window_noactivate_topmost(TITLE) or not win32.IS_WINDOWS
+                    if made_noactivate and win32.IS_WINDOWS:
+                        hidden = getattr(win32.make_window_noactivate_topmost, "excluded_from_capture", False)
+                        self.status["overlay in capture"] = "hidden" if hidden else "VISIBLE - keep off game"
+                        if not hidden:
+                            print("WARNING: could not hide the overlay from capture; keep it off the game window.")
                 next_t += self.period
                 clock.precise_sleep_until(next_t, stop_event=self.stop_event)
                 next_t = max(next_t, clock.now())

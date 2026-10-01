@@ -229,7 +229,10 @@ The safety tests are part of acceptance. During a run:
   acceptance counts.
 - **Stuck keys after a hard kill:** if the process is killed (e.g. Task Manager), keys may stay
   logically down. Use `sf6bot release-all`, or tap the keys.
-- **Overlay over the game:** the overlay window gets captured if placed over the game.
+- **Overlay over the game:** the overlay goes beside the game when there's room. It's also
+  marked `WDA_EXCLUDEFROMCAPTURE`, so it should not appear in captured frames even if it covers
+  the game. This is unverified on the user's PC; check `snapshot.png`. The overlay status line
+  shows "overlay in capture: hidden" or "VISIBLE".
 - **Key-ups after focus loss:** on focus loss we send key-ups within about 5 ms, but they go
   to the newly focused window. We have not verified that SF6 clears held inputs when it loses
   focus.

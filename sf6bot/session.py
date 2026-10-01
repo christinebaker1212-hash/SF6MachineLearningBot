@@ -133,8 +133,8 @@ class Session:
                                         avoid_rect=None if self.window is None else self.window.client_rect,
                                         screen_rect=None if self.window is None else self.window.monitor_rect)
             if self.overlay.overlaps_game:
-                print("WARNING: no room beside the game for the debug overlay; it may cover the game and be "
-                      "captured. Drag the SF6 window to the top-left corner of the screen, or use --no-overlay.")
+                print("Note: no room beside the game for the debug overlay, so it may cover part of the game "
+                      "on screen. It is excluded from capture; check snapshot.png to confirm.")
             self.overlay.start()
 
     # ------------------------------------------------------------------
