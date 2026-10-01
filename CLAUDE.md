@@ -29,7 +29,11 @@ experimental outcome we're working toward, not a promised capability.
     - Not yet seen: values responding to the bot's inputs. In that run, `state-check`
       reported "no new lines". The likely cause is that Python looked in a different folder
       from where the file was written. The reader now searches the game folder and uses fstat
-      for size. Waiting on the user for the file's location.
+      for size.
+    - **Cause found:** on the user's REFramework, `io.open` paths are relative to
+      `<SF6>/reframework/data`. The v1 path "reframework/data/..." therefore landed in
+      `reframework/data/reframework/data/`. The script now writes `sf6bot_state.jsonl` (that
+      is, `<SF6>/reframework/data/sf6bot_state.jsonl`). The reader also checks the nested path.
 - M1 history: the first real-game runs were on 2026-10-01 on
   the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
   random loop.

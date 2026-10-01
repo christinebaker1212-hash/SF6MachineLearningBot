@@ -6,8 +6,9 @@
 -- Use OFFLINE only (Training Mode / CPU). Disable REFramework before playing online.
 
 -- io.open path rules differ between REFramework builds; try these in order and report which worked.
-local CANDIDATE_PATHS = { "reframework/data/sf6bot_state.jsonl", "reframework\\data\\sf6bot_state.jsonl",
-                          "sf6bot_state.jsonl" }
+-- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
+-- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
+local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
