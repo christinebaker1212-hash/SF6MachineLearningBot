@@ -404,6 +404,21 @@ The safety tests are part of acceptance. During a run:
     hitstun/blockstun/y/pose/x-velocity.
 - Not yet exported: the HUD round timer (seconds) and the round winner. The watch data will
   show what's derivable.
+- **First watch run (0.2.6, 2026-10-01).** The user played Ryu vs CPU from the RIGHT side, so
+  the user was `p2`. User-reported result: won R1, lost R2, won R3.
+  - KOs detected (hp → 0): R0 P1 KO'd, R1 P2 KO'd, R2 P1 KO'd. **This matches the user's
+    report 3/3.**
+  - `round` is 0-indexed in matches (0, 1, 2). In Training Mode it stays 0.
+  - The KO stage_timer values were 2085, 2657 and 2638. stage_timer appears to restart each
+    round (to be confirmed with the event log).
+  - Readiness: 1 transition (not ready → ready at the start). The watch was stopped with F8
+    before the post-match menus.
+  - 88 hp-drop events; 154 s ready out of 169 s.
+  - **Key implication:** the human or bot is not always `p1`. The side is chosen in the
+    menus, and here the user was p2. Episode logic must identify the controlled player:
+    use a short input probe at round start and see which player's state responds, or
+    infer it from which keyboard was used.
+  - Not yet seen: timeouts, double KOs, the timer value on the HUD, menus between matches.
 
 ## Idea queued: input-display readback
 SF6's Training Mode input display shows the frames each input was held, newest row at the top.
