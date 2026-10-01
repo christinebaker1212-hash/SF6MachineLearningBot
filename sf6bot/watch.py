@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from . import clock
-from .game_state import StateReader, find_sf6_dir, locate_state_file
+from .game_state import StateReader, character_name, find_sf6_dir, locate_state_file
 from .session import Session
 
 ZONES = ((1.0, "close"), (2.5, "mid"), (float("inf"), "far"))  # provisional thresholds (game units)
@@ -51,7 +51,8 @@ def run_watch(sess: Session, cfg: dict, seconds: float) -> dict:
     reader = StateReader(path, on_state=lambda st: ev({"type": "state", "t": st.t_recv, **st.raw})).start()
     sess.narrate("Watching only: the bot sends no inputs.", source="measured")
     print(f"Watching for up to {seconds:.0f} s (F8 to stop). The bot presses nothing. Play a match vs CPU.")
-    summary = {"transitions": [], "rounds_seen": [], "kos": [], "hp_events": 0, "ready_s": 0.0, "lines": 0}
+    summary = {"transitions": [], "rounds_seen": [], "kos": [], "hp_events": 0, "ready_s": 0.0, "lines": 0,
+               "characters": [None, None], "lines_with_input": [0, 0], "distinct_inputs": [set(), set()]}
     prev = None
     last_status = 0.0
     t_end = clock.now() + seconds
@@ -72,6 +73,15 @@ def run_watch(sess: Session, cfg: dict, seconds: float) -> dict:
             if prev is not None and st.ready and prev.ready:
                 summary["ready_s"] += t - prev.t_recv
             if st.ready:
+                for i in (0, 1):
+                    p = st.player(i)
+                    if isinstance(p.get("chara"), int) and summary["characters"][i] != p["chara"]:
+                        summary["characters"][i] = p["chara"]
+                        sess.narrate(f"P{i + 1} is {character_name(p['chara'])} (id {p['chara']}).", source="measured")
+                    if isinstance(p.get("input"), int) and p["input"]:
+                        summary["lines_with_input"][i] += 1
+                        if len(summary["distinct_inputs"][i]) < 200:
+                            summary["distinct_inputs"][i].add(p["input"])
                 rnd = st.raw.get("round")
                 if rnd not in summary["rounds_seen"]:
                     summary["rounds_seen"].append(rnd)
@@ -100,6 +110,8 @@ def run_watch(sess: Session, cfg: dict, seconds: float) -> dict:
     finally:
         reader.stop()
     summary["ready_s"] = round(summary["ready_s"], 1)
+    summary["character_names"] = [character_name(c) for c in summary["characters"]]
+    summary["distinct_inputs"] = [len(x) for x in summary["distinct_inputs"]]
     sess.recorder.write_json("watch_summary.json", summary)
     print(json.dumps(summary, indent=2)[:3000])
     return summary

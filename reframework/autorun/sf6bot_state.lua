@@ -9,7 +9,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 3          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 4          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -75,12 +75,37 @@ local function enc(v)
     return "null"
 end
 
-local PFIELDS = { "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
+-- Character ids (ESF numbers) via a READ-ONLY hook on app.FBattleMediator.UpdateGameInfo, the same
+-- approach as haruno-ku/SF6_Tools SF6_DistanceViewer.lua. The hook only reads; it never changes args.
+local chara = { [0] = nil, [1] = nil }
+pcall(function()
+    local t_med = sdk.find_type_definition("app.FBattleMediator")
+    local method = t_med and t_med:get_method("UpdateGameInfo")
+    if not method then return end
+    sdk.hook(method, function(args)
+        pcall(function()
+            local obj = sdk.to_managed_object(args[2])
+            local arr = obj and t_med:get_field("PlayerType"):get_data(obj)
+            if arr and arr:call("get_Length") >= 2 then
+                for i = 0, 1 do
+                    local e = arr:call("GetValue", i)
+                    if e then chara[i] = e:get_type_definition():get_field("value__"):get_data(e) end
+                end
+            end
+        end)
+    end, function(retval) return retval end)
+end)
+
+local PFIELDS = { "chara", "input", "input_sw", "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
                   "facing_right", "dir_bit", "action_id", "action_frame", "action_frames_total", "hitstop",
                   "hitstun", "blockstun", "pose", "act_st", "invuln" }
 
-local function read_player(p, t)
+local function read_player(p, t, idx)
     local r = {}
+    r.chara = chara[idx]
+    -- Raw per-frame input masks (READ only). Bit meanings are measured by `sf6bot input-map`.
+    r.input = try(function() return p.pl_input_new end)
+    r.input_sw = try(function() return p.pl_sw_new end)
     r.hp = try(function() return p.vital_new end)
     r.hp_max = try(function() return p.vital_max end)
     r.hp_recoverable = try(function() return p.heal_new end)
@@ -112,7 +137,7 @@ local function encode_player(r, prefix, missing)
     local parts = {}
     for _, k in ipairs(PFIELDS) do
         local v = r[k]
-        if v == nil then missing[#missing + 1] = prefix .. "." .. k end
+        if v == nil and k ~= "chara" then missing[#missing + 1] = prefix .. "." .. k end  -- chara: known after match start
         local tv = type(v)
         if tv ~= "number" and tv ~= "boolean" and tv ~= "nil" then v = tonumber(tostring(v)) end
         parts[#parts + 1] = '"' .. k .. '":' .. enc(v)
@@ -149,8 +174,8 @@ re.on_frame(function()
         local stage_timer = try(function() return gb:get_field("Game"):get_data(nil).stage_timer end)
         local round_no = try(function() return gb:get_field("Round"):get_data(nil).RoundNo end)
         local missing = {}
-        local r1 = read_player(p1, teams[0])
-        local r2 = read_player(p2, teams[1])
+        local r1 = read_player(p1, teams[0], 0)
+        local r2 = read_player(p2, teams[1], 1)
         -- During loading/intros the player objects exist but are zeroed: not usable state.
         local ready = (r1.hp_max or 0) > 0 and (r2.hp_max or 0) > 0 and r1.action_id ~= nil and r2.action_id ~= nil
         local s1 = encode_player(r1, "p1", missing)

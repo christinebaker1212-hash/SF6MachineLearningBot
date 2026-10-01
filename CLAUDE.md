@@ -467,6 +467,30 @@ The safety tests are part of acceptance. During a run:
   a super's cinematic hits. It is not a complete "being hit" signal; damage reaction action
   ids (2xx) are also needed.
 
+### Match 2 identity (user)
+- It was a **replay of two Ultimate Master ranked players: Ken (left/p1) vs Ryu (right/p2).**
+  The user confirmed the analysis above is "exactly right".
+- **This proves the exporter works during replays.** Replays could be a source of top-level
+  demonstrations with exact per-frame inputs, if the input masks are populated during
+  playback (exporter v4 tests this).
+
+## Exporter v4 / input map (0.2.9)
+- v4 adds per player:
+  - `input` (`pl_input_new`) and `input_sw` (`pl_sw_new`): raw per-frame input masks, read only
+  - `chara`: ESF id, via a read-only hook on `app.FBattleMediator.UpdateGameInfo`, as in
+    SF6_Tools. It is only known after match start, so it's never listed as missing.
+- Character names: `game_state.CHARACTERS`, a community table. To verify: the user's replay
+  should read Ken (10) left and Ryu (1) right.
+- `sf6bot input-map` (menu I), in Training Mode with the bot as P1:
+  - presses each key and records which bit lights up, giving a **measured** bit table
+  - also records the delay from input to mask in game frames
+  - writes `input_map.json`
+- **Community status:** the bit meanings are explicitly unverified in SF6_Tools' own
+  provenance notes. Its layout is directions in the low 4 bits and buttons in 0xFFF0.
+- Next, verify in a replay that both players' `input` masks vary (`watch_summary`
+  lines_with_input / distinct_inputs). If they do, build a replay → demonstration dataset
+  exporter for M3.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

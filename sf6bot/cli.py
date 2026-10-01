@@ -157,6 +157,13 @@ def cmd_overlay_test(args, cfg):
     _print_report(s)
 
 
+def cmd_input_map(args, cfg):
+    from .input_map import run_input_map
+    with _session(args, cfg, "input_map") as s:
+        run_input_map(s, cfg)
+    _print_report(s)
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -235,6 +242,9 @@ def main(argv=None):
     p = sub.add_parser("overlay-test", help="show the debug overlay with MOCK data and log whether Windows shows it")
     p.add_argument("--seconds", type=float, default=15)
     p.set_defaults(fn=cmd_overlay_test)
+
+    sub.add_parser("input-map", help="measure SF6 input-mask bits per key (Training Mode, bot = P1)").set_defaults(
+        fn=cmd_input_map)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

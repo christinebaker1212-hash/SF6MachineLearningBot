@@ -25,7 +25,7 @@ class SimExporter(threading.Thread):
         while not self.stop.is_set():
             n += 1
             if n % 30 == 1:
-                info.write_text(json.dumps({"version": 3, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
+                info.write_text(json.dumps({"version": 4, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
                                             "last_error": "", "open_errors": ""}))
             d = set(self.inp.down)
             if "D" in d:
@@ -132,3 +132,43 @@ def test_watch_records_hits_and_ko(cfg, tmp_path, monkeypatch):
     th.join()
     assert summary["hp_events"] == 4 and len(summary["kos"]) == 1 and summary["kos"][0]["player"] == "P2"
     assert summary["rounds_seen"] == [1]
+
+
+def test_input_map_against_simulated_masks(cfg, tmp_path, monkeypatch):
+    """MOCK: simulated exporter reports pl_input_new as a made-up bit per held key (not SF6's real
+    bits). Checks that input-map recovers a single distinct bit per key."""
+    import sf6bot.input_map as im
+    import sf6bot.session as sm
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    path = game / "reframework" / "data" / "sf6bot_state.jsonl"
+    path.write_text("")
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(im, "find_sf6_dir", lambda cfg: game)
+    fake_bits = {"W": 1, "S": 2, "A": 4, "D": 8, "U": 16, "I": 32, "O": 64, "J": 128, "K": 256, "L": 512}
+
+    def writer(stop):
+        n = 0
+        with open(path, "a") as f:
+            while not stop.is_set():
+                n += 1
+                mask = sum(b for k, b in fake_bits.items() if k in inp.down)
+                p = {"hp": 10000, "hp_max": 10000, "x": -1.0, "facing_right": True, "action_id": 1, "input": mask}
+                f.write(json.dumps({"v": 4, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "round": 0,
+                                    "p1": p, "p2": dict(p, x=1.0, input=0), "missing": []}) + "\n")
+                f.flush()
+                stop.wait(1 / 60)
+
+    stop = threading.Event()
+    th = threading.Thread(target=writer, args=(stop,))
+    th.start()
+    try:
+        with Session(cfg, "input_map_test", mock=True) as s:
+            out = im.run_input_map(s, cfg, hold_frames=8, repeats=2)
+    finally:
+        stop.set()
+        th.join()
+    assert out["verified"], out
+    assert out["keys"]["LP"]["mask"] == 16 and out["keys"]["RIGHT"]["mask"] == 8

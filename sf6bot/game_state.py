@@ -25,8 +25,23 @@ STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
                     Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
 INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
-EXPECTED_SCRIPT_VERSION = 3  # must match SCRIPT_VERSION in the Lua script
+EXPECTED_SCRIPT_VERSION = 4  # must match SCRIPT_VERSION in the Lua script
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
+
+
+# ESF character numbers -> names. Source: haruno-ku/SF6_Tools (community, 2026-09). Spot-check against
+# known matches (user's replay: Ken left, Ryu right) before relying on it.
+CHARACTERS = {1: "Ryu", 2: "Luke", 3: "Kimberly", 4: "Chun-Li", 5: "Manon", 6: "Zangief", 7: "JP", 8: "Dhalsim",
+              9: "Cammy", 10: "Ken", 11: "Dee Jay", 12: "Lily", 13: "A.K.I.", 14: "Rashid", 15: "Blanka",
+              16: "Juri", 17: "Marisa", 18: "Guile", 19: "Ed", 20: "E. Honda", 21: "Jamie", 22: "Akuma",
+              25: "Sagat", 26: "M. Bison", 27: "Terry", 28: "Mai", 29: "Elena", 30: "Viper", 31: "Alex",
+              32: "Ingrid", 33: "Yasmine"}
+
+
+def character_name(esf) -> str:
+    if not isinstance(esf, int):
+        return "?"
+    return CHARACTERS.get(esf, f"ESF_{esf:03d}")
 
 
 @dataclass
