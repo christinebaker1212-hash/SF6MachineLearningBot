@@ -110,6 +110,12 @@ def cmd_release_all(args, cfg):
     print(f"Released: {keys}")
 
 
+def cmd_share(args, cfg):
+    from .share import build
+    p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
+    print(f"Wrote {p} ({p.stat().st_size // 1024} KB). Paste its contents to Claude.")
+
+
 def _print_report(s):
     from .report import to_markdown
     if s.report:
@@ -166,6 +172,11 @@ def main(argv=None):
     p = sub.add_parser("report", help="(re)build report.md/report.json for a run directory")
     p.add_argument("dir")
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
+    p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")
+    p.add_argument("--include-mock", action="store_true")
+    p.set_defaults(fn=cmd_share)
 
     sub.add_parser("release-all", help="send key-up for all bound keys").set_defaults(fn=cmd_release_all)
 

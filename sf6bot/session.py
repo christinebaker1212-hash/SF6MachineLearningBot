@@ -31,7 +31,8 @@ class Session:
         self.use_overlay = cfg["overlay"]["enabled"] if overlay is None else overlay
         self.extra_meta = extra_meta or {}
         self.stop_event = threading.Event()
-        self.status: dict = {}
+        import collections
+        self.status: dict = {"_thoughts": collections.deque(maxlen=12)}
         self.window = None
         self.report = None
 
@@ -170,6 +171,15 @@ class Session:
             if t_end is not None and clock.now() > t_end:
                 return False
         return True
+
+    def narrate(self, text: str, source: str = "scripted") -> None:
+        """Add a line to the overlay THOUGHTS feed and the recording. ``source`` says where the
+        statement comes from (scripted routine, measured state, policy output) so it is never
+        presented as more than it is."""
+        line = f"[{source}] {text}"
+        self.status["_thoughts"].append(line)
+        if getattr(self, "recorder", None) is not None:
+            self.recorder.event({"type": "narration", "t": clock.now(), "source": source, "text": text})
 
     def check(self) -> None:
         """Raise if capture died."""

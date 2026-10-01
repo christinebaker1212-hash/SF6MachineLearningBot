@@ -24,6 +24,7 @@ echo  7. Latency probe (you drag a box around the input display)
 echo  8. Random-input loop, 30 s (Training Mode only)
 echo  9. Release all keys (if a key seems stuck)
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
+echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
 echo  0. Open the results folder
 echo  Q. Quit
 echo.
@@ -39,6 +40,7 @@ if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
 if /i "%CH%"=="t" goto torch
+if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="q" exit /b 0
 goto menu
@@ -46,6 +48,15 @@ goto menu
 :torch
 ".venv\Scripts\python.exe" -m pip install torch
 %BOT% run --policy probe --seconds 60
+goto done
+
+:share
+%BOT% share
+if errorlevel 1 goto done
+clip < runs\for_claude.txt
+echo.
+echo The summary is now COPIED. Go to the Claude chat, click the message box, press Ctrl+V, and send.
+start "" notepad runs\for_claude.txt
 goto done
 
 :probe

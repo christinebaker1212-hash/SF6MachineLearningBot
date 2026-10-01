@@ -25,6 +25,7 @@ def run_acceptance(sess: Session, routine_path: str) -> list[dict]:
                 return results
             sess.check()
             sess.status["step"] = f"{i}:{seq.name} #{r + 1}"
+            sess.narrate(f"Running {seq.name} ({seq.notation()}), facing {sess.controller.facing.value}.")
             timings, ok = runner.run(seq, stop_event=sess.stop_event)
             errs = [t.error_s for t in timings]
             results.append({"step": i, "move": seq.name, "repeat": r + 1, "completed": ok,

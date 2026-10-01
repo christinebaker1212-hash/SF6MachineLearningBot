@@ -40,22 +40,17 @@ class DebugOverlay:
     MIN_IMG_W = 160
 
     def _place(self, width, game, screen) -> int:
-        """Put the overlay beside the game window so it is not captured. Returns image width."""
+        """Pin the overlay to the hard left of the screen (user preference).
+        Shrinks the frame view to fit beside the game when possible; otherwise it overlaps
+        the game on screen (it is excluded from capture, see win32). Returns image width."""
         gl, gt, gr, gb = game
         sl, st, sr, sb = screen
-        need = self.PANEL_W + self.MIN_IMG_W + 10
-        right, left = sr - gr, gl - sl
-        if right >= need:
-            w = min(width, right - self.PANEL_W - 10)
-            self.pos = (gr + 10, max(st, gt))
-        elif left >= need:
-            w = min(width, left - self.PANEL_W - 10)
-            self.pos = (sl, max(st, gt))
-        else:
-            w = min(width, 320)
-            self.pos = (sr - w - self.PANEL_W, sb - 460)
-            self.overlaps_game = True
-        return w
+        left = gl - sl
+        self.pos = (sl, st)
+        if left >= self.PANEL_W + self.MIN_IMG_W + 10:
+            return min(width, left - self.PANEL_W - 10)
+        self.overlaps_game = left < self.PANEL_W
+        return min(width, 320) if left < self.PANEL_W else max(0, left - self.PANEL_W - 10)
 
     def start(self) -> "DebugOverlay":
         self._thread.start()
@@ -92,12 +87,27 @@ class DebugOverlay:
         ]
         if g.recv_delays:
             lines.append(f"present->recv: {1000 * g.recv_delays[-1]:5.1f} ms")
-        for k, v in list(self.status.items())[:8]:
+        for k, v in [kv for kv in self.status.items() if not kv[0].startswith("_")][:8]:
             lines.append(f"{k}: {v}")
         for i, line in enumerate(lines):
             col = (0, 255, 0) if i == 0 and self.c.armed else (0, 0, 255) if i == 0 else (230, 230, 230)
             cv2.putText(p, line, (8, 130 + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col, 1)
         return p
+
+    def _draw_thoughts(self, area, width) -> None:
+        """Running commentary feed (Session.narrate). In M1 it only states what the scripted
+        routine is doing; later milestones feed it from measured state and the policy's outputs."""
+        import textwrap
+        area[:] = (20, 20, 20)
+        cv2.putText(area, "THOUGHTS", (8, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
+        chars = max(20, width // 8)
+        rows = []
+        for line in reversed(list(self.status.get("_thoughts", []))):
+            rows = textwrap.wrap(line, chars) + rows
+        y = 36
+        for row in rows[-6:]:
+            cv2.putText(area, row, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1)
+            y += 19
 
     def _run(self) -> None:
         made_noactivate = False
@@ -109,7 +119,7 @@ class DebugOverlay:
                 if fr is not None:
                     h, w = fr.image.shape[:2]
                     vh = int(h * self.width / w)
-                    img = cv2.resize(fr.image, (self.width, vh), interpolation=cv2.INTER_AREA)
+                    img = cv2.resize(fr.image, (max(1, self.width), max(1, vh)), interpolation=cv2.INTER_AREA)
                     age_ms = 1000 * (clock.now() - fr.t_recv)
                     cv2.putText(img, f"frame #{fr.seq} age {age_ms:.0f} ms", (8, 20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
@@ -117,9 +127,14 @@ class DebugOverlay:
                     img = np.zeros((360, self.width, 3), np.uint8)
                     cv2.putText(img, "no frames yet", (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
                 ph = max(img.shape[0], 420)
-                canvas = np.zeros((ph, img.shape[1] + self.PANEL_W, 3), np.uint8)
-                canvas[:img.shape[0], :img.shape[1]] = img
-                canvas[:, img.shape[1]:] = self._panel(ph)
+                iw = img.shape[1] if self.width > 0 else 0
+                tw = self.PANEL_W + iw
+                th = 150
+                canvas = np.zeros((ph + th, tw, 3), np.uint8)
+                canvas[:ph, :self.PANEL_W] = self._panel(ph)
+                if iw:
+                    canvas[:img.shape[0], self.PANEL_W:] = img
+                self._draw_thoughts(canvas[ph:], tw)
                 cv2.imshow(TITLE, canvas)
                 cv2.waitKey(1)
                 if not made_noactivate:
