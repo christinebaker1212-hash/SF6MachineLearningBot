@@ -82,7 +82,9 @@ class Session:
             s = cfg["safety"]
             k_kill, k_pause, k_flip = vk(s["kill_key"]), vk(s["pause_key"]), vk(s["flip_facing_key"])
             focused = lambda: win32.foreground_window() == hwnd  # noqa: E731
-            kill = lambda: win32.is_vk_down(k_kill)  # noqa: E731
+            pad = win32.XInputCombo(s.get("pad_kill_combo") or [])
+            self.pad_kill = pad
+            kill = lambda: win32.is_vk_down(k_kill) or pad.pressed()  # noqa: E731
             pause = lambda: win32.is_vk_down(k_pause)  # noqa: E731
             flip = lambda: win32.is_vk_down(k_flip)  # noqa: E731
             alive = lambda: win32.is_window(hwnd)  # noqa: E731
@@ -138,6 +140,11 @@ class Session:
         s = self.cfg["safety"]
         print(f"Click into the SF6 window. Inputs start in {countdown_s:.0f}s. "
               f"Kill: {s['kill_key']}  Pause: {s['pause_key']}  Flip facing: {s['flip_facing_key']}")
+        pad = getattr(self, "pad_kill", None)
+        if pad is not None and pad.mask:
+            combo = "+".join(s.get("pad_kill_combo") or [])
+            print(f"Controller kill: hold {combo}" + ("" if pad.available and pad.connected()
+                                                    else "  (WARNING: no XInput controller detected)"))
         end = clock.now() + countdown_s
         while clock.now() < end:
             if self.stop_event.wait(0.1):

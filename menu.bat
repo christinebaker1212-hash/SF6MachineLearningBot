@@ -12,7 +12,7 @@ if not exist runs mkdir runs
 :menu
 cls
 echo ================= sf6bot (Milestone 1) =================
-echo  Safety while the bot runs: F8 = STOP   F7 = pause   F6 = flip facing
+echo  Safety while the bot runs: F8 or click BOTH thumbsticks = STOP   F7 = pause   F6 = flip facing
 echo.
 echo  1. System info (saved to runs\sysinfo.txt)
 echo  2. Check that the SF6 window is found
@@ -23,6 +23,7 @@ echo  6. Acceptance routine - Ryu on the RIGHT side
 echo  7. Latency probe (needs a box from snapshot.png)
 echo  8. Random-input loop, 30 s (Training Mode only)
 echo  9. Release all keys (if a key seems stuck)
+echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
 echo  0. Open the results folder
 echo  Q. Quit
 echo.
@@ -37,9 +38,15 @@ if /i "%CH%"=="6" (%BOT% acceptance --side right & goto done)
 if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
+if /i "%CH%"=="t" goto torch
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="q" exit /b 0
 goto menu
+
+:torch
+".venv\Scripts\python.exe" -m pip install torch
+%BOT% run --policy probe --seconds 60
+goto done
 
 :probe
 echo Enter the box around the input display as x,y,w,h  (example: 40,200,300,40)

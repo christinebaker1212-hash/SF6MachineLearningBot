@@ -36,6 +36,7 @@ input:
 safety:
   kill_key: F8            # immediate stop + release all (works even when game is focused)
   pause_key: F7           # toggle pause (inputs released while paused)
+  pad_kill_combo: [LS, RS] # controller kill: click BOTH thumbsticks (XInput pads; [] disables)
   flip_facing_key: F6     # manual facing flip (M1 has no facing detection yet)
   refocus_grace_s: 0.5    # wait after the game regains focus before re-arming
   start_countdown_s: 5    # time to click into the game before inputs start
@@ -53,6 +54,7 @@ overlay:
 
 loop:
   max_frame_age_ms: 50    # do not act on frames older than this (stale) -> counted & skipped
+  torch_threads: 2        # CPU threads for PyTorch inference; leave cores for the game
   obs_width: 128          # grayscale observation size fed to the policy
   obs_height: 72
   # Actions for the RANDOM baseline policy (relative directions; label RANDOM, not learned)

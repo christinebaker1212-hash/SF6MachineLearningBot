@@ -89,7 +89,7 @@ def cmd_run(args, cfg):
     from .policy import make_policy
     policy = make_policy(args.policy, cfg)
     with _session(args, cfg, f"run_{args.policy}", extra_meta={"policy": policy.label}) as s:
-        print(f"Policy: {policy.label}")
+        print(f"Policy: {policy.label}" + (f"  device={policy.device}" if hasattr(policy, "device") else ""))
         out = run_policy(s, policy, args.seconds)
         print(out)
     _print_report(s)

@@ -55,10 +55,11 @@ class TorchProbePolicy(Policy):
     label = "PROBE (untrained random-weight CNN; output NOT applied)"
     applies_actions = False
 
-    def __init__(self, n_actions: int = 32, device: str | None = None) -> None:
+    def __init__(self, n_actions: int = 32, device: str | None = None, threads: int = 2) -> None:
         import torch
         import torch.nn as nn
         self.torch = torch
+        torch.set_num_threads(max(1, threads))
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.net = nn.Sequential(
             nn.Conv2d(4, 32, 8, stride=4), nn.ReLU(),
@@ -68,6 +69,10 @@ class TorchProbePolicy(Policy):
         ).to(self.device).eval()
         self._stack = None
         self.last_action_index = -1
+        # Warm up (lazy layer init, kernel selection) so the first live decision isn't measured cold.
+        with torch.inference_mode():
+            for _ in range(3):
+                self.net(torch.zeros(1, 4, 72, 128, device=self.device))
 
     def act(self, obs, t):
         torch = self.torch
@@ -89,5 +94,5 @@ def make_policy(name: str, cfg: dict) -> Policy:
     if name == "random":
         return RandomPolicy(lc["random_actions"], int(lc["random_hold_frames"]))
     if name == "probe":
-        return TorchProbePolicy()
+        return TorchProbePolicy(threads=int(lc.get("torch_threads", 2)))
     raise ValueError(f"unknown policy {name!r}")

@@ -259,3 +259,70 @@ def install_console_ctrl_handler(callback) -> None:
 
     install_console_ctrl_handler._ref = HANDLER(handler)  # keep alive
     kernel32.SetConsoleCtrlHandler(install_console_ctrl_handler._ref, True)
+
+
+# ---- XInput (controller) kill switch -----------------------------------------
+XINPUT_BUTTONS = {"DPAD_UP": 0x0001, "DPAD_DOWN": 0x0002, "DPAD_LEFT": 0x0004, "DPAD_RIGHT": 0x0008,
+                  "START": 0x0010, "BACK": 0x0020, "LS": 0x0040, "RS": 0x0080, "LB": 0x0100, "RB": 0x0200,
+                  "A": 0x1000, "B": 0x2000, "X": 0x4000, "Y": 0x8000}
+
+
+class XInputCombo:
+    """True while every button in ``combo`` is held on any connected XInput pad.
+
+    Only reads controller state; never sends anything. Disconnected slots are
+    rescanned every ``rescan_s`` because polling empty slots is slow."""
+
+    def __init__(self, combo: list[str], rescan_s: float = 2.0) -> None:
+        self.mask = 0
+        for b in combo:
+            self.mask |= XINPUT_BUTTONS[b.upper()]
+        self.available = False
+        self._connected: list[int] = []
+        self._last_scan = -1e9
+        self.rescan_s = rescan_s
+        if not IS_WINDOWS or not self.mask:
+            return
+        from ctypes import wintypes as wt
+
+        class XINPUT_GAMEPAD(ctypes.Structure):
+            _fields_ = [("wButtons", wt.WORD), ("bLeftTrigger", ctypes.c_ubyte), ("bRightTrigger", ctypes.c_ubyte),
+                        ("sThumbLX", ctypes.c_short), ("sThumbLY", ctypes.c_short),
+                        ("sThumbRX", ctypes.c_short), ("sThumbRY", ctypes.c_short)]
+
+        class XINPUT_STATE(ctypes.Structure):
+            _fields_ = [("dwPacketNumber", wt.DWORD), ("Gamepad", XINPUT_GAMEPAD)]
+
+        for dll in ("xinput1_4", "xinput9_1_0"):
+            try:
+                self._dll = ctypes.WinDLL(dll)
+                break
+            except OSError:
+                self._dll = None
+        if self._dll is None:
+            return
+        self._dll.XInputGetState.argtypes = [wt.DWORD, ctypes.POINTER(XINPUT_STATE)]
+        self._dll.XInputGetState.restype = wt.DWORD
+        self._state = XINPUT_STATE()
+        self.available = True
+
+    def _get(self, i: int) -> int | None:
+        if self._dll.XInputGetState(i, ctypes.byref(self._state)) != 0:
+            return None
+        return self._state.Gamepad.wButtons
+
+    def connected(self) -> list[int]:
+        import time
+        if time.perf_counter() - self._last_scan > self.rescan_s:
+            self._connected = [i for i in range(4) if self._get(i) is not None]
+            self._last_scan = time.perf_counter()
+        return self._connected
+
+    def pressed(self) -> bool:
+        if not self.available:
+            return False
+        for i in self.connected():
+            b = self._get(i)
+            if b is not None and (b & self.mask) == self.mask:
+                return True
+        return False

@@ -13,7 +13,13 @@ experimental outcome we're working toward, not a promised capability.
 | item | value | source |
 |---|---|---|
 | OS / platform | Windows 11, Steam | user |
-| CPU / GPU / VRAM / RAM / display Hz | **unknown**: run `sf6bot sysinfo` | pending |
+| Device | likely a ROG Xbox Ally X-class handheld (inferred from CPU; unconfirmed) | inferred |
+| CPU | AMD Ryzen AI Z2 Extreme, 8 cores / 16 threads | `sysinfo` |
+| GPU / VRAM | AMD Radeon 890M iGPU, 12117 MB reported as dedicated (shared with system memory). **No CUDA.** | `sysinfo` |
+| RAM | 11.6 GB visible to Windows | `sysinfo` |
+| Display | 1920x1080 @ 60 Hz, single monitor | `sysinfo` |
+| Python | 3.14.5 | `sysinfo` |
+| SF6 window | `StreetFighter6.exe`, title "Street Fighter 6", **windowed 1280x720** client at (479,192) | `list-windows` |
 | Character / controls | Ryu, Classic | user |
 | Input method | keyboard via SendInput (scancodes) | user |
 | REFramework | available | user |
@@ -49,8 +55,8 @@ punishes, missed anti-airs, poor drive/burnout management, slow reactions.
 - dxcam 0.3.0 provides Desktop Duplication capture. Per-frame `LastPresentTime` is in QPC
   ticks and exposed as seconds; I read this in the library source.
 - `SendInput` with scancodes and a `dwExtraInfo` tag is a documented Win32 API.
-- The SF6 window and process are found via EnumWindows. The exe name `StreetFighter6.exe` is
-  **unverified**.
+- The SF6 window and process are found via EnumWindows. **Verified on the user's PC:**
+  `StreetFighter6.exe`, title "Street Fighter 6".
 
 **Not assumed:**
 - No official SF6 training API.
@@ -110,6 +116,9 @@ DebugOverlay thread (overlay.py)              focus loss -> disarm+release, wind
    and extract it.
 2. Double-click `setup.bat` once.
 3. Double-click `menu.bat` and choose steps by number.
+4. To get new versions, double-click `update.bat`. It keeps `.venv`, `runs` and
+   `configs\local.yaml`. If the download fails (e.g. the repo is private), download the ZIP
+   manually and copy its contents over the folder.
 
 Results land in `runs\` (menu option 0 opens it).
 
@@ -200,8 +209,19 @@ The safety tests are part of acceptance. During a run:
 ## Unresolved issues / risks
 - **Key bindings:** SF6's default keyboard layout is not verified, so the user must align
   bindings.
-- **Exe name / title:** `StreetFighter6.exe` and "Street Fighter 6" are unverified;
-  `list-windows` will show the real values.
+- **Hardware limits (handheld, shared CPU and iGPU):**
+  - Game, capture and inference compete for the same chip.
+  - Inference runs on CPU (`loop.torch_threads: 2`). There is no CUDA, and ROCm/DirectML on
+    Windows for the 890M is unverified.
+  - Heavy training (BC/RL updates) will probably have to move to another machine or a cloud
+    GPU, with only inference running on the handheld. Decide this from measured numbers.
+  - RAM is about 11.6 GB with SF6 running.
+  - Run plugged in, in the highest performance mode.
+- **No keyboard on a handheld:** F8 needs a keyboard. A controller kill switch is added: click
+  both thumbsticks (`safety.pad_kill_combo`, read through XInput). Whether the built-in pad
+  shows up as XInput is unverified.
+- **Which device controls Player 1:** with the built-in pad present, it's unverified whether
+  SF6 takes keyboard input for P1. `input-test` will show it.
 - **dxcam on SF6:** may fail in exclusive fullscreen; use borderless or windowed. The
   QPC-offset timestamp conversion is checked at runtime (`timestamp_check` in the report).
 - **Short presses can be missed:** wall-clock timing means a 1-frame press can straddle game
