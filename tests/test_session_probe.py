@@ -39,7 +39,7 @@ class ReactiveMock(CaptureBackend):
 
 
 def test_probe_measures_known_delay(cfg, monkeypatch):
-    cfg["latency_probe"].update(trials=3, settle_s=0.1, timeout_s=0.3, hold_frames=2)
+    cfg["latency_probe"].update(trials=3, settle_s=0.1, timeout_s=0.3, hold_frames=2, threshold="auto")
     import sf6bot.session as sm
     from sf6bot.input_backend import MockInputBackend
     inp = MockInputBackend()
@@ -64,3 +64,12 @@ def test_policy_loop_report(cfg):
     assert s.report["loop"]["ticks"] == out["ticks"]
     assert s.report["end_reason"] == "completed"
     assert (s.recorder.dir / "video.mp4").exists()
+
+
+def test_probe_diagnoses_inputs_not_reaching_game(cfg):
+    """MOCK: synthetic frames ignore inputs -> every press undetected -> diagnosis names input path."""
+    from sf6bot.latency_probe import diagnose
+    res = [{"detected": False, "max_diff": 0.5}] * 5
+    assert "not reaching" in diagnose(res, noise=0.4, thr=3.0)
+    res = [{"detected": False, "max_diff": 2.5}] * 5
+    assert "below the threshold" in diagnose(res, noise=0.4, thr=3.0)

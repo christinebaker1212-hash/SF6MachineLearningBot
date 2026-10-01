@@ -65,6 +65,7 @@ latency_probe:
   key: LP
   hold_frames: 4
   trials: 30
-  threshold: 25.0         # mean abs pixel diff in ROI that counts as "visible change"
+  threshold: auto         # "auto" = 3 x measured idle noise + 2 (at least min_threshold), or a number
+  min_threshold: 3.0      # mean abs pixel diff in the box
   timeout_s: 0.5
   settle_s: 1.0

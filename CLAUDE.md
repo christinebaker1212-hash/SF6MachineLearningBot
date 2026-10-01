@@ -227,8 +227,8 @@ The safety tests are part of acceptance. During a run:
 | capability | MOCK/container | real SF6 |
 |---|---|---|
 | Capture with timestamps, duplicate/missed-frame counting | yes (synthetic) | **unverified** |
-| SendInput press/release, atomic batches | yes (mock backend) | **partly verified**: user's Training Mode input-display screenshot of an acceptance run (right side) |
-| Sequences with measured timing; facing mirroring | yes (unit tests) | **partly verified**: Hadoken from the right registered as 3f ↓, 3f ↙, 3f ←+P (correctly mirrored); neutral gaps of 80f as scripted; walks of 40f and **39f** (1-frame wall-clock jitter observed). Hadoken success count still pending. |
+| SendInput press/release, atomic batches | yes (mock backend) | **unverified**. The user's first latency-probe run detected nothing on every trial; cause not yet known (input path vs. box/threshold). |
+| Sequences with measured timing; facing mirroring | yes (unit tests) | **unverified** |
 | Recording (frames.csv, video.mp4, events.jsonl) and report | yes | **unverified** |
 | Kill/pause/focus-loss release | yes (unit tests) | **unverified** |
 | Debug overlay (no-activate, topmost) | not testable headless | **unverified** |

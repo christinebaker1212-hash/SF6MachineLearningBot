@@ -33,7 +33,7 @@ def select_roi(img) -> tuple[int, int, int, int] | None:
 def run_probe(sess: Session, roi: tuple[int, int, int, int] | None, trials: int | None = None) -> list[dict]:
     pc = sess.cfg["latency_probe"]
     trials = int(trials or pc["trials"])
-    thr = float(pc["threshold"])
+    thr_cfg = pc.get("threshold", "auto")
     timeout = float(pc["timeout_s"])
     settle = float(pc["settle_s"])
     hold = int(pc["hold_frames"]) * clock.FRAME_S
@@ -58,6 +58,13 @@ def run_probe(sess: Session, roi: tuple[int, int, int, int] | None, trials: int 
     x, y, rw, rh = roi
     if x < 0 or y < 0 or x + rw > w or y + rh > h:
         raise ValueError(f"ROI {roi} outside captured area {w}x{h}")
+    noise = measure_noise(sess, roi)
+    if thr_cfg in (None, "auto"):
+        thr = max(float(pc.get("min_threshold", 3.0)), 3.0 * noise + 2.0)
+    else:
+        thr = float(thr_cfg)
+    print(f"Box noise with no input: {noise:.2f}; detection threshold: {thr:.2f}")
+    ev({"type": "probe_calibration", "t": clock.now(), "noise": noise, "threshold": thr})
     for i in range(trials):
         if sess.stop_event.is_set() or not sess.wait_armed():
             break
@@ -95,5 +102,42 @@ def run_probe(sess: Session, roi: tuple[int, int, int, int] | None, trials: int 
         msg = f"{1000 * r['latency_s']:.1f} ms" if hit else f"not detected (max diff {max_diff:.1f})"
         print(f"  trial {i + 1}/{trials}: {msg}")
         sess.status["probe"] = msg
+        if i == 4 and not any(r["detected"] for r in results):
+            print("Stopping early: 5 presses in a row were not detected.")
+            break
     sess.recorder.write_json("probe_results.json", results)
+    diag = diagnose(results, noise, thr)
+    if diag:
+        print("\nDIAGNOSIS: " + diag)
+        ev({"type": "probe_diagnosis", "t": clock.now(), "text": diag})
     return results
+
+
+def measure_noise(sess: Session, roi, seconds: float = 0.5) -> float:
+    """Largest ROI change between frames while nothing is pressed (animation, video noise)."""
+    fr = sess.grabber.wait_newer(0, timeout=1.0)
+    base = _roi(fr.image, roi)
+    seq = fr.seq
+    noise = 0.0
+    end = clock.now() + seconds
+    while clock.now() < end:
+        f = sess.grabber.wait_newer(seq, timeout=0.1)
+        if f is None:
+            continue
+        seq = f.seq
+        noise = max(noise, float(np.abs(_roi(f.image, roi) - base).mean()))
+    return noise
+
+
+def diagnose(results: list[dict], noise: float, thr: float) -> str:
+    if not results or any(r["detected"] for r in results):
+        missed = sum(not r["detected"] for r in results)
+        return f"{missed} of {len(results)} presses not detected." if missed else ""
+    peak = max(r["max_diff"] for r in results)
+    if peak <= noise + 1.0:
+        return ("The box never changed after a press. Most likely the bot's key presses are not reaching "
+                "SF6: check that the game's keyboard bindings match the bot's (W/A/S/D, U I O, J K L) and "
+                "that the keyboard controls Player 1 (menu option 4: does Ryu walk?). Otherwise the box is "
+                "not on the input display.")
+    return (f"The box changed (peak {peak:.1f}) but stayed below the threshold {thr:.1f}. Draw the box tighter "
+            "around the newest (top) row, or set latency_probe.threshold lower in configs/local.yaml.")
