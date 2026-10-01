@@ -104,6 +104,15 @@ DebugOverlay thread (overlay.py)              focus loss -> disarm+release, wind
 - Facing in M1 is set manually (`--side`, or F6 to flip at runtime). Detection comes in M2.
 
 ## Commands
+### Install without typing commands (recommended for the user)
+1. Download the branch ZIP from
+   https://github.com/christinebaker1212-hash/SF6MachineLearningBot/archive/refs/heads/claude/admiring-mccarthy-uyyay4.zip
+   and extract it.
+2. Double-click `setup.bat` once.
+3. Double-click `menu.bat` and choose steps by number.
+
+Results land in `runs\` (menu option 0 opens it).
+
 ### Install (Windows 11, PowerShell)
 ```powershell
 winget install Python.Python.3.12
