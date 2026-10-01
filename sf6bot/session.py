@@ -46,6 +46,10 @@ class Session:
         l, t, r, b = w.client_rect
         if r - l < 320 or b - t < 180:
             raise RuntimeError(f"game client area too small or minimised: {w.client_rect}")
+        ml, mt, mr, mb = w.monitor_rect
+        if l < ml or t < mt or r > mr or b > mb:
+            raise RuntimeError(f"Part of the SF6 window is off-screen (game area {w.client_rect}, screen "
+                               f"{w.monitor_rect}). Move the SF6 window fully onto the screen and try again.")
         backend = self.cfg["capture"]["backend"]
         if backend == "dxcam":
             ml, mt, _, _ = w.monitor_rect
@@ -57,8 +61,13 @@ class Session:
     def __enter__(self) -> "Session":
         try:
             self._setup()
-        except BaseException:
-            self._teardown("setup failed")
+        except BaseException as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"\nSETUP FAILED: {e!r}")
+            if getattr(self, "recorder", None) is not None:
+                self.recorder.event({"type": "setup_error", "t": clock.now(), "error": repr(e), "traceback": tb})
+            self._teardown(f"setup failed: {e!r}")
             raise
         return self
 
