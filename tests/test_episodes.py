@@ -77,3 +77,13 @@ def test_real_match2_finish_kinds():
     assert f2["kind"] == "normal" and not f2["perfect"]           # P2's 1-bar super was ~29 s earlier
     assert f3["kind"] == "super_art_lv3" and f3["super_bars_spent_before_ko"] == 3 and not f3["perfect"]
     assert [e for e in events if e["event"] == "match_end"][0]["score"] == (2, 1)
+
+
+def test_decode_input_with_measured_bits():
+    from sf6bot.game_state import decode_input, load_input_bits
+    bits = load_input_bits()
+    assert decode_input(0, bits) == (5, [])
+    assert decode_input(0x2 | 0x8 | 0x10, bits) == (3, ["LP"])        # down-right + LP
+    assert decode_input(0x1 | 0x4, bits) == (7, [])
+    assert decode_input(0x40 | 0x200, bits) == (5, ["HP", "HK"])
+    assert decode_input(0x400, bits) == (5, ["bit0x400"])              # unmeasured bit surfaces, not dropped

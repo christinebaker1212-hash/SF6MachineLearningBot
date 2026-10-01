@@ -494,9 +494,21 @@ The safety tests are part of acceptance. During a run:
     lines with 58 distinct masks; p2 on 4,542 lines with 55 distinct masks.
   - **Replay playback is reproducible:** the KO stage_timers matched the first viewing exactly
     (1325, 2982, 1926).
-- Remaining before building a replay → demonstration dataset exporter for M3:
-  - **the input-map run** (bit meanings), not yet done by the user
-  - checking that the masks are player-relative or screen-absolute
+- **Input map VERIFIED (run 20261001_142205, Classic, P1 facing right):** every key set one
+  distinct bit, consistent 3/3:
+  - UP 0x1, DOWN 0x2, LEFT 0x4, RIGHT 0x8
+  - LP 0x10, MP 0x20, HP 0x40, LK 0x80, MK 0x100, HK 0x200
+  - Stored in `configs/input_bits.yaml`; `game_state.decode_input()`.
+  - **Input → mask latency in game frames: 3-5, mostly 4** (30 presses). This agrees with the
+    70 ms screen probe and the ~60 ms state latency.
+  - Bits are the same for every character, since they come from the controller. Only
+    Classic vs Modern could differ.
+- Remaining before the replay → demonstration dataset exporter:
+  - whether LEFT/RIGHT are screen-absolute or relative to facing (only measured facing right)
+- **User-proposed next step: a per-character move catalog.** The bot performs each
+  character's normals and specials in Training Mode and records action_id → move name,
+  duration, damage, and hit/block advantage. It feeds commentary, opponent assessment,
+  punishing and replay labelling.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

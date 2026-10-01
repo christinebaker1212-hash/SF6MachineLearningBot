@@ -1,0 +1,17 @@
+# SF6 per-player input mask (pl_input_new) bit meanings.
+# MEASURED on the user's game with `sf6bot input-map`, 2026-10-01, Classic controls, P1 facing right:
+# every key 3/3 presses set exactly this one bit (run 20261001_142205_input_map).
+# Open question: are LEFT/RIGHT screen-absolute or relative to facing? Only measured facing right.
+verified: true
+controls: classic
+bits:
+  UP: 0x1
+  DOWN: 0x2
+  LEFT: 0x4
+  RIGHT: 0x8
+  LP: 0x10
+  MP: 0x20
+  HP: 0x40
+  LK: 0x80
+  MK: 0x100
+  HK: 0x200

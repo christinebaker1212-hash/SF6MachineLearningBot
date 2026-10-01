@@ -248,3 +248,34 @@ class StateReader:
                 if remaining <= 0 or self._stop.is_set():
                     return None
                 self._cond.wait(remaining)
+
+
+def load_input_bits(path=None) -> dict:
+    import yaml
+    p = Path(path) if path else Path(__file__).resolve().parent.parent / "configs" / "input_bits.yaml"
+    return {k: int(v) for k, v in yaml.safe_load(p.read_text())["bits"].items()}
+
+
+def decode_input(mask: int, bits: dict) -> tuple[int, list[str]]:
+    """Mask -> (numpad direction using LEFT/RIGHT as reported, buttons). Unknown bits are reported as 'bit0x...'."""
+    if not isinstance(mask, int):
+        return 5, []
+    v = 8 if mask & bits["UP"] else 2 if mask & bits["DOWN"] else 5
+    h = -1 if mask & bits["LEFT"] else 1 if mask & bits["RIGHT"] else 0
+    direction = {(8, -1): 7, (8, 0): 8, (8, 1): 9, (5, -1): 4, (5, 0): 5, (5, 1): 6,
+                 (2, -1): 1, (2, 0): 2, (2, 1): 3}[(v, h)]
+    known = 0
+    buttons = []
+    for name in ("LP", "MP", "HP", "LK", "MK", "HK"):
+        if mask & bits[name]:
+            buttons.append(name)
+    for b in bits.values():
+        known |= b
+    extra = mask & ~known
+    i = 0
+    while extra:
+        if extra & 1:
+            buttons.append(f"bit{hex(1 << i)}")
+        extra >>= 1
+        i += 1
+    return direction, buttons
