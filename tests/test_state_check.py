@@ -25,7 +25,7 @@ class SimExporter(threading.Thread):
         while not self.stop.is_set():
             n += 1
             if n % 30 == 1:
-                info.write_text(json.dumps({"version": 4, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
+                info.write_text(json.dumps({"version": 5, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
                                             "last_error": "", "open_errors": ""}))
             d = set(self.inp.down)
             if "D" in d:

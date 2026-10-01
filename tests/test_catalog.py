@@ -53,3 +53,17 @@ def test_whiff_and_no_action():
     assert analyze_move(s, 1.0, NA, ND)["result"] == "whiff"
     s2 = [st(0.9, 98, 1)] + [st(1.0 + i / 60, 100 + i, 1) for i in range(10)]
     assert analyze_move(s2, 1.0, NA, ND)["result"] == "no_action"
+
+
+def test_dummy_animation_change_is_not_contact():
+    """Regression (0.3.0 reported startup 1 for every move): a dummy action change on the move's first
+    frame, without stun/damage, must not count as contact."""
+    s = [st(0.9, 98, 1)]
+    for f in range(100, 106):
+        s.append(st(1.0 + (f - 100) / 60, f, 600, d_id=77))          # dummy animates, no hit yet
+    for f in range(106, 112):
+        s.append(st(1.0 + (f - 100) / 60, f, 600, d_id=200, hp=9500, hitstun=10))
+    for f in range(112, 125):
+        s.append(st(1.0 + (f - 100) / 60, f, 1, d_id=1 if f > 118 else 200, hp=9500, hitstun=max(0, 118 - f)))
+    r = analyze_move(s, 1.0, NA, ND)
+    assert r["result"] == "hit" and r["startup"] == 7

@@ -13,7 +13,9 @@ Run once with the dummy NOT guarding (--guard none) and once with it guarding ev
 
 Caveats (stated in the output too):
   * "can act" = back in a neutral action id learned at the start (standing/crouching idle).
-  * Frame counts use the global stage_timer, which also runs during hitstop. Advantage is
+  * The game's own frame meter (Training Mode, exporter v5) is recorded raw per move as
+    `frame_meter` and is the authoritative source once its fields are mapped.
+  * Our own frame counts use the global stage_timer, which also runs during hitstop. Advantage is
     unaffected when hitstop is equal for both players; startup/total may differ from published
     frame data that excludes hitstop.
   * Moves are generic Classic inputs (numpad + buttons). Inputs that are not real moves for a
@@ -77,9 +79,13 @@ def analyze_move(states: list[dict], t_sent: float, neutral_a: set, neutral_d: s
             break
         if a not in ids:
             ids.append(a)
-    contact = next((s for s in after if (_n(s["p2"].get("hp")) is not None and hp0 is not None
-                                         and s["p2"]["hp"] < hp0) or (s["p2"].get("hitstun") or 0) > 0
-                    or (s["p2"].get("blockstun") or 0) > 0 or s["p2"].get("action_id") not in neutral_d), None)
+    # Contact = the dummy is actually hit or blocking (stun or damage), searched only from the
+    # frame the move started. (0.3.0 also counted any dummy animation change, which fired on the
+    # same frame as the move start and produced startup = 1 for everything.)
+    i0 = after.index(start)
+    contact = next((s for s in after[i0:] if (_n(s["p2"].get("hp")) is not None and hp0 is not None
+                                              and s["p2"]["hp"] < hp0) or (s["p2"].get("hitstun") or 0) > 0
+                    or (s["p2"].get("blockstun") or 0) > 0), None)
     hp_min = min((_n(s["p2"].get("hp")) for s in after if _n(s["p2"].get("hp")) is not None), default=hp0)
     res: dict = {"action_ids": ids, "game_total": _n(start["p1"].get("action_frames_total")),
                  "total_observed": (end_a["stage_timer"] - f0) if end_a and isinstance(f0, int) else None}
@@ -209,6 +215,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 break
             t_last_press = timings[-2].sent if len(timings) >= 2 else timings[0].sent  # final input step
             r = analyze_move(pre + post, t_last_press, neutral_a, neutral_d)
+            # The game's own frame meter (authoritative; exporter v5). Raw fields until mapped.
+            r["frame_meter"] = reader.last_fm if (reader.last_fm_t or 0) >= t_last_press else None
             fid = (r.get("action_ids") or [None])[0]
             if fid is not None and fid in first_ids:
                 r["same_as"] = first_ids[fid]
@@ -224,6 +232,10 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 msg += f", {r['damage']} dmg"
             if r.get("same_as"):
                 msg += f" (same as {r['same_as']})"
+            if r.get("frame_meter"):
+                msg += f"\n      game frame meter: {json.dumps(r['frame_meter'])}"
+            else:
+                msg += "\n      game frame meter: not updated (exporter v5 installed? Training Mode frame meter on?)"
             print("  " + msg)
             sess.narrate(msg, source="measured")
     except InterruptedError:

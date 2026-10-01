@@ -548,6 +548,26 @@ The safety tests are part of acceptance. During a run:
   - Charge characters need [4]6 / [2]8.
 - MOCK-tested only: `analyze_move` on synthetic frames, plus a smoke run against the
   simulated exporter.
+- **0.3.0 bug, reported by the user:** startup = 1 for every move. Contact detection accepted
+  any dummy action-id change, which happened on the move's first frame. **Fixed in 0.3.1**:
+  contact now requires hitstun, blockstun or hp loss, searched from the move start. There is a
+  regression test.
+- **The game's own frame meter is authoritative** (user screenshots, 2026-10-01). Training Mode
+  shows "Startup NF / Total NF / Advantage ±NF" for P1, and P2's advantage, plus colour-coded
+  per-frame boxes. The in-game legend:
+  - counter state, punish-counter state, non-counter recovery
+  - hitbox, projectile active, parry/counter active
+  - post-damage/block recovery
+  - invincibility, strike invincibility, projectile invincibility
+- **Exporter v5 (0.3.1):** reads `app.training.TrainingManager._tCommon.SnapShotDatas[0]._DisplayData.FrameMeterSSData.MeterDatas`
+  items 0 and 1 (path from SF6_Tools). It exports **all scalar fields**, stringified, as `fm`
+  only when changed (or every 60 frames) — a discovery pass.
+  - Known community field names: `StunFrame`, `MeatyFrame`, plus `FrameNumDatas`, a per-frame
+    list with FrameType (community: 7 startup, 8 recovery, 13 active, 9 hurt, 10 block,
+    11 DI) — unverified.
+  - The catalog stores the raw `frame_meter` per move. **Next:** map the fields to
+    startup/total/advantage by comparing with the on-screen numbers, then make them the
+    catalog's primary values.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

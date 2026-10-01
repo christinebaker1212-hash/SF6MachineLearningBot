@@ -9,7 +9,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 4          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 5          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -95,6 +95,56 @@ pcall(function()
         end)
     end, function(retval) return retval end)
 end)
+
+-- Training Mode frame meter (the game's own Startup / Total / Advantage). READ only. Field names are
+-- not documented, so every scalar field of both players' MeterDatas items is exported (discovery);
+-- sf6bot maps the meaningful ones after comparing with the on-screen numbers.
+-- Path from haruno-ku/SF6_Tools: TrainingManager._tCommon.SnapShotDatas[0]._DisplayData.FrameMeterSSData.
+local fm_fields_cache = nil
+local fm_last, fm_last_frame = "", -1000
+
+local function scalar_text(v)
+    local tv = type(v)
+    if tv == "number" or tv == "boolean" then return v end
+    if tv == "string" then return v end
+    if tv == "userdata" or tv == "table" then
+        local ok, s = pcall(function() return v:call("ToString()") end)
+        if ok and type(s) == "string" then return s end
+        local ok2, s2 = pcall(tostring, v)   -- some REFramework strings stringify directly
+        if ok2 and type(s2) == "string" and not s2:find("^sol%.") and not s2:find("^table:") then return s2 end
+    end
+    return nil
+end
+
+local function read_frame_meter()
+    local tm = sdk.get_managed_singleton("app.training.TrainingManager")
+    if not tm then return nil end
+    local md = tm._tCommon.SnapShotDatas[0]._DisplayData.FrameMeterSSData.MeterDatas
+    local parts = {}
+    for i = 0, 1 do
+        local item = md:call("get_Item", i)
+        if not item then return nil end
+        if not fm_fields_cache then
+            fm_fields_cache = {}
+            for _, f in ipairs(item:get_type_definition():get_fields()) do
+                local n = f:get_name()
+                if not f:is_static() and not n:find("Datas") then fm_fields_cache[#fm_fields_cache + 1] = f end
+            end
+        end
+        local kv = {}
+        for _, f in ipairs(fm_fields_cache) do
+            local ok, v = pcall(function() return f:get_data(item) end)
+            if ok then
+                local x = scalar_text(v)
+                if x ~= nil then kv[#kv + 1] = '"' .. f:get_name() .. '":' .. (type(x) == "string" and
+                    ('"' .. x:gsub('[%c"\\]', "") .. '"') or (type(x) == "boolean" and (x and "true" or "false")
+                    or (x == math.floor(x) and string.format("%d", x) or string.format("%.4f", x)))) end
+            end
+        end
+        parts[#parts + 1] = '"' .. (i == 0 and "p1" or "p2") .. '":{' .. table.concat(kv, ",") .. "}"
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
 
 local PFIELDS = { "chara", "input", "input_sw", "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
                   "facing_right", "dir_bit", "action_id", "action_frame", "action_frames_total", "hitstop",
@@ -184,10 +234,18 @@ re.on_frame(function()
         if round_no == nil then missing[#missing + 1] = "round" end
         local m = {}
         for i, k in ipairs(missing) do m[i] = '"' .. k .. '"' end
+        local fm_part = ""
+        local okfm, fm = pcall(read_frame_meter)
+        if okfm and fm then
+            if fm ~= fm_last or frame_no - fm_last_frame >= 60 then
+                fm_part = ',"fm":' .. fm
+                fm_last, fm_last_frame = fm, frame_no
+            end
+        end
         last_missing = table.concat(missing, ", ")
         write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":true,"ready":' .. enc(ready) ..
                    ',"stage_timer":' .. enc(stage_timer) ..
-                   ',"round":' .. enc(round_no) .. ',"p1":' .. s1 .. ',"p2":' .. s2 ..
+                   ',"round":' .. enc(round_no) .. fm_part .. ',"p1":' .. s1 .. ',"p2":' .. s2 ..
                    ',"missing":[' .. table.concat(m, ",") .. ']}')
     end)
     if not ok then last_error = tostring(err) end

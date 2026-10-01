@@ -25,7 +25,7 @@ STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
                     Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
 INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
-EXPECTED_SCRIPT_VERSION = 4  # must match SCRIPT_VERSION in the Lua script
+EXPECTED_SCRIPT_VERSION = 5  # must match SCRIPT_VERSION in the Lua script
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
 
 
@@ -173,6 +173,8 @@ class StateReader:
         self._thread = threading.Thread(target=self._run, name="StateReader", daemon=True)
         self.lines = 0
         self.parse_errors = 0
+        self.last_fm: dict | None = None      # latest Training Mode frame meter export (only sent on change)
+        self.last_fm_t: float | None = None
         self.truncations = 0
         self.error: BaseException | None = None
 
@@ -222,6 +224,8 @@ class StateReader:
                         self.parse_errors += 1
                         continue
                     self.lines += 1
+                    if isinstance(raw.get("fm"), dict):
+                        self.last_fm, self.last_fm_t = raw["fm"], t
                     st = GameState(t, int(raw.get("f", -1)), bool(raw.get("in_battle")), raw)
                     with self._cond:
                         self._latest = st
