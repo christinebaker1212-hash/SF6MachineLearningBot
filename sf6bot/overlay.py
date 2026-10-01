@@ -22,8 +22,10 @@ TITLE = "sf6bot debug"
 class DebugOverlay:
     def __init__(self, grabber: FrameGrabber, controller: Controller, stop_event: threading.Event,
                  width: int = 640, fps: float = 30.0, status: dict | None = None,
-                 avoid_rect=None, screen_rect=None) -> None:
+                 avoid_rect=None, screen_rect=None, exclude_from_capture: bool = False, sink=None) -> None:
         self.g = grabber
+        self.exclude_from_capture = exclude_from_capture
+        self.sink = sink or (lambda e: None)
         self.pos = None
         self.overlaps_game = False
         if avoid_rect is not None and screen_rect is not None:
@@ -111,6 +113,8 @@ class DebugOverlay:
 
     def _run(self) -> None:
         made_noactivate = False
+        self.frames_drawn = 0
+        self._next_diag = clock.now() + 0.5
         try:
             cv2.namedWindow(TITLE, cv2.WINDOW_AUTOSIZE)
             next_t = clock.now()
@@ -141,12 +145,18 @@ class DebugOverlay:
                     from . import win32
                     if self.pos is not None:
                         cv2.moveWindow(TITLE, int(self.pos[0]), int(self.pos[1]))
-                    made_noactivate = win32.make_window_noactivate_topmost(TITLE) or not win32.IS_WINDOWS
+                    made_noactivate = win32.make_window_noactivate_topmost(
+                        TITLE, self.exclude_from_capture) or not win32.IS_WINDOWS
                     if made_noactivate and win32.IS_WINDOWS:
                         hidden = getattr(win32.make_window_noactivate_topmost, "excluded_from_capture", False)
-                        self.status["overlay in capture"] = "hidden" if hidden else "VISIBLE - keep off game"
-                        if not hidden:
-                            print("WARNING: could not hide the overlay from capture; keep it off the game window.")
+                        self.status["overlay in capture"] = "hidden" if hidden else "visible (keep off game)"
+                if clock.now() >= self._next_diag:
+                    from . import win32
+                    d = win32.window_diagnostics(TITLE)
+                    self.sink({"type": "overlay_status", "t": clock.now(), "frames_drawn": self.frames_drawn,
+                               "intended_pos": self.pos, **d})
+                    self._next_diag = clock.now() + (2.0 if self.frames_drawn < 100 else 30.0)
+                self.frames_drawn += 1
                 next_t += self.period
                 clock.precise_sleep_until(next_t, stop_event=self.stop_event)
                 next_t = max(next_t, clock.now())

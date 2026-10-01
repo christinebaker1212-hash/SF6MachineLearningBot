@@ -67,6 +67,9 @@ if IS_WINDOWS:
     user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
     user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
     user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.GetWindowDisplayAffinity.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
     user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
@@ -245,8 +248,12 @@ def find_game_window(exe_name: str, title_contains: str) -> WindowInfo | None:
     return None
 
 
-def make_window_noactivate_topmost(title: str) -> bool:
-    """Stop our debug overlay window from stealing focus from the game."""
+def make_window_noactivate_topmost(title: str, exclude_from_capture: bool = False) -> bool:
+    """Stop our debug overlay window from stealing focus from the game; keep it on top.
+
+    exclude_from_capture uses WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+). Off by default: it also hides
+    the window from screen-streaming tools (e.g. Parsec), which made the overlay invisible to a user
+    viewing the PC remotely."""
     if not IS_WINDOWS:
         return False
     hwnd = user32.FindWindowW(None, title)
@@ -258,14 +265,32 @@ def make_window_noactivate_topmost(title: str) -> bool:
     style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TOPMOST)
     HWND_TOPMOST = -1
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE = 0x2, 0x1, 0x10
-    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
-    # Hide the overlay from screen capture (Windows 10 2004+): it stays visible on the monitor
-    # but should not appear in Desktop Duplication frames. Confirm with capture-bench snapshot.png.
-    WDA_EXCLUDEFROMCAPTURE = 0x11
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x2, 0x1, 0x10, 0x40
+    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
+    WDA_NONE, WDA_EXCLUDEFROMCAPTURE = 0x0, 0x11
     make_window_noactivate_topmost.excluded_from_capture = bool(
-        user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE))
+        user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE if exclude_from_capture else WDA_NONE)
+    ) and exclude_from_capture
     return True
+
+
+def window_diagnostics(title: str) -> dict:
+    """What Windows reports about a top-level window (for debugging an invisible overlay)."""
+    if not IS_WINDOWS:
+        return {"platform": sys.platform}
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        return {"found": False}
+    rc = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rc))
+    aff = wintypes.DWORD(0)
+    try:
+        user32.GetWindowDisplayAffinity(hwnd, ctypes.byref(aff))
+    except Exception:
+        pass
+    return {"found": True, "visible": bool(user32.IsWindowVisible(hwnd)), "minimized": bool(user32.IsIconic(hwnd)),
+            "rect": (rc.left, rc.top, rc.right, rc.bottom), "exstyle": hex(user32.GetWindowLongPtrW(hwnd, -20)),
+            "display_affinity": hex(aff.value), "foreground": int(user32.GetForegroundWindow() or 0) == int(hwnd)}
 
 
 def install_console_ctrl_handler(callback) -> None:

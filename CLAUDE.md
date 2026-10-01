@@ -420,6 +420,42 @@ The safety tests are part of acceptance. During a run:
     infer it from which keyboard was used.
   - Not yet seen: timeouts, double KOs, the timer value on the HUD, menus between matches.
 
+## Milestone 2: episode tracker (0.2.7)
+- `sf6bot/episodes.py` EpisodeTracker emits these events from the state stream:
+  - `round_start`, `fight_start`
+  - `round_end` (winner, reason, confidence)
+  - `match_end` (first to 2)
+  - `data_gap`, kept separate from game outcomes
+- **Evidence:** the user's real vs-CPU match, trimmed to
+  `tests/data/watch_2026-10-01_ryu_vs_cpu.jsonl.gz`.
+  - The match starts with an intro (actions 400/401, timer 1..264), then the timer resets to 0.
+  - Fight start comes at stage_timer 191 in 3/3 rounds. It's gated on no intro action ids so
+    the intro is not mistaken for the fight; this matches first movement at 7.96 s vs 8.0 s.
+  - KO = hp 0; the timer then advances about 3 per line (slow-motion). The next round starts
+    about 8 s later, with the round number +1.
+  - Drive refills each round; Super carries over.
+  - Tracker output on the real match: KO winners p2, p1, p2 with high confidence, and match to
+    p2 2-1. **This matches the user's report.**
+- **Assumed, not observed yet** (marked low confidence in output):
+  - timeout = 99 × 60 frames after fight start
+  - a round change without a KO
+  - double KO
+  - intro action ids for other characters
+- **Controlled-player identity is not solved yet:** `self_index` must be provided. Plan: an
+  input probe at fight start.
+
+## Overlay visibility problem (0.2.7)
+- The user reports the debug overlay "closes automatically / is not visible". No
+  `overlay_error` was ever logged, so it does not crash.
+- **Hypothesis:** the user views the Ally through Parsec (a Parsec window was listed), and
+  `WDA_EXCLUDEFROMCAPTURE` hides the window from streaming too.
+- **0.2.7:**
+  - Exclusion is OFF by default (`overlay.exclude_from_capture`).
+  - SWP_SHOWWINDOW is applied.
+  - `overlay_status` diagnostics (found, visible, minimized, rect, exstyle, display affinity)
+    are logged at start and periodically, and included in share.
+  - `sf6bot overlay-test` (menu O) shows the overlay for 15 s with MOCK data.
+
 ## Idea queued: input-display readback
 SF6's Training Mode input display shows the frames each input was held, newest row at the top.
 Reading it automatically (template-matching the arrows/icons and digits) would verify sequences

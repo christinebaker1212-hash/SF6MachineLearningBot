@@ -50,6 +50,7 @@ recording:
 
 overlay:
   enabled: true
+  exclude_from_capture: false   # true hides it from screen capture AND from streaming apps like Parsec
   width: 640
   fps: 30
 

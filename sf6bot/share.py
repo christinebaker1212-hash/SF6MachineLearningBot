@@ -35,7 +35,7 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
                 except json.JSONDecodeError:
                     continue
                 if e.get("type") in ("stop", "disarm", "recorder_error", "session_end", "capture_summary",
-                                     "pause", "resume", "probe_roi", "overlay_error", "probe_calibration", "probe_diagnosis", "probe", "setup_error"):
+                                     "pause", "resume", "probe_roi", "overlay_error", "probe_calibration", "probe_diagnosis", "probe", "setup_error", "overlay_status"):
                     e.pop("t", None)
                     notable.append(json.dumps(e, default=str))
         if notable:

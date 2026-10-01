@@ -24,6 +24,7 @@ echo  6. Acceptance routine - Ryu on the RIGHT side
 echo  7. Latency probe (you drag a box around the input display)
 echo  8. Random-input loop, 30 s (Training Mode only)
 echo  9. Release all keys (if a key seems stuck)
+echo  O. Overlay test: show the debug window for 15 s (no game needed)
 echo  --- Milestone 2 ---
 echo  R. Install the REFramework game-state script (SF6 must be running)
 echo  G. Game-state check (Training Mode, Ryu vs standing dummy)
@@ -44,6 +45,7 @@ if /i "%CH%"=="6" (%BOT% acceptance --side right & goto done)
 if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
+if /i "%CH%"=="o" (%BOT% overlay-test & goto done)
 if /i "%CH%"=="t" goto torch
 if /i "%CH%"=="r" (%BOT% refw-install & goto done)
 if /i "%CH%"=="g" (%BOT% state-check & goto done)

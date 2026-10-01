@@ -141,10 +141,12 @@ class Session:
                                         width=int(cfg["overlay"]["width"]), fps=float(cfg["overlay"]["fps"]),
                                         status=self.status,
                                         avoid_rect=None if self.window is None else self.window.client_rect,
-                                        screen_rect=None if self.window is None else self.window.monitor_rect)
+                                        screen_rect=None if self.window is None else self.window.monitor_rect,
+                                        exclude_from_capture=bool(cfg["overlay"].get("exclude_from_capture", False)),
+                                        sink=self.recorder.event)
             if self.overlay.overlaps_game:
                 print("Note: no room beside the game for the debug overlay, so it may cover part of the game "
-                      "on screen. It is excluded from capture; check snapshot.png to confirm.")
+                      "and be captured. Move the SF6 window right, or set overlay.exclude_from_capture: true.")
             self.overlay.start()
 
     # ------------------------------------------------------------------

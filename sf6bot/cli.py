@@ -141,6 +141,22 @@ def cmd_watch(args, cfg):
     _print_report(s)
 
 
+def cmd_overlay_test(args, cfg):
+    """Show the debug overlay for N seconds with MOCK data (no game, no inputs) and log its status."""
+    import time
+    from .session import Session
+    cfg["input"]["backend"] = "mock"
+    with Session(cfg, "overlay_test", mock=True, overlay=True) as s:
+        print(f"The 'sf6bot debug' window should be visible now at the top-left for {args.seconds:.0f} s.")
+        end = time.perf_counter() + args.seconds
+        i = 0
+        while time.perf_counter() < end and not s.stop_event.is_set():
+            s.narrate(f"Overlay test line {i}: if you can read this, the overlay works.", source="scripted")
+            i += 1
+            time.sleep(1.0)
+    _print_report(s)
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -215,6 +231,10 @@ def main(argv=None):
     p = sub.add_parser("watch", help="record game state + video while YOU play (bot sends no inputs)")
     p.add_argument("--seconds", type=float, default=300)
     p.set_defaults(fn=cmd_watch)
+
+    p = sub.add_parser("overlay-test", help="show the debug overlay with MOCK data and log whether Windows shows it")
+    p.add_argument("--seconds", type=float, default=15)
+    p.set_defaults(fn=cmd_overlay_test)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")
