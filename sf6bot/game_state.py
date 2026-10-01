@@ -36,6 +36,18 @@ class GameState:
     raw: dict = field(repr=False)
 
     @property
+    def ready(self) -> bool:
+        """Usable battle state. v1 lines had no flag: fall back to non-zero max HP."""
+        if "ready" in self.raw:
+            return bool(self.raw["ready"])
+        return self.in_battle and bool(self.p1.get("hp_max")) and bool(self.p2.get("hp_max"))
+
+    @property
+    def game_frame(self):
+        """SF6 stage_timer: observed to advance exactly 1 per game frame (2026-10-01 capture)."""
+        return self.raw.get("stage_timer")
+
+    @property
     def p1(self) -> dict:
         return self.raw.get("p1") or {}
 
@@ -79,6 +91,10 @@ def reframework_status(game_dir: Path) -> dict:
 def locate_state_file(game_dir: Path) -> Path | None:
     """Most recently modified exporter output among the candidate locations."""
     found = [game_dir / c for c in STATE_CANDIDATES if (game_dir / c).is_file()]
+    if not found:  # unknown working directory: search the game folder (bounded depth)
+        for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
+            found += [p for p in game_dir.glob(f"{depth}/sf6bot_state.jsonl") if p.is_file()]
+        found += [p for p in game_dir.glob("sf6bot_state.jsonl") if p.is_file()]
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 
 
@@ -141,7 +157,9 @@ class StateReader:
                     f.seek(0, os.SEEK_END)  # only new lines
                     buf = b""
                 try:
-                    size = os.path.getsize(self.path)
+                    # fstat on the open handle: the directory entry's size can be stale on NTFS
+                    # while another process is writing the file.
+                    size = os.fstat(f.fileno()).st_size
                 except OSError:
                     size = None
                 if size is not None and size < f.tell():  # Lua truncated/reopened the file

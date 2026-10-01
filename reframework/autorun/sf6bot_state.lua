@@ -74,7 +74,7 @@ local function enc(v)
 end
 
 local PFIELDS = { "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
-                  "facing_left", "action_id", "action_frame", "action_frames_total", "hitstop",
+                  "facing_right", "dir_bit", "action_id", "action_frame", "action_frames_total", "hitstop",
                   "hitstun", "blockstun", "pose", "act_st", "invuln" }
 
 local function read_player(p, t)
@@ -87,7 +87,12 @@ local function read_player(p, t)
     r.super = try(function() return t.mSuperGauge end)
     r.x = try(function() return p.pos.x.v / 6553600.0 end)
     r.y = try(function() return p.pos.y.v / 6553600.0 end)
-    r.facing_left = try(function() return math.floor(p.BitValue / 128) % 2 == 1 end)
+    -- BitValue bit 128: observed on the user's game (2026-10-01) set for the player on the LEFT
+    -- (x=-1.5) and clear for the player on the right, i.e. set = facing RIGHT. (A community
+    -- comment claims the opposite; state-check verifies this every run.)
+    r.dir_bit = try(function() return math.floor(p.BitValue / 128) % 2 end)
+    r.facing_right = try(function() return r.dir_bit == 1 end)
+    if r.dir_bit == nil then r.facing_right = nil end
     local eng = try(function() return p.mpActParam.ActionPart._Engine end)
     r.action_id = try(function() return eng:get_ActionID() end)
     r.action_frame = try(function() return sfix(eng:get_ActionFrame()) end)
@@ -135,21 +140,26 @@ re.on_frame(function()
         if frame_no % INFO_EVERY == 1 then write_info(in_battle) end
         if not in_battle then
             if frame_no % IDLE_EVERY == 0 then
-                write_line('{"v":1,"f":' .. frame_no .. ',"in_battle":false}')
+                write_line('{"v":2,"f":' .. frame_no .. ',"in_battle":false,"ready":false}')
             end
             return
         end
         local stage_timer = try(function() return gb:get_field("Game"):get_data(nil).stage_timer end)
         local round_no = try(function() return gb:get_field("Round"):get_data(nil).RoundNo end)
         local missing = {}
-        local s1 = encode_player(read_player(p1, teams[0]), "p1", missing)
-        local s2 = encode_player(read_player(p2, teams[1]), "p2", missing)
+        local r1 = read_player(p1, teams[0])
+        local r2 = read_player(p2, teams[1])
+        -- During loading/intros the player objects exist but are zeroed: not usable state.
+        local ready = (r1.hp_max or 0) > 0 and (r2.hp_max or 0) > 0 and r1.action_id ~= nil and r2.action_id ~= nil
+        local s1 = encode_player(r1, "p1", missing)
+        local s2 = encode_player(r2, "p2", missing)
         if stage_timer == nil then missing[#missing + 1] = "stage_timer" end
         if round_no == nil then missing[#missing + 1] = "round" end
         local m = {}
         for i, k in ipairs(missing) do m[i] = '"' .. k .. '"' end
         last_missing = table.concat(missing, ", ")
-        write_line('{"v":1,"f":' .. frame_no .. ',"in_battle":true,"stage_timer":' .. enc(stage_timer) ..
+        write_line('{"v":2,"f":' .. frame_no .. ',"in_battle":true,"ready":' .. enc(ready) ..
+                   ',"stage_timer":' .. enc(stage_timer) ..
                    ',"round":' .. enc(round_no) .. ',"p1":' .. s1 .. ',"p2":' .. s2 ..
                    ',"missing":[' .. table.concat(m, ",") .. ']}')
     end)

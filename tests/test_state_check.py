@@ -47,9 +47,9 @@ class SimExporter(threading.Thread):
             self.stun = max(0, self.stun - 1)
             p = lambda x, y, hp, sup, pose, act, stun: {
                 "hp": hp, "hp_max": 10000, "drive": 60000, "super": sup, "x": x, "y": y,
-                "facing_left": x > (self.x2 if x == self.x1 else self.x1), "action_id": act,
+                "facing_right": x < (self.x2 if x == self.x1 else self.x1), "action_id": act,
                 "pose": pose, "hitstun": stun}
-            line = {"v": 1, "f": n, "in_battle": True, "stage_timer": n, "round": 1, "missing": [],
+            line = {"v": 2, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "round": 1, "missing": [],
                     "p1": p(self.x1, self.y, 10000, self.sup1, 2 if "S" in d else 0, self.act, 0),
                     "p2": p(self.x2, 0.0, self.hp2, 0, 0, 0, self.stun)}
             f.write(json.dumps(line) + "\n")
@@ -79,7 +79,7 @@ def test_state_check_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     finally:
         sim.stop.set()
     status = {r["check"]: r["status"] for r in results}
-    for name in ("exporter_alive", "fields_present", "hp_range", "facing_semantics", "walk_back_changes_distance",
+    for name in ("exporter_alive", "game_frame_clock", "fields_present", "hp_range", "facing_semantics", "walk_back_changes_distance",
                  "walk_forward_changes_distance", "crouch_changes_pose", "jab_changes_action_id",
                  "jump_raises_y", "hit_reduces_p2_hp", "hit_causes_p2_hitstun", "hit_builds_p1_super"):
         assert status.get(name) == "PASS", (name, results)

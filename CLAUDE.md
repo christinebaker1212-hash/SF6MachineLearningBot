@@ -13,6 +13,23 @@ experimental outcome we're working toward, not a promised capability.
     REFramework not loading, or an io.open path issue.
   - Added a heartbeat file (`reframework/data/sf6bot_exporter_info.json` via json.dump_file),
     multiple io.open candidate paths, and a diagnosis in `state-check`.
+  - **The user uploaded a real exporter file (v1 script):** 5,904 lines, about 70 s in Training
+    Mode, idle. **Verified on the user's game:**
+    - The exporter runs and every field reads: hp 10000/10000, drive 60000, super 30000
+      (training infinite), x = -1.5 / +1.5. `action_id` and `action_frame` cycle;
+      `action_frames_total` = 396 (idle).
+    - **`stage_timer` is a game-frame clock:** +1 per line in 4,157 steps, 70 repeats (renders
+      without a game tick), **0 skips**.
+    - **The facing bit is opposite to the community comment:** BitValue bit 128 is SET for the
+      left player (P1, x = -1.5) and clear for the right player. The exporter now emits
+      `facing_right` (bit set) plus raw `dir_bit`. This is a single static observation;
+      state-check re-verifies it.
+    - The first ~1,670 frames (loading/intro) report in_battle with zeroed players. A `ready`
+      flag (hp_max > 0 and action_id present) was added.
+    - Not yet seen: values responding to the bot's inputs. In that run, `state-check`
+      reported "no new lines". The likely cause is that Python looked in a different folder
+      from where the file was written. The reader now searches the game folder and uses fstat
+      for size. Waiting on the user for the file's location.
 - M1 history: the first real-game runs were on 2026-10-01 on
   the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
   random loop.

@@ -137,10 +137,16 @@ def _checks(ck: Checker) -> None:
     rate = (len(sts) - 1) / max(1e-6, sts[-1].t_recv - sts[0].t_recv) if len(sts) > 1 else 0.0
     intervals = [b.t_recv - a.t_recv for a, b in zip(sts, sts[1:])]
     ck.add("exporter_alive", "PASS", lines_per_s=round(rate, 1), recv_interval_ms=summarize_ms(intervals))
-    battle = [x for x in sts if x.in_battle]
+    battle = [x for x in sts if x.ready]
     if not battle:
-        ck.add("in_battle", "FAIL", reason="exporter running but not in a battle: enter Training Mode")
+        ck.add("in_battle", "FAIL", reason="exporter running but no usable battle state (menu, loading or intro): "
+               "enter Training Mode and wait until you can move")
         return
+    gf = [x.game_frame for x in sts if x.game_frame is not None]
+    steps = [b - a for a, b in zip(gf, gf[1:])]
+    ck.add("game_frame_clock", "PASS" if steps and max(steps) <= 1 else "INFO",
+           lines=len(gf), steps_of_1=sum(1 for d in steps if d == 1), repeats=sum(1 for d in steps if d == 0),
+           skips=sum(1 for d in steps if d > 1))
     st0 = battle[-1]
     ck.add("fields_present", "PASS" if not st0.missing else "FAIL", missing=st0.missing)
     p1, p2 = st0.p1, st0.p2
@@ -149,15 +155,16 @@ def _checks(ck: Checker) -> None:
     ck.add("hp_range", "PASS" if hp_ok else "FAIL", p1=(p1.get("hp"), p1.get("hp_max")), p2=(p2.get("hp"), p2.get("hp_max")))
 
     # 2. Facing semantics: P1 left of P2 should face right --------------------------------------
-    x1, x2, fl = _num(p1, "x"), _num(p2, "x"), p1.get("facing_left")
-    if x1 is None or x2 is None or not isinstance(fl, bool):
-        ck.add("facing_semantics", "INCONCLUSIVE", x1=x1, x2=x2, facing_left=fl)
+    x1, x2, fr = _num(p1, "x"), _num(p2, "x"), p1.get("facing_right")
+    if x1 is None or x2 is None or not isinstance(fr, bool):
+        ck.add("facing_semantics", "INCONCLUSIVE", x1=x1, x2=x2, facing_right=fr)
     else:
-        expect_left = x1 > x2
-        ck.add("facing_semantics", "PASS" if fl == expect_left else "FAIL", p1_x=x1, p2_x=x2, p1_facing_left=fl,
-               expected_facing_left=expect_left)
-        s.controller.set_facing(Facing.LEFT if fl else Facing.RIGHT)
-        s.narrate(f"Facing from game state: {'left' if fl else 'right'}", source="measured")
+        expect_right = x1 < x2
+        ck.add("facing_semantics", "PASS" if fr == expect_right else "FAIL", p1_x=x1, p2_x=x2,
+               p1_facing_right=fr, expected_facing_right=expect_right)
+        facing = Facing.RIGHT if expect_right else Facing.LEFT  # positions are the safer source
+        s.controller.set_facing(facing)
+        s.narrate(f"Facing from game state: {facing.value}", source="measured")
 
     if not s.start_inputs():
         return
