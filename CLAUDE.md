@@ -50,6 +50,35 @@ punishes, missed anti-airs, poor drive/burnout management, slow reactions.
 - **Dependency:** reliable hit/whiff/block detection. Screen-only detection is hard; the
   REFramework state read is the likely route.
 
+**Requirement: match commentary ("thinking" feed) — user request.**
+The overlay has a THOUGHTS strip (`Session.narrate`). The user wants it to describe, in
+natural language:
+- neutral and spacing
+- move choice
+- the opponent's state and habits
+- what the bot is doing and what the opponent is doing
+
+Rules:
+- **Local and template-based.** No remote LLM in the game loop. A local LLM is too heavy for
+  the Ally X alongside SF6.
+- **Every line is tagged with its source**, so a post-hoc description is never presented as the
+  model's reasoning:
+  - `[scripted]` for M1 routines
+  - `[measured]` for M2 detector/REFramework state, with confidence
+  - `[policy]` for the model's actual outputs: action probabilities, value estimate, the
+    opponent-assessment estimate
+- **Grounded in internal structure.** Explicit spacing zones, an opponent model, and value/risk
+  estimates as policy inputs and outputs make the commentary describe real internals rather
+  than guesses.
+
+Layout: the overlay sits at the hard left of the screen, inputs panel leftmost, then the frame
+view, with the THOUGHTS strip underneath.
+
+## Sending results to Claude
+Menu option **S** (`sf6bot share`) writes `runs\for_claude.txt` and copies it to the
+clipboard. It contains the reports, checklists and notable events of the last 6 runs (a few
+KB). Videos stay on the PC. There is no Google Drive connector in this Claude session.
+
 ## Feasibility assessment (concise)
 **Verified (documentation / library source, not yet on the user's PC):**
 - dxcam 0.3.0 provides Desktop Duplication capture. Per-frame `LastPresentTime` is in QPC
