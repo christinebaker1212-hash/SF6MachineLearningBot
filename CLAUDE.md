@@ -13,7 +13,7 @@ experimental outcome we're working toward, not a promised capability.
 | item | value | source |
 |---|---|---|
 | OS / platform | Windows 11, Steam | user |
-| Device | likely a ROG Xbox Ally X-class handheld (inferred from CPU; unconfirmed) | inferred |
+| Device | ROG Xbox Ally X handheld, with a keyboard connected | user |
 | CPU | AMD Ryzen AI Z2 Extreme, 8 cores / 16 threads | `sysinfo` |
 | GPU / VRAM | AMD Radeon 890M iGPU, 12117 MB reported as dedicated (shared with system memory). **No CUDA.** | `sysinfo` |
 | RAM | 11.6 GB visible to Windows | `sysinfo` |
@@ -181,9 +181,9 @@ python -m sf6bot --mock --no-overlay acceptance   # MOCK pipeline run, writes ru
    - Fill in each run's `acceptance_checklist.md`. Count Hadokens out of 10 from the game,
      `video.mp4` or the input display.
 7. **Measure latency with the probe:**
-   - Open `snapshot.png` in Paint and find a box `x,y,w,h` around the newest row of the input
-     display.
-   - Run `sf6bot latency-probe --roi x,y,w,h`.
+   - Run `sf6bot latency-probe` (menu option 7).
+   - Drag a box around the newest row of the input display in the window it shows, then press
+     ENTER. The box is printed, so it can be reused with `--roi`.
    - If presses are "not detected", adjust the ROI or `latency_probe.threshold`.
 8. **Measure the live loop:** optional `sf6bot run --policy probe --seconds 60` (needs torch),
    and `sf6bot run --policy random --seconds 30`.
@@ -217,9 +217,9 @@ The safety tests are part of acceptance. During a run:
     GPU, with only inference running on the handheld. Decide this from measured numbers.
   - RAM is about 11.6 GB with SF6 running.
   - Run plugged in, in the highest performance mode.
-- **No keyboard on a handheld:** F8 needs a keyboard. A controller kill switch is added: click
-  both thumbsticks (`safety.pad_kill_combo`, read through XInput). Whether the built-in pad
-  shows up as XInput is unverified.
+- **Kill switch:** a keyboard is connected, so F8 works. The controller kill switch (click both
+  thumbsticks, `safety.pad_kill_combo`, read through XInput) is a backup. Whether the built-in
+  pad shows up as XInput is unverified.
 - **Which device controls Player 1:** with the built-in pad present, it's unverified whether
   SF6 takes keyboard input for P1. `input-test` will show it.
 - **dxcam on SF6:** may fail in exclusive fullscreen; use borderless or windowed. The

@@ -76,9 +76,11 @@ def cmd_acceptance(args, cfg):
 
 def cmd_latency_probe(args, cfg):
     from .latency_probe import run_probe
-    roi = tuple(int(v) for v in args.roi.split(","))
-    if len(roi) != 4:
-        sys.exit("--roi must be x,y,w,h in game-client pixels")
+    roi = None
+    if args.roi:
+        roi = tuple(int(v) for v in args.roi.split(","))
+        if len(roi) != 4:
+            sys.exit("--roi must be x,y,w,h in game-client pixels")
     with _session(args, cfg, "latency_probe") as s:
         run_probe(s, roi, args.trials)
     _print_report(s)
@@ -149,7 +151,8 @@ def main(argv=None):
     p.set_defaults(fn=cmd_acceptance)
 
     p = sub.add_parser("latency-probe", help="measure input -> visible change latency")
-    p.add_argument("--roi", required=True, help="x,y,w,h in game-client pixels (use capture-bench snapshot.png)")
+    p.add_argument("--roi", default=None,
+                   help="x,y,w,h in game-client pixels; omit to drag a box on a captured frame")
     p.add_argument("--trials", type=int, default=None)
     side(p)
     p.set_defaults(fn=cmd_latency_probe)

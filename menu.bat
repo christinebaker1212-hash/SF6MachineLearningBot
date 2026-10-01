@@ -20,7 +20,7 @@ echo  3. Capture test, 20 s, no inputs  (have SF6 in Training Mode)
 echo  4. Walk-forward test  (Ryu should walk forward)
 echo  5. Acceptance routine - Ryu on the LEFT side
 echo  6. Acceptance routine - Ryu on the RIGHT side
-echo  7. Latency probe (needs a box from snapshot.png)
+echo  7. Latency probe (you drag a box around the input display)
 echo  8. Random-input loop, 30 s (Training Mode only)
 echo  9. Release all keys (if a key seems stuck)
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
@@ -49,11 +49,7 @@ goto menu
 goto done
 
 :probe
-echo Enter the box around the input display as x,y,w,h  (example: 40,200,300,40)
-set "ROI="
-set /p ROI=Box: 
-if not defined ROI goto menu
-%BOT% latency-probe --roi %ROI%
+%BOT% latency-probe
 goto done
 
 :done

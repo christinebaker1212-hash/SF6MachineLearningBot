@@ -20,7 +20,17 @@ def _roi(img, roi):
     return img[y:y + h, x:x + w].astype(np.int16)
 
 
-def run_probe(sess: Session, roi: tuple[int, int, int, int], trials: int | None = None) -> list[dict]:
+def select_roi(img) -> tuple[int, int, int, int] | None:
+    """Let the user drag a box on a captured frame. Returns (x, y, w, h) or None if cancelled."""
+    import cv2
+    title = "Drag a box around the input display, then press ENTER (ESC = cancel)"
+    r = cv2.selectROI(title, img, showCrosshair=True, fromCenter=False)
+    cv2.destroyWindow(title)
+    x, y, w, h = (int(v) for v in r)
+    return (x, y, w, h) if w > 0 and h > 0 else None
+
+
+def run_probe(sess: Session, roi: tuple[int, int, int, int] | None, trials: int | None = None) -> list[dict]:
     pc = sess.cfg["latency_probe"]
     trials = int(trials or pc["trials"])
     thr = float(pc["threshold"])
@@ -30,12 +40,20 @@ def run_probe(sess: Session, roi: tuple[int, int, int, int], trials: int | None 
     press = InputState(5, frozenset([pc["key"].upper()]))
     ev = sess.recorder.event
     results = []
-    if not sess.start_inputs():
-        return results
     first = sess.grabber.wait_newer(0, timeout=2.0)
     if first is None:
         raise RuntimeError("no frames captured")
     sess.recorder.save_image("probe_roi_first_frame.png", first.image)
+    if roi is None:
+        print("A window shows the game. Drag a box around the newest row of the input display, press ENTER.")
+        roi = select_roi(first.image)
+        if roi is None:
+            print("No box selected; cancelled.")
+            return results
+    print(f"Using box x,y,w,h = {roi[0]},{roi[1]},{roi[2]},{roi[3]} (reuse with --roi)")
+    ev({"type": "probe_roi", "t": clock.now(), "roi": list(roi)})
+    if not sess.start_inputs():
+        return results
     h, w = first.image.shape[:2]
     x, y, rw, rh = roi
     if x < 0 or y < 0 or x + rw > w or y + rh > h:
