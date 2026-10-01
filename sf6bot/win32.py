@@ -155,6 +155,23 @@ class WindowInfo:
     monitor_rect: tuple[int, int, int, int]
 
 
+def process_image_path(pid: int) -> str:
+    """Full path of a process's executable ("" if not accessible)."""
+    _require_windows()
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(1024)
+        if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            return buf.value
+        return ""
+    finally:
+        kernel32.CloseHandle(h)
+
+
 def _process_exe(pid: int) -> str:
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)

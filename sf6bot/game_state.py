@@ -1,0 +1,168 @@
+"""Game state from the REFramework exporter (reframework/autorun/sf6bot_state.lua).
+
+The Lua script appends one JSON line per rendered frame to
+<SF6>/reframework/data/sf6bot_state.jsonl. StateReader tails that file in a
+background thread and timestamps each line when Python reads it (the Lua side
+has no access to our clock, so t_recv includes file-write and polling delay).
+
+Field meanings come from community scripts and are verified by `sf6bot state-check`,
+not assumed. Missing fields are reported, never silently filled in.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import clock
+
+STATE_FILE = Path("reframework") / "data" / "sf6bot_state.jsonl"
+LUA_NAME = "sf6bot_state.lua"
+LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
+
+
+@dataclass
+class GameState:
+    t_recv: float
+    frame: int
+    in_battle: bool
+    raw: dict = field(repr=False)
+
+    @property
+    def p1(self) -> dict:
+        return self.raw.get("p1") or {}
+
+    @property
+    def p2(self) -> dict:
+        return self.raw.get("p2") or {}
+
+    @property
+    def missing(self) -> list[str]:
+        return self.raw.get("missing") or []
+
+    def player(self, idx: int) -> dict:
+        return self.p1 if idx == 0 else self.p2
+
+
+def find_sf6_dir(cfg: dict) -> Path | None:
+    """SF6 install folder, from the running game's process (most reliable), else config."""
+    if cfg["game"].get("install_dir"):
+        return Path(cfg["game"]["install_dir"])
+    from . import win32
+    if not win32.IS_WINDOWS:
+        return None
+    w = win32.find_game_window(cfg["game"]["exe_name"], cfg["game"]["title_contains"])
+    if w is None:
+        return None
+    exe = win32.process_image_path(w.pid)
+    return Path(exe).parent if exe else None
+
+
+def reframework_status(game_dir: Path) -> dict:
+    return {
+        "game_dir": str(game_dir),
+        "reframework_dll": (game_dir / "dinput8.dll").exists(),
+        "reframework_folder": (game_dir / "reframework").is_dir(),
+        "script_installed": (game_dir / "reframework" / "autorun" / LUA_NAME).exists(),
+        "state_file": str(game_dir / STATE_FILE),
+        "state_file_exists": (game_dir / STATE_FILE).exists(),
+    }
+
+
+def install_exporter(game_dir: Path) -> Path:
+    dst_dir = game_dir / "reframework" / "autorun"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / LUA_NAME
+    shutil.copyfile(LUA_SRC, dst)
+    return dst
+
+
+class StateReader:
+    """Background tail of the exporter's JSONL file; keeps the newest state."""
+
+    def __init__(self, path: str | Path, poll_s: float = 0.001, on_state=None) -> None:
+        self.path = Path(path)
+        self.poll_s = poll_s
+        self.on_state = on_state
+        self._latest: GameState | None = None
+        self._cond = threading.Condition()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="StateReader", daemon=True)
+        self.lines = 0
+        self.parse_errors = 0
+        self.truncations = 0
+        self.error: BaseException | None = None
+
+    def start(self) -> "StateReader":
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        f = None
+        buf = b""
+        try:
+            while not self._stop.is_set():
+                if f is None:
+                    if not self.path.exists():
+                        self._stop.wait(0.2)
+                        continue
+                    f = open(self.path, "rb")
+                    f.seek(0, os.SEEK_END)  # only new lines
+                    buf = b""
+                try:
+                    size = os.path.getsize(self.path)
+                except OSError:
+                    size = None
+                if size is not None and size < f.tell():  # Lua truncated/reopened the file
+                    self.truncations += 1
+                    f.seek(0)
+                    buf = b""
+                chunk = f.read()
+                if not chunk:
+                    self._stop.wait(self.poll_s)
+                    continue
+                t = clock.now()
+                buf += chunk
+                *complete, buf = buf.split(b"\n")
+                for line in complete:
+                    if not line.strip():
+                        continue
+                    try:
+                        raw = json.loads(line)
+                    except json.JSONDecodeError:
+                        self.parse_errors += 1
+                        continue
+                    self.lines += 1
+                    st = GameState(t, int(raw.get("f", -1)), bool(raw.get("in_battle")), raw)
+                    with self._cond:
+                        self._latest = st
+                        self._cond.notify_all()
+                    if self.on_state is not None:
+                        self.on_state(st)
+        except BaseException as e:
+            self.error = e
+        finally:
+            if f is not None:
+                f.close()
+
+    def latest(self) -> GameState | None:
+        with self._cond:
+            return self._latest
+
+    def wait_newer(self, frame: int, timeout: float = 0.5) -> GameState | None:
+        deadline = clock.now() + timeout
+        with self._cond:
+            while True:
+                if self._latest is not None and self._latest.frame != frame:
+                    return self._latest
+                remaining = deadline - clock.now()
+                if remaining <= 0 or self._stop.is_set():
+                    return None
+                self._cond.wait(remaining)

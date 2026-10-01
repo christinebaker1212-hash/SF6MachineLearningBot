@@ -4,7 +4,13 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
-- **Current milestone: 1 (game connection).** The first real-game runs were on 2026-10-01 on
+- **Milestone 1: COMPLETE (2026-10-01).** Acceptance passed both sides; latency measured;
+  F8, F7 and focus-loss release confirmed by the user (Ryu idle after Alt-Tab). Thumbstick kill
+  untested.
+- **Current milestone: 2 (observations).** Step 1 is the REFramework state exporter, written and
+  tested against a MOCK REFramework API and a simulated exporter. **Not yet run in the game.**
+  The user has REFramework available but no scripts.
+- M1 history: the first real-game runs were on 2026-10-01 on
   the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
   random loop.
   - Measured numbers are below.
@@ -294,6 +300,48 @@ The safety tests are part of acceptance. During a run:
 - **Admin rights (UIPI):** if SF6 runs as admin, SendInput is blocked unless sf6bot also runs
   as admin. This raises an explicit error.
 
+## Milestone 2: REFramework game-state exporter
+- `reframework/autorun/sf6bot_state.lua` is copied into `<SF6>/reframework/autorun/` by
+  `sf6bot refw-install` (menu R). The SF6 folder is found from the running process.
+- Each rendered frame it appends one JSON line to `<SF6>/reframework/data/sf6bot_state.jsonl`.
+  `in_battle:false` heartbeats are written every 30 frames outside battle. The file is
+  truncated after 200k lines. Every field read is wrapped in pcall; unreadable fields are
+  listed in `missing`.
+- **Exported per player:**
+  - health: `hp` (vital_new), `hp_max` (vital_max), `hp_recoverable` (heal_new)
+  - Drive: `drive` (focus_new), `drive_wait` (focus_wait)
+  - Super: `super` (team mSuperGauge)
+  - position: `x`, `y` (pos/6553600)
+  - facing: `facing_left` (BitValue bit 128)
+  - action: `action_id`, `action_frame`, `action_frames_total` (mpActParam.ActionPart._Engine)
+  - stun: `hitstop`, `hitstun` (damage_time), `blockstun` (guard_time)
+  - other: `pose` (pose_st), `act_st`, `invuln` (muteki_time)
+- **Exported globally:** `stage_timer`, `round` (RoundNo).
+- **Source of field names:** community scripts, not official docs:
+  - rkaganda/SF6_replay_capture (2023)
+  - haruno-ku/SF6_Tools (updated 2026-09). It notes that bit 128 means facing LEFT.
+- `sf6bot/game_state.py` StateReader tails the file (1 ms poll) and timestamps lines on receipt.
+- `sf6bot state-check` (menu G) runs in Training Mode, with P1 as the bot and a standing
+  dummy. It checks:
+  - the exporter is alive and its rate
+  - all fields are present
+  - HP is in range
+  - facing matches the relative positions
+  - walking forward and back changes the distance
+  - crouching changes `pose`
+  - a jab changes `action_id`, measuring input → state latency
+  - a jump raises `y`
+  - walking in and landing cr.MK lowers P2 HP, gives P2 hitstun, and builds P1 Super
+
+  Results go into `report.md` and `state_check.json`.
+- **MOCK-tested only:** the Lua was run under a stubbed REFramework API with `lua5.4`, and the
+  checks were run against a simulated exporter (`tests/test_state_check.py`).
+- **Offline only:** keep REFramework out of online play. Before going online, disable it by
+  renaming `dinput8.dll` in the SF6 folder.
+- The REFramework install itself: the SF6 build of REFramework (praydog/REFramework-nightly
+  releases, or Nexus "REFramework" for SF6) goes in the game folder as `dinput8.dll`. Whether
+  it's installed on the user's PC is unknown; `refw-install` reports it.
+
 ## Idea queued: input-display readback
 SF6's Training Mode input display shows the frames each input was held, newest row at the top.
 Reading it automatically (template-matching the arrows/icons and digits) would verify sequences
@@ -301,7 +349,10 @@ in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing valid
 
 ## Roadmap
 - **M2 — observations and episodes:**
-  - HUD detectors: HP, Drive, Super, timer, round result, positions/facing, game state.
+  - The REFramework exporter is the primary source (see above). Screen HUD detectors are a
+    cross-check / fallback; screen reading remains necessary for menus.
+  - Remaining: round timer and round outcome, menu/loading/transition detection, confidence,
+    episodes, the Gymnasium env.
   - Confidence and explicit uncertain handling.
   - Checking REFramework state export.
   - Episode/reset logic; a Gymnasium env that accounts for real-time execution.

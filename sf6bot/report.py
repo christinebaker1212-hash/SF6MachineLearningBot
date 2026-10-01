@@ -111,6 +111,9 @@ def build_report(dir_: str | Path) -> dict:
     rec = [e for e in events if e["type"] == "recorder_closed"]
     if rec:
         rep["recorder_dropped"] = {"frames": rec[-1]["dropped_frames"], "events": rec[-1]["dropped_events"]}
+    sc = d / "state_check.json"
+    if sc.exists():
+        rep["state_check"] = json.loads(sc.read_text(encoding="utf-8"))
     return rep
 
 
@@ -145,6 +148,13 @@ def to_markdown(rep: dict) -> str:
         L += [fmt_row("probe: input sent -> visible", p["input_sent_to_visible_change"])]
         L += ["", f"Probe detected {p['detected']}/{p['trials']} presses; median = "
                   f"{p['in_60fps_frames_p50']} frames at 60 fps."]
+    if "state_check" in rep:
+        L += ["", "## REFramework state check"]
+        for r in rep["state_check"]["results"]:
+            det = {k: v for k, v in r.items() if k not in ("check", "status")}
+            L.append(f"- **{r['status']}** {r['check']}: {json.dumps(det, default=str)}")
+        L.append(f"- lines read: {rep['state_check'].get('lines_read')}, parse errors: "
+                 f"{rep['state_check'].get('parse_errors')}")
     L += ["", "## Caveats", *[f"- {x}" for x in rep["caveats"]], ""]
     return "\n".join(L)
 

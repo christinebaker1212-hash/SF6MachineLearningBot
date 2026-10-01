@@ -4,6 +4,7 @@
 game:
   exe_name: StreetFighter6.exe        # UNVERIFIED: confirm with `sf6bot list-windows`
   title_contains: "Street Fighter 6"  # fallback match on window title
+  install_dir: null       # SF6 folder; null = detect from the running game
   character: Ryu
   controls: classic
 

@@ -23,6 +23,9 @@ echo  6. Acceptance routine - Ryu on the RIGHT side
 echo  7. Latency probe (you drag a box around the input display)
 echo  8. Random-input loop, 30 s (Training Mode only)
 echo  9. Release all keys (if a key seems stuck)
+echo  --- Milestone 2 ---
+echo  R. Install the REFramework game-state script (SF6 must be running)
+echo  G. Game-state check (Training Mode, Ryu vs standing dummy)
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
 echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
 echo  0. Open the results folder
@@ -40,6 +43,8 @@ if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
 if /i "%CH%"=="t" goto torch
+if /i "%CH%"=="r" (%BOT% refw-install & goto done)
+if /i "%CH%"=="g" (%BOT% state-check & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="q" exit /b 0

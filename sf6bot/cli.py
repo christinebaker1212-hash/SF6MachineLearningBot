@@ -110,6 +110,26 @@ def cmd_release_all(args, cfg):
     print(f"Released: {keys}")
 
 
+def cmd_refw_install(args, cfg):
+    from .game_state import find_sf6_dir, install_exporter, reframework_status
+    d = find_sf6_dir(cfg)
+    if d is None:
+        sys.exit("SF6 must be running so its folder can be found (or set game.install_dir in configs/local.yaml).")
+    st = reframework_status(d)
+    print(json.dumps(st, indent=2))
+    if not st["reframework_dll"]:
+        sys.exit("REFramework is not installed in this game folder (no dinput8.dll). Install it first.")
+    print(f"Installed exporter: {install_exporter(d)}")
+    print("Restart SF6 (or press Insert > ScriptRunner > Reset scripts) so REFramework loads it.")
+
+
+def cmd_state_check(args, cfg):
+    from .state_check import run_state_check
+    with _session(args, cfg, "state_check") as s:
+        run_state_check(s, cfg)
+    _print_report(s)
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -172,6 +192,12 @@ def main(argv=None):
     p = sub.add_parser("report", help="(re)build report.md/report.json for a run directory")
     p.add_argument("dir")
     p.set_defaults(fn=cmd_report)
+
+    sub.add_parser("refw-install", help="copy the REFramework state exporter into the SF6 folder").set_defaults(
+        fn=cmd_refw_install)
+    p = sub.add_parser("state-check", help="verify REFramework game state against scripted inputs")
+    side(p)
+    p.set_defaults(fn=cmd_state_check)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")
