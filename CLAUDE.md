@@ -8,10 +8,14 @@ experimental outcome we're working toward, not a promised capability.
   the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
   random loop.
   - Measured numbers are below.
+  - **M1 acceptance passed (user-observed):** walk forward/back, crouch, neutral/forward/back
+    jump, all 6 normals and cr.MK worked from both sides. Hadoken (236+LP) came out **10/10 on
+    the left and 10/10 on the right**.
   - Still open:
-    - in-game confirmation of each acceptance move, plus Hadoken counts (checklists not filled)
-    - the latency probe (0/30 detected, because the box covered the whole column)
-    - the safety tests
+    - the latency probe (0/30 detected, because the box covered the whole column; re-run
+      with a top-row box)
+    - the safety tests: F8, Alt-Tab release, F7, thumbstick kill
+    - SendInput slowness (PowerToys check)
 - Next step: the user runs the M1 acceptance procedure below on the game PC and sends back the
   `report.md`, `acceptance_checklist.md` files and `sysinfo` output.
 
@@ -234,8 +238,8 @@ The safety tests are part of acceptance. During a run:
 | capability | MOCK/container | real SF6 |
 |---|---|---|
 | Capture with timestamps, duplicate/missed-frame counting | yes (synthetic) | **verified**. dxcam on the 1280x720 window: about 60 fps of unique content, present->recv p50 6-7 ms / p95 about 10 ms, 100% plausible QPC timestamps. Estimated missed frames: about 0.4-3% per run. Raw fps can exceed 60 because of desktop updates (identical frames). |
-| SendInput press/release, atomic batches | yes (mock backend) | **sent without error**. The SendInput call takes 2-4 ms mean, up to 11 ms (slow; PowerToys keyboard hook suspected). The user saw Ryu walk. Per-move in-game confirmation is pending. |
-| Sequences with measured timing; facing mirroring | yes (unit tests) | **wall-clock timing measured**. Step error mean 1.8 ms, p99 about 6 ms; 4/90 steps off by more than 1/4 frame. In-game result (game frames, Hadoken success) is pending. |
+| SendInput press/release, atomic batches | yes (mock backend) | **verified in game** (acceptance, both sides). The SendInput call takes 2-4 ms mean, up to 11 ms (slow; PowerToys keyboard hook suspected). |
+| Sequences with measured timing; facing mirroring | yes (unit tests) | **verified in game**. Hadoken 10/10 per side; mirroring correct. Wall-clock step error mean 1.8 ms, p99 about 6 ms; 4/90 steps off by more than 1/4 frame. Game-frame accuracy is not measured (see input-display readback idea). |
 | Recording (frames.csv, video.mp4, events.jsonl) and report | yes | **verified** (0 dropped frames/events) |
 | Kill/pause/focus-loss release | yes (unit tests) | **unverified** |
 | Debug overlay (no-activate, topmost) | not testable headless | **unverified** |
