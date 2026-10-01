@@ -209,7 +209,8 @@ python -m sf6bot --mock --no-overlay acceptance   # MOCK pipeline run, writes ru
      `sf6bot acceptance --side right`.
    - Fill in each run's `acceptance_checklist.md`. Count Hadokens out of 10 from the game,
      `video.mp4` or the input display.
-7. **Measure latency with the probe:**
+7. **Measure latency with the probe** (a calibration measurement in Training Mode only; the
+   bot never uses the input display during matches):
    - Run `sf6bot latency-probe` (menu option 7).
    - Drag a box around the newest row of the input display in the window it shows, then press
      ENTER. The box is printed, so it can be reused with `--roi`.
@@ -249,8 +250,9 @@ The safety tests are part of acceptance. During a run:
 - **Kill switch:** a keyboard is connected, so F8 works. The controller kill switch (click both
   thumbsticks, `safety.pad_kill_combo`, read through XInput) is a backup. Whether the built-in
   pad shows up as XInput is unverified.
-- **Which device controls Player 1:** with the built-in pad present, it's unverified whether
-  SF6 takes keyboard input for P1. `input-test` will show it.
+- **Which device controls Player 1:** the user reports that Ryu walks with keyboard input in
+  Training Mode, so the keyboard does control P1. Whether this was the bot's `input-test` or a
+  manual keypress is to be confirmed by the acceptance runs.
 - **dxcam on SF6:** may fail in exclusive fullscreen; use borderless or windowed. The
   QPC-offset timestamp conversion is checked at runtime (`timestamp_check` in the report).
 - **Short presses can be missed:** wall-clock timing means a 1-frame press can straddle game
