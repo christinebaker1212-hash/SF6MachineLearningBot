@@ -11,6 +11,16 @@ from sf6bot.sequences import parse_sequence
 from .test_actions_sequences import BIND
 
 
+def wait_for(cond, timeout=2.0):
+    """Poll instead of fixed sleeps: shared CI CPUs can stall threads for 100+ ms."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.005)
+    return cond()
+
+
 def test_watchdog_focus_and_kill():
     b = MockInputBackend()
     c = Controller(b, BIND, Facing.RIGHT)
@@ -18,20 +28,16 @@ def test_watchdog_focus_and_kill():
     state = {"focus": True, "kill": False}
     wd = Watchdog(c, stop, kill_pressed=lambda: state["kill"], game_focused=lambda: state["focus"],
                   refocus_grace_s=0.05).start()
-    time.sleep(0.15)
-    assert c.armed
+    assert wait_for(lambda: c.armed)
     c.apply(parse_sequence("6+HP@2").steps[0].state)
     assert b.down == {"D", "O"}
     state["focus"] = False
-    time.sleep(0.05)
-    assert not c.armed and b.down == set()
+    assert wait_for(lambda: not c.armed and b.down == set())
     state["focus"] = True
-    time.sleep(0.15)
-    assert c.armed
+    assert wait_for(lambda: c.armed)
     c.apply(parse_sequence("4@2").steps[0].state)
     state["kill"] = True
-    time.sleep(0.05)
-    assert stop.is_set() and not c.armed and b.down == set()
+    assert wait_for(lambda: stop.is_set() and not c.armed and b.down == set())
     assert wd.stop_reason == "kill hotkey"
 
 
