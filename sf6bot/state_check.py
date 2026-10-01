@@ -94,35 +94,48 @@ def run_state_check(sess: Session, cfg: dict) -> list[dict]:
 
 
 def _wait_for_exporter(game_dir, sess, timeout_s: float = 4.0):
-    """Use the heartbeat file to tell 'REFramework/script not running' from 'cannot write data'."""
+    """Decide from data freshness (is the state file growing?) and report script versions.
+    The heartbeat file only exists from script v2 on, so it is diagnostic, not required."""
+    from .game_state import EXPECTED_SCRIPT_VERSION, file_age_s, installed_script_current
     end = clock.now() + timeout_s
-    info = None
+    info = path = age = None
     while clock.now() < end and not sess.stop_event.is_set():
         info = read_exporter_info(game_dir)
-        if info and info.get("age_s", 99) < 3 and locate_state_file(game_dir):
+        path = locate_state_file(game_dir)
+        age = file_age_s(path)
+        if age is not None and age < 2:
             break
         sess.stop_event.wait(0.25)
-    path = locate_state_file(game_dir)
-    sess.recorder.write_json("exporter_info.json", {"info": info, "state_file": str(path) if path else None})
-    print(f"Exporter heartbeat: {json.dumps(info)}\nState file: {path}")
+    running_version = (info or {}).get("version")
+    current = installed_script_current(game_dir)
+    diag = {"heartbeat": info, "state_file": str(path) if path else None, "state_file_age_s": age,
+            "running_script_version": running_version, "expected_script_version": EXPECTED_SCRIPT_VERSION,
+            "installed_script_is_current": current}
+    sess.recorder.write_json("exporter_info.json", diag)
+    print(json.dumps(diag, indent=2))
+    stale_install = ("The script installed in SF6 is OUTDATED (it differs from this bot version). Run menu R "
+                     "again; if it reports a permission error, run menu.bat as administrator. Then fully restart "
+                     "SF6.") if current is False else ""
+    old_running = (f"SF6 is running script version {running_version}, expected {EXPECTED_SCRIPT_VERSION}: SF6 "
+                   "has not loaded the new script. Fully close and restart SF6 after menu R."
+                   if running_version != EXPECTED_SCRIPT_VERSION else "")
     msg = None
-    if info is None:
-        msg = ("The sf6bot script has never run: no heartbeat file. Either SF6 was not restarted after menu R, "
-               "or REFramework is not loading. When SF6 starts with REFramework you should be able to press "
-               "Insert to open the REFramework menu. If Insert does nothing, REFramework is not loading "
-               "(wrong version for this game patch?).")
-    elif info.get("age_s", 99) > 5:
-        msg = (f"The sf6bot script ran before but its heartbeat is {info.get('age_s')} s old: it stopped. "
-               f"Last error: {info.get('last_error') or 'none'}. Check 'Export enabled' in the REFramework menu "
-               "(Insert > Script Generated UI > sf6bot state exporter) and that the game is not paused.")
-    elif path is None:
-        msg = (f"The script is running but could not create its data file. Errors: {info.get('open_errors')}; "
-               f"last error: {info.get('last_error')}.")
+    if age is None or age >= 2:
+        if info is None and path is None:
+            msg = ("The sf6bot script has never written anything. Either SF6 was not restarted after menu R, or "
+                   "REFramework is not loading (press Insert in game: if no menu appears, it is not loading).")
+        else:
+            msg = (f"No fresh game-state data (newest file {path}, last written {age} s ago). "
+                   f"Make sure you are in Training Mode and the game is not paused. {stale_install} {old_running}")
     if msg:
         print("\nDIAGNOSIS: " + msg)
         sess.recorder.write_json("state_check.json", {"results": [{"check": "exporter_running", "status": "FAIL",
-                                                                   "reason": msg, "info": info}]})
+                                                                   "reason": msg, **diag}]})
         return None
+    if stale_install or old_running:
+        print("\nWARNING: " + (stale_install + " " + old_running).strip())
+        sess.recorder.event({"type": "state_check", "t": clock.now(), "check": "script_version", "status": "WARN",
+                             "reason": (stale_install + " " + old_running).strip(), **diag})
     return path
 
 

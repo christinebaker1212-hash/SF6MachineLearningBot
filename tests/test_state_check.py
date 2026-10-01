@@ -25,7 +25,7 @@ class SimExporter(threading.Thread):
         while not self.stop.is_set():
             n += 1
             if n % 30 == 1:
-                info.write_text(json.dumps({"version": 2, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
+                info.write_text(json.dumps({"version": 3, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
                                             "last_error": "", "open_errors": ""}))
             d = set(self.inp.down)
             if "D" in d:
@@ -96,4 +96,4 @@ def test_state_check_diagnoses_script_never_ran(cfg, tmp_path, monkeypatch, caps
     monkeypatch.setattr(sc, "_wait_for_exporter", lambda g, s, timeout_s=0.3: sc.__dict__["_orig_wait"](g, s, 0.3))
     with Session(cfg, "state_check_never_ran", mock=True) as s:
         assert sc.run_state_check(s, cfg) == []
-    assert "never run" in capsys.readouterr().out
+    assert "never written" in capsys.readouterr().out

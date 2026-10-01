@@ -119,7 +119,11 @@ def cmd_refw_install(args, cfg):
     print(json.dumps(st, indent=2))
     if not st["reframework_dll"]:
         sys.exit("REFramework is not installed in this game folder (no dinput8.dll). Install it first.")
-    print(f"Installed exporter: {install_exporter(d)}")
+    try:
+        dst = install_exporter(d)
+    except OSError as e:
+        sys.exit(f"INSTALL FAILED: {e}")
+    print(f"Installed and verified exporter: {dst}")
     print("Restart SF6 (or press Insert > ScriptRunner > Reset scripts) so REFramework loads it.")
 
 

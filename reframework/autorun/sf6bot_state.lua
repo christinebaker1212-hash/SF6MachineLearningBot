@@ -9,6 +9,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
+local SCRIPT_VERSION = 3          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -43,7 +44,7 @@ end
 local function write_info(in_battle)
     pcall(function()
         json.dump_file("sf6bot_exporter_info.json", {
-            version = 2, frame = frame_no, path = OUT_PATH, lines = lines, enabled = enabled,
+            version = SCRIPT_VERSION, frame = frame_no, path = OUT_PATH, lines = lines, enabled = enabled,
             in_battle = in_battle, last_error = last_error, missing = last_missing,
             open_errors = table.concat(open_errors, " | "),
         })
@@ -141,7 +142,7 @@ re.on_frame(function()
         if frame_no % INFO_EVERY == 1 then write_info(in_battle) end
         if not in_battle then
             if frame_no % IDLE_EVERY == 0 then
-                write_line('{"v":2,"f":' .. frame_no .. ',"in_battle":false,"ready":false}')
+                write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":false,"ready":false}')
             end
             return
         end
@@ -159,7 +160,7 @@ re.on_frame(function()
         local m = {}
         for i, k in ipairs(missing) do m[i] = '"' .. k .. '"' end
         last_missing = table.concat(missing, ", ")
-        write_line('{"v":2,"f":' .. frame_no .. ',"in_battle":true,"ready":' .. enc(ready) ..
+        write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":true,"ready":' .. enc(ready) ..
                    ',"stage_timer":' .. enc(stage_timer) ..
                    ',"round":' .. enc(round_no) .. ',"p1":' .. s1 .. ',"p2":' .. s2 ..
                    ',"missing":[' .. table.concat(m, ",") .. ']}')
@@ -171,7 +172,7 @@ re.on_draw_ui(function()
     if imgui.tree_node("sf6bot state exporter") then
         local changed, v = imgui.checkbox("Export enabled", enabled)
         if changed then enabled = v end
-        imgui.text("Lines written: " .. tostring(lines) .. "  file: " .. OUT_PATH)
+        imgui.text("Script version " .. SCRIPT_VERSION .. ". Lines written: " .. tostring(lines) .. "  file: " .. OUT_PATH)
         if last_missing ~= "" then imgui.text("Missing fields: " .. last_missing) end
         if last_error ~= "" then imgui.text("Last error: " .. last_error) end
         imgui.tree_pop()

@@ -25,6 +25,7 @@ STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
                     Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
 INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
+EXPECTED_SCRIPT_VERSION = 3  # must match SCRIPT_VERSION in the Lua script
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
 
 
@@ -77,12 +78,21 @@ def find_sf6_dir(cfg: dict) -> Path | None:
     return Path(exe).parent if exe else None
 
 
+def installed_script_current(game_dir: Path) -> bool | None:
+    dst = game_dir / "reframework" / "autorun" / LUA_NAME
+    if not dst.is_file():
+        return None
+    return dst.read_bytes() == LUA_SRC.read_bytes()
+
+
 def reframework_status(game_dir: Path) -> dict:
     return {
         "game_dir": str(game_dir),
         "reframework_dll": (game_dir / "dinput8.dll").exists(),
         "reframework_folder": (game_dir / "reframework").is_dir(),
         "script_installed": (game_dir / "reframework" / "autorun" / LUA_NAME).exists(),
+        "installed_script_is_current": installed_script_current(game_dir),
+        "expected_script_version": EXPECTED_SCRIPT_VERSION,
         "state_file": str(game_dir / STATE_FILE),
         "state_file_exists": (game_dir / STATE_FILE).exists(),
     }
@@ -112,11 +122,26 @@ def read_exporter_info(game_dir: Path) -> dict | None:
     return info
 
 
+def file_age_s(p: Path | None) -> float | None:
+    import time
+    if p is None or not p.is_file():
+        return None
+    return round(time.time() - p.stat().st_mtime, 1)
+
+
 def install_exporter(game_dir: Path) -> Path:
     dst_dir = game_dir / "reframework" / "autorun"
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / LUA_NAME
-    shutil.copyfile(LUA_SRC, dst)
+    try:
+        shutil.copyfile(LUA_SRC, dst)
+    except PermissionError as e:
+        raise PermissionError(
+            f"Windows refused to write {dst} ({e}). SF6 is under Program Files, which can need admin rights: "
+            "close menu.bat, right-click menu.bat > 'Run as administrator', and choose R again. Or copy "
+            f"{LUA_SRC} into {dst_dir} by hand in File Explorer.") from e
+    if dst.read_bytes() != LUA_SRC.read_bytes():
+        raise OSError(f"Copied {dst} but its content does not match the bundled script.")
     return dst
 
 

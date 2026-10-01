@@ -34,6 +34,15 @@ experimental outcome we're working toward, not a promised capability.
       `<SF6>/reframework/data`. The v1 path "reframework/data/..." therefore landed in
       `reframework/data/reframework/data/`. The script now writes `sf6bot_state.jsonl` (that
       is, `<SF6>/reframework/data/sf6bot_state.jsonl`). The reader also checks the nested path.
+    - **0.2.3 runs:** the heartbeat said `version: 1` and was 10-15 min old, so SF6 was still
+      running the v1 script.
+      - The v2 install probably never reached SF6: suspected permission denial under
+        Program Files, or no full restart.
+      - The state-check wrongly required a v2 heartbeat.
+      - **0.2.4:** SCRIPT_VERSION=3 is in every line and in the heartbeat. `refw-install`
+        verifies the copied bytes and explains PermissionError (run menu.bat as admin).
+        State-check decides by state-file freshness and reports
+        installed/running/expected versions.
 - M1 history: the first real-game runs were on 2026-10-01 on
   the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
   random loop.
