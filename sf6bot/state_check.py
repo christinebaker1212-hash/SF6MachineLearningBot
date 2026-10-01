@@ -13,7 +13,8 @@ import threading
 from . import clock
 from .actions import Facing
 from .config import load_moves
-from .game_state import StateReader, find_sf6_dir, reframework_status, STATE_FILE
+from .game_state import (StateReader, find_sf6_dir, locate_state_file, read_exporter_info,
+                         reframework_status)
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 from .stats import summarize_ms
@@ -75,7 +76,10 @@ def run_state_check(sess: Session, cfg: dict) -> list[dict]:
     if not status["script_installed"]:
         print("\nThe sf6bot exporter script is not installed. Use menu option R first, then restart SF6.")
         return []
-    reader = StateReader(game_dir / STATE_FILE,
+    path = _wait_for_exporter(game_dir, sess)
+    if path is None:
+        return []
+    reader = StateReader(path,
                          on_state=lambda st: sess.recorder.event({"type": "state", "t": st.t_recv, **st.raw})).start()
     ck = Checker(sess, reader)
     try:
@@ -87,6 +91,39 @@ def run_state_check(sess: Session, cfg: dict) -> list[dict]:
         sess.recorder.write_json("state_check.json", {"results": ck.results, "lines_read": reader.lines,
                                                       "parse_errors": reader.parse_errors})
     return ck.results
+
+
+def _wait_for_exporter(game_dir, sess, timeout_s: float = 4.0):
+    """Use the heartbeat file to tell 'REFramework/script not running' from 'cannot write data'."""
+    end = clock.now() + timeout_s
+    info = None
+    while clock.now() < end and not sess.stop_event.is_set():
+        info = read_exporter_info(game_dir)
+        if info and info.get("age_s", 99) < 3 and locate_state_file(game_dir):
+            break
+        sess.stop_event.wait(0.25)
+    path = locate_state_file(game_dir)
+    sess.recorder.write_json("exporter_info.json", {"info": info, "state_file": str(path) if path else None})
+    print(f"Exporter heartbeat: {json.dumps(info)}\nState file: {path}")
+    msg = None
+    if info is None:
+        msg = ("The sf6bot script has never run: no heartbeat file. Either SF6 was not restarted after menu R, "
+               "or REFramework is not loading. When SF6 starts with REFramework you should be able to press "
+               "Insert to open the REFramework menu. If Insert does nothing, REFramework is not loading "
+               "(wrong version for this game patch?).")
+    elif info.get("age_s", 99) > 5:
+        msg = (f"The sf6bot script ran before but its heartbeat is {info.get('age_s')} s old: it stopped. "
+               f"Last error: {info.get('last_error') or 'none'}. Check 'Export enabled' in the REFramework menu "
+               "(Insert > Script Generated UI > sf6bot state exporter) and that the game is not paused.")
+    elif path is None:
+        msg = (f"The script is running but could not create its data file. Errors: {info.get('open_errors')}; "
+               f"last error: {info.get('last_error')}.")
+    if msg:
+        print("\nDIAGNOSIS: " + msg)
+        sess.recorder.write_json("state_check.json", {"results": [{"check": "exporter_running", "status": "FAIL",
+                                                                   "reason": msg, "info": info}]})
+        return None
+    return path
 
 
 def _checks(ck: Checker) -> None:

@@ -5,6 +5,8 @@ import threading
 
 from sf6bot import clock
 from sf6bot.session import Session
+import sf6bot.state_check as _sc
+_sc._orig_wait = _sc._wait_for_exporter
 
 
 class SimExporter(threading.Thread):
@@ -18,9 +20,13 @@ class SimExporter(threading.Thread):
 
     def run(self):
         f = open(self.path, "a")
+        info = self.path.parent / "sf6bot_exporter_info.json"
         n = 0
         while not self.stop.is_set():
             n += 1
+            if n % 30 == 1:
+                info.write_text(json.dumps({"version": 2, "frame": n, "path": "reframework/data/sf6bot_state.jsonl",
+                                            "last_error": "", "open_errors": ""}))
             d = set(self.inp.down)
             if "D" in d:
                 self.x1 = min(self.x1 + 0.02, self.x2 - 0.8)
@@ -78,3 +84,16 @@ def test_state_check_against_simulated_exporter(cfg, tmp_path, monkeypatch):
                  "jump_raises_y", "hit_reduces_p2_hp", "hit_causes_p2_hitstun", "hit_builds_p1_super"):
         assert status.get(name) == "PASS", (name, results)
     assert "REFramework state check" in (s.recorder.dir / "report.md").read_text()
+
+
+def test_state_check_diagnoses_script_never_ran(cfg, tmp_path, monkeypatch, capsys):
+    import sf6bot.state_check as sc
+    game = tmp_path / "SF6"
+    (game / "reframework" / "autorun").mkdir(parents=True)
+    (game / "dinput8.dll").write_text("MOCK")
+    (game / "reframework" / "autorun" / "sf6bot_state.lua").write_text("-- MOCK")
+    monkeypatch.setattr(sc, "find_sf6_dir", lambda cfg: game)
+    monkeypatch.setattr(sc, "_wait_for_exporter", lambda g, s, timeout_s=0.3: sc.__dict__["_orig_wait"](g, s, 0.3))
+    with Session(cfg, "state_check_never_ran", mock=True) as s:
+        assert sc.run_state_check(s, cfg) == []
+    assert "never run" in capsys.readouterr().out

@@ -20,6 +20,10 @@ from pathlib import Path
 from . import clock
 
 STATE_FILE = Path("reframework") / "data" / "sf6bot_state.jsonl"
+# The Lua script tries several io.open paths (REFramework builds differ); look in all of them.
+STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
+                    Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
+INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
 
@@ -70,6 +74,26 @@ def reframework_status(game_dir: Path) -> dict:
         "state_file": str(game_dir / STATE_FILE),
         "state_file_exists": (game_dir / STATE_FILE).exists(),
     }
+
+
+def locate_state_file(game_dir: Path) -> Path | None:
+    """Most recently modified exporter output among the candidate locations."""
+    found = [game_dir / c for c in STATE_CANDIDATES if (game_dir / c).is_file()]
+    return max(found, key=lambda p: p.stat().st_mtime) if found else None
+
+
+def read_exporter_info(game_dir: Path) -> dict | None:
+    """Heartbeat written by the Lua script via json.dump_file. Adds 'age_s' (file age)."""
+    import time
+    p = game_dir / INFO_FILE
+    if not p.is_file():
+        return None
+    try:
+        info = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return {"unreadable": repr(e)}
+    info["age_s"] = round(time.time() - p.stat().st_mtime, 1)
+    return info
 
 
 def install_exporter(game_dir: Path) -> Path:

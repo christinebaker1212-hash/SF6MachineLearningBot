@@ -5,7 +5,11 @@
 -- every read is protected so a renamed field shows up in "missing" instead of crashing.
 -- Use OFFLINE only (Training Mode / CPU). Disable REFramework before playing online.
 
-local OUT_PATH = "reframework/data/sf6bot_state.jsonl"
+-- io.open path rules differ between REFramework builds; try these in order and report which worked.
+local CANDIDATE_PATHS = { "reframework/data/sf6bot_state.jsonl", "reframework\\data\\sf6bot_state.jsonl",
+                          "sf6bot_state.jsonl" }
+local OUT_PATH = "(none)"
+local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
 local IDLE_EVERY = 30             -- outside battle, write a heartbeat every N frames
 
@@ -16,12 +20,33 @@ local frame_no = 0
 local last_error = ""
 local last_missing = ""
 
+local open_errors = {}
+
 local function open_file()
     if fh then pcall(function() fh:close() end) end
-    pcall(function() json.dump_file("sf6bot_exporter_info.json", { version = 1 }) end) -- ensures data dir exists
-    fh = io.open(OUT_PATH, "w")
+    fh = nil
     lines = 0
-    if not fh then last_error = "could not open " .. OUT_PATH end
+    open_errors = {}
+    for _, path in ipairs(CANDIDATE_PATHS) do
+        local ok, f, err = pcall(io.open, path, "w")
+        if ok and f then
+            fh = f
+            OUT_PATH = path
+            return
+        end
+        open_errors[#open_errors + 1] = path .. ": " .. tostring(ok and err or f)
+    end
+    last_error = "could not open any output file: " .. table.concat(open_errors, " | ")
+end
+
+local function write_info(in_battle)
+    pcall(function()
+        json.dump_file("sf6bot_exporter_info.json", {
+            version = 2, frame = frame_no, path = OUT_PATH, lines = lines, enabled = enabled,
+            in_battle = in_battle, last_error = last_error, missing = last_missing,
+            open_errors = table.concat(open_errors, " | "),
+        })
+    end)
 end
 
 local function try(f)
@@ -107,6 +132,7 @@ re.on_frame(function()
         local p1 = players and try(function() return players[0] end)
         local p2 = players and try(function() return players[1] end)
         local in_battle = p1 ~= nil and p2 ~= nil and teams ~= nil
+        if frame_no % INFO_EVERY == 1 then write_info(in_battle) end
         if not in_battle then
             if frame_no % IDLE_EVERY == 0 then
                 write_line('{"v":1,"f":' .. frame_no .. ',"in_battle":false}')

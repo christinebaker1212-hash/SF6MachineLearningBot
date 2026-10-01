@@ -7,9 +7,12 @@ experimental outcome we're working toward, not a promised capability.
 - **Milestone 1: COMPLETE (2026-10-01).** Acceptance passed both sides; latency measured;
   F8, F7 and focus-loss release confirmed by the user (Ryu idle after Alt-Tab). Thumbstick kill
   untested.
-- **Current milestone: 2 (observations).** Step 1 is the REFramework state exporter, written and
-  tested against a MOCK REFramework API and a simulated exporter. **Not yet run in the game.**
-  The user has REFramework available but no scripts.
+- **Current milestone: 2 (observations).** Step 1 is the REFramework state exporter.
+  - **First in-game attempt:** `dinput8.dll` and the script were found in the game folder, but
+    no data lines arrived in 2 s (two runs). The cause is unknown: no restart after install,
+    REFramework not loading, or an io.open path issue.
+  - Added a heartbeat file (`reframework/data/sf6bot_exporter_info.json` via json.dump_file),
+    multiple io.open candidate paths, and a diagnosis in `state-check`.
 - M1 history: the first real-game runs were on 2026-10-01 on
   the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
   random loop.
