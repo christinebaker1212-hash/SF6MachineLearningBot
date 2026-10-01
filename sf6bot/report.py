@@ -11,6 +11,8 @@ from .stats import TABLE_HEADER, fmt_row, summarize_ms
 CAVEATS = [
     "All timing is wall-clock (perf_counter / QPC). Inputs are NOT synchronised to SF6's internal "
     "frame boundaries; nothing here shows frame-perfect execution.",
+    "Desktop Duplication also delivers a frame when anything else on the desktop changes, so raw fps "
+    "can exceed 60; identical-content frames are ignored by the control loop.",
     "'est. missed frames' assumes the game renders at a steady 60 fps; menus, loading and hitstop can "
     "legitimately produce repeated or identical frames.",
     "present->recv uses DXGI LastPresentTime converted to perf_counter via a measured QPC offset; it "
@@ -50,6 +52,8 @@ def build_report(dir_: str | Path) -> dict:
         "fps": round((len(frames) - 1) / duration, 2) if duration > 0 else None,
         "with_present_time": sum(p is not None for p in t_pres),
         "duplicates_identical_content": sum(int(r["duplicate"]) for r in frames),
+        "unique_content_fps": round((len(frames) - sum(int(r["duplicate"]) for r in frames)) / duration, 2)
+        if duration > 0 else None,
         "est_missed_frames_at_60fps": sum(int(r["est_missed"]) for r in frames),
         "intervals": summarize_ms(intervals),
         "present_to_recv": summarize_ms([r - p for p, r in zip(t_pres, t_recv) if p is not None]),
@@ -117,8 +121,8 @@ def to_markdown(rep: dict) -> str:
     c = rep["capture"]
     L += [f"- side: {rep['side']}, capture: {rep['capture_backend']}, input: {rep['input_backend']}",
           f"- end reason: {rep['end_reason']}",
-          f"- frames: {c['frames']} in {c['duration_s']} s ({c['fps']} fps), with present time: "
-          f"{c['with_present_time']}",
+          f"- frames: {c['frames']} in {c['duration_s']} s ({c['fps']} fps; unique content "
+          f"{c.get('unique_content_fps')} fps), with present time: {c['with_present_time']}",
           f"- identical-content frames: {c['duplicates_identical_content']}, est. missed (60 fps): "
           f"{c['est_missed_frames_at_60fps']}",
           f"- sequences: {rep['sequences']['completed']}/{rep['sequences']['run']} completed; steps off by "

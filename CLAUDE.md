@@ -4,8 +4,14 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
-- **Current milestone: 1 (game connection).** The code is complete. It is tested only against
-  MOCK capture/input in a Linux container. **It has not run against the real game yet.**
+- **Current milestone: 1 (game connection).** The first real-game runs were on 2026-10-01 on
+  the user's Ally X: capture bench, input test, acceptance on both sides, latency probe, and a
+  random loop.
+  - Measured numbers are below.
+  - Still open:
+    - in-game confirmation of each acceptance move, plus Hadoken counts (checklists not filled)
+    - the latency probe (0/30 detected, because the box covered the whole column)
+    - the safety tests
 - Next step: the user runs the M1 acceptance procedure below on the game PC and sends back the
   `report.md`, `acceptance_checklist.md` files and `sysinfo` output.
 
@@ -227,14 +233,15 @@ The safety tests are part of acceptance. During a run:
 ## Verified capabilities
 | capability | MOCK/container | real SF6 |
 |---|---|---|
-| Capture with timestamps, duplicate/missed-frame counting | yes (synthetic) | **unverified** |
-| SendInput press/release, atomic batches | yes (mock backend) | **unverified**. The user's first latency-probe run detected nothing on every trial; cause not yet known (input path vs. box/threshold). |
-| Sequences with measured timing; facing mirroring | yes (unit tests) | **unverified** |
-| Recording (frames.csv, video.mp4, events.jsonl) and report | yes | **unverified** |
+| Capture with timestamps, duplicate/missed-frame counting | yes (synthetic) | **verified**. dxcam on the 1280x720 window: about 60 fps of unique content, present->recv p50 6-7 ms / p95 about 10 ms, 100% plausible QPC timestamps. Estimated missed frames: about 0.4-3% per run. Raw fps can exceed 60 because of desktop updates (identical frames). |
+| SendInput press/release, atomic batches | yes (mock backend) | **sent without error**. The SendInput call takes 2-4 ms mean, up to 11 ms (slow; PowerToys keyboard hook suspected). The user saw Ryu walk. Per-move in-game confirmation is pending. |
+| Sequences with measured timing; facing mirroring | yes (unit tests) | **wall-clock timing measured**. Step error mean 1.8 ms, p99 about 6 ms; 4/90 steps off by more than 1/4 frame. In-game result (game frames, Hadoken success) is pending. |
+| Recording (frames.csv, video.mp4, events.jsonl) and report | yes | **verified** (0 dropped frames/events) |
 | Kill/pause/focus-loss release | yes (unit tests) | **unverified** |
 | Debug overlay (no-activate, topmost) | not testable headless | **unverified** |
 | Latency probe logic | yes (reactive mock, known 50 ms delay) | **unverified** |
-| PyTorch inference in loop | yes, torch 2.14.1 CPU in container (numbers not representative) | **unverified** (GPU) |
+| Live loop (random policy) | yes | **verified**. Present->input sent p50 10 ms, p95 16 ms. Preprocess about 1 ms. |
+| PyTorch inference in loop | yes, torch 2.14.1 CPU in container (numbers not representative) | **unverified** (torch not installed on the PC yet) |
 
 ## Unresolved issues / risks
 - **Key bindings:** SF6's default keyboard layout is not verified, so the user must align

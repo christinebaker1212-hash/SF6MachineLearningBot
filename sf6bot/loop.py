@@ -32,7 +32,7 @@ def run_policy(sess: Session, policy: Policy, duration_s: float) -> dict:
     policy.reset()
     t_end = clock.now() + duration_s
     last_seq = 0
-    ticks = stale = skipped = 0
+    ticks = stale = skipped = dup = 0
     while not sess.stop_event.is_set() and clock.now() < t_end:
         sess.check()
         fr = sess.grabber.wait_newer(last_seq, timeout=0.25)
@@ -41,6 +41,9 @@ def run_policy(sess: Session, policy: Policy, duration_s: float) -> dict:
         if last_seq:
             skipped += max(0, fr.seq - last_seq - 1)
         last_seq = fr.seq
+        if fr.duplicate:
+            dup += 1  # same image as before (e.g. a desktop update elsewhere): nothing new to decide on
+            continue
         t_start = clock.now()
         t_ref = fr.t_present if fr.t_present is not None else fr.t_recv
         if t_start - t_ref > max_age:
@@ -61,4 +64,4 @@ def run_policy(sess: Session, policy: Policy, duration_s: float) -> dict:
             "t_obs": t_obs, "t_inf": t_inf, "t_sent": t_sent, "action": action.label(),
             "applied": policy.applies_actions})
         sess.status["loop ms"] = f"{1000 * (t_sent - t_ref):.1f} (frame->input)"
-    return {"ticks": ticks, "stale": stale, "skipped_by_loop": skipped}
+    return {"ticks": ticks, "stale": stale, "skipped_by_loop": skipped, "duplicate_frames_ignored": dup}
