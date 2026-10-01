@@ -487,9 +487,16 @@ The safety tests are part of acceptance. During a run:
   - writes `input_map.json`
 - **Community status:** the bit meanings are explicitly unverified in SF6_Tools' own
   provenance notes. Its layout is directions in the low 4 bits and buttons in 0xFFF0.
-- Next, verify in a replay that both players' `input` masks vary (`watch_summary`
-  lines_with_input / distinct_inputs). If they do, build a replay → demonstration dataset
-  exporter for M3.
+- **VERIFIED in a replay (0.2.9, the same Ken vs Ryu Master replay re-watched):**
+  - The characters read as **Ken (10) / Ryu (1)**, which is correct, so the community ESF table
+    checks out for these two.
+  - **Both players' input masks are populated during replay playback:** p1 non-zero on 3,772
+    lines with 58 distinct masks; p2 on 4,542 lines with 55 distinct masks.
+  - **Replay playback is reproducible:** the KO stage_timers matched the first viewing exactly
+    (1325, 2982, 1926).
+- Remaining before building a replay → demonstration dataset exporter for M3:
+  - **the input-map run** (bit meanings), not yet done by the user
+  - checking that the masks are player-relative or screen-absolute
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
