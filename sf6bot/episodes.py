@@ -20,6 +20,10 @@ DATA_GAP_S = 0.5              # no state lines for this long during a round = ca
 # them, then resets). Used so the intro is not mistaken for the fight. Observed for Ryu vs the CPU
 # opponent in one match; other characters' intros may use other ids (re-check with more watch data).
 INTRO_ACTION_IDS = {400, 401}
+SUPER_BAR = 10000            # observed: super gauge max 30000 = 3 bars
+DRIVE_BAR = 10000            # observed: drive gauge max 60000 = 6 bars
+FINISH_WINDOW_S = 10.0       # a super spent this long before the KO counts as the finisher (inference)
+CRITICAL_ART_HP = 0.25       # SF6 rule (game knowledge, not measured): Lv3 at <=25% HP becomes a Critical Art
 
 
 @dataclass
@@ -33,6 +37,7 @@ class RoundResult:
     fight_start_stage_timer: int | None = None
     data_gaps: int = 0
     notes: list = field(default_factory=list)
+    finish: dict = field(default_factory=dict)
 
 
 class EpisodeTracker:
@@ -52,6 +57,8 @@ class EpisodeTracker:
         self._prev = None
         self._prev_t: float | None = None
         self._gaps = 0
+        self._hist: list = []          # (t, raw) for the current round, trimmed to FINISH_WINDOW_S + 2 s
+        self._round_drive_spent = [0, 0]
 
     # ---- helpers ---------------------------------------------------------------------------
     @staticmethod
@@ -60,14 +67,57 @@ class EpisodeTracker:
         v = p.get("hp")
         return v if isinstance(v, (int, float)) else None
 
+    def _finish(self, raw, winner) -> dict:
+        """How the round ended, inferred from measured gauges. Every field is evidence, not a game label."""
+        if winner is None:
+            return {}
+        loser = 1 - winner
+        wk, lk = ("p1", "p2")[winner], ("p1", "p2")[loser]
+        w, l = raw.get(wk) or {}, raw.get(lk) or {}
+        t_end = self._hist[-1][0] if self._hist else 0.0
+        spent, spend_t, spend_hp = 0, None, None
+        prev = None
+        for t, r in self._hist:
+            sup = (r.get(wk) or {}).get("super")
+            if isinstance(sup, (int, float)) and isinstance(prev, (int, float)) and prev - sup >= SUPER_BAR * 0.9 \
+                    and t_end - t <= FINISH_WINDOW_S:
+                spent, spend_t, spend_hp = round((prev - sup) / SUPER_BAR), t, (r.get(wk) or {}).get("hp")
+            prev = sup
+        hp_max = w.get("hp_max") or 0
+        kind = "normal"
+        if spent:
+            kind = f"super_art_lv{spent}"
+            if spent == 3 and hp_max and isinstance(spend_hp, (int, float)) and spend_hp <= CRITICAL_ART_HP * hp_max:
+                kind = "critical_art"
+        last_dmg = None
+        if len(self._hist) >= 2:
+            for (t0, a), (t1, b) in zip(reversed(self._hist[:-1]), reversed(self._hist)):
+                h0, h1 = (a.get(lk) or {}).get("hp"), (b.get(lk) or {}).get("hp")
+                if isinstance(h0, (int, float)) and isinstance(h1, (int, float)) and h1 < h0:
+                    last_dmg = h0 - h1
+                    break
+        return {
+            "kind": kind, "kind_confidence": "medium" if spent else "medium",
+            "perfect": bool(hp_max) and w.get("hp") == hp_max,
+            "super_bars_spent_before_ko": spent,
+            "super_spent_s_before_ko": round(t_end - spend_t, 2) if spend_t is not None else None,
+            "winner_hp_pct": round(100 * w["hp"] / hp_max, 1) if hp_max and isinstance(w.get("hp"), (int, float)) else None,
+            "winner_burnout": w.get("drive") == 0, "loser_burnout": l.get("drive") == 0,
+            "finisher_action_id": w.get("action_id"), "final_hit_damage": last_dmg,
+            "drive_bars_lost_round": [round(x / DRIVE_BAR, 1) for x in self._round_drive_spent],
+            "basis": "inferred from hp/super/drive gauges; SF6's own finish label is not read",
+        }
+
     def _end_round(self, raw, reason, winner, confidence, notes=()):
         st = raw.get("stage_timer")
         res = RoundResult(self._round if self._round is not None else -1, winner, reason, confidence, st,
-                          (self._hp(raw, 0), self._hp(raw, 1)), self._fight_start_timer, self._gaps, list(notes))
+                          (self._hp(raw, 0), self._hp(raw, 1)), self._fight_start_timer, self._gaps, list(notes),
+                          self._finish(raw, winner) if reason == "ko" else {})
         self.rounds.append(res)
         self._round_ended = True
         ev = [{"event": "round_end", "round": res.index, "winner": winner, "reason": reason,
-               "confidence": confidence, "hp": res.hp_end, "stage_timer": st, "data_gaps": self._gaps}]
+               "confidence": confidence, "hp": res.hp_end, "stage_timer": st, "data_gaps": self._gaps,
+               "finish": res.finish}]
         if winner is not None:
             self.wins[winner] += 1
             if self.wins[winner] >= self.rounds_to_win and not self.match_over:
@@ -115,6 +165,8 @@ class EpisodeTracker:
             self._fight_started = False
             self._fight_start_timer = None
             self._gaps = 0
+            self._hist = []
+            self._round_drive_spent = [0, 0]
             out.append({"event": "round_start", "round": rnd, "stage_timer": st,
                         "super": ((raw.get("p1") or {}).get("super"), (raw.get("p2") or {}).get("super"))})
         acts = {(raw.get("p1") or {}).get("action_id"), (raw.get("p2") or {}).get("action_id")}
@@ -124,6 +176,15 @@ class EpisodeTracker:
             self._fight_start_timer = st
             out.append({"event": "fight_start", "round": rnd, "stage_timer": st})
         if self._fight_started and not self._round_ended:
+            if self._hist:
+                for i, k in enumerate(("p1", "p2")):
+                    d0 = (self._hist[-1][1].get(k) or {}).get("drive")
+                    d1 = (raw.get(k) or {}).get("drive")
+                    if isinstance(d0, (int, float)) and isinstance(d1, (int, float)) and d1 < d0:
+                        self._round_drive_spent[i] += d0 - d1
+            self._hist.append((t, raw))
+            while self._hist and t - self._hist[0][0] > FINISH_WINDOW_S + 2:
+                self._hist.pop(0)
             h0, h1 = self._hp(raw, 0), self._hp(raw, 1)
             if h0 is not None and h1 is not None:
                 if h0 <= 0 and h1 <= 0:

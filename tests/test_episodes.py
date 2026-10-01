@@ -6,10 +6,11 @@ from pathlib import Path
 from sf6bot.episodes import EpisodeTracker, replay
 
 DATA = Path(__file__).parent / "data" / "watch_2026-10-01_ryu_vs_cpu.jsonl.gz"
+DATA2 = Path(__file__).parent / "data" / "watch_2026-10-01_match2.jsonl.gz"
 
 
-def load_real():
-    with gzip.open(DATA, "rt") as f:
+def load_real(path=DATA):
+    with gzip.open(path, "rt") as f:
         return [json.loads(l) for l in f if l.strip() and not l.startswith('{"_provenance"')]
 
 
@@ -64,3 +65,15 @@ def test_data_gap_reported_separately():
     ev += tr.update(_line(400 / 60 + 2.0, 0, 520, 10000, 10000), 400 / 60 + 2.0)
     assert any(e["event"] == "data_gap" for e in ev)
     assert not any(e["event"] == "round_end" for e in ev)
+
+
+def test_real_match2_finish_kinds():
+    """REAL data, second match: P1 won 2-1; R1 perfect, R3 ended by a 3-bar super with P1 at ~73% hp."""
+    tr, events = replay(load_real(DATA2))
+    ends = [e for e in events if e["event"] == "round_end"]
+    assert [(e["winner"], e["reason"]) for e in ends] == [(0, "ko"), (1, "ko"), (0, "ko")]
+    f1, f2, f3 = (e["finish"] for e in ends)
+    assert f1["perfect"] and f1["kind"] == "normal" and f1["winner_burnout"]
+    assert f2["kind"] == "normal" and not f2["perfect"]           # P2's 1-bar super was ~29 s earlier
+    assert f3["kind"] == "super_art_lv3" and f3["super_bars_spent_before_ko"] == 3 and not f3["perfect"]
+    assert [e for e in events if e["event"] == "match_end"][0]["score"] == (2, 1)

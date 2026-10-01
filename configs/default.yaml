@@ -34,6 +34,9 @@ input:
     MK: K
     HK: L
 
+training:
+  reset_key: SLASH        # Training Mode "reset position" on the user's keyboard (user-reported: "/")
+
 safety:
   kill_key: F8            # immediate stop + release all (works even when game is focused)
   pause_key: F7           # toggle pause (inputs released while paused)

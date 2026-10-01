@@ -444,6 +444,33 @@ The safety tests are part of acceptance. During a run:
 - **Controlled-player identity is not solved yet:** `self_index` must be provided. Plan: an
   input probe at fight start.
 
+### Finish classification (0.2.8)
+- `round_end.finish` holds:
+  - `kind`: normal | super_art_lvN | critical_art
+  - `perfect`
+  - super bars spent within 10 s before the KO, and how long before
+  - winner hp %
+  - burnout of either player at the KO
+  - finisher action id and final-hit damage
+  - drive bars lost in the round
+- **Inferred from gauges. SF6's own finish label (the round icons) is not read.**
+  critical_art uses the game rule "Lv3 at ≤25% HP" (game knowledge, not measured).
+- **Real match 2** (`tests/data/watch_2026-10-01_match2.jsonl.gz`, user: "Ultimate Masters"):
+  P1 won 2-1.
+  - R1: PERFECT, normal KO. It ended with a long juggle combo with heavily scaled final hits
+    (68, 48, 64, 64, 7). P1 was in burnout after two 3-bar drive spends (action 501).
+  - R2: P2 won at 29% hp with a normal KO (action 627, 570 dmg). P2's 1-bar super was 29 s
+    earlier.
+  - R3: P1 spent a full 3 bars 7.5 s before the KO at 73% hp, so SA Lv3, not a CA. The KO came
+    from action 1217, which lasted 340 frames with repeated 100-damage ticks.
+- **Observation:** `hitstun` (damage_time) reads 0 while the defender is airborne/juggled or in
+  a super's cinematic hits. It is not a complete "being hit" signal; damage reaction action
+  ids (2xx) are also needed.
+
+## Training Mode reset
+- The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
+  Side-specific resets are not known yet.
+
 ## Overlay visibility problem (0.2.7)
 - The user reports the debug overlay "closes automatically / is not visible". No
   `overlay_error` was ever logged, so it does not crash.
