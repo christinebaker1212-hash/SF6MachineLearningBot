@@ -227,8 +227,8 @@ The safety tests are part of acceptance. During a run:
 | capability | MOCK/container | real SF6 |
 |---|---|---|
 | Capture with timestamps, duplicate/missed-frame counting | yes (synthetic) | **unverified** |
-| SendInput press/release, atomic batches | yes (mock backend) | **unverified** |
-| Sequences with measured timing; facing mirroring | yes (unit tests) | **unverified** |
+| SendInput press/release, atomic batches | yes (mock backend) | **partly verified**: user's Training Mode input-display screenshot of an acceptance run (right side) |
+| Sequences with measured timing; facing mirroring | yes (unit tests) | **partly verified**: Hadoken from the right registered as 3f ↓, 3f ↙, 3f ←+P (correctly mirrored); neutral gaps of 80f as scripted; walks of 40f and **39f** (1-frame wall-clock jitter observed). Hadoken success count still pending. |
 | Recording (frames.csv, video.mp4, events.jsonl) and report | yes | **unverified** |
 | Kill/pause/focus-loss release | yes (unit tests) | **unverified** |
 | Debug overlay (no-activate, topmost) | not testable headless | **unverified** |
@@ -270,6 +270,11 @@ The safety tests are part of acceptance. During a run:
     be considered.
 - **Admin rights (UIPI):** if SF6 runs as admin, SendInput is blocked unless sf6bot also runs
   as admin. This raises an explicit error.
+
+## Idea queued: input-display readback
+SF6's Training Mode input display shows the frames each input was held, newest row at the top.
+Reading it automatically (template-matching the arrows/icons and digits) would verify sequences
+in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing validation.
 
 ## Roadmap
 - **M2 — observations and episodes:**
