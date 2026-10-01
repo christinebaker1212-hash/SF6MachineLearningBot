@@ -503,8 +503,11 @@ The safety tests are part of acceptance. During a run:
     70 ms screen probe and the ~60 ms state latency.
   - Bits are the same for every character, since they come from the controller. Only
     Classic vs Modern could differ.
-- Remaining before the replay → demonstration dataset exporter:
-  - whether LEFT/RIGHT are screen-absolute or relative to facing (only measured facing right)
+- **Directions are SCREEN-ABSOLUTE (verified):** re-measured with P1 facing left (run
+  20261001_142625). LEFT still → 0x4 and RIGHT → 0x8. All bits are identical; latency is
+  again 3-5 frames.
+  - `decode_input_relative(mask, bits, facing_right)` converts to forward/back numpad.
+- The replay → demonstration exporter has no remaining blockers.
 - **User-proposed next step: a per-character move catalog.** The bot performs each
   character's normals and specials in Training Mode and records action_id → move name,
   duration, damage, and hit/block advantage. It feeds commentary, opponent assessment,

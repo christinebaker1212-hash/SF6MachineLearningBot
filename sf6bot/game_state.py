@@ -279,3 +279,12 @@ def decode_input(mask: int, bits: dict) -> tuple[int, list[str]]:
         extra >>= 1
         i += 1
     return direction, buttons
+
+
+def decode_input_relative(mask: int, bits: dict, facing_right: bool) -> tuple[int, list[str]]:
+    """Like decode_input, but numpad relative to the player's facing (6 = forward).
+    pl_input_new directions are screen-absolute (measured facing both ways, 2026-10-01)."""
+    d, b = decode_input(mask, bits)
+    if not facing_right:
+        d = {1: 3, 3: 1, 4: 6, 6: 4, 7: 9, 9: 7}.get(d, d)
+    return d, b

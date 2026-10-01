@@ -87,3 +87,11 @@ def test_decode_input_with_measured_bits():
     assert decode_input(0x1 | 0x4, bits) == (7, [])
     assert decode_input(0x40 | 0x200, bits) == (5, ["HP", "HK"])
     assert decode_input(0x400, bits) == (5, ["bit0x400"])              # unmeasured bit surfaces, not dropped
+
+
+def test_decode_input_relative_mirrors_when_facing_left():
+    from sf6bot.game_state import decode_input_relative, load_input_bits
+    bits = load_input_bits()
+    assert decode_input_relative(0x8, bits, True) == (6, [])    # screen-right while facing right = forward
+    assert decode_input_relative(0x8, bits, False) == (4, [])   # screen-right while facing left = back
+    assert decode_input_relative(0x2 | 0x4 | 0x10, bits, False) == (3, ["LP"])
