@@ -1,0 +1,19 @@
+# Ryu, Classic controls. Relative numpad notation: <dir>[+BTN...][@frames], 6 = forward.
+# Frame counts are nominal 60 Hz wall-clock durations (not game-frame-synchronised).
+moves:
+  walk_forward:   "6@40"
+  walk_back:      "4@40"
+  crouch:         "2@40"
+  neutral_jump:   "8@3 5@50"
+  forward_jump:   "9@3 5@55"
+  back_jump:      "7@3 5@55"
+  st_lp:          "5+LP@3 5@25"
+  st_mp:          "5+MP@3 5@30"
+  st_hp:          "5+HP@3 5@40"
+  st_lk:          "5+LK@3 5@25"
+  st_mk:          "5+MK@3 5@30"
+  st_hk:          "5+HK@3 5@40"
+  cr_mk:          "2+MK@3 5@30"
+  hadoken_lp:     "2@3 3@3 6+LP@3 5@50"        # 236+LP
+  shoryuken_lp:   "6@3 2@3 3+LP@3 5@60"        # 623+LP
+  tatsu_lk:       "2@3 1@3 4+LK@3 5@60"        # 214+LK

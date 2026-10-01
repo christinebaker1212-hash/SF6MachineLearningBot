@@ -1,0 +1,21 @@
+# Milestone 1 acceptance routine (Training Mode, dummy standing, input display ON).
+# Run once with your character on the LEFT and once on the RIGHT.
+sequences_file: configs/sequences/ryu_classic.yaml
+pause_frames: 30        # neutral gap between steps
+steps:
+  - {move: walk_forward}
+  - {move: walk_back}
+  - {move: crouch}
+  - {move: neutral_jump}
+  - {move: forward_jump}
+  - {move: back_jump}
+  - {move: st_lp}
+  - {move: st_mp}
+  - {move: st_hp}
+  - {move: st_lk}
+  - {move: st_mk}
+  - {move: st_hk}
+  - {move: cr_mk}
+  - {move: hadoken_lp, repeat: 10}   # repeatability: count successes in the recording
+  - {move: walk_back}
+  - {move: walk_back}

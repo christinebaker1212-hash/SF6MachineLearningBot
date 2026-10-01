@@ -1,0 +1,68 @@
+# sf6bot default configuration. Do not edit for personal settings:
+# copy overrides into configs/local.yaml (git-ignored); it is deep-merged on top.
+
+game:
+  exe_name: StreetFighter6.exe        # UNVERIFIED: confirm with `sf6bot list-windows`
+  title_contains: "Street Fighter 6"  # fallback match on window title
+  character: Ryu
+  controls: classic
+
+capture:
+  backend: dxcam          # dxcam (Windows, DXGI present timestamps) | mss (no present timestamps)
+  dxcam_backend: dxgi     # dxgi | winrt (dxcam's Windows Graphics Capture path)
+  device_idx: 0
+  output_idx: null        # null = primary monitor. Set if the game is on another monitor.
+  target_fps: 120         # dxcam polling rate; 0 = unpaced (may use a full CPU core)
+
+input:
+  backend: sendinput_keyboard   # sendinput_keyboard | mock (MOCK: sends nothing)
+  min_hold_frames: 2            # reject sequences that hold a button < this many frames
+  # Logical input -> keyboard key (names in sf6bot/keys.py).
+  # UNVERIFIED vs. SF6 defaults: open SF6 Controls > Keyboard and make the game's
+  # bindings match these (or change these to match the game), then confirm with
+  # `sf6bot input-test` and the Training Mode input display.
+  bindings:
+    UP: W
+    DOWN: S
+    LEFT: A
+    RIGHT: D
+    LP: U
+    MP: I
+    HP: O
+    LK: J
+    MK: K
+    HK: L
+
+safety:
+  kill_key: F8            # immediate stop + release all (works even when game is focused)
+  pause_key: F7           # toggle pause (inputs released while paused)
+  flip_facing_key: F6     # manual facing flip (M1 has no facing detection yet)
+  refocus_grace_s: 0.5    # wait after the game regains focus before re-arming
+  start_countdown_s: 5    # time to click into the game before inputs start
+  poll_s: 0.005
+
+recording:
+  root: runs
+  record_video: true
+  video_width: 640
+
+overlay:
+  enabled: true
+  width: 640
+  fps: 30
+
+loop:
+  max_frame_age_ms: 50    # do not act on frames older than this (stale) -> counted & skipped
+  obs_width: 128          # grayscale observation size fed to the policy
+  obs_height: 72
+  # Actions for the RANDOM baseline policy (relative directions; label RANDOM, not learned)
+  random_actions: ["5", "6", "4", "2", "1", "3", "5+LP", "5+MP", "2+LK", "2+MK"]
+  random_hold_frames: 6
+
+latency_probe:
+  key: LP
+  hold_frames: 4
+  trials: 30
+  threshold: 25.0         # mean abs pixel diff in ROI that counts as "visible change"
+  timeout_s: 0.5
+  settle_s: 1.0
