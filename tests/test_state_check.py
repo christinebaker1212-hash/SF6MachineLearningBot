@@ -172,3 +172,30 @@ def test_input_map_against_simulated_masks(cfg, tmp_path, monkeypatch):
         th.join()
     assert out["verified"], out
     assert out["keys"]["LP"]["mask"] == 16 and out["keys"]["RIGHT"]["mask"] == 8
+
+
+def test_catalog_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
+    """MOCK: run the catalog for two moves against the simulated exporter; checks the flow end to end
+    (reset key, approach, capture, analysis, file output). Not SF6 frame data."""
+    import sf6bot.catalog as cat
+    import sf6bot.session as sm
+    from sf6bot.game_state import STATE_FILE
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(cat, "find_sf6_dir", lambda cfg: game)
+    cfg["datasets"] = {"root": str(tmp_path / "datasets")}
+    sim = SimExporter(game / STATE_FILE, inp)
+    sim.start()
+    try:
+        with Session(cfg, "catalog_test", mock=True) as s:
+            out = cat.run_catalog(s, cfg, "none", only=["5LP", "2MK"])
+    finally:
+        sim.stop.set()
+    data = json.loads(out.read_text())
+    lp, mk = data["moves"]["5LP"]["guard_none"], data["moves"]["2MK"]["guard_none"]
+    assert lp["action_ids"] == [101]
+    assert mk["action_ids"] == [102] and mk["result"] == "hit" and mk["damage"] == 600
+    assert "SLASH" in {k for _, k, d in inp.log if d}   # training reset was pressed

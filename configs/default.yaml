@@ -46,6 +46,9 @@ safety:
   start_countdown_s: 5    # time to click into the game before inputs start
   poll_s: 0.005
 
+datasets:
+  root: datasets          # demonstration datasets (replays, converted runs, move catalogs)
+
 recording:
   root: runs
   record_video: true

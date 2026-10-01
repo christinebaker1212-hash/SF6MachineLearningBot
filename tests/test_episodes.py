@@ -95,3 +95,34 @@ def test_decode_input_relative_mirrors_when_facing_left():
     assert decode_input_relative(0x8, bits, True) == (6, [])    # screen-right while facing right = forward
     assert decode_input_relative(0x8, bits, False) == (4, [])   # screen-right while facing left = back
     assert decode_input_relative(0x2 | 0x4 | 0x10, bits, False) == (3, ["LP"])
+
+
+def test_dataset_builder_on_real_match(tmp_path):
+    """REAL data (match 2, exporter v3: no input field) -> dataset rows, rounds, dedup."""
+    import gzip as _gz
+    from sf6bot.dataset import DatasetBuilder
+    b = DatasetBuilder()
+    for raw in load_real(DATA2):
+        b.add(raw, raw["t"])
+    m = b.meta("test")
+    assert [r["winner"] for r in m["rounds"]] == [0, 1, 0] and m["match"]["score"] == (2, 1)
+    assert m["frames"] > 7000 and m["player_lines_without_input"] == 2 * m["frames"]  # v3 had no inputs
+    frames = [(r["round"], r["frame"]) for r in b.rows]
+    assert len(frames) == len(set(frames))
+    out = b.save(tmp_path, "replays", "test")
+    with _gz.open(out, "rt") as f:
+        assert sum(1 for _ in f) == m["frames"]
+
+
+def test_dataset_decodes_inputs_relative():
+    from sf6bot.dataset import DatasetBuilder
+    b = DatasetBuilder()
+    p1 = {"hp": 1, "hp_max": 1, "x": -1, "facing_right": True, "action_id": 1, "input": 0x8 | 0x10, "chara": 1}
+    p2 = {"hp": 1, "hp_max": 1, "x": 1, "facing_right": False, "action_id": 1, "input": 0x8, "chara": 10}
+    b.add({"ready": True, "round": 0, "stage_timer": 5, "p1": p1, "p2": p2}, 0.0)
+    b.add({"ready": True, "round": 0, "stage_timer": 5, "p1": p1, "p2": p2}, 0.01)   # duplicate frame
+    r = b.rows[0]
+    assert len(b.rows) == 1 and b.duplicates == 1
+    assert (r["p1"]["dir"], r["p1"]["buttons"]) == (6, ["LP"])   # forward + LP
+    assert r["p2"]["dir"] == 4                                    # screen-right while facing left = back
+    assert b.meta("t")["characters"] == ["Ryu", "Ken"]

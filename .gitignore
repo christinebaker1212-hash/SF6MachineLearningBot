@@ -5,3 +5,4 @@ __pycache__/
 runs/
 configs/local.yaml
 .pytest_cache/
+datasets/

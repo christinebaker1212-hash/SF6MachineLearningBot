@@ -164,6 +164,31 @@ def cmd_input_map(args, cfg):
     _print_report(s)
 
 
+def cmd_replay_record(args, cfg):
+    from .dataset import run_replay_record
+    cfg["recording"]["record_video"] = False  # state is the dataset; skip video to save disk/CPU
+    with _session(args, cfg, "replay_record") as s:
+        run_replay_record(s, cfg, args.seconds, args.notes)
+    _print_report(s)
+
+
+def cmd_dataset_from_run(args, cfg):
+    import json as _json
+    from pathlib import Path
+    from .dataset import from_events_file
+    b = from_events_file(Path(args.dir) / "events.jsonl")
+    out = b.save(cfg.get("datasets", {}).get("root", "datasets"), args.kind, f"run:{Path(args.dir).name}", args.notes)
+    print(f"Saved {out}")
+    print(_json.dumps(b.meta(f"run:{Path(args.dir).name}", args.notes), indent=2, default=str))
+
+
+def cmd_catalog(args, cfg):
+    from .catalog import run_catalog
+    with _session(args, cfg, f"catalog_guard_{args.guard}") as s:
+        run_catalog(s, cfg, args.guard, args.only.split(",") if args.only else None)
+    _print_report(s)
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -245,6 +270,23 @@ def main(argv=None):
 
     sub.add_parser("input-map", help="measure SF6 input-mask bits per key (Training Mode, bot = P1)").set_defaults(
         fn=cmd_input_map)
+
+    p = sub.add_parser("replay-record", help="record a replay you play back in SF6 into a demonstration dataset")
+    p.add_argument("--seconds", type=float, default=420)
+    p.add_argument("--notes", default="", help="free text, e.g. 'Master replay, Ken vs Ryu'")
+    p.set_defaults(fn=cmd_replay_record)
+
+    p = sub.add_parser("dataset-from-run", help="convert a recorded run's events.jsonl into a dataset")
+    p.add_argument("dir")
+    p.add_argument("--kind", default="converted")
+    p.add_argument("--notes", default="")
+    p.set_defaults(fn=cmd_dataset_from_run)
+
+    p = sub.add_parser("catalog", help="measure the current character's moves in Training Mode (bot = P1)")
+    p.add_argument("--guard", choices=["none", "all"], required=True,
+                   help="what the Training Mode dummy is set to: none = gets hit, all = blocks everything")
+    p.add_argument("--only", default="", help="comma-separated move names, e.g. 5LP,2MK")
+    p.set_defaults(fn=cmd_catalog)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

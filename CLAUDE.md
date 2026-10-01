@@ -513,6 +513,42 @@ The safety tests are part of acceptance. During a run:
   duration, damage, and hit/block advantage. It feeds commentary, opponent assessment,
   punishing and replay labelling.
 
+## Milestone 3 data tools (0.3.0)
+### Replay → demonstration dataset (`sf6bot replay-record`, menu D)
+- Records while the user plays back any replay (or match). The bot never arms; video is off.
+- Writes `datasets/replays/<stamp>_<P1>_vs_<P2>.jsonl.gz` plus `.meta.json`, with one row per
+  game frame, deduplicated on (round, stage_timer). Each row has both players':
+  - state fields
+  - raw `input` mask
+  - decoded `dir` (facing-relative numpad) and `buttons`
+- The meta records characters, rounds/winners/finish kinds (EpisodeTracker), duplicates,
+  skipped frames and lines without input.
+- `sf6bot dataset-from-run runs/<dir>` converts an earlier run's events.jsonl the same way.
+- Tested on real match-2 data (v3, no inputs) and on synthetic input decoding.
+
+### Move catalog (`sf6bot catalog --guard none|all`, menu C / B)
+- In Training Mode with the bot as P1, it learns neutral action ids (stand/crouch idle; dummy
+  idle). Then for each of about 60 generic Classic inputs it:
+  - resets with "/"
+  - walks to contact if needed
+  - performs the move
+  - analyses state on the stage_timer clock
+- Generic inputs covered: 12 normals, command-normal probes, throw, DI, parry, jump normals,
+  the 236/214/623/41236/63214 motions × LP/HP/LK/HK, and charge [4]6 and [2]8.
+- Output: `datasets/catalog/<Character>.json`, with per move and guard mode:
+  - `action_ids`, `game_total` (action_frames_total)
+  - `startup`, `result` (hit/block/whiff)
+  - `damage`, `advantage`
+  - `same_as` when an input doesn't produce a distinct move
+- **Caveats:**
+  - stage_timer runs during hitstop, so startup/total can differ from published frame data.
+    Advantage is fine when hitstop is equal for both players.
+  - Jump normals are ids only, at reset distance.
+  - Knockdowns can exceed the 2.6 s window, giving advantage None.
+  - Charge characters need [4]6 / [2]8.
+- MOCK-tested only: `analyze_move` on synthetic frames, plus a smoke run against the
+  simulated exporter.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
