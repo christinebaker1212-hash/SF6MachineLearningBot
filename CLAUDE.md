@@ -69,7 +69,7 @@ experimental outcome we're working toward, not a promised capability.
   - **Safety, from the event log:** focus loss disarmed the bot (2×), and F7 pause/resume
     worked.
   - Still open:
-    - **F8** was not seen in the log (the run ended "completed"); waiting on the user.
+    - **F8:** confirmed by the user and in the log (watch run ended with "kill hotkey").
     - The thumbstick kill was not tested (the user declined), so it stays **unverified**.
     - Whether keys stayed stuck after Alt-Tab is waiting on the user.
   - **SendInput call time:** 0.9 ms mean in the probe run (single key, PowerToys closed)
@@ -447,8 +447,13 @@ The safety tests are part of acceptance. During a run:
 ## Overlay visibility problem (0.2.7)
 - The user reports the debug overlay "closes automatically / is not visible". No
   `overlay_error` was ever logged, so it does not crash.
-- **Hypothesis:** the user views the Ally through Parsec (a Parsec window was listed), and
-  `WDA_EXCLUDEFROMCAPTURE` hides the window from streaming too.
+- **Confirmed cause:** the user views and controls the Ally through **Parsec**.
+  `WDA_EXCLUDEFROMCAPTURE` also hid the overlay from Parsec's stream. With exclusion off
+  (0.2.7), the user **sees the overlay** (menu O).
+- **Consequence:** with exclusion off, an overlay that overlaps the game is captured. Keep the
+  game window right of the overlay; it auto-places at the screen's left edge.
+- Parsec does not affect our latency numbers: capture, input and state are all local on the
+  Ally. What the user sees is delayed by the stream.
 - **0.2.7:**
   - Exclusion is OFF by default (`overlay.exclude_from_capture`).
   - SWP_SHOWWINDOW is applied.
