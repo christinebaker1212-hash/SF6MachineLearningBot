@@ -17,6 +17,7 @@ class SimExporter(threading.Thread):
         self.path, self.inp, self.stop = path, inp, threading.Event()
         self.x1, self.x2, self.y, self.vy = -1.5, 1.5, 0.0, 0.0
         self.hp2, self.sup1, self.act, self.act_t, self.stun = 10000, 0, 0, 0, 0
+        self.fm = None  # MOCK of exporter v5 frame meter (made-up numbers)
 
     def run(self):
         f = open(self.path, "a")
@@ -38,10 +39,14 @@ class SimExporter(threading.Thread):
             self.vy = self.vy - 0.005 if self.y > 0 else 0.0
             if ("U" in d or "K" in d) and self.act_t == 0:
                 self.act, self.act_t = (101 if "U" in d else 102), 20
-                if "K" in d and self.x2 - self.x1 < 0.9:
+                hit = "K" in d and self.x2 - self.x1 < 0.9
+                if hit:
                     self.hp2 -= 600
                     self.stun = 15
                     self.sup1 += 500
+                self.fm = {"p1": {"ApperFrame": "5F" if "U" in d else "8F", "MeatyFrame": "20F",
+                                  "StunFrame": "+2F" if hit else "--"},
+                           "p2": {"StunFrame": "-2F" if hit else "--"}}
             self.act_t = max(0, self.act_t - 1)
             self.act = self.act if self.act_t else 0
             self.stun = max(0, self.stun - 1)
@@ -49,7 +54,7 @@ class SimExporter(threading.Thread):
                 "hp": hp, "hp_max": 10000, "drive": 60000, "super": sup, "x": x, "y": y,
                 "facing_right": x < (self.x2 if x == self.x1 else self.x1), "action_id": act,
                 "pose": pose, "hitstun": stun}
-            line = {"v": 2, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "round": 1, "missing": [],
+            line = {"v": 2, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "fm": self.fm, "round": 1, "missing": [],
                     "p1": p(self.x1, self.y, 10000, self.sup1, 2 if "S" in d else 0, self.act, 0),
                     "p2": p(self.x2, 0.0, self.hp2, 0, 0, 0, self.stun)}
             f.write(json.dumps(line) + "\n")
@@ -196,6 +201,6 @@ def test_catalog_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
         sim.stop.set()
     data = json.loads(out.read_text())
     lp, mk = data["moves"]["5LP"]["guard_none"], data["moves"]["2MK"]["guard_none"]
-    assert lp["action_ids"] == [101]
-    assert mk["action_ids"] == [102] and mk["result"] == "hit" and mk["damage"] == 600
+    assert lp["move_id"] == 101 and lp["result"] == "whiff" and lp["startup"] == 5
+    assert mk["move_id"] == 102 and mk["result"] == "hit" and mk["advantage"] == 2 and mk["damage"] == 600
     assert "SLASH" in {k for _, k, d in inp.log if d}   # training reset was pressed

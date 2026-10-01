@@ -67,3 +67,18 @@ def test_dummy_animation_change_is_not_contact():
         s.append(st(1.0 + (f - 100) / 60, f, 1, d_id=1 if f > 118 else 200, hp=9500, hitstun=max(0, 118 - f)))
     r = analyze_move(s, 1.0, NA, ND)
     assert r["result"] == "hit" and r["startup"] == 7
+
+
+def test_parse_frame_meter_real_values():
+    """Values copied from the user's real catalog run (Ryu 2LP on block, throw, whiff)."""
+    from sf6bot.catalog import parse_frame_meter
+    fm = {"p1": {"ApperFrame": "4F", "MeatyFrame": "14F", "WholeFrame": 14, "StunFrame": "-1F", "MainGauge": 1},
+          "p2": {"ApperFrame": "--", "MeatyFrame": "--", "StunFrame": "1F", "MainGauge": 1}}
+    r = parse_frame_meter(fm)
+    assert (r["startup"], r["total"], r["advantage"], r["opponent_advantage"], r["connected"]) == (4, 14, -1, 1, True)
+    throw = parse_frame_meter({"p1": {"ApperFrame": "5F", "MeatyFrame": "96F", "StunFrame": "17F"},
+                               "p2": {"StunFrame": "-17F"}})
+    assert throw["advantage"] == 17 and throw["connected"]
+    whiff = parse_frame_meter({"p1": {"ApperFrame": "4F", "MeatyFrame": "29F", "StunFrame": "--"},
+                               "p2": {"StunFrame": "--"}})
+    assert whiff["advantage"] is None and not whiff["connected"] and whiff["total"] == 29

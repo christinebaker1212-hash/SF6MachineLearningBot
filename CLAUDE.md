@@ -565,9 +565,29 @@ The safety tests are part of acceptance. During a run:
   - Known community field names: `StunFrame`, `MeatyFrame`, plus `FrameNumDatas`, a per-frame
     list with FrameType (community: 7 startup, 8 recovery, 13 active, 9 hurt, 10 block,
     11 DI) — unverified.
-  - The catalog stores the raw `frame_meter` per move. **Next:** map the fields to
-    startup/total/advantage by comparing with the on-screen numbers, then make them the
-    catalog's primary values.
+  - **Frame-meter mapping VERIFIED (0.3.1 run on Ryu, guard all + none, 2026-10-01).** Checked
+    against the user's on-screen "Startup 4F / Total 14F / Advantage 4F" (2LP) and known Ryu
+    values (5MK 9F, 6HP 20F, DI 26F, Hadoken 16F):
+    - `ApperFrame` = **Startup**
+    - `MeatyFrame` (= int `WholeFrame`) = **Total**
+    - `StunFrame` = **Advantage** for that player; P2's is always the negation
+    - `HighAndLowType` = the sign of the advantage (1 plus, 2 minus, 0 even)
+    - `MainGauge`: meaning unconfirmed (block runs 1, throw 2, whiffs p2 0)
+    - Strings look like "5F", "-4F", "--".
+  - **0.3.1 catalog problems** (user + data):
+    - **Own measurements wrong:** every id list began with 11, the walk/stop transition from the
+      approach. That gave bogus startup/advantage (e.g. −54) and `same_as: 5LP` everywhere.
+    - **Throw, parry and DI were classed as whiffs** although they connected (the frame meter
+      showed the throw at +17).
+    - **Supers were not in the list.**
+  - **0.3.2 fixes:**
+    - Primary catalog values now come from the frame meter: startup, total, advantage,
+      opponent_advantage, and connected/whiff.
+    - The result is hit/block by guard mode; a throw counts as a hit.
+    - It learns movement ids (walk fwd/back including the stop, neutral jump) and excludes them,
+      giving `move_id`.
+    - Own measurements go under `own_measure`, flagged low reliability.
+    - Supers added: 236236P/K and 214214P/K, with a 6 s window.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
