@@ -97,3 +97,38 @@ def test_state_check_diagnoses_script_never_ran(cfg, tmp_path, monkeypatch, caps
     with Session(cfg, "state_check_never_ran", mock=True) as s:
         assert sc.run_state_check(s, cfg) == []
     assert "never written" in capsys.readouterr().out
+
+
+def test_watch_records_hits_and_ko(cfg, tmp_path, monkeypatch):
+    """MOCK: simulated exporter; P2 hp drops to 0 -> hit events and a KO are summarised."""
+    import sf6bot.watch as wm
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    path = game / "reframework" / "data" / "sf6bot_state.jsonl"
+    path.write_text("")
+    monkeypatch.setattr(wm, "find_sf6_dir", lambda cfg: game)
+
+    def writer(stop):
+        hp = 1000
+        n = 0
+        with open(path, "a") as f:
+            while not stop.is_set() and n < 60:
+                n += 1
+                if n % 10 == 0:
+                    hp = max(0, hp - 250)
+                p = {"hp": 10000, "hp_max": 10000, "x": -1.0, "y": 0, "facing_right": True, "action_id": 1}
+                q = dict(p, hp=hp, x=1.0, facing_right=False)
+                f.write(json.dumps({"v": 3, "f": n, "in_battle": True, "ready": True, "stage_timer": n,
+                                    "round": 1, "p1": p, "p2": q, "missing": []}) + "\n")
+                f.flush()
+                stop.wait(1 / 60)
+
+    stop = threading.Event()
+    th = threading.Thread(target=writer, args=(stop,))
+    with Session(cfg, "watch_test", mock=True) as s:
+        th.start()
+        summary = wm.run_watch(s, cfg, 1.5)
+    stop.set()
+    th.join()
+    assert summary["hp_events"] == 4 and len(summary["kos"]) == 1 and summary["kos"][0]["player"] == "P2"
+    assert summary["rounds_seen"] == [1]

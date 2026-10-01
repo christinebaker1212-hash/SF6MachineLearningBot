@@ -391,6 +391,20 @@ The safety tests are part of acceptance. During a run:
   releases, or Nexus "REFramework" for SF6) goes in the game folder as `dinput8.dll`. Whether
   it's installed on the user's PC is unknown; `refw-install` reports it.
 
+## Milestone 2: watch mode (0.2.6)
+- `sf6bot watch` (menu W) records state and video while the USER plays. The bot never arms.
+- **Purpose:** learn from evidence how SF6 behaves around rounds:
+  - round starts/ends and how the `round` field changes
+  - KOs (hp reaching 0)
+  - menu/loading/intro transitions (`ready` toggling)
+- Writes `watch_summary.json` with transitions, rounds seen, KOs, hp events and time ready.
+- The first `[measured]` commentary in the THOUGHTS strip: hits, KOs, readiness changes.
+  The status panel shows spacing zone and per-player hp/drive/super/activity.
+  - Zones (close < 1.0 < mid < 2.5 < far) are provisional. Activity comes from
+    hitstun/blockstun/y/pose/x-velocity.
+- Not yet exported: the HUD round timer (seconds) and the round winner. The watch data will
+  show what's derivable.
+
 ## Idea queued: input-display readback
 SF6's Training Mode input display shows the frames each input was held, newest row at the top.
 Reading it automatically (template-matching the arrows/icons and digits) would verify sequences

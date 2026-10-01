@@ -27,6 +27,7 @@ echo  9. Release all keys (if a key seems stuck)
 echo  --- Milestone 2 ---
 echo  R. Install the REFramework game-state script (SF6 must be running)
 echo  G. Game-state check (Training Mode, Ryu vs standing dummy)
+echo  W. Watch: record while YOU play a CPU match, up to 5 min, bot presses nothing
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
 echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
 echo  0. Open the results folder
@@ -46,6 +47,7 @@ if /i "%CH%"=="9" (%BOT% release-all & goto done)
 if /i "%CH%"=="t" goto torch
 if /i "%CH%"=="r" (%BOT% refw-install & goto done)
 if /i "%CH%"=="g" (%BOT% state-check & goto done)
+if /i "%CH%"=="w" (%BOT% watch & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="q" exit /b 0
