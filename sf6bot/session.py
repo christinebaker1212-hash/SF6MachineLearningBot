@@ -211,6 +211,9 @@ class Session:
             g.stop()
         if getattr(self, "overlay", None) is not None:
             self.overlay.join()
+            if self.overlay.error is not None and getattr(self, "recorder", None) is not None:
+                self.recorder.event({"type": "overlay_error", "t": clock.now(), "error": repr(self.overlay.error),
+                                     "traceback": getattr(self.overlay, "traceback", "")})
         rec = getattr(self, "recorder", None)
         if rec is not None:
             if g is not None:

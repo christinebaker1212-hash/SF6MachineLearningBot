@@ -151,7 +151,10 @@ class DebugOverlay:
                 clock.precise_sleep_until(next_t, stop_event=self.stop_event)
                 next_t = max(next_t, clock.now())
         except BaseException as e:
+            import traceback
             self.error = e
+            self.traceback = traceback.format_exc()
+            print(f"WARNING: debug overlay crashed (the bot keeps running): {e!r}")
         finally:
             try:
                 cv2.destroyWindow(TITLE)
