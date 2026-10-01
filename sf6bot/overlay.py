@@ -21,8 +21,13 @@ TITLE = "sf6bot debug"
 
 class DebugOverlay:
     def __init__(self, grabber: FrameGrabber, controller: Controller, stop_event: threading.Event,
-                 width: int = 640, fps: float = 30.0, status: dict | None = None) -> None:
+                 width: int = 640, fps: float = 30.0, status: dict | None = None,
+                 avoid_rect=None, screen_rect=None) -> None:
         self.g = grabber
+        self.pos = None
+        self.overlaps_game = False
+        if avoid_rect is not None and screen_rect is not None:
+            width = self._place(width, avoid_rect, screen_rect)
         self.c = controller
         self.stop_event = stop_event
         self.width = width
@@ -30,6 +35,27 @@ class DebugOverlay:
         self.status = status if status is not None else {}
         self._thread = threading.Thread(target=self._run, name="Overlay", daemon=True)
         self.error: BaseException | None = None
+
+    PANEL_W = 260
+    MIN_IMG_W = 160
+
+    def _place(self, width, game, screen) -> int:
+        """Put the overlay beside the game window so it is not captured. Returns image width."""
+        gl, gt, gr, gb = game
+        sl, st, sr, sb = screen
+        need = self.PANEL_W + self.MIN_IMG_W + 10
+        right, left = sr - gr, gl - sl
+        if right >= need:
+            w = min(width, right - self.PANEL_W - 10)
+            self.pos = (gr + 10, max(st, gt))
+        elif left >= need:
+            w = min(width, left - self.PANEL_W - 10)
+            self.pos = (sl, max(st, gt))
+        else:
+            w = min(width, 320)
+            self.pos = (sr - w - self.PANEL_W, sb - 460)
+            self.overlaps_game = True
+        return w
 
     def start(self) -> "DebugOverlay":
         self._thread.start()
@@ -90,13 +116,16 @@ class DebugOverlay:
                 else:
                     img = np.zeros((360, self.width, 3), np.uint8)
                     cv2.putText(img, "no frames yet", (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
-                panel = self._panel(img.shape[0])
-                if panel.shape[0] < 330:
-                    panel = cv2.resize(panel, (260, img.shape[0]))
-                cv2.imshow(TITLE, np.hstack([img, panel]))
+                ph = max(img.shape[0], 420)
+                canvas = np.zeros((ph, img.shape[1] + self.PANEL_W, 3), np.uint8)
+                canvas[:img.shape[0], :img.shape[1]] = img
+                canvas[:, img.shape[1]:] = self._panel(ph)
+                cv2.imshow(TITLE, canvas)
                 cv2.waitKey(1)
                 if not made_noactivate:
                     from . import win32
+                    if self.pos is not None:
+                        cv2.moveWindow(TITLE, int(self.pos[0]), int(self.pos[1]))
                     made_noactivate = win32.make_window_noactivate_topmost(TITLE) or not win32.IS_WINDOWS
                 next_t += self.period
                 clock.precise_sleep_until(next_t, stop_event=self.stop_event)

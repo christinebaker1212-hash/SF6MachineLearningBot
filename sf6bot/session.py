@@ -129,7 +129,13 @@ class Session:
         if self.use_overlay:
             self.overlay = DebugOverlay(self.grabber, self.controller, self.stop_event,
                                         width=int(cfg["overlay"]["width"]), fps=float(cfg["overlay"]["fps"]),
-                                        status=self.status).start()
+                                        status=self.status,
+                                        avoid_rect=None if self.window is None else self.window.client_rect,
+                                        screen_rect=None if self.window is None else self.window.monitor_rect)
+            if self.overlay.overlaps_game:
+                print("WARNING: no room beside the game for the debug overlay; it may cover the game and be "
+                      "captured. Drag the SF6 window to the top-left corner of the screen, or use --no-overlay.")
+            self.overlay.start()
 
     # ------------------------------------------------------------------
     def start_inputs(self, countdown_s: float | None = None) -> bool:
