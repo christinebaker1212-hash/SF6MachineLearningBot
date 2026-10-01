@@ -11,11 +11,21 @@ experimental outcome we're working toward, not a promised capability.
   - **M1 acceptance passed (user-observed):** walk forward/back, crouch, neutral/forward/back
     jump, all 6 normals and cr.MK worked from both sides. Hadoken (236+LP) came out **10/10 on
     the left and 10/10 on the right**.
+  - **Latency probe: 30/30 detected.** From SendInput returning to the input display changing
+    in a captured frame: **median 70 ms (4.2 frames at 60 fps)**, p95 82 ms, max 89 ms. This
+    includes the game's input processing, rendering and present. It cannot be split further.
+  - **Reaction pipeline estimate:** screen event to visible response is about
+    11 ms (loop p50) + 70 ms = **about 80 ms, roughly 5 frames**.
+  - **Safety, from the event log:** focus loss disarmed the bot (2×), and F7 pause/resume
+    worked.
   - Still open:
-    - the latency probe (0/30 detected, because the box covered the whole column; re-run
-      with a top-row box)
-    - the safety tests: F8, Alt-Tab release, F7, thumbstick kill
-    - SendInput slowness (PowerToys check)
+    - **F8** was not seen in the log (the run ended "completed"); waiting on the user.
+    - The thumbstick kill was not tested (the user declined), so it stays **unverified**.
+    - Whether keys stayed stuck after Alt-Tab is waiting on the user.
+  - **SendInput call time:** 0.9 ms mean in the probe run (single key, PowerToys closed)
+    versus 2.1 ms in the random run (multi-key batches). The cause is inconclusive; it's minor.
+  - Unique-content fps dropped to about 45 in the random run, during the focus-loss and pause
+    tests. Probably the game throttles when unfocused (unverified).
 - Next step: the user runs the M1 acceptance procedure below on the game PC and sends back the
   `report.md`, `acceptance_checklist.md` files and `sysinfo` output.
 
@@ -241,9 +251,9 @@ The safety tests are part of acceptance. During a run:
 | SendInput press/release, atomic batches | yes (mock backend) | **verified in game** (acceptance, both sides). The SendInput call takes 2-4 ms mean, up to 11 ms (slow; PowerToys keyboard hook suspected). |
 | Sequences with measured timing; facing mirroring | yes (unit tests) | **verified in game**. Hadoken 10/10 per side; mirroring correct. Wall-clock step error mean 1.8 ms, p99 about 6 ms; 4/90 steps off by more than 1/4 frame. Game-frame accuracy is not measured (see input-display readback idea). |
 | Recording (frames.csv, video.mp4, events.jsonl) and report | yes | **verified** (0 dropped frames/events) |
-| Kill/pause/focus-loss release | yes (unit tests) | **unverified** |
+| Kill/pause/focus-loss release | yes (unit tests) | focus-loss disarm and F7 **verified in the log**; F8 pending; thumbstick kill **unverified** |
 | Debug overlay (no-activate, topmost) | not testable headless | **unverified** |
-| Latency probe logic | yes (reactive mock, known 50 ms delay) | **unverified** |
+| Latency probe | yes (reactive mock, known 50 ms delay) | **verified**: 30/30, median 70 ms input-sent to visible |
 | Live loop (random policy) | yes | **verified**. Present->input sent p50 10 ms, p95 16 ms. Preprocess about 1 ms. |
 | PyTorch inference in loop | yes, torch 2.14.1 CPU in container (numbers not representative) | **unverified** (torch not installed on the PC yet) |
 
