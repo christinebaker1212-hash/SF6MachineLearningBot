@@ -11,7 +11,8 @@ if not exist runs mkdir runs
 
 :menu
 cls
-echo ================= sf6bot (Milestone 1) =================
+echo ================= sf6bot =================
+%BOT% --version
 echo  Safety while the bot runs: F8 or click BOTH thumbsticks = STOP   F7 = pause   F6 = flip facing
 echo.
 echo  1. System info (saved to runs\sysinfo.txt)
@@ -57,7 +58,11 @@ goto done
 
 :share
 %BOT% share
-if errorlevel 1 goto done
+if errorlevel 1 (
+    echo SHARE FAILED - copy the error text above and send it to Claude instead.
+    echo sf6bot share failed, see the menu window | clip
+    goto done
+)
 clip < runs\for_claude.txt
 echo.
 echo The summary is now COPIED. Go to the Claude chat, click the message box, press Ctrl+V, and send.

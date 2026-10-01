@@ -124,6 +124,10 @@ Rules:
 Layout: the overlay sits at the hard left of the screen, inputs panel leftmost, then the frame
 view, with the THOUGHTS strip underneath.
 
+## Versioning
+`sf6bot/__init__.py` holds `__version__`. **Bump it on every push the user should install.** The
+menu header and `share` output show it, so stale installs and stale clipboard pastes are visible.
+
 ## Sending results to Claude
 Menu option **S** (`sf6bot share`) writes `runs\for_claude.txt` and copies it to the
 clipboard. It contains the reports, checklists and notable events of the last 6 runs (a few

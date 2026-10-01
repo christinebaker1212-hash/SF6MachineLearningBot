@@ -12,13 +12,17 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
     root = Path(root)
     runs = sorted([d for d in root.iterdir() if d.is_dir() and (d / "meta.json").exists()
                    and (include_mock or not d.name.endswith("_MOCK"))], key=lambda d: d.name)[-last:]
-    out = ["=== sf6bot results for Claude ==="]
+    import time
+    from . import __version__
+    out = ["=== sf6bot results for Claude ===",
+           f"generated {time.strftime('%Y-%m-%d %H:%M:%S')} by sf6bot {__version__}; "
+           f"runs included: {', '.join(d.name for d in runs) or 'none'}"]
     si = root / "sysinfo.txt"
     if si.exists():
         out += ["", "--- sysinfo ---", si.read_text(encoding="utf-8", errors="replace").strip()]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
-        for name in ("report.md", "acceptance_checklist.md"):
+        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json"):
             f = d / name
             if f.exists():
                 out += [f.read_text(encoding="utf-8", errors="replace").strip(), ""]

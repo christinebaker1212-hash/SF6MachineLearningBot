@@ -148,6 +148,8 @@ def main(argv=None):
     ap.add_argument("--mock", action="store_true",
                     help="MOCK mode: synthetic frames + no real inputs (pipeline testing only, not the game)")
     ap.add_argument("--no-overlay", action="store_true")
+    from . import __version__
+    ap.add_argument("--version", action="version", version=f"sf6bot {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("sysinfo", help="print OS/CPU/GPU/VRAM/RAM/display info").set_defaults(fn=cmd_sysinfo)
