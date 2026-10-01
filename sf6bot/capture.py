@@ -158,7 +158,8 @@ def make_backend(cfg: dict) -> CaptureBackend:
 
 
 def _signature(img: np.ndarray) -> np.ndarray:
-    return img[::max(1, img.shape[0] // 18), ::max(1, img.shape[1] // 32)].copy()
+    # Every 2nd pixel: cheap enough at 1080p and still catches small sprite changes.
+    return img[::2, ::2].copy()
 
 
 class FrameGrabber:

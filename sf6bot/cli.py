@@ -1,0 +1,177 @@
+"""sf6bot command line. Run `sf6bot -h` or `sf6bot <command> -h`."""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from .config import load_config
+
+
+def _session(args, cfg, name, **kw):
+    from .session import Session
+    return Session(cfg, name, side=getattr(args, "side", "left"), mock=args.mock,
+                   overlay=False if args.no_overlay else None, **kw)
+
+
+def cmd_sysinfo(args, cfg):
+    from .sysinfo import collect
+    print(json.dumps(collect(), indent=2))
+
+
+def cmd_list_windows(args, cfg):
+    from . import win32
+    win32.set_dpi_aware()
+    g = cfg["game"]
+    match = win32.find_game_window(g["exe_name"], g["title_contains"])
+    for w in win32.list_windows():
+        mark = "  <== matched as SF6" if match and w.hwnd == match.hwnd else ""
+        print(f"hwnd={w.hwnd} exe={w.exe!r} title={w.title!r} client={w.client_rect} monitor={w.monitor_rect}{mark}")
+    if not match:
+        print("\nSF6 window NOT matched. Set game.exe_name / game.title_contains in configs/local.yaml.")
+
+
+def cmd_capture_bench(args, cfg):
+    import time
+    with _session(args, cfg, "capture_bench") as s:
+        print(f"Capturing {args.seconds}s, no inputs are sent. Region {s.region}.")
+        end = time.perf_counter() + args.seconds
+        while time.perf_counter() < end and not s.stop_event.is_set():
+            s.check()
+            time.sleep(0.1)
+        fr = s.grabber.latest()
+        if fr is not None:
+            s.recorder.save_image("snapshot.png", fr.image)
+    _print_report(s)
+
+
+def cmd_input_test(args, cfg):
+    from .config import load_moves
+    from .sequences import SequenceRunner, parse_sequence
+    mh = int(cfg["input"]["min_hold_frames"])
+    if args.move:
+        seq = load_moves(args.moves_file, mh)[args.move]
+    else:
+        seq = parse_sequence(args.seq, "custom", mh)
+    with _session(args, cfg, f"input_test_{args.side}") as s:
+        print(f"Sequence {seq.name}: {seq.notation()}  x{args.repeat}  facing {s.facing.value}")
+        if s.start_inputs():
+            runner = SequenceRunner(s.controller, sink=s.recorder.event)
+            for i in range(args.repeat):
+                if s.stop_event.is_set():
+                    break
+                timings, ok = runner.run(seq, stop_event=s.stop_event)
+                worst = max((abs(t.error_s) for t in timings), default=0) * 1000
+                print(f"  #{i + 1}: {'ok' if ok else 'INTERRUPTED'}  worst step error {worst:.2f} ms")
+                s.stop_event.wait(args.gap)
+    _print_report(s)
+
+
+def cmd_acceptance(args, cfg):
+    from .acceptance import run_acceptance
+    with _session(args, cfg, f"acceptance_{args.side}") as s:
+        run_acceptance(s, args.routine)
+    _print_report(s)
+
+
+def cmd_latency_probe(args, cfg):
+    from .latency_probe import run_probe
+    roi = tuple(int(v) for v in args.roi.split(","))
+    if len(roi) != 4:
+        sys.exit("--roi must be x,y,w,h in game-client pixels")
+    with _session(args, cfg, "latency_probe") as s:
+        run_probe(s, roi, args.trials)
+    _print_report(s)
+
+
+def cmd_run(args, cfg):
+    from .loop import run_policy
+    from .policy import make_policy
+    policy = make_policy(args.policy, cfg)
+    with _session(args, cfg, f"run_{args.policy}", extra_meta={"policy": policy.label}) as s:
+        print(f"Policy: {policy.label}")
+        out = run_policy(s, policy, args.seconds)
+        print(out)
+    _print_report(s)
+
+
+def cmd_report(args, cfg):
+    from .report import to_markdown, write_report
+    print(to_markdown(write_report(args.dir)))
+
+
+def cmd_release_all(args, cfg):
+    """Send key-up for every bound key (use if a crash left an input stuck)."""
+    from .input_backend import make_backend
+    keys = sorted(set(v for v in cfg["input"]["bindings"].values() if v))
+    make_backend(cfg["input"]["backend"]).send([(k.upper(), False) for k in keys])
+    print(f"Released: {keys}")
+
+
+def _print_report(s):
+    from .report import to_markdown
+    if s.report:
+        print(to_markdown(s.report))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="sf6bot", description=__doc__)
+    ap.add_argument("--config", default=None, help="config YAML (default configs/default.yaml + local.yaml)")
+    ap.add_argument("--mock", action="store_true",
+                    help="MOCK mode: synthetic frames + no real inputs (pipeline testing only, not the game)")
+    ap.add_argument("--no-overlay", action="store_true")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("sysinfo", help="print OS/CPU/GPU/VRAM/RAM/display info").set_defaults(fn=cmd_sysinfo)
+    sub.add_parser("list-windows", help="list windows; shows which one matches SF6").set_defaults(fn=cmd_list_windows)
+
+    p = sub.add_parser("capture-bench", help="capture only (no inputs); timing report + snapshot.png")
+    p.add_argument("--seconds", type=float, default=10)
+    p.set_defaults(fn=cmd_capture_bench)
+
+    def side(p):
+        p.add_argument("--side", default="left", choices=["left", "right"],
+                       help="screen side your character is on (sets facing; M1 has no facing detection)")
+
+    p = sub.add_parser("input-test", help="execute one input sequence with timing")
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--seq", help='sequence notation, e.g. "2@3 3@3 6+LP@3"')
+    g.add_argument("--move", help="move name from --moves-file")
+    p.add_argument("--moves-file", default="configs/sequences/ryu_classic.yaml")
+    p.add_argument("--repeat", type=int, default=1)
+    p.add_argument("--gap", type=float, default=1.0, help="seconds between repeats")
+    side(p)
+    p.set_defaults(fn=cmd_input_test)
+
+    p = sub.add_parser("acceptance", help="Milestone 1 acceptance routine (run once per side)")
+    p.add_argument("--routine", default="configs/acceptance.yaml")
+    side(p)
+    p.set_defaults(fn=cmd_acceptance)
+
+    p = sub.add_parser("latency-probe", help="measure input -> visible change latency")
+    p.add_argument("--roi", required=True, help="x,y,w,h in game-client pixels (use capture-bench snapshot.png)")
+    p.add_argument("--trials", type=int, default=None)
+    side(p)
+    p.set_defaults(fn=cmd_latency_probe)
+
+    p = sub.add_parser("run", help="live control loop with a (non-learned) M1 policy")
+    p.add_argument("--policy", choices=["idle", "random", "probe"], default="idle")
+    p.add_argument("--seconds", type=float, default=30)
+    side(p)
+    p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("report", help="(re)build report.md/report.json for a run directory")
+    p.add_argument("dir")
+    p.set_defaults(fn=cmd_report)
+
+    sub.add_parser("release-all", help="send key-up for all bound keys").set_defaults(fn=cmd_release_all)
+
+    args = ap.parse_args(argv)
+    cfg = load_config(args.config)
+    if args.mock:
+        cfg["input"]["backend"] = "mock"
+    args.fn(args, cfg)
+
+
+if __name__ == "__main__":
+    main()
