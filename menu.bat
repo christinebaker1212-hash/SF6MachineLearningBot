@@ -20,6 +20,7 @@ echo  V. FIGHT: scripted Ryu vs CPU, bot on the LEFT (P1). Start the match first
 echo  N. FIGHT: same, bot on the RIGHT (P2)
 echo  D. Record a replay into training data (start the replay, the bot presses nothing)
 echo  Y. Training data summary: merges repeat recordings of the same replay (no game needed)
+echo  X. Learn move ids from recordings: which action id is which move, for every character seen
 echo  C. Move catalog, dummy guard NONE (Training Mode)    B. same, dummy guard ALL
 echo  --- Bot controller ---
 echo  K. Give the bot its OWN virtual controller (so you can play against it)
@@ -83,6 +84,7 @@ if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="y" (%BOT% dataset-summary & goto done)
+if /i "%CH%"=="x" (%BOT% move-map & goto done)
 if /i "%CH%"=="k" (%BOT% controller pad & goto done)
 if /i "%CH%"=="j" (%BOT% controller keyboard & goto done)
 if /i "%CH%"=="p" (%BOT% pad & goto done)

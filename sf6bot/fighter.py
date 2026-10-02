@@ -9,7 +9,8 @@ Rules, in priority order (configs/fighter/ryu.yaml; every distance/timing there 
   2. opponent Drive Impact           -> Drive Impact back (needs the opponent's catalog for its id)
   3. opponent jumping in, descending -> Shoryuken
   4. blocking                        -> keep holding down-back; when blockstun is about to end and the
-                                        blocked move is punishable (opponent catalog) -> punish
+                                        blocked move is punishable (opponent catalog, else the inferred
+                                        move map with Capcom's on-block value + a safety margin) -> punish
   5. opponent attacking nearby       -> block (down-back)
   6. neutral (every ~0.35 s)         -> weighted choice by distance zone: Hadoken, walk in,
                                         2MK > 236MP, 5HP, light chain, throw, block, wait
@@ -71,6 +72,36 @@ def load_opponent_catalog(chara_name: str, datasets_root: Path) -> dict:
                                    "di": "Drive Impact" in mname or mname == "drive_impact"})
         return out
     return {}
+
+
+def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dict:
+    """action_id -> {"name", "block_adv", "di", "source": "inferred"} from the inferred move map
+    (move_map.py: replay inputs matched to Capcom inputs). Only ids at or above the configured
+    confidence; Capcom's on-block value gets a safety margin (fewer, safer punishes)."""
+    from .move_map import LEVELS, load_map
+    icfg = fcfg.get("inferred") or {}
+    floor = LEVELS.index(icfg.get("min_confidence", "medium"))
+    margin = int(icfg.get("block_adv_margin", 2))
+    mp = load_map(chara_name, datasets_root)
+    out: dict = {}
+    for a, e in ((mp or {}).get("ids") or {}).items():
+        if LEVELS.index(e.get("confidence", "low")) < floor:
+            continue
+        ob = (e.get("capcom") or {}).get("on_block")
+        out[int(a)] = {"name": e["name"], "block_adv": ob + margin if isinstance(ob, int) else None,
+                       "di": e["name"].startswith("Drive Impact"), "source": "inferred"}
+    return out
+
+
+def opponent_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> tuple[dict, str]:
+    """Merged move knowledge, best source wins per id: catalog (measured) > inferred map > shared
+    system ids. Returns (moves, label for commentary)."""
+    cat = load_opponent_catalog(chara_name, datasets_root)
+    inf = load_inferred_moves(chara_name, datasets_root, fcfg)
+    parts = [f"catalog {len(cat)} ids"] if cat else []
+    if inf:
+        parts.append(f"inferred {len(set(inf) - set(cat))} ids (Capcom on-block, safety margin)")
+    return {**_common_moves(fcfg), **inf, **cat}, ", ".join(parts)
 
 
 _num = num
@@ -150,8 +181,9 @@ class ScriptedFighter:
                     if adv <= opt["max_adv"]:
                         self.punished = True
                         name = self.opp[self.blocked_id]["name"]
+                        src = " inferred" if self.opp[self.blocked_id].get("source") == "inferred" else ""
                         return Decision("seq", opt["name"], opt["seq"], rule="punish",
-                                        reason=f"blocked {name} ({adv:+d} on block)")
+                                        reason=f"blocked {name} ({adv:+d} on block{src})")
             return Decision("hold", direction=1, reason="blocking", rule="block")
         self.blocked_id = None
         # 5. opponent attacking nearby -> block
@@ -234,14 +266,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict
             if fighter is None and isinstance(op.get("chara"), int):
                 summary["character"] = character_name(me.get("chara"))
                 summary["opponent"] = character_name(op["chara"])
-                opp_moves = load_opponent_catalog(summary["opponent"], ds_root)
-                summary["opponent_catalog"] = bool(opp_moves)
-                fighter = ScriptedFighter(fcfg, {**_common_moves(fcfg), **opp_moves})
+                opp_moves, label = opponent_moves(summary["opponent"], ds_root, fcfg)
+                summary["opponent_catalog"] = label or False
+                fighter = ScriptedFighter(fcfg, opp_moves)
                 if summary["character"] not in ("Ryu", "?"):
                     print(f"WARNING: the bot side is {summary['character']}, but these rules are written for Ryu.")
                 sess.narrate(f"Opponent {summary['opponent']}: "
-                             + ("move catalog loaded (punishes and DI reactions on)." if opp_moves
-                                else "no move catalog: no punishes; DI reactions from the shared "
+                             + (f"move data: {label} (punishes and DI reactions on)." if label
+                                else "no move catalog or inferred map: no punishes; DI reactions from the shared "
                                      "system-move ids."), source="scripted")
             if fighter is None:
                 fighter = ScriptedFighter(fcfg, _common_moves(fcfg))

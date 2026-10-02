@@ -326,6 +326,32 @@ def cmd_dataset_summary(args, cfg):
     print("\n".join(lines))
 
 
+def cmd_move_map(args, cfg):
+    """Infer action id -> move name for every character in datasets/replays + fights (no game needed)."""
+    import time as _time
+    from pathlib import Path
+    from .move_map import build_maps, catalog_truth, report_lines
+    root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    if not (root / "framedata").exists():
+        print("No Capcom frame data yet: run F first (the map matches inputs against Capcom's move list).")
+        return
+    maps = build_maps(root)
+    checks = {}
+    for name, m in maps.items():
+        truth = catalog_truth(root, name)
+        if truth:
+            checks[name] = truth
+    lines = report_lines(maps, checks)
+    if not maps:
+        lines.append("- no recordings with inputs found in datasets/replays or datasets/fights (record with D at 1x)")
+    run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_move_map")
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "meta.json").write_text(json.dumps({"kind": "move_map"}, indent=1))
+    (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+    print(f"\nSaved to {root / 'move_maps'}. The fighter uses ids at medium confidence or better.")
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -452,6 +478,9 @@ def main(argv=None):
 
     sub.add_parser("dataset-summary", help="merge repeat recordings of the same replay; report usable "
                    "training data").set_defaults(fn=cmd_dataset_summary)
+
+    sub.add_parser("move-map", help="infer which action id is which move from recorded inputs + Capcom "
+                   "move lists (datasets/move_maps)").set_defaults(fn=cmd_move_map)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

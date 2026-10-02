@@ -22,6 +22,12 @@ punish:
     - {max_adv: -10, name: "5HP > 623HP", seq: "5+HP@3 5@8 6@2 2@2 3+HP@3"}
     - {max_adv: -7,  name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
     - {max_adv: -4,  name: "5LP ~ 2LP ~ 5LP", seq: "5+LP@3 5@7 2+LP@3 5@7 5+LP@3"}
+# Opponents without a catalog: ids from the inferred move map (menu X, datasets/move_maps/), only at
+# this confidence or better. Capcom's on-block value + margin is used, so -4 on Capcom's page is
+# treated as -2 (no punish) and -12 as -10: punishes only where they have room to spare.
+inferred:
+  min_confidence: medium
+  block_adv_margin: 2
 # System moves share action ids across characters. MEASURED in the user's replays (2026-10-02):
 # Ken's Drive Impact 855, parry 480/482, throws 715/720 equal Ryu's catalog ids. Used when the
 # opponent has no move catalog, so DI reactions work against any opponent seen so far.

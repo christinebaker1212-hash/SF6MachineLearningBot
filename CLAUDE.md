@@ -856,24 +856,6 @@ The safety tests are part of acceptance. During a run:
 - The main screen shows play/record, bot controller, setup and results. The older diagnostics
   are under **M**. All old letters still work.
 
-## First real fight (0.6.0, 2026-10-02): scripted Ryu (P1) vs CPU level 4 Ken — WON 2–0
-- User: "won easily", but it missed reacting to a Drive Impact.
-- `fight_summary`:
-  - anti-air Shoryukens: 6 of 10 landed (hp drop within 1 s)
-  - Hadokens landed 12/23
-  - light chain 4/13, 5HP 5/6, 2MK > 236MP 2/22, throws 1/8
-  - 125 hitstun frames
-- **Why DI was missed:** `opponent_catalog: false`. Only Ryu had a catalog, so the DI rule was
-  off.
-- **Measured fix:** system moves share action ids across characters. Ken's DI 855, parry
-  480/482 and throws 715/720 equal Ryu's in the user's replays (8× Ryu vs Ken, and the Master
-  Ken vs Ryu replay). `common_moves` in `configs/fighter/ryu.yaml` gives DI reactions against any
-  opponent. Punishes still need the opponent's catalog.
-- **Also fixed (0.6.2):** it pressed buttons before "Fight!" (Hadokens at distance 3.00 during
-  the round-start pause). It now acts only when stage_timer ≥ 190 and outside the intro.
-- Fights are saved to `datasets/fights/` (state + both players' inputs), separate from the
-  replay demonstrations: an evaluation record, not imitation data.
-
 ## First real fights (0.6.0, 2026-10-02): scripted Ryu (P1) vs CPU Ken
 - **Fight 1, CPU level 4: WON 2–0.** User: "won easily", but it missed reacting to a Drive
   Impact.
@@ -897,6 +879,39 @@ The safety tests are part of acceptance. During a run:
   the round-start pause). It now acts only when stage_timer ≥ 190 and outside the intro.
 - Fights are saved to `datasets/fights/` (state + both players' inputs), separate from the
   replay demonstrations: an evaluation record, not imitation data.
+
+## Move ids inferred from recordings (0.7.0): `sf6bot move-map`, menu X
+- **Why:** punishing needs the opponent's action id → move. Capcom's data is keyed by move name, and
+  normals do NOT share ids across characters (Ryu 5MP 605, Ken 5MP 604). System moves do share
+  ids. The user agreed to a three-tier plan (2026-10-02): **catalog (C/B) = guaranteed, Capcom
+  data = baseline, inferred map in between.**
+- `sf6bot/move_map.py`. For each player in each recording (`datasets/replays`, `datasets/fights`):
+  - at every new action id ≥ 450, take the fresh button presses in the last 3 game frames, the
+    held direction and the last 24 frames of directions
+  - only contiguous frames (gaps ≤ 2) count, so 8× recordings give few votes
+  - match the press against that character's Capcom inputs: exact button set, generic P/K counts
+    for OD, motions as subsequences (a diagonal may be skipped), charge, 360, airborne for jump
+    moves; the most specific match wins
+  - rows the catalog skips (stances, follow-ups, target combos, variants) are not inferred
+  - votes per id give a name, agreement share and a confidence: high = 3+ votes and 70%+,
+    medium = 2+ and 60%+, else low
+- Output: `datasets/move_maps/<Character>.json`, with Capcom's startup/total/on-block/on-hit. The
+  report checks the map against a measured catalog where one exists.
+- **Fighter:** `opponent_moves()` merges, best source per id: catalog > inferred (medium or better,
+  `inferred.min_confidence`) > shared system ids. Inferred punishes use Capcom's on-block value
+  **+2 frames margin** (`inferred.block_adv_margin`): Capcom −4 → treated as −2, so no jab punish.
+  Commentary marks punishes on inferred data.
+- **Tests:**
+  - A synthetic 1× recording of Ryu doing his moves with the bot's own sequences recovers **all 51**
+    of the user's catalog ids, with no conflicting votes. This is the matcher in clean conditions,
+    not human play.
+  - **Real 8× Ryu vs Ken recordings:** only 4 presses survive the frame drops. The 3 checkable Ryu
+    ids (614 5MK, 640 2MK, 904 H Hadoken) all match the catalog.
+  - The first version, before the tightening, labelled 2/9 checkable ids wrong (throw → 5LP, 4HP →
+    5MP) and turned parries into 2MP. Exact button sets and contiguous frames fixed that.
+- **Not yet tested:** human 1× replays (noisier: buffered inputs, kara cancels, mashing), other
+  characters, and whether the action id starts the same tick as the press.
+- **User test:** record a replay at 8× (D, v8) and a CPU fight with the same characters (V), then X.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

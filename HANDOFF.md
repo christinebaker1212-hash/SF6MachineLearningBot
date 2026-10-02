@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.6.2**, REFramework exporter script **v8**, branch
-`claude/admiring-mccarthy-uyyay4`, 58 tests passing.*
+*State as of 2026-10-02: code version **0.7.0**, REFramework exporter script **v8**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
@@ -178,6 +178,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    bot on P2 (N) while the user plays P1. Then teach a routine with L, e.g. picking Ryu in
    Versus.
 6. Catalog re-run (C/B) to confirm the 0.4.1 fixes.
+7. **Move-id inference (0.7.0, menu X):** the user will record a replay at 8× (D) and a CPU
+   fight with the same characters (V), then run X and send S. Check how many ids the map gets per
+   character, how they compare with the Ryu catalog, and whether the fighter's punishes on
+   inferred ids land. 1× replays give far more votes than 8×.
 
 ## 7. Recommended next steps (in order) — the road to fights
 
@@ -221,7 +225,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
+| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 
