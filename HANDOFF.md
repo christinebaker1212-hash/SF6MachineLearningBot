@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.8.0**, REFramework exporter script **v8**, branch
+*State as of 2026-10-02: code version **0.9.0**, REFramework exporter script **v8**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -174,7 +174,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 4. **First fights DONE (0.6.0), both vs CPU level 4 Ken: won 2–0, then lost 1–2.** It missed one DI (no Ken catalog);
    0.6.2 reacts to DI from shared ids and waits for "Fight!". Next: higher CPU levels, and a
    catalog run of the opponent's character (C/B as that character) to enable punishes.
-5. **Bot controller:** K, then input-map (I), which verifies the pad layout. Then fight with the
+5. **Bot controller (0.9.0: only for menu H):** `input-map --pad` verifies the pad layout. Then fight with the
    bot on P2 (N) while the user plays P1. Then teach a routine with L, e.g. picking Ryu in
    Versus.
 6. Catalog re-run (C/B) to confirm the 0.4.1 fixes.
@@ -182,7 +182,8 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    jump-ins, throw tech, interruptible combos): fight CPU Ken level 4 and 7 again with V. Send S
    plus the `datasets/fights` files. Check `throws_against` (seen vs thrown) to see whether the
    reaction tech works.
-8. **Bot vs the user (menu H):** K first (bot pad), then H. The user drives menus with the overlay
+8. **Bot vs the user (menu H):** H creates the bot's controller by itself (no K any more). The user
+   drives menus with the overlay
    buttons, and the bot takes over at "Fight!". Untested in game: ViGEmBus, the panel lock, rematch
    flow.
 9. **Re-record the 8× replay with 0.8.0** (the recorder kept ~1 in 7 lines; fixed).
@@ -190,6 +191,14 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    fight with the same characters (V), then run X and send S. Check how many ids the map gets per
    character, how they compare with the Ryu catalog, and whether the fighter's punishes on
    inferred ids land. 1× replays give far more votes than 8×.
+
+**0.9.0 (user, 2026-10-02): "versus CPU runs automatically connect a controller ... P1's inputs
+should be used ... Only when another human is fighting the bot does an extra controller need to
+be connected."** The user could not record any fights with 0.8.0 because of this. Since 0.9.0, V/N,
+the overlay buttons (P/L/U) and routines press P1's keyboard keys, and only H uses the bot's own
+controller as P2. The old saved `input.backend: virtual_pad` (menu K) is ignored. The menu was
+regrouped (Fight / Record / Overlay buttons / Results, plus Tools T and Erase data E).
+Ask the user which keyboard keys SF6 uses for menu MENU/VIEW/LB/LT (`input.menu_keys`, unset).
 
 ## 7. Recommended next steps (in order) — the road to fights
 

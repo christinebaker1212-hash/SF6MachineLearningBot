@@ -822,7 +822,7 @@ The safety tests are part of acceptance. During a run:
     (menu I) verifies them.
   - The backend refuses LS+RS together, which is the kill combo.
   - Training reset ("/") still goes through the keyboard.
-  - Menus: K = pad, J = keyboard. This writes `configs/local.yaml`.
+  - Menus: K = pad, J = keyboard. This writes `configs/local.yaml`. **Replaced in 0.9.0** (below).
 - `sf6bot pad` (menu P) adds a clickable pad to the overlay that presses the bot's controller.
   `pad --teach NAME` (menu L) records the clicks into `routines/NAME/routine.yaml` (button,
   wait, hold) plus a screenshot per step. `routine NAME` (menu U) replays it.
@@ -967,6 +967,37 @@ The safety tests are part of acceptance. During a run:
 - `fight_summary.json`: one match as before; several give `{"matches": [...], "record": ...}`.
 - MOCK test `tests/test_fight_session.py`: the two real fights with menu gaps → record 1–1, two
   datasets, buttons locked while fighting.
+
+## 0.9.0: P1's keys vs CPU, the bot's controller only vs a human; erase data; simpler menu
+- **User (2026-10-02):** "the versus CPU runs automatically connect a controller, but this is
+  unnecessary — P1's inputs should be used for these cases, with the debug inputs mapping directly to
+  P1. Only when another human is fighting the bot does an extra controller need to be connected."
+  The cause was menu K (0.6.0), which saved `input.backend: virtual_pad` for every command. The user
+  could not record fights with 0.8.0.
+- **Now the side decides:**
+  - V/N (vs CPU), the overlay buttons (P), teaching (L) and routines (U) press **P1's keyboard keys**.
+  - Only H (`fight --pad`, bot = P2 vs a human) creates the bot's virtual controller.
+  - A saved `virtual_pad` default is ignored. `pad --p2` and `input-map --pad` use the pad explicitly.
+- `pad_teach.KeyboardPad`: each overlay button presses the key of the same game input (pad A = LK in
+  `pad_bindings` → LK's key J). Menu-only buttons (MENU, VIEW, LB, LT) use `input.menu_keys`; SF6's
+  keyboard keys for them are **unknown**, so they are unset and greyed out until set. The buttons
+  show their key ("A=J").
+- Routines record the device they were taught on and replay on it. Routines from before 0.9.0 were
+  taught on the pad.
+- V/N also get the overlay buttons (P1 keys) between matches, locked while the bot fights.
+- **Erase data (menu E, `sf6bot erase runs|training|fights`)** shows what it would delete and needs
+  a typed YES. The folders stay; their contents go.
+  - runs: the runs folder
+  - training: `datasets/replays`, `merged`, `move_maps`
+  - fights: `datasets/fights`
+  - Never: catalogs, Capcom frame data, routines. Guards refuse a drive root, home, the project
+    folder, or a folder holding kept data.
+- **Menu regrouped** for readability:
+  - main: Fight (V, N, H), Record (D, C), Overlay buttons (P, L, U), Results (S, 0), plus T tools,
+    E erase, Q quit
+  - C asks for guard None / All / both
+  - Tools (T, or M): setup R/F, data Y/X, checks G/I/W/O/9, older tests 1–8; PyTorch moved to Z
+  - every old letter still works
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

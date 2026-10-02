@@ -71,3 +71,42 @@ def test_rec_toggle_without_name_does_nothing(tmp_path):
     panel.click("REC")
     panel.press("B")
     assert not panel.recording and panel.save() is None
+
+
+def test_overlay_buttons_press_p1_keys(cfg, tmp_path):
+    """0.9.0: vs CPU the overlay buttons press P1's keyboard keys (no second controller)."""
+    from sf6bot.pad_teach import KeyboardPad, routine_uses_pad
+    kb = MockInputBackend()
+    pad = KeyboardPad(kb, cfg)
+    assert pad.keys["A"] == "J" and pad.keys["DPAD_UP"] == "W" and pad.keys["RT"] == "L"   # LK, UP, HK
+    assert "START" not in pad.keys                       # menu-only button: unset until configured
+    panel = PadPanel(pad, routine="pick_ken", root=tmp_path, hold_s=0.01)
+    panel.press("A")
+    panel.click("START")                                 # greyed out: nothing happens
+    assert [(k, d) for _, k, d in kb.log] == [("J", True), ("J", False)]
+    assert panel.save() and not routine_uses_pad("pick_ken", tmp_path)
+    kb2 = MockInputBackend()
+    assert play_routine(KeyboardPad(kb2, cfg), "pick_ken", root=tmp_path, min_wait_s=0.0) == 1
+    assert [(k, d) for _, k, d in kb2.log] == [("J", True), ("J", False)]
+    cfg["input"]["menu_keys"]["START"] = "ESC"
+    assert KeyboardPad(kb, cfg).keys["START"] == "ESC"
+
+
+def test_locked_panel_ignores_clicks(tmp_path):
+    be = MockInputBackend()
+    panel = PadPanel(be, root=tmp_path, hold_s=0.01)
+    panel.locked = True
+    panel.click("A")
+    import time
+    time.sleep(0.05)
+    assert be.log == []
+
+
+def test_saved_pad_default_is_ignored(monkeypatch, tmp_path):
+    """Menu K (0.6-0.8) saved input.backend: virtual_pad; since 0.9.0 only menu H uses the pad."""
+    import sf6bot.cli as cli
+    seen = {}
+    monkeypatch.setattr(cli, "load_config", lambda p=None: {"input": {"backend": "virtual_pad"}})
+    monkeypatch.setattr(cli, "cmd_sysinfo", lambda args, cfg: seen.update(cfg["input"]))
+    cli.main(["sysinfo"])
+    assert seen["backend"] == "sendinput_keyboard"

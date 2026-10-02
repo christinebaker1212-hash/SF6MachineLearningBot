@@ -159,6 +159,8 @@ def cmd_overlay_test(args, cfg):
 
 def cmd_input_map(args, cfg):
     from .input_map import run_input_map
+    if args.pad:
+        cfg = _with_pad(cfg)
     with _session(args, cfg, "input_map") as s:
         run_input_map(s, cfg)
     _print_report(s)
@@ -232,69 +234,79 @@ def cmd_framedata_import(args, cfg):
     print("\n".join(lines))
 
 
+def _panel(s, cfg, pad: bool, routine: str | None = None):
+    """The overlay's clickable buttons: P1's keyboard keys, or the bot's own controller (pad=True)."""
+    from .pad_teach import KeyboardPad, PadPanel
+    if s.overlay is None:
+        return None
+    backend = s.controller.backend if pad else KeyboardPad(s.controller.backend, cfg)
+    panel = PadPanel(backend, routine=routine, grabber=s.grabber, sink=s.recorder.event)
+    s.overlay.pad_panel = panel
+    return panel
+
+
 def cmd_fight(args, cfg):
-    """The bot plays matches as p1/p2. With --pad it uses its own virtual controller and the overlay
-    buttons drive menus between matches (vs a human); --matches 0 = until F8 / --seconds."""
+    """The bot plays every match until F8. Default (vs CPU): it presses P1's keyboard keys, and the
+    overlay buttons press P1 too, for menus between matches. --pad (vs a human): the bot is P2 on its
+    own virtual controller and the overlay buttons press that controller."""
     from .fighter import run_fight
     if args.pad:
         cfg = _with_pad(cfg)
     with _session(args, cfg, f"fight_{args.player}") as s:
-        panel = None
-        if args.pad and s.overlay is not None:
-            from .pad_teach import PadPanel
-            panel = PadPanel(s.controller.backend, grabber=s.grabber, sink=s.recorder.event)
-            s.overlay.pad_panel = panel
+        panel = _panel(s, cfg, pad=args.pad)
         run_fight(s, cfg, args.seconds, player=0 if args.player == "p1" else 1,
                   matches=args.matches or None, panel=panel)
     _print_report(s)
 
 
 def _with_pad(cfg):
-    """Config copy whose input backend is the bot's virtual controller."""
+    """Config copy whose input backend is the bot's virtual controller (only for the bot as P2 vs a
+    human: everything else uses P1's keyboard keys)."""
     import copy
+    if cfg["input"]["backend"] == "mock":
+        return cfg
     c = copy.deepcopy(cfg)
     c["input"]["backend"] = "virtual_pad"
     return c
 
 
 def cmd_controller(args, cfg):
+    """Kept for old menu letters K/J. Since 0.9.0 the side decides: vs CPU the bot uses P1's keys,
+    vs a human (menu H) it gets its own controller automatically."""
     from .config import set_local
-    backend = {"keyboard": "sendinput_keyboard", "pad": "virtual_pad"}[args.mode]
-    p = set_local(["input", "backend"], backend)
-    if args.mode == "pad":
-        print(f"The bot now uses its OWN virtual Xbox controller (saved in {p}).\n"
-              "In SF6, that controller is a separate player: you can play against the bot with your\n"
-              "keyboard or pad. In Versus, give the bot's controller the side you start it on (V/N).")
-    else:
-        print(f"The bot now types on the keyboard again (saved in {p}). It shares Player 1 with you.")
+    p = set_local(["input", "backend"], "sendinput_keyboard")
+    print("Nothing to switch any more: vs CPU (V/N) the bot and the overlay buttons use P1's keyboard\n"
+          "keys; vs YOU (H) the bot gets its own controller as P2 automatically. "
+          f"(Saved keyboard as default in {p}.)")
 
 
 def cmd_pad(args, cfg):
-    """Clickable bot controller in the overlay; with --teach NAME the clicks become a routine."""
+    """Clickable buttons in the overlay (P1's keys, or the bot's controller with --p2); with
+    --teach NAME the clicks become a routine."""
     import re
-    from .pad_teach import PadPanel
     if args.teach and not re.fullmatch(r"[A-Za-z0-9_]{1,40}", args.teach):
         print("Routine names may only use letters, digits and _ (e.g. pick_ryu).")
         return
-    cfg = _with_pad(cfg)
+    if args.p2:
+        cfg = _with_pad(cfg)
     with _session(args, cfg, f"pad_{args.teach}" if args.teach else "pad") as s:
-        if s.overlay is None:
-            print("The clickable controller lives in the debug overlay; run without --no-overlay.")
+        panel = _panel(s, cfg, pad=args.p2, routine=args.teach)
+        if panel is None:
+            print("The clickable buttons live in the debug overlay; run without --no-overlay.")
             return
-        panel = PadPanel(s.controller.backend, routine=args.teach, grabber=s.grabber, sink=s.recorder.event)
-        s.overlay.pad_panel = panel
         what = f"Teaching routine '{args.teach}': every button you click is recorded." if args.teach \
-            else "Click the buttons in the debug overlay to press the bot's controller."
-        print(what + f" F8 (or {args.minutes:.0f} min) ends it.")
+            else "Click the buttons in the debug overlay."
+        print(f"{what} They press: {panel.device}. F8 (or {args.minutes:.0f} min) ends it.")
         s.stop_event.wait(args.minutes * 60)
         p = panel.save()
         if p:
             print(f"Saved {len(panel.steps)} steps to {p}. Replay it with menu U.")
-            s.recorder.write_json("routine_taught.json", {"routine": args.teach, "steps": panel.steps})
+            s.recorder.write_json("routine_taught.json", {"routine": args.teach, "device": panel.device,
+                                                          "steps": panel.steps})
 
 
 def cmd_routine(args, cfg):
-    from .pad_teach import list_routines, play_routine
+    from .pad_teach import KeyboardPad, list_routines, play_routine, routine_uses_pad
     names = list_routines()
     if not args.name:
         print("Taught routines: " + (", ".join(names) or "none yet (teach one with menu L)"))
@@ -302,13 +314,39 @@ def cmd_routine(args, cfg):
     if args.name not in names:
         print(f"No routine '{args.name}'. Taught routines: {', '.join(names) or 'none'}")
         return
-    cfg = _with_pad(cfg)
+    pad = routine_uses_pad(args.name)          # replayed on the device it was taught on
+    if pad:
+        cfg = _with_pad(cfg)
     with _session(args, cfg, f"routine_{args.name}") as s:
         if not s.start_inputs():
             return
-        n = play_routine(s.controller.backend, args.name, stop_event=s.stop_event, sink=s.recorder.event)
-        print(f"Routine '{args.name}': {n} steps pressed.")
-        s.recorder.write_json("routine_run.json", {"routine": args.name, "steps_done": n})
+        backend = s.controller.backend if pad else KeyboardPad(s.controller.backend, cfg)
+        n = play_routine(backend, args.name, stop_event=s.stop_event, sink=s.recorder.event)
+        print(f"Routine '{args.name}': {n} steps pressed on {'the bot controller' if pad else 'P1 keys'}.")
+        s.recorder.write_json("routine_run.json", {"routine": args.name, "steps_done": n, "pad": pad})
+
+
+def cmd_erase(args, cfg):
+    """Delete recorded data after a typed confirmation. Catalogs, Capcom frame data and routines are
+    never touched."""
+    from .erase import TARGETS, erase, describe
+    if args.what not in TARGETS:
+        print(f"Choose one of: {', '.join(TARGETS)}")
+        return
+    info = describe(args.what, cfg)
+    print(info["text"])
+    if not info["files"]:
+        return
+    if not args.yes:
+        try:
+            ans = input("Type YES to delete them for good (anything else cancels): ")
+        except EOFError:
+            ans = ""
+        if ans.strip() != "YES":
+            print("Cancelled. Nothing was deleted.")
+            return
+    n, errors = erase(args.what, cfg)
+    print(f"Deleted {n} files." + (f" Could not delete {len(errors)} (in use?): {errors[:3]}" if errors else ""))
 
 
 def cmd_dataset_summary(args, cfg):
@@ -441,8 +479,9 @@ def main(argv=None):
     p.add_argument("--seconds", type=float, default=15)
     p.set_defaults(fn=cmd_overlay_test)
 
-    sub.add_parser("input-map", help="measure SF6 input-mask bits per key (Training Mode, bot = P1)").set_defaults(
-        fn=cmd_input_map)
+    p = sub.add_parser("input-map", help="measure SF6 input-mask bits per key (Training Mode, bot = P1)")
+    p.add_argument("--pad", action="store_true", help="measure the bot's virtual controller buttons instead")
+    p.set_defaults(fn=cmd_input_map)
 
     p = sub.add_parser("replay-record", help="record a replay you play back in SF6 into a demonstration dataset")
     p.add_argument("--seconds", type=float, default=420)
@@ -472,22 +511,28 @@ def main(argv=None):
     p.add_argument("--player", choices=("p1", "p2"), default="p1", help="which side the bot plays")
     p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h)")
     p.add_argument("--matches", type=int, default=0, help="stop after N matches (0 = until F8 / --seconds)")
-    p.add_argument("--pad", action="store_true", help="bot on its own virtual controller; overlay buttons "
-                   "drive menus between matches (locked while it fights)")
+    p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "
+                   "controller and the overlay buttons press that controller (default: P1's keys)")
     p.set_defaults(fn=cmd_fight)
 
-    p = sub.add_parser("controller", help="the bot uses the keyboard or its own virtual Xbox controller")
+    p = sub.add_parser("controller", help="(obsolete since 0.9.0: the side decides) reset to keyboard")
     p.add_argument("mode", choices=("keyboard", "pad"))
     p.set_defaults(fn=cmd_controller)
 
-    p = sub.add_parser("pad", help="clickable bot controller in the overlay (menu navigation, teaching)")
+    p = sub.add_parser("pad", help="clickable buttons in the overlay that press P1's keys (menus, teaching)")
     p.add_argument("--teach", default=None, help="record the clicks as a routine with this name")
+    p.add_argument("--p2", action="store_true", help="press the bot's own controller instead (bot = P2 vs a human)")
     p.add_argument("--minutes", type=float, default=10.0)
     p.set_defaults(fn=cmd_pad)
 
-    p = sub.add_parser("routine", help="replay a taught routine on the bot's controller (no name: list)")
+    p = sub.add_parser("routine", help="replay a taught routine on the device it was taught on (no name: list)")
     p.add_argument("name", nargs="?", default="")
     p.set_defaults(fn=cmd_routine)
+
+    p = sub.add_parser("erase", help="delete recorded data: runs, training (replays) or fights; asks for YES")
+    p.add_argument("what", choices=("runs", "training", "fights"))
+    p.add_argument("--yes", action="store_true", help="do not ask")
+    p.set_defaults(fn=cmd_erase)
 
     sub.add_parser("dataset-summary", help="merge repeat recordings of the same replay; report usable "
                    "training data").set_defaults(fn=cmd_dataset_summary)
@@ -504,6 +549,10 @@ def main(argv=None):
 
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
+    if cfg["input"]["backend"] == "virtual_pad":
+        # saved by the old menu K (0.6-0.8). Since 0.9.0 only the bot-vs-human mode uses the bot's own
+        # controller; everything else presses P1's keys (user, 2026-10-02).
+        cfg["input"]["backend"] = "sendinput_keyboard"
     if args.mock:
         cfg["input"]["backend"] = "mock"
     args.fn(args, cfg)

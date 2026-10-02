@@ -51,6 +51,15 @@ input:
     LK: A
     MK: B
     HK: RT
+  # Overlay buttons on P1's keyboard (vs CPU): face buttons, triggers and the d-pad press the key of
+  # the same game input above (pad A = LK -> J). SF6's keyboard keys for the menu-only buttons are not
+  # known yet: set them here (key names as in bindings, e.g. ESC, ENTER, BACKSPACE, Q, E). Unset =
+  # the button is greyed out.
+  menu_keys:
+    START: null
+    BACK: null
+    LB: null
+    LT: null
 
 training:
   reset_key: SLASH        # Training Mode "reset position" on the user's keyboard (user-reported: "/")
