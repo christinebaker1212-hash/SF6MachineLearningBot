@@ -1112,6 +1112,43 @@ The safety tests are part of acceptance. During a run:
 - Not one-shot, by nature: anything that depends on the situation (spacing, pushback, corner,
   counter state, scaling) is measured live; and the opponent model is per opponent.
 
+## 0.10.1: Ken catalog with follow-ups verified; fixes before the combo lab
+- **Ken move-list catalog in game (0.10.0, guard None, user, 2026-10-02): 69 moves, 67 with an id.
+  Every measured start-up equals Capcom's**, including all the new rows. The user: "Everything else
+  looks great."
+  - Follow-ups and variants that came out on the first timing: Emergency Stop 681, Thunder Kick 682,
+    Forward Step Kick 683, [QD] Shoryuken 959, [QD] Tatsu 1003, [QD] Dragonlash 983, Kazekama 924,
+    Gorai 925, Senka 926, OD Kazekama 930, OD Gorai 931, OD Senka 932, Chin Buster 677, Triple Flash
+    Kicks (2) 670.
+  - Triple Flash Kicks (3) 671 came out on the third timing. Cancel Drive Rush gave 501 (Drive
+    Rush), dashes 17/18, and neutral-jump HK 656 is distinct from j.HK 655.
+- **Problems (user + data) and fixes:**
+  1. **SA3 recorded as a whiff** (total 36). Ken's SA3 shows a numeric Total on the meter before its
+     cinematic. The catalog now reads the meter only after **both characters have been neutral for
+     30 lines** (`_wait_settled`, up to 15 s for supers, 4 s otherwise).
+     - OD Tatsu "whiff" is likely the same "--" meter shown while the dummy is juggled. A dummy hit,
+       juggle or knockdown reaction (ids 200–399) now also counts as contact (`contact_from`).
+  2. **"ID: none"** had two causes:
+     - (a) Ken has **three rows called "Kasai Thrust Kick"**. Chain plans and results were keyed by
+       name, so they merged and overwrote each other (id 936 did come out). Fix:
+       `framedata.unique_names` → "Kasai Thrust Kick (after OD Gorai Axe Kick)" etc., each with its
+       own parent and window (frames 11 / 24 / 22).
+     - (b) `StateReader.collect` kept only the newest line per render (the same flaw as the 8×
+       recorder), so a move lasting a frame or two could be missed. It now takes **every line**
+       (`subscribe()` queues).
+  3. **Parry Drive Rush** never came out. User: "must wait for the parry to appear before pressing
+     forward twice." **All follow-ups are now state-triggered** (`_run_triggered`): run the parent,
+     poll the state until the parent's action id is on screen at `action_frame >= press_at - 5`
+     (input lead, measured 3–5F), then send the child. A parry stays held (MP+MK) through the dash.
+     Attempts shift the press frame 0 / +2 / −2. The wall-clock chains remain the fallback when the
+     parent's id is unknown.
+  4. **Keyboard menu key: ESC opens the menu** (user) → `input.menu_keys.START: ESC`, the overlay's
+     MENU button, needed to record routines.
+- `catalog --only` re-tests named moves and finds a follow-up's parent in the earlier catalog file
+  (`_earlier_result`). Menu C → 4 = "re-test only some moves".
+- Flaky test fixed: the mock fight smoke ran 3 s, but the fighter acts from frame 190 (~3.2 s);
+  now 6 s.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

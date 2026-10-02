@@ -553,11 +553,12 @@ def _hold_last(seq: str, frames: int = 3) -> str:
     return " ".join(steps)
 
 
-def _chain(parent_seq: str, child_seq: str, press_at: int) -> str:
+def _chain(parent_seq: str, child_seq: str, press_at: int, hold: str = "") -> str:
     """Parent, then the child's inputs timed so its final button lands on parent frame `press_at`
-    (frame 1 = the frame the parent's final button is pressed)."""
+    (frame 1 = the frame the parent's final button is pressed). `hold` ('+MP+MK') keeps buttons
+    held while waiting (parry)."""
     wait = press_at - 1 - 3 - _prefix_frames(child_seq)       # parent's final button is held 3F
-    return parent_seq + (f" 5@{wait}" if wait > 0 else "") + " " + child_seq
+    return parent_seq + (f" 5{hold}@{wait}" if wait > 0 else "") + " " + child_seq
 
 
 def chain_plans(framedata: dict) -> dict:
@@ -622,6 +623,12 @@ def chain_plans(framedata: dict) -> dict:
                     cseq = " ".join(f"{d}@3" if k != 1 else "5@2 " + f"{d}@3" for k, d in enumerate(rest))
                 if not (pseq and cseq):
                     continue
+                hold_parent = parent["name"] == "Drive Parry" or (parent.get("input") or "").endswith("MP+MK")
+                if hold_parent and rest and re.fullmatch(r"\d{2}", rest):
+                    # Parry Drive Rush: keep the parry held and dash only once the parry is out (user,
+                    # 0.10.0 run: pressing 66 straight after MP+MK never came out)
+                    cseq = " ".join(f"{d}+MP+MK@3" if k != 1 else "5+MP+MK@2 " + f"{d}+MP+MK@3"
+                                    for k, d in enumerate(rest))
                 pseq = _hold_last(pseq)
                 start = _window_start(parent, name)
                 if start is not None:
@@ -630,8 +637,14 @@ def chain_plans(framedata: dict) -> dict:
                     su = parent.get("startup_n") or 10
                     tot = parent.get("total_n") or (su + 20)
                     times = [su + 2, max(su + 2, tot - 8), tot + 2]
+                if hold_parent:
+                    times = [max(t, 10) for t in times]
                 out[name] = {"parent": parent["name"], "kind": "follow_up",
-                             "sequences": [_chain(pseq, cseq, t) for t in times], "window_from_notes": start}
+                             "sequences": [_chain(pseq, cseq, t, "+MP+MK" if hold_parent else "") for t in times], "window_from_notes": start,
+                             # state-triggered execution (catalog): parent, then wait until the parent's
+                             # action is on frame press_at - latency, then the child
+                             "parent_sequence": pseq, "child_sequence": cseq, "press_at": times[0],
+                             "hold_parent": hold_parent}
                 continue
             mb = re.match(r"^\[([^\]]+)\]\s*(.+)$", name)
             if mb and not quals and mb.group(1) in rows and seq_of(mb.group(1)):
@@ -674,12 +687,31 @@ def chain_plans(framedata: dict) -> dict:
     return out
 
 
+def unique_names(moves: list[dict]) -> list[dict]:
+    """Copies of Capcom's rows with unique names. Ken has three rows called "Kasai Thrust Kick"
+    (after OD Kazekama / OD Gorai / OD Senka); 0.10.0 merged them into one result. Duplicates become
+    'Kasai Thrust Kick (after OD Gorai Axe Kick)'."""
+    from collections import Counter
+    counts = Counter(m["name"] for m in moves)
+    seen: Counter = Counter()
+    out = []
+    for m in moves:
+        name = m["name"]
+        if counts[name] > 1:
+            seen[name] += 1
+            q = re.search(r"\((?:During|While) (?:an? |the )?([^()]+)\)", m.get("input") or "")
+            name = f"{name} (after {q.group(1)})" if q else f"{name} ({seen[name]})"
+        out.append(dict(m, name=name, capcom_name=m["name"]))
+    return out
+
+
 def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
     """(moves to perform, skipped rows) for one character, in Capcom's order.
 
     Rows with the same sequence are performed once; the later rows record `same_input_as`.
     """
     todo, skipped, by_seq = [], [], {}
+    framedata = dict(framedata, moves=unique_names(framedata["moves"]))
     chains = chain_plans(framedata)
     for mv in framedata["moves"]:
         seq, reason = to_sequence(mv)
@@ -687,6 +719,8 @@ def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
             ch = chains[mv["name"]]
             todo.append({"name": mv["name"], "input": mv["input"], "sequence": ch["sequences"][0],
                          "alternatives": ch["sequences"][1:], "parent": ch["parent"], "kind": ch["kind"],
+                         "parent_sequence": ch.get("parent_sequence"), "child_sequence": ch.get("child_sequence"),
+                         "press_at": ch.get("press_at"), "hold_parent": ch.get("hold_parent", False),
                          "section": mv["section"], "jump": False, "long": mv["section"] == "Super Arts",
                          "throw": False})
             continue

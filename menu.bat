@@ -77,8 +77,10 @@ goto menu
 echo.
 echo  Move catalog: set Training Mode with the dummy standing, then choose its guard setting:
 echo    1  Guard NONE (moves hit)   2  Guard ALL (moves are blocked)   3  Both, one after the other
+echo    4  Re-test only some moves (you type their names), dummy guard NONE
 set "GC="
 set /p GC=Choose: 
+if "%GC%"=="4" goto catalog_some
 if "%GC%"=="1" (%BOT% catalog --guard none & goto done)
 if "%GC%"=="2" (%BOT% catalog --guard all & goto done)
 if "%GC%"=="3" (
@@ -90,6 +92,15 @@ if "%GC%"=="3" (
     goto done
 )
 goto menu
+
+:catalog_some
+echo  Type the move names exactly as in the catalog, separated by commas, e.g.
+echo  SA3 Shinryu Reppa,Parry Drive Rush,Kasai Thrust Kick (after OD Gorai Axe Kick)
+set "MV="
+set /p MV=Moves: 
+if "%MV%"=="" goto menu
+%BOT% catalog --guard none --only "%MV%"
+goto done
 
 :ask
 set "CH="

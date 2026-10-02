@@ -79,17 +79,18 @@ def test_overlay_buttons_press_p1_keys(cfg, tmp_path):
     kb = MockInputBackend()
     pad = KeyboardPad(kb, cfg)
     assert pad.keys["A"] == "J" and pad.keys["DPAD_UP"] == "W" and pad.keys["RT"] == "L"   # LK, UP, HK
-    assert "START" not in pad.keys                       # menu-only button: unset until configured
+    assert pad.keys["START"] == "ESC"                    # MENU = ESC on keyboard (user)
+    assert "BACK" not in pad.keys                        # menu-only button: unset until configured
     panel = PadPanel(pad, routine="pick_ken", root=tmp_path, hold_s=0.01)
     panel.press("A")
-    panel.click("START")                                 # greyed out: nothing happens
+    panel.click("BACK")                                  # greyed out: nothing happens
     assert [(k, d) for _, k, d in kb.log] == [("J", True), ("J", False)]
     assert panel.save() and not routine_uses_pad("pick_ken", tmp_path)
     kb2 = MockInputBackend()
     assert play_routine(KeyboardPad(kb2, cfg), "pick_ken", root=tmp_path, min_wait_s=0.0) == 1
     assert [(k, d) for _, k, d in kb2.log] == [("J", True), ("J", False)]
-    cfg["input"]["menu_keys"]["START"] = "ESC"
-    assert KeyboardPad(kb, cfg).keys["START"] == "ESC"
+    cfg["input"]["menu_keys"]["BACK"] = "BACKSPACE"
+    assert KeyboardPad(kb, cfg).keys["BACK"] == "BACKSPACE"
 
 
 def test_locked_panel_ignores_clicks(tmp_path):

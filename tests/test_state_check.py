@@ -269,7 +269,8 @@ def test_fight_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     sim.start()
     try:
         with Session(cfg, "fight_test", mock=True) as s:
-            out = fi.run_fight(s, cfg, 3.0, player=0)
+            # the simulated clock starts at 0 and the fighter acts from frame 190 (~3.2 s): give it 6 s
+            out = fi.run_fight(s, cfg, 6.0, player=0)
             summary = json.loads((s.recorder.dir / "fight_summary.json").read_text())
     finally:
         sim.stop.set()

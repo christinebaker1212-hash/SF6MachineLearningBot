@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import queue
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -180,6 +181,7 @@ class StateReader:
         self.on_state = on_state
         self._latest: GameState | None = None
         self._cond = threading.Condition()
+        self._subs: list = []
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="StateReader", daemon=True)
         self.lines = 0
@@ -240,6 +242,8 @@ class StateReader:
                     st = GameState(t, int(raw.get("f", -1)), bool(raw.get("in_battle")), raw)
                     with self._cond:
                         self._latest = st
+                        for sq in self._subs:
+                            sq.put(st)
                         self._cond.notify_all()
                     if self.on_state is not None:
                         self.on_state(st)
@@ -253,14 +257,34 @@ class StateReader:
         with self._cond:
             return self._latest
 
+    def subscribe(self) -> "queue.Queue":
+        """A queue that receives EVERY state line from now on (unsubscribe when done)."""
+        q: queue.Queue = queue.Queue()
+        with self._cond:
+            self._subs.append(q)
+        return q
+
+    def unsubscribe(self, q) -> None:
+        with self._cond:
+            if q in self._subs:
+                self._subs.remove(q)
+
     def collect(self, seconds: float, stop_event=None) -> list[GameState]:
-        """Every new state for `seconds` (or until stop_event is set)."""
-        out, last, end = [], -1, clock.now() + seconds
-        while clock.now() < end and not (stop_event is not None and stop_event.is_set()):
-            st = self.wait_newer(last, timeout=0.05)
-            if st is not None:
-                last = st.frame
-                out.append(st)
+        """EVERY new state line for `seconds` (or until stop_event is set). 0.10.0 kept only the newest
+        line per render (wait_newer), so moves lasting a frame or two could be missed (user: some
+        catalog inputs "come out too quick for the bot to record ... ID: none")."""
+        q = self.subscribe()
+        out, end = [], clock.now() + seconds
+        try:
+            while clock.now() < end and not (stop_event is not None and stop_event.is_set()):
+                try:
+                    out.append(q.get(timeout=0.05))
+                except queue.Empty:
+                    pass
+        finally:
+            self.unsubscribe(q)
+        while not q.empty():
+            out.append(q.get_nowait())
         return out
 
     def wait_newer(self, frame: int, timeout: float = 0.5) -> GameState | None:

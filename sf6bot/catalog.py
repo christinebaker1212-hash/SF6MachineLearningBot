@@ -159,6 +159,68 @@ def _ready_dicts(states) -> list[dict]:
     return [dict(st.raw, t=st.t_recv) for st in states if st.ready]
 
 
+INPUT_LEAD_FRAMES = 5   # measured: input -> game reads it 3-5 frames (mostly 4), +1 for reading state
+
+
+def _earlier_result(cfg: dict, name: str, guard: str, move: str | None) -> dict | None:
+    """A move's result from an earlier catalog run (so `--only <follow-up>` still knows its parent)."""
+    if not move:
+        return None
+    p = Path(cfg.get("datasets", {}).get("root", "datasets")) / "catalog" / f"{file_stem(name)}_movelist.json"
+    try:
+        m = json.loads(p.read_text(encoding="utf-8"))["moves"].get(move) or {}
+    except (OSError, ValueError, KeyError):
+        return None
+    return m.get(f"guard_{guard}") or m.get("guard_none") or m.get("guard_all")
+
+
+def _wait_settled(reader, sess, neutral_a: set, neutral_d: set, max_s: float, need: int = 30) -> bool:
+    """Wait until bot and dummy have both been in a neutral action for `need` consecutive lines."""
+    q = reader.subscribe()
+    calm, end = 0, clock.now() + max_s
+    try:
+        while clock.now() < end and not sess.stop_event.is_set():
+            try:
+                st = q.get(timeout=0.1)
+            except Exception:
+                continue
+            p1, p2 = st.raw.get("p1") or {}, st.raw.get("p2") or {}
+            calm = calm + 1 if (p1.get("action_id") in neutral_a and p2.get("action_id") in neutral_d) else 0
+            if calm >= need:
+                sess.stop_event.wait(0.2)        # let the meter's last update land
+                return True
+    finally:
+        reader.unsubscribe(q)
+    return False
+
+
+def _run_triggered(runner, reader, sess, mv: dict, parent_id: int, attempt: int):
+    """Parent sequence, then poll the game state until the parent's action is on frame
+    press_at - INPUT_LEAD_FRAMES, then the child. The parent's last buttons stay held for a parry
+    (Parry Drive Rush only comes out once the parry is out: user, 0.10.0). Attempts shift the press
+    frame by 0 / +2 / -2. Returns (timings, completed) like SequenceRunner.run."""
+    press_at = (mv.get("press_at") or 10) + (0, 2, -2)[attempt % 3]
+    timings, ok = runner.run(parse_sequence(mv["parent_sequence"], mv["name"] + " (parent)"),
+                             stop_event=sess.stop_event, end_neutral=not mv.get("hold_parent"))
+    if not ok:
+        return timings, ok
+    end = clock.now() + 2.0
+    seen = False
+    while clock.now() < end and not sess.stop_event.is_set():
+        st = reader.latest()
+        p1 = (st.raw.get("p1") or {}) if st is not None else {}
+        if p1.get("action_id") == parent_id:
+            seen = True
+            frame = p1.get("action_frame")
+            if isinstance(frame, (int, float)) and frame >= press_at - INPUT_LEAD_FRAMES:
+                break
+        elif seen:
+            break               # the parent already ended: press now (it will likely miss; a retry follows)
+        time.sleep(0.001)
+    more, ok = runner.run(parse_sequence(mv["child_sequence"], mv["name"]), stop_event=sess.stop_event)
+    return timings + more, ok
+
+
 def _move_plan(name: str, cfg: dict, generic: bool):
     """(moves, skipped, source). Moves are dicts: name, sequence, approach, long, throw, input.
 
@@ -172,7 +234,9 @@ def _move_plan(name: str, cfg: dict, generic: bool):
         moves = [{"name": t["name"], "sequence": t["sequence"], "approach": not t["jump"] and t.get("kind") != "movement",
                   "long": t["long"], "throw": t["throw"], "input": t["input"],
                   "alternatives": t.get("alternatives") or [], "parent": t.get("parent"),
-                  "kind": t.get("kind")} for t in todo]
+                  "kind": t.get("kind"), "parent_sequence": t.get("parent_sequence"),
+                  "child_sequence": t.get("child_sequence"), "press_at": t.get("press_at"),
+                  "hold_parent": t.get("hold_parent")} for t in todo]
         return moves, skipped, "capcom_movelist"
     moves = [{"name": n, "sequence": q, "approach": a, "long": n.startswith(LONG_WINDOW_PREFIXES),
               "throw": n == "throw", "input": None} for n, q, a in MOVES]
@@ -267,7 +331,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             # means our input was misread (0.4.0: SA1 came out as H Shoryuken). Retry up to twice.
             # Follow-ups / target combos / stance moves (0.10.0) retry with their other timings.
             variants = [seq_text] + list(mv.get("alternatives") or [])
-            parent_ids = set((results.get(mv.get("parent") or "") or {}).get("action_ids") or [])
+            parent_res = results.get(mv.get("parent") or "") or _earlier_result(cfg, name, guard, mv.get("parent"))
+            parent_ids = set((parent_res or {}).get("action_ids") or [])
             attempts = max(3, len(variants)) if source == "capcom_movelist" else 1
             stopped = False
             for attempt in range(attempts):
@@ -295,24 +360,23 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 import threading
                 post: list = []
                 # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
-                window = 9.0 if mv["long"] else 2.6
+                window = 9.0 if mv["long"] else 3.6 if mv.get("parent") else 2.6
                 th = threading.Thread(target=lambda: post.extend(_ready_dicts(reader.collect(window))))
                 th.start()
-                timings, ok = runner.run(seq, stop_event=sess.stop_event)
+                parent_id = (parent_res or {}).get("move_id")
+                if mv.get("child_sequence") and parent_id is not None and attempt < 3:
+                    # state-triggered follow-up: wait until the parent move is really on screen
+                    timings, ok = _run_triggered(runner, reader, sess, mv, parent_id, attempt)
+                else:
+                    timings, ok = runner.run(seq, stop_event=sess.stop_event)
                 th.join()
                 if not ok:
                     stopped = True
                     break
                 t_last_press = timings[-2].sent if len(timings) >= 2 else timings[0].sent  # final input step
-                if mv["long"]:
-                    # Supers on hit: the meter only shows Total after the cinematic. 0.4.0 read SA3 too
-                    # early (total "--"). Wait up to 8 s more for a numeric Total.
-                    end_wait = clock.now() + 8.0
-                    while clock.now() < end_wait and not sess.stop_event.is_set():
-                        fm_now = reader.last_fm if (reader.last_fm_t or 0) >= t_last_press else None
-                        if _frames(((fm_now or {}).get("p1") or {}).get("MeatyFrame")) is not None:
-                            break
-                        sess.stop_event.wait(0.1)
+                # Read the frame meter only once BOTH characters are back to neutral: Ken's SA3 shows a
+                # numeric Total before its cinematic, so 0.10.0 recorded it as a 36F whiff (user).
+                _wait_settled(reader, sess, neutral_a, neutral_d, 15.0 if mv["long"] else 4.0)
                 own = analyze_move(pre + post, t_last_press, neutral_a | movement, neutral_d)
                 ids = own.get("action_ids") or []
                 move_ids = [a for a in ids if a not in movement and a not in neutral_a]
@@ -335,7 +399,13 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                              opponent_advantage=fmp.get("opponent_advantage"),
                              main_gauge_raw=fmp.get("main_gauge_raw"))
                     is_throw = mv["throw"]  # throws and command grabs connect on a guarding dummy too
-                    r["result"] = ("whiff" if not fmp.get("connected") else
+                    # the meter shows "--" while the dummy is still juggled / knocked down: a dummy hit,
+                    # juggle or knockdown reaction (ids 200-399, measured) also means the move connected
+                    dummy_hit = any(200 <= ((s2.get("p2") or {}).get("action_id") or 0) < 400 for s2 in post)
+                    connected = fmp.get("connected") or (dummy_hit and guard == "none")
+                    if dummy_hit and not fmp.get("connected"):
+                        r["contact_from"] = "dummy hit reaction (meter showed no advantage)"
+                    r["result"] = ("whiff" if not connected else
                                    "hit" if (guard == "none" or is_throw) else "block")
                 else:
                     r["result"] = "unknown (frame meter did not update)"

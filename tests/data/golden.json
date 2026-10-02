@@ -1,7 +1,7 @@
 {
- "catalog_plan:guile": "f97f10788dd56b2e",
- "catalog_plan:ryu": "ee2d1ab052c32838",
- "catalog_plan:zangief": "42949091e5d43b4b",
+ "catalog_plan:guile": "d05b7bb70b87c419",
+ "catalog_plan:ryu": "62a15ffcce27ac71",
+ "catalog_plan:zangief": "32a4d934f74e928e",
  "compare:ryu_0.3.2": "52df9a208922c6d4",
  "dataset_meta:watch_2026-10-01_match2.jsonl.gz": "70f6973f9f3ab96c",
  "dataset_meta:watch_2026-10-01_ryu_vs_cpu.jsonl.gz": "d2899ca580431242",

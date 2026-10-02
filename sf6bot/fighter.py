@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import queue
 import random
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -142,7 +143,7 @@ def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: 
     margin = int((fcfg.get("capcom") or {}).get("block_adv_margin", 1))
     n = 0
     for info in moves.values():
-        row = rows.get(info.get("name"))
+        row = rows.get(info.get("name")) or rows.get(re.sub(r" \((after .*|\d+)\)$", "", info.get("name") or ""))
         if not row:
             continue
         info.setdefault("guard", guard_of(row.get("properties")))

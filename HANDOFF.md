@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.10.0**, REFramework exporter script **v8**, branch
+*State as of 2026-10-02: code version **0.10.1**, REFramework exporter script **v8**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -200,6 +200,12 @@ controller as P2. The old saved `input.backend: virtual_pad` (menu K) is ignored
 regrouped (Fight / Record / Overlay buttons / Results, plus Tools T and Erase data E).
 Ask the user which keyboard keys SF6 uses for menu MENU/VIEW/LB/LT (`input.menu_keys`, unset).
 
+**0.10.1:** Ken catalog with follow-ups verified (67/69 ids, every start-up = Capcom). Fixed: SA3 read
+mid-cinematic, duplicate "Kasai Thrust Kick" rows, collector dropping lines, Parry Drive Rush now waits
+for the parry (follow-ups are state-triggered), ESC = menu. User re-test: C → 4 with
+"SA3 Shinryu Reppa,OD Tatsumaki Senpu-kyaku,Parry Drive Rush,Kasai Thrust Kick (after OD Kazekama Shin
+Kick),Kasai Thrust Kick (after OD Gorai Axe Kick),Kasai Thrust Kick (after OD Senka Snap Kick)".
+Then the combo lab.
 **0.10.0 open items for the user:**
 1. Re-run the catalog for Ken AND Ryu (C → 3, both guards). The follow-ups, target combos and
    variants are new rows; guard All gives measured on-block values.
