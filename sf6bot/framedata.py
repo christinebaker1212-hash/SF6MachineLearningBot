@@ -37,6 +37,8 @@ ICONS = {
     "icon_punch_l": "LP", "icon_punch_m": "MP", "icon_punch_h": "HP", "icon_punch": "P",
     "icon_kick_l": "LK", "icon_kick_m": "MK", "icon_kick_h": "HK", "icon_kick": "K",
     "key-plus": "+", "key-or": "|", "arrow_3": ">",
+    # Charge (hold) icons, written like the catalog's '[4]6+LP'; full circle motion = 360.
+    "key-lc": "[4]", "key-dc": "[2]", "key-rc": "[6]", "key-circle": "360",
 }
 _BUTTONS = {"LP", "MP", "HP", "P", "LK", "MK", "HK", "K"}
 
@@ -138,22 +140,28 @@ def classic_input(tokens) -> tuple[str, str]:
             # qualifiers ("(During a jump)", "(Block Direction)") are kept, in parentheses.
             if not t or re.fullmatch(r"[LMH]{1,3}|[PK]", t):
                 continue
-            if re.fullmatch(r"[()]+", t):
+            t = re.sub(r"\s+", " ", t)
+            # Text that already has parentheses (or is '-', '/') is kept as written: the page
+            # splits '(During Prowler Stance [or] Low Rush)' around the 'or' icon.
+            if re.search(r"[()]", t) or t in ("-", "/"):
                 parts.append(t)
             else:
-                parts.append(t if t.startswith("(") else f"({t})")
+                parts.append(f"({t})")
     s, prev = "", None
     for p in parts:
         if p in ("+", "|", ">"):
             s = s.rstrip() + p
         elif prev in _BUTTONS and p in _BUTTONS:
             s += "+" + p  # simultaneous buttons, e.g. OD '236+P+P', throw 'LP+LK'
-        elif s and s[-1] not in "+|>(" and p != ")" and not (p.isdigit() and s[-1].isdigit()):
+        elif p == "360" and s.endswith("360"):
+            s = s[:-3] + "720"  # two circles (Zangief SA3)
+        elif s and s[-1] not in "+|>([" and not p.startswith(")") and not (
+                (p[0].isdigit() or p[0] == "[") and (s[-1].isdigit() or s[-1] == "]")):
             s += " " + p
         else:
             s += p
         prev = p
-    return s.strip(), " ".join(r for r in raw if r)
+    return s.strip(), " ".join(re.sub(r"\s+", " ", r) for r in raw if r)
 
 
 def _num(s: str):
@@ -312,7 +320,7 @@ def catalog_key(move: dict) -> str | None:
         return "j." + m.group(1)
     if "(" in inp:
         return None
-    m = re.fullmatch(r"(?:(\d+)\+)?(LP|MP|HP|LK|MK|HK|P|K)", inp)
+    m = re.fullmatch(r"(?:([\[\]\d]+)\+)?(LP|MP|HP|LK|MK|HK|P|K)", inp)
     if not m:
         return None
     dirs, btn = m.group(1) or "5", m.group(2)

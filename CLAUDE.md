@@ -634,6 +634,19 @@ The safety tests are part of acceptance. During a run:
   - Pages are identified by the Next.js query name, or failing that by the `<title>`.
   - Output: `datasets/framedata/<slug>.json`, `raw/<slug>.html` and `all_characters.json`, plus a
     run report with catalog cross-checks for S.
+- **All 31 characters imported from the user's saved pages (2026-10-02, site build
+  `4K_w2_x7pC3TEWOnYV27D`):** 2,442 moves, from 59 (Manon) to 105 (Dee Jay) per character.
+  - Startup is parsed for 83–96% of rows and total for 86–98%. Blanks are dashes, stances,
+    follow-ups and throws, which have no startup or block value.
+  - 0.3.5 parser fixes, found by auditing all 31 pages:
+    - charge icons → `[4]6+LP`, `[2]8+K+K`, `[4]646+K`
+    - circle → `360+P`, two circles → `720+P`
+    - qualifiers split by an "or" icon are kept intact: `(During Prowler Stance|Low Rush) 6+LP`
+  - The only rows with no input are A.K.I.'s two Nightshade Chaser (Burst) rows, which are
+    triggered, not input.
+  - Ken spot check: 5LP 4F/13F/+4/−1; 2MK 7F startup, −6 on block; L Shoryuken 5F, −23 on block.
+- Fixtures: `capcom_guile_frame_table.html.gz` and `capcom_zangief_frame_table.html.gz` (real
+  pages, trimmed to the table).
 - Test fixtures: `tests/data/capcom_ryu_frame_table.html.gz` (the real table) and
   `tests/data/catalog_ryu_0.3.2.json.gz` (the user's catalog, raw meter fields stripped).
 

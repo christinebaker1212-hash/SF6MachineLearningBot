@@ -67,3 +67,20 @@ def test_identify_saved_page():
     assert identify_slug("<title>M. BISON FRAME DATA | STREET FIGHTER 6</title>") == "vega_mbison"
     assert identify_slug("<title>AKUMA FRAME DATA</title>") == "gouki_akuma"
     assert identify_slug("<title>Something else</title>") is None
+
+
+def _moves(name):
+    html = gzip.open(DATA / f"capcom_{name}_frame_table.html.gz", "rt", encoding="utf-8").read()
+    return {m["name"]: m for m in parse_frame_page(html)}
+
+
+def test_charge_and_circle_inputs():
+    g = _moves("guile")  # real page saved from the user's browser
+    assert g["L Sonic Boom"]["input"] == "[4]6+LP"
+    assert g["OD Somersault Kick"]["input"] == "[2]8+K+K"
+    assert g["SA3 Crossfire Somersault"]["input"] == "[4]646+K"
+    assert catalog_key(g["L Sonic Boom"]) == "[4]6LP"
+    z = _moves("zangief")
+    assert z["L Screw Piledriver"]["input"] == "(When near opponent) 360+LP"
+    assert z["SA3 Bolshoi Storm Buster"]["input"] == "(When near opponent) 720+P"
+    assert all("[key" not in m["input"] for m in list(g.values()) + list(z.values()))

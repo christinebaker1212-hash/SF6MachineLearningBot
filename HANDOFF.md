@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.3.4**, REFramework exporter script **v5**, branch
-`claude/admiring-mccarthy-uyyay4`, 36 tests passing.*
+*State as of 2026-10-02: code version **0.3.5**, REFramework exporter script **v5**, branch
+`claude/admiring-mccarthy-uyyay4`, 37 tests passing.*
 
 ---
 
@@ -159,10 +159,11 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
      inputs.
    - A 1× comparison of the same replay was not in the paste.
    - Fix to research: export on a per-game-tick hook instead of `re.on_frame`.
-3. **Capcom's official frame data:** the parser works on Ryu (75 moves). The site blocks
-   scripted downloads (403 from the user's PC as well), so in 0.3.4 the user saves the pages from
-   their browser into `framedata_pages\` (menu F opens a links page), runs F again, and uploads
-   `datasets\framedata\all_characters.json`.
+3. **Capcom's official frame data: DONE for all 31 characters** (user-saved pages, 2026-10-02).
+   The pages live in the user's `framedata_pages\` folder. Re-running menu F re-parses them, so
+   parser fixes need no new saves.
+   - The parsed JSON is not in git (`datasets/` is ignored). To work on it in a new session,
+     ask the user to upload `datasets\framedata\all_characters.json` (or the pages zip).
    - Next: drive the catalog from each character's real move list (`input` notation) instead of
      generic inputs; use the cancel column for combos.
 
