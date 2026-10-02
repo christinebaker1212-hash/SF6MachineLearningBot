@@ -353,7 +353,8 @@ def cmd_combos_import(args, cfg):
         lp = pages / "open_these.html"
         lp.write_text(links_page(), encoding="utf-8")
         print(f"\n{len(summary) - len(ok)} characters still missing. Opening {lp}: save each page into "
-              f"{pages}\\ from your browser (Ctrl+S, 'Webpage, HTML only'), then run this again.")
+              f"{pages}\\ from your browser once the combo tables are on screen (the wiki first shows a\n"
+              f"short bot check that finishes by itself), Ctrl+S, 'Webpage, HTML only', then run this again.")
         try:
             import os
             os.startfile(str(lp.resolve()))     # Windows only

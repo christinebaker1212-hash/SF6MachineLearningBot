@@ -339,9 +339,22 @@ def fetch_page(character: str, timeout: float = 30.0) -> str:
         return r.read().decode("utf-8", "replace")
 
 
-def saved_pages(pages_dir: Path) -> dict:
+BOT_CHECK_HELP = ("is the wiki's bot-check page ('Making sure you're not a bot!'), not the combos. Open the "
+                  "page, wait until the combo tables show (the check finishes by itself), then save it again; "
+                  "if it still saves the check page, use 'Webpage, Complete'")
+
+
+def is_bot_check(text: str) -> bool:
+    """The Anubis challenge page a browser can save instead of the article (user, 0.11.1: Cammy)."""
+    return "anubis_challenge" in text or "Making sure you&#39;re not a bot" in text[:5000] \
+        or "Making sure you're not a bot" in text[:5000]
+
+
+def saved_pages(pages_dir: Path, bot_checks: dict | None = None) -> dict:
     """{character display name: html} from pages saved in a browser, recognised by their title
-    ('Street Fighter 6/Ken/Combos - SuperCombo Wiki'), whatever the file is called."""
+    ('Street Fighter 6/Ken/Combos - SuperCombo Wiki'), whatever the file is called. A saved bot-check
+    page names the character too (og:title), so it is recognised and set aside in `bot_checks`
+    ({character: file name}); it never replaces a real page."""
     out: dict = {}
     back = {page_name(n): n for n in fd.SLUGS.values()}
     for f in sorted(Path(pages_dir).glob("*.htm*")):
@@ -349,14 +362,25 @@ def saved_pages(pages_dir: Path) -> dict:
         m = re.search(r"Street Fighter 6/([^/<\"]+)/Combos", text[:20000])
         if m:
             name = back.get(m.group(1).replace(" ", "_"), back.get(m.group(1), m.group(1)))
+            if is_bot_check(text):
+                if bot_checks is not None:
+                    bot_checks[name] = f.name
+                continue
             out[name] = text
+    if bot_checks is not None:
+        for name in list(bot_checks):
+            if name in out:
+                del bot_checks[name]           # a good copy of the page was saved too
     return out
 
 
 def links_page() -> str:
     links = "".join(f'<li><a href="{BASE.format(page=page_name(n))}">{n}</a></li>' for n in fd.SLUGS.values())
-    return ("<html><body><h3>Save each page into this folder (Ctrl+S, 'Webpage, HTML only'), then run menu "
-            f"T then A again.</h3><ol>{links}</ol></body></html>")
+    return ("<html><body><h3>For each character: open the link, WAIT until the combo tables are on screen (the "
+            "wiki first shows a short 'Making sure you're not a bot!' check that finishes by itself), then save "
+            "the page into this folder (Ctrl+S, 'Webpage, HTML only'; if the saved file is still the check page, "
+            "use 'Webpage, Complete'). Then run menu T then A again.</h3>"
+            f"<ol>{links}</ol></body></html>")
 
 
 def import_all(datasets_root: Path, pages_dir: Path | None = None, fetch: bool = True,
@@ -369,11 +393,16 @@ def import_all(datasets_root: Path, pages_dir: Path | None = None, fetch: bool =
     out_dir.mkdir(parents=True, exist_ok=True)
     summary: dict = {}
     blocked = False
-    saved = saved_pages(pages_dir) if pages_dir is not None and Path(pages_dir).exists() else {}
+    bot_checks: dict = {}
+    saved = saved_pages(pages_dir, bot_checks) if pages_dir is not None and Path(pages_dir).exists() else {}
     for slug, name in fd.SLUGS.items():
         if characters and name not in characters:
             continue
         page = saved.get(name)
+        if page is None and name in bot_checks:
+            summary[name] = {"error": f"saved file {bot_checks[name]} {BOT_CHECK_HELP}"}
+            log(f"  {name}: the saved file {bot_checks[name]} {BOT_CHECK_HELP}.")
+            continue
         if page is None and fetch and not blocked:
             try:
                 page = fetch_page(name)

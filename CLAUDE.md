@@ -1251,6 +1251,15 @@ catalogued, all moves for that character can be tested and iterated")
 - Test fixture `catalog_ken_0.10.1_movelist.json.gz`: the user's 0.9.0 guard None + 0.10.1 C2 guard
   All (71 moves) + C4 re-test, raw meter fields stripped.
 
+## 0.11.2: saved bot-check pages are recognised
+- The user's saved Cammy Combos page (2026-10-02) was SuperCombo's Anubis bot check ("Making sure you're
+  not a bot!"), saved before the check finished. Its og:title names "Street Fighter 6/Cammy/Combos", so the
+  importer took it for Cammy's page and imported 0 combos silently.
+- `combos.is_bot_check` sets such files aside; the import reports "saved file … is the wiki's bot-check
+  page … wait until the combo tables show, then save again (or 'Webpage, Complete')". A real copy of the
+  same page wins. The links page (`combo_pages/open_these.html`) says to wait for the tables first.
+- We still don't work around the check: the user saves each page from their browser.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

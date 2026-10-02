@@ -49,3 +49,19 @@ def test_denjin_and_saved_pages(tmp_path):
     assert r["steps"][0].get("name") == "[Denjin Charge]OD Hashogeki"
     (tmp_path / "Street Fighter 6_Ken_Combos.html").write_text(_page("ken"), encoding="utf-8")
     assert list(cb.saved_pages(tmp_path)) == ["Ken"]
+
+
+def test_saved_bot_check_page_is_reported_not_imported(tmp_path):
+    """User, 0.11.1: the saved Cammy page was the wiki's bot check. It names the character in its
+    og:title, so it used to count as Cammy's page with 0 combos."""
+    check = ('<!doctype html><html><head><title>Making sure you&#39;re not a bot!</title>'
+             '<meta property="og:title" content="Street Fighter 6/Cammy/Combos">'
+             '<script id="anubis_challenge" type="application/json">{}</script></head><body></body></html>')
+    (tmp_path / "cammy.htm").write_text(check, encoding="utf-8")
+    (tmp_path / "Street Fighter 6_Ken_Combos.html").write_text(_page("ken"), encoding="utf-8")
+    bad: dict = {}
+    pages = cb.saved_pages(tmp_path, bad)
+    assert list(pages) == ["Ken"] and bad == {"Cammy": "cammy.htm"}
+    summary = cb.import_all(tmp_path / "ds", tmp_path, fetch=False, log=lambda *_: None,
+                            characters=["Cammy", "Ken"])
+    assert "bot-check" in summary["Cammy"]["error"] and summary["Ken"]["combos"] == 53
