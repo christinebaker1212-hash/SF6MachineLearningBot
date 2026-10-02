@@ -565,7 +565,8 @@ def main(argv=None):
                    help="routes for this starting hit (counter routes need Training Mode's counter-hit setting)")
     p.add_argument("--max-difficulty", dest="max_difficulty", type=int, default=None)
     p.add_argument("--only", default="", help="comma-separated text the route must contain, e.g. '2MK,DRC'")
-    p.add_argument("--tries", type=int, default=5, help="attempts to find a timing that works")
+    p.add_argument("--tries", type=int, default=40,
+                   help="safety cap on attempts per route (the search itself: 5 earlier + 5 later per failing move)")
     p.add_argument("--confirm", type=int, default=2, help="repeats at the timing that worked")
     p.add_argument("--limit", type=int, default=None, help="at most this many routes")
     p.add_argument("--again", action="store_true", help="also re-test routes already verified")

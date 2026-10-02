@@ -98,7 +98,8 @@ goto menu
 echo.
 echo  Combo lab: Training Mode, the bot as P1. Dummy: standing, Guard = AFTER FIRST HIT
 echo  (it blocks anything that is not a true combo). Super and Drive gauges on max/infinite.
-echo  Corner routes push the dummy to the corner by themselves.
+echo  Positions are set with the hold-direction resets (down + reset = midscreen, a corner direction
+echo  + reset = corner); jump-in routes walk to a jump distance first. Nothing to set by hand.
 echo    1  Community routes (imported with T then A)
 echo    2  The bot's own routes: built from every catalogued move (run C first)
 echo    3  Keep exploring: own routes, 3 rounds (each round extends what worked)

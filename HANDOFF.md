@@ -217,6 +217,9 @@ Then the combo lab.
 **0.11.1 (user): the dummy must use Guard "After first hit": only TRUE combos count — a CRITICAL
 distinction.** The lab treats any block after the first hit as a gap. The generator now uses every
 catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's results (K → 3 = rounds).
+**0.11.3:** recovery floors in every suite (no input before the move can come out), failing moves
+searched 5 frames earlier then 5 later, jump-in starters and target combos tested, supers pass on connect
+(cinematic or not), positions by hold-direction resets. The fighter's combos run on the game clock too.
 **0.11.0/0.11.1 open items for the user:**
 1. Combo lab, Ken: Training Mode, Ken vs a standing dummy with Guard = After first hit, gauges max. Run
    menu K → 1 (community routes), then K → 3 (the bot's own routes, 3 rounds). Send S. Look at: verified count, the failing

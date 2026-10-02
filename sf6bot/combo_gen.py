@@ -33,6 +33,7 @@ SUPER_MIN = {"SA1": 0.3, "SA2": 0.4, "SA3": 0.5}               # community minim
 DRIVE_COST = {"od": 2, "drive_rush": 3}                         # bars (community values, unverified)
 MAX_DRIVE_BARS, MAX_SUPER_BARS = 6, 3
 RUSH_BONUS = 4                                                  # community: +4 on hit after a Drive Rush
+JUMP_LINK_MAX = 8                                               # assumption: see static_edges
 MAX_STEPS = 6
 BEAM = 300
 DR = "drive_rush"
@@ -99,7 +100,22 @@ def move_nodes(capcom: dict, catalog: dict | None = None) -> dict:
     for m in rows:
         quals = _quals(m)
         inp = m.get("input") or ""
-        if any("jump" in q.lower() for q in quals) or m["section"] in ("Throws", "Common Moves"):
+        jump_q = [q for q in quals if "jump" in q.lower()]
+        if m["section"] in ("Throws", "Common Moves"):
+            continue
+        if jump_q:
+            # jump-in starters (user, 0.11.3): forward / neutral jump normals start routes; the lab jumps in,
+            # presses the button while falling and links on landing. Air specials are left out.
+            meas = _measured(catalog, m["name"])
+            if m["section"] != "Normal Moves" or not m.get("damage_n") or "back" in " ".join(jump_q).lower() \
+                    or (catalog is not None and meas.get("move_id") is None):
+                continue
+            nodes[m["name"]] = {"key": m["name"], "raw": m["capcom_name"], "row": m, "kind": "jump",
+                                "parents": [], "startup": m.get("startup_n"), "hit_adv": None,
+                                "cancel": m.get("cancel"), "rapid": False, "super": None, "od": False,
+                                "damage": m.get("damage_n") or 0,
+                                "token": ("nj." if "neutral" in " ".join(jump_q).lower() else "j.")
+                                + re.sub(r"^5", "", _key_of(m) or m["name"])}
             continue
         if m["name"].startswith("CA ") or re.search(r"Lv[23]|Hold", m["name"] + inp):
             continue
@@ -173,6 +189,13 @@ def static_edges(nodes: dict, community: list[dict] | None = None) -> dict:
         if a["kind"] == "normal" and "C" in (a["cancel"] or "").upper().replace("SA", ""):
             e.append((">", DR, "cancel"))
     out[DR] = [("~", b["key"], "rush") for b in normals]
+    # after a jump-in, a ground move on landing: start-up <= JUMP_LINK_MAX (ASSUMPTION: a deep jump-in
+    # leaves time for a fast normal; the lab measures which ones really link)
+    for a in nodes.values():
+        if a["kind"] == "jump":
+            out[a["key"]] = [(",", b["key"], "jump_link") for b in nodes.values()
+                             if b["kind"] in ("normal", "special") and isinstance(b["startup"], int)
+                             and b["startup"] <= JUMP_LINK_MAX]
     by_raw: dict = {}
     for n in nodes.values():
         by_raw.setdefault(n["raw"], []).append(n["key"])
@@ -189,7 +212,7 @@ def static_edges(nodes: dict, community: list[dict] | None = None) -> dict:
             cur = None
             if st.get("system") == "drive_rush" and st.get("rush") != "parry":
                 cur = DR
-            elif st.get("name") in by_raw:
+            elif st.get("name") in by_raw and (prev is None or nodes[by_raw[st["name"]][0]]["kind"] != "jump"):
                 cands = by_raw[st["name"]]
                 cur = next((k for k in cands if prev and prev in nodes.get(k, {}).get("parents", [])), cands[0])
             if prev == DR and st.get("connector"):
@@ -277,7 +300,7 @@ def generate(capcom: dict, catalog: dict | None = None, community: list[dict] | 
         sup = sum(int(nodes[k]["super"][2]) for _, k in path if k != DR and nodes[k]["super"])
         return drive, sup
 
-    starts = [n["key"] for n in nodes.values() if n["kind"] in ("normal", "special", "transit")]
+    starts = [n["key"] for n in nodes.values() if n["kind"] in ("normal", "special", "transit", "jump")]
     frontier = [([("", k)], [], False) for k in starts]
     found: dict = {}
     for _depth in range(max_steps - 1):
@@ -344,10 +367,14 @@ def generate(capcom: dict, catalog: dict | None = None, community: list[dict] | 
              else "drive" if r["drive_bars"] else "meterless", r["position"].lower().replace("anywhere", "midscreen"))
         pre = tuple(st.get("name") or st["token"] for st in r["steps"][:-1])
         first = r["steps"][0].get("name")
-        # variety: at most 2 enders per prefix and 3 routes per starter in each group
+        # variety: at most 2 enders per prefix and 3 routes per starter in each group, and at most 3
+        # jump-in routes per group (they add damage, so they would crowd out the ground starters)
+        jump_in = r["steps"][0]["token"].startswith(("j.", "nj."))
         if per_prefix.get((g, pre), 0) >= 2 or per_prefix.get((g, "start", first), 0) >= 3 \
-                or len(groups[g]) >= per_group:
+                or (jump_in and per_prefix.get((g, "jump"), 0) >= 3) or len(groups[g]) >= per_group:
             continue
+        if jump_in:
+            per_prefix[(g, "jump")] = per_prefix.get((g, "jump"), 0) + 1
         per_prefix[(g, pre)] = per_prefix.get((g, pre), 0) + 1
         per_prefix[(g, "start", first)] = per_prefix.get((g, "start", first), 0) + 1
         groups[g].append(r)

@@ -1260,6 +1260,60 @@ catalogued, all moves for that character can be tested and iterated")
   same page wins. The links page (`combo_pages/open_these.html`) says to wait for the tables first.
 - We still don't work around the check: the user saves each page from their browser.
 
+## 0.11.3: recovery floors everywhere; earlier-then-later search; jump-ins, target combos, supers
+User requests (2026-10-02): "the bot [must] understand how long a move's recovery is so it doesn't try to
+input a move before it can logically come out ... among all suites"; "try the failed input earlier, and
+then later, until it works, or until 5 passes of each"; "not allowing target combos or jump in starters";
+supers "only need to verify the super connected, unless any extra buttons need pressed after"; "supers
+that don't cause a cinematic"; position resets by holding a direction.
+### Recovery floor (`plan_route` → `min_offset`, `floor`; `ComboRun._off`)
+- Each step has an earliest frame it can come out, from data:
+  - link `,` → the previous move's recovery has ended (catalog meter total, else Capcom)
+  - cancel / chain / target combo → the previous move has hit (contact; predicted from start-up)
+  - follow-up → Capcom's window ("from frame N")
+  - after a jump-in → landing + landing recovery (Capcom "3 frame(s) after landing")
+  - after a Drive Rush / follow-ups without a window: no data, so no floor (-5)
+- The input is never timed to arrive before that floor; the search may go 1 frame under it (JITTER: the
+  measured input delay is 3–5 frames around 4).
+- Link feasibility from frame data: on-hit advantage − start-up + 1 = the link window; ≤ 0 is noted
+  ("no link window at point blank") but still tried (juggles differ).
+- The input delay used for timing is recalibrated during the run: the median of the measured delays
+  (`lead_measured`) once there are 5, else 4.
+### Search (`next_offsets`)
+- A failing move is tried EARLIER −1…−5 frames, then LATER +1…+5, until it works; passes under the floor
+  are skipped. A misread motion is retried once at the same timing first. Cap: `--tries` (default 40).
+### Jump-ins (performed, no longer skipped)
+- Plan: forward (or neutral) jump → the air button → the rest. The air button is pressed when the bot's
+  predicted landing (height, fall speed and measured gravity) is start-up − 1 + 2 + input delay frames
+  away, so it hits ~2 frames before landing (deep). The landing link is pressed to arrive at landing +
+  landing recovery. The start distance = the bot's measured jump travel (learned once per run) + 0.6;
+  a jump-in that misses tries 0.4 / 0.8 / 0.5 / 0.7 before the timing search.
+- Generator: jump normals start routes (links on landing into ground moves with start-up ≤ 8, an
+  assumption, plus community jump-in steps); at most 3 jump-in routes per group. Air juggles mid-route
+  remain unsupported.
+### Target combos
+- `5MP ~ HP` is planned as the target-combo row (Chin Buster) and checked by its own catalog id (677);
+  a plain 5HP coming out is a wrong move.
+### Supers
+- A route ending in a Super Art passes as soon as the super's first hit connects; the cinematic is not
+  judged (`super_connected`). Damage is still read until both are neutral (up to 10 s). The same holds for
+  supers WITHOUT a cinematic (e.g. projectile supers). A super in the middle of a route (follow-up buttons
+  or a link after a non-cinematic super) is timed and checked like any step (link after its total).
+### Positions (user: hold a direction + reset)
+- `make_reset()(hold)`: Down + Reset = midscreen (player left), Up = midscreen (player right), Left /
+  Down-Left = left corner, Right / Down-Right = right corner. The lab finds the hold that puts the DUMMY in
+  the corner (positions read back), remembers it (`combo_lab/<Character>.json: corner_hold`), and falls
+  back to walking the dummy into the corner. Side swaps are not used yet.
+### All suites
+- Combo lab: the above. Catalog follow-ups: retries are 0 / +2 / −1 frames (never before the window).
+- Fighter: moves and punishes with a `route` in `configs/fighter/ryu.yaml` (2MK > 236MP, light chains,
+  5HP > 623HP) are performed by the same executor (`combo_lab.perform_route`, bot = p1 or p2), each input
+  on the game's clock; a blocked first hit stops the rest. Fight idle ids < 33 (measured, Ryu and Ken).
+  `fight_summary`: `routes_on_game_clock`, `routes_completed`, `routes_stopped`. Wall-clock `seq` is the
+  fallback without Capcom data.
+- MOCK-tested only: jump-in timing and landing floor on a synthetic jump, super endings with and without
+  a cinematic, a link after a super, the search order, real Ken/Ryu plans.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

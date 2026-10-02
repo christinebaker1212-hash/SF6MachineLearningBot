@@ -43,6 +43,13 @@ END_TICKS = 240        # wait at most 4 s after the last move for its hits
 DRIVE_BAR, SUPER_BAR = 10000, 10000   # 60000 = 6 Drive bars, 30000 = 3 Super bars (exporter)
 SYSTEM_SEQ = {"drive_rush": "6@3 5@2 6@3", "drive_impact": "5+HP+HK@3", "dash": "6@3 5@3 6@3"}
 PDR_SEQ = "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3"
+JITTER = 1             # measured input delay 3-5 frames around 4: an input may land 1 frame early
+JUMP_DEPTH = 2         # jump-ins: hit this many frames before landing (deep, so the link reaches)
+LANDING_REC = 3        # Capcom: jump attacks "3 frame(s) after landing" (row landing_n when given)
+NO_FLOOR = -5          # no data for the earliest frame: the search may go 5 frames earlier
+SEARCH_EARLIER = [-1, -2, -3, -4, -5]
+SEARCH_LATER = [1, 2, 3, 4, 5]
+FIGHT_IDLE_MAX = 33    # MEASURED (fights 2026-10-02): idle / walk / crouch ids of Ryu and Ken are < 33
 DASH_TOTAL = 19        # Ken forward dash, catalog-measured; used when the catalog has none
 
 
@@ -118,13 +125,20 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
     plan: list[dict] = []
     if combo.get("unresolved"):
         return {"unsupported": f"moves not matched to Capcom rows: {combo['unresolved']}", "steps": []}
-    if steps_in and steps_in[0].get("name", "").startswith(("Jumping", "Neutral Jumping")) \
-            or (steps_in and "j." in (steps_in[0].get("token") or "")):
-        notes.append(f"jump-in {steps_in[0].get('token')} skipped: the route starts from the next move")
-        steps_in = steps_in[1:]
-        if steps_in:
-            steps_in[0]["connector"] = ""
+    jump_row = None
+    if steps_in and not steps_in[0].get("system"):
+        r0 = _row(steps_in[0].get("name") or "", None, rows)
+        q0 = " ".join(re.findall(r"\(([^()]*)\)", (r0 or {}).get("input") or "")).lower()
+        if r0 is not None and "jump" in q0:
+            jump_row = r0                 # a jump-in starter: jump, then the air button (user, 0.11.3)
     prev: dict | None = None
+    if jump_row is not None:
+        d = "8" if "neutral" in " ".join(re.findall(r"\(([^()]*)\)", jump_row["input"])).lower() else "9"
+        jump = {"token": "jump", "connector": "", "mods": [], "base_offset": 0, "name": "jump",
+                "system": "jump", "sequence": f"{d}@3", "hitting": False, "allow_movement": True,
+                "prefix": 0, "trigger": "first", "min_offset": 0, "floor": "first move"}
+        plan.append(jump)
+        prev = jump
     for i, s in enumerate(steps_in):
         conn = s.get("connector") or ""
         st: dict = {"token": s.get("token"), "connector": conn if i else "", "mods": s.get("mods") or [],
@@ -144,10 +158,34 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             st["expect_id"] = meas.get("move_id") or {"drive_rush": 500 if pdr else 501, "drive_impact": 855}.get(system)
             st["total"] = meas.get("total") or (DASH_TOTAL if system == "dash" else None)
             st["startup"] = meas.get("startup") or (26 if system == "drive_impact" else None)
+        elif i == 0 and jump_row is not None:
+            row = jump_row
+            seq = fd.to_sequence(row)[0] or ""
+            seq = seq.split()[-1] if seq else ""
+            cn = _catalog_name(row["name"], None, catalog)
+            meas = _measured(catalog, cn)
+            st.update(name=row["name"], sequence=seq, catalog_name=cn, expect_id=meas.get("move_id"),
+                      known_ids=meas.get("action_ids") or [], startup=meas.get("startup") or row.get("startup_n"),
+                      total=None, hitting=bool(row.get("damage_n")), capcom_damage=row.get("damage_n"),
+                      super_art=False, air=True, landing=row.get("landing_n") or LANDING_REC,
+                      input_key=row.get("input"))
+            if not seq:
+                return {"unsupported": f"{row['name']}: no input", "steps": []}
         else:
             row = _row(s.get("name") or "", prev.get("name") if prev else None, rows)
             if row is None:
                 return {"unsupported": f"no Capcom row for {s.get('token')!r}", "steps": []}
+            q = " ".join(re.findall(r"\(([^()]*)\)", row.get("input") or "")).lower()
+            if "jump" in q:
+                return {"unsupported": f"{row['name']}: air move in the middle of a route (air juggle)",
+                        "steps": []}
+            if conn == "~" and prev and prev.get("input_key"):
+                # target combo: '5MP ~ HP' is the 'MP>HP' row (Chin Buster), checked by its own id
+                own = re.sub(r"^\(.*?\)\s*", "", row.get("input") or "")
+                tc_input = f"{prev['input_key']}>{own}"
+                tc = next((m for m in capcom.get("moves", []) if (m.get("input") or "") == tc_input), None)
+                if tc is not None:
+                    row = tc
             seq, why = step_sequence(row)
             if seq is None:
                 return {"unsupported": f"{row['name']}: {why}", "steps": []}
@@ -158,17 +196,38 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
                       startup=meas.get("startup") or row.get("startup_n"),
                       total=meas.get("total") or row.get("total_n"),
                       hitting=bool(row.get("damage_n")), capcom_damage=row.get("damage_n"),
-                      super_art=bool(re.match(r"(SA[123]|CA)\b", row["name"])))
+                      super_art=bool(re.match(r"(SA[123]|CA)\b", row["name"])), input_key=row.get("input"),
+                      target_combo=">" in (row.get("input") or ""),
+                      hit_adv=(meas.get("advantage") if meas.get("result") == "hit" and isinstance(meas.get("advantage"), int)
+                               and not row.get("on_hit_knockdown") else row.get("on_hit_n")
+                               if not row.get("on_hit_knockdown") else None))
         st["prefix"] = fd._prefix_frames(st["sequence"])
-        # trigger: when the previous move is far enough that this step's button lands in time
-        if i == 0:
-            st["trigger"] = "first"
+        # trigger: when the previous move is far enough that this step's button lands in time.
+        # FLOOR (user, 0.11.3): an input must never reach the game before the move can logically come out
+        # (link: the previous move's recovery has ended; cancel / chain: the previous move has hit;
+        # follow-up: its window in Capcom's notes; after a jump-in: landing + landing recovery). The
+        # search may go at most JITTER frames under it (measured 3-5 frame input delay).
+        if st.get("air"):
+            st["trigger"], st["min_offset"], st["floor"] = "air", NO_FLOOR, "airborne, after take-off"
+        elif prev is None:
+            st["trigger"], st["min_offset"], st["floor"] = "first", 0, "first move"
+        elif prev.get("air"):
+            st["trigger"], st["min_offset"] = "landing", -JITTER
+            st["floor"] = f"landing + {prev.get('landing') or LANDING_REC} frames landing recovery"
         elif prev.get("system") == "drive_rush":
-            st["trigger"], st["at"] = "own_frame", RUSH_AT
+            st["trigger"], st["at"], st["min_offset"] = "own_frame", RUSH_AT, NO_FLOOR
+            st["floor"] = "unknown (Drive Rush frame is a guess)"
         elif conn == ",":
             st["trigger"], st["at"] = "own_frame", prev.get("total")
+            st["min_offset"], st["floor"] = -JITTER, f"previous move's recovery ends (frame {prev.get('total')})"
             if prev.get("total") is None:
-                st["trigger"] = "prev_neutral"
+                st["trigger"], st["min_offset"], st["floor"] = "prev_neutral", 0, "previous move back to neutral"
+            adv, su = prev.get("hit_adv"), st.get("startup")
+            if isinstance(adv, int) and isinstance(su, int):
+                st["link_window"] = adv - su + 1
+                if st["link_window"] < 1:
+                    notes.append(f"frame data: {prev.get('name')} , {st['name']} has no link window at point "
+                                 f"blank ({adv:+d} on hit vs {su}F start-up); tried anyway (juggle states differ)")
         elif not system and _is_follow_up(row, prev) or (prev and not prev.get("hitting")):
             prow = _row(prev.get("name") or "", None, rows) if not prev.get("system") else None
             start = fd._window_start(prow, st["name"]) if prow else None
@@ -176,13 +235,16 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             st["at"] = (start + 1) if start is not None else (
                 (prev.get("startup") or 10) + 2 if prev.get("hitting") else max(10, (prev.get("total") or 30) - 8))
             st["window_from_notes"] = start
+            st["min_offset"] = -1 - JITTER if start is not None else NO_FLOOR
+            st["floor"] = f"Capcom window from frame {start}" if start is not None else "no window in Capcom's notes"
         else:
-            st["trigger"] = "contact"
+            st["trigger"], st["min_offset"] = "contact", -CONTACT_PLUS - JITTER
+            st["floor"] = "the previous move has hit (contact)"
         plan.append(st)
         prev = st
-    if not plan:
+    if not plan or (jump_row is not None and len(plan) < 2):
         return {"unsupported": "no moves left", "steps": []}
-    return {"steps": plan, "notes": notes, "unsupported": None}
+    return {"steps": plan, "notes": notes, "unsupported": None, "jump_in": jump_row is not None}
 
 
 # ---- execution against the state stream (pure: unit tested with synthetic lines) ------------------
@@ -192,8 +254,10 @@ class ComboRun:
     The caller sends it and reports back with `sent()`. Bot = p1, dummy = p2."""
 
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
-                 movement: set, lead: int = LEAD):
+                 movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2"):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        self.me, self.op = me, op            # the fighter can be P2
+        self.bot_y = None                    # (y, tick) of the previous line: jump-in timing
         self.neutral_a, self.neutral_d, self.movement = set(neutral_a), set(neutral_d), set(movement)
         self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None) for _ in steps]
         self.hits: list[dict] = []
@@ -208,9 +272,33 @@ class ComboRun:
         self.min = {}
         self.pending = None
         self.ticks_after_last = 0
+        self.super_connected = None
 
     def _off(self, k: int) -> int:
-        return self.offsets.get(k, 0) + self.steps[k].get("base_offset", 0)
+        """The step's timing offset, never under its floor (see plan_route)."""
+        st = self.steps[k]
+        return max(self.offsets.get(k, 0) + st.get("base_offset", 0), st.get("min_offset", NO_FLOOR))
+
+    def _ticks_to_land(self, p1: dict, tick: int):
+        """Frames until the bot lands, from its height, fall speed and the measured gravity (the last
+        three heights), or None if it is not falling."""
+        y = num(p1.get("y"))
+        hist = (self.bot_y or [])[-2:] + [(y, tick)]
+        self.bot_y = hist
+        if y is None or len(hist) < 2 or any(h[0] is None for h in hist) or hist[-1][1] <= hist[-2][1]:
+            return None
+        if y <= 0.01:
+            return 0
+        (y1, t1), (y2, t2) = hist[-2], hist[-1]
+        vy = (y2 - y1) / (t2 - t1)
+        ay = 0.0
+        if len(hist) == 3 and hist[0][1] < t1:
+            v0 = (y1 - hist[0][0]) / (t1 - hist[0][1])
+            ay = (vy - v0) / ((t2 - hist[0][1]) / 2)
+        if ay < -1e-6:                         # ballistic: 0 = y + vy t + ay t^2 / 2
+            disc = vy * vy - 2 * ay * y
+            return (-vy - disc ** 0.5) / ay
+        return y / -vy if vy < 0 else None
 
     def _active(self) -> int | None:
         started = [k for k, r in enumerate(self.rt) if r["start"] is not None]
@@ -219,7 +307,7 @@ class ComboRun:
     def feed(self, raw: dict):
         if self.done:
             return None
-        p1, p2 = raw.get("p1") or {}, raw.get("p2") or {}
+        p1, p2 = raw.get(self.me) or {}, raw.get(self.op) or {}
         tick = raw.get("stage_timer")
         if not isinstance(tick, int):
             return None
@@ -247,7 +335,7 @@ class ComboRun:
         if k is not None:
             r, st = self.rt[k], self.steps[k]
             pid, pfr = r["at_send"]
-            allowed_move = st.get("system") == "dash"
+            allowed_move = st.get("system") == "dash" or st.get("allow_movement")
             known_prev = set(self.steps[k - 1].get("known_ids") or []) if k else set()
             new = aid is not None and aid not in self.neutral_a and (allowed_move or aid not in self.movement) \
                 and (aid != pid or (isinstance(afr, (int, float)) and isinstance(pfr, (int, float)) and afr < pfr)) \
@@ -261,7 +349,7 @@ class ComboRun:
                 self.last = raw
                 return None
         # dummy: hits, block, escape
-        d_prev = (prev or {}).get("p2") or {}
+        d_prev = (prev or {}).get(self.op) or {}
         hs, hs0 = p2.get("hitstop") or 0, d_prev.get("hitstop") or 0
         hp, hp0 = num(p2.get("hp")), num(d_prev.get("hp"))
         if (p2.get("blockstun") or 0) > 0 and not (d_prev.get("blockstun") or 0) and self.blocked is None:
@@ -289,6 +377,13 @@ class ComboRun:
             self.escape = {"tick": tick, "active": self._active(), "pending": self.pending}
         self.last = raw
         # finished?
+        last = self.steps[-1]
+        if last.get("super_art") and self.rt[-1]["contact"] is not None:
+            # a route ending in a Super Art only has to show the super CONNECTED (user, 0.11.3); the
+            # cinematic is not followed (its damage is still read afterwards: observe())
+            self.super_connected = tick
+            self._finish(None, None)
+            return None
         if self.rt[-1]["start"] is not None:
             self.ticks_after_last += max(dt, 0)
             if self.escape is not None or self.ticks_after_last > END_TICKS:
@@ -305,12 +400,13 @@ class ComboRun:
                 kind, step = "dropped", self._next()
             self._finish(kind, step)
             return None
-        return self._due(tick, p1)
+        land = self._ticks_to_land(p1, tick)
+        return self._due(tick, p1, land)
 
     def _next(self) -> int:
         return next((k for k, r in enumerate(self.rt) if r["sent"] is None), len(self.rt) - 1)
 
-    def _due(self, tick: int, p1: dict):
+    def _due(self, tick: int, p1: dict, land=None):
         if self.pending is not None:
             return None
         n = next((k for k, r in enumerate(self.rt) if r["sent"] is None), None)
@@ -323,6 +419,18 @@ class ComboRun:
         if pr["start"] is None:
             return None
         trig, off = st["trigger"], self._off(n)
+        if trig == "air":
+            # jump-in: the attack should hit JUMP_DEPTH frames before landing (deep), so press when
+            # landing is (start-up - 1 + depth + input delay) frames away; later offsets = deeper
+            if not (num(p1.get("y")) or 0) > 0.05 or land is None:
+                return None
+            return n if land <= (st.get("startup") or 8) - 1 + JUMP_DEPTH + self.lead + st["prefix"] - off else None
+        if trig == "landing":
+            # after a jump-in: reach the game on landing + landing recovery (the earliest it can come out)
+            rec = pst.get("landing") or LANDING_REC
+            if land is None:
+                return n if (num(p1.get("y")) or 0) <= 0.01 and pr["contact"] is not None else None
+            return n if land + rec <= self.lead + st["prefix"] - off else None
         if trig == "own_frame":
             at = st.get("at")
             return n if at is None or pr["moving"] >= at - self.lead - st["prefix"] + off else None
@@ -337,8 +445,19 @@ class ComboRun:
             base = pr["start"] + su - 1
         return n if tick >= base + CONTACT_PLUS + off - self.lead - st["prefix"] else None
 
+    def observe(self, raw: dict) -> None:
+        """After the run is decided (a super connected): only keep the lowest health / gauges, so the
+        damage includes the whole cinematic."""
+        for who, key in (("bot", self.me), ("dummy", self.op)):
+            p = raw.get(key) or {}
+            for f in ("hp", "drive", "super"):
+                v = num(p.get(f))
+                if v is not None:
+                    self.min[f"{who}_{f}"] = min(self.min.get(f"{who}_{f}", v), v)
+        self.last = raw
+
     def sent(self, k: int, tick: int | None = None):
-        p1 = (self.last or {}).get("p1") or {}
+        p1 = (self.last or {}).get(self.me) or {}
         t = tick if tick is not None else (self.last or {}).get("stage_timer") or 0
         self.rt[k].update(sent=t, at_send=(p1.get("action_id"), p1.get("action_frame")),
                           sent_moving_prev=self.rt[k - 1]["moving"] if k else None)
@@ -359,7 +478,8 @@ class ComboRun:
                     fail = {"kind": "not_out", "step": k}
                     break
                 exp = st.get("expect_id")
-                if exp is not None and r["start_id"] != exp and st.get("connector") != "~" \
+                if exp is not None and r["start_id"] != exp \
+                        and (st.get("connector") != "~" or st.get("target_combo")) \
                         and r["start_id"] not in (st.get("known_ids") or []):
                     fail = {"kind": "wrong_move", "step": k, "came_out": r["start_id"]}
                     break
@@ -371,13 +491,13 @@ class ComboRun:
             if fail is None and self.escape is not None and self.hits and self.escape["tick"] < self.hits[-1]["tick"]:
                 fail = {"kind": "dropped", "step": self.escape.get("active")}
         fl, last = self.first_line or {}, self.last or {}
-        b0, d0 = fl.get("p1") or {}, fl.get("p2") or {}
-        b1, d1 = last.get("p1") or {}, last.get("p2") or {}
+        b0, d0 = fl.get(self.me) or {}, fl.get(self.op) or {}
+        b1, d1 = last.get(self.me) or {}, last.get(self.op) or {}
 
         def side(p, q):
             px, qx = num(p.get("x")), num(q.get("x"))
             return None if px is None or qx is None else (qx > px)
-        out = {"success": fail is None, "fail": fail, "hits": len(self.hits),
+        out = {"success": fail is None, "fail": fail, "hits": len(self.hits), "super_connected": self.super_connected,
                "damage": (num(d0.get("hp")) - self.min["dummy_hp"]) if num(d0.get("hp")) is not None and "dummy_hp" in self.min else None,
                "drive_spent": (num(b0.get("drive")) - self.min["bot_drive"]) if num(b0.get("drive")) is not None and "bot_drive" in self.min else None,
                "super_spent": (num(b0.get("super")) - self.min["bot_super"]) if num(b0.get("super")) is not None and "bot_super" in self.min else None,
@@ -397,31 +517,26 @@ class ComboRun:
 
 
 def next_offsets(steps: list[dict], offsets: dict, fail: dict, tried: dict) -> dict | None:
-    """Timing search after a failed attempt: shift the failing step. Returns new offsets, or None when
-    that step's range is exhausted."""
+    """Timing search after a failed attempt (user, 0.11.3): the failing step is tried EARLIER, up to 5
+    passes (-1..-5 frames), then LATER, up to 5 passes (+1..+5), until it works. Passes under the step's
+    floor (before the move can logically come out) are skipped. A misread motion (wrong move) is first
+    retried at the same timing once. Returns new offsets, or None when the step's passes are used up."""
     k, kind = fail.get("step"), fail.get("kind")
-    if k is None:
+    if k is None or k >= len(steps):
         return None
-    st = steps[k]
-    cur = offsets.get(k, 0)
-    seen = tried.setdefault(k, {cur})
-    if kind == "wrong_move" and len(seen) < 2 and tried.get(("wrong", k), 0) < 1:
-        tried[("wrong", k)] = 1
-        return dict(offsets)                       # a misread motion: same timing once more
-    if kind == "not_out":
-        order = [1, 2, 3, -1, -2, 4, 6] if st["trigger"] != "contact" else [2, -2, 4, -1, 1, 6]
-    elif kind in ("dropped", "whiff", "blocked"):
-        order = [-1, -2, -3, 1, -4, 2]
-    else:
-        order = [1, -1, 2, -2]
-    for d in order:
-        new = cur + d if kind != "not_out" or st["trigger"] == "contact" else d
-        new = max(OFFSET_RANGE[0], min(OFFSET_RANGE[1], new))
-        if new not in seen:
-            seen.add(new)
-            o = dict(offsets)
-            o[k] = new
-            return o
+    if kind == "wrong_move" and not tried.get(("wrong", k)):
+        tried[("wrong", k)] = True
+        return dict(offsets)
+    lo = steps[k].get("min_offset", NO_FLOOR)
+    todo = tried.setdefault(("passes", k), [d for d in SEARCH_EARLIER + SEARCH_LATER])
+    while todo:
+        d = todo.pop(0)
+        if d < lo:
+            tried.setdefault(("skipped_under_floor", k), []).append(d)
+            continue
+        o = dict(offsets)
+        o[k] = d
+        return o
     return None
 
 
@@ -530,9 +645,96 @@ def is_true(entry: dict) -> bool:
     return bool(entry.get("verified")) and entry.get("guard") == "after_first_hit"
 
 
-def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard) -> dict:
+CORNER_HOLDS = (6, 3, 4, 1)     # user: right / down-right / left / down-left + reset = a corner
+JUMP_DISTANCES = (0.6, 0.4, 0.8, 0.5, 0.7)   # jump-in start distance = jump travel + this (searched)
+
+
+def _positions(reader):
+    st = reader.latest()
+    if st is None:
+        return None, None
+    return num(st.p1.get("x")), num(st.p2.get("x"))
+
+
+def set_position(sess, reader, reset, position: str, state: dict) -> str:
+    """Training Mode position by the hold-direction reset (user, 0.11.3). Corner: the hold that puts the
+    DUMMY against the wall is found once (positions read back) and remembered; if none does, the bot
+    walks the dummy into the corner. Returns how it was done."""
+    if position != "corner":
+        reset(2)                                   # midscreen, player on the left
+        return "reset+down"
+    holds = [state["corner_hold"]] if state.get("corner_hold") else list(CORNER_HOLDS)
+    for h in holds:
+        reset(h)
+        bx, dx = _positions(reader)
+        if bx is not None and dx is not None and abs(dx) > abs(bx) and abs(dx) > 3.0 and bx * dx > 0:
+            state["corner_hold"] = h
+            return f"reset+{h}"
+    state.pop("corner_hold", None)
+    reset()
+    push_to_corner(sess, reader)
+    return "walked the dummy to the corner"
+
+
+def walk_to_distance(sess, reader, target: float, max_s: float = 3.0) -> float | None:
+    """Walk forward / back until the players are `target` apart (jump-in start)."""
+    from .actions import InputState
+    from .game_state import player_distance
+    c = sess.controller
+    end, d = clock.now() + max_s, None
+    while clock.now() < end and not sess.stop_event.is_set():
+        st = reader.latest()
+        d = player_distance(st.p1, st.p2) if st is not None else None
+        if d is None or abs(d - target) <= 0.05:
+            break
+        c.apply(InputState(6 if d > target else 4), tag="to_distance")
+        time.sleep(0.016)
+    c.apply(InputState(), tag="to_distance_end")
+    sess.stop_event.wait(0.3)
+    return d
+
+
+def learn_jump(sess, reader, reset, direction: int = 9) -> float:
+    """Measure the bot's jump: horizontal travel from take-off to landing (game units)."""
+    from .actions import InputState
+    reset(2)
+    q = reader.subscribe()
+    try:
+        sess.controller.apply(InputState(direction), tag="learn_jump_arc")
+        time.sleep(0.05)
+        sess.controller.apply(InputState(), tag="learn_jump_arc_end")
+        xs, air, end = [], False, clock.now() + 1.6
+        while clock.now() < end:
+            try:
+                st = q.get(timeout=0.05)
+            except Exception:
+                continue
+            y, x = num(st.p1.get("y")) or 0.0, num(st.p1.get("x"))
+            if y > 0.05:
+                air = True
+                xs.append(x)
+            elif air:
+                xs.append(x)
+                break
+    finally:
+        reader.unsubscribe(q)
+    xs = [x for x in xs if x is not None]
+    return round(abs(xs[-1] - xs[0]), 2) if len(xs) >= 2 else (0.0 if direction == 8 else 1.9)
+
+
+def _lead(state: dict) -> int:
+    """The input delay used for timing: the median of the measured delays (send -> move starts) of this
+    run once there are 5, else the input-map measurement (4)."""
+    leads = sorted(state.get("leads", [])[-40:])
+    if len(leads) < 5:
+        return LEAD
+    return max(3, min(6, leads[len(leads) // 2]))
+
+
+def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard, state=None) -> dict:
     """Try one route until a timing works (or the search gives up), then repeat it `confirm` times."""
     from .catalog import walk_to_contact, _wait_settled, parse_frame_meter
+    state = {} if state is None else state
     neutral_a, neutral_d, movement = ids
     steps = plan["steps"]
     attempts: list[dict] = []
@@ -540,10 +742,16 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     tried: dict = {}
     found = None            # offsets of the first success; then `confirm` repeats at them
     confirms_left = confirm
+    jump_variant = 0
     while not sess.stop_event.is_set():
-        reset()
-        if _position(combo) == "corner":
-            push_to_corner(sess, reader)
+        how = set_position(sess, reader, reset, _position(combo), state)
+        if plan.get("jump_in"):
+            jd = steps[0]["sequence"][0]
+            key = f"jump_travel_{jd}"
+            if key not in state:
+                state[key] = learn_jump(sess, reader, reset, int(jd))
+                set_position(sess, reader, reset, _position(combo), state)
+            walk_to_distance(sess, reader, state[key] + JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)])
         else:
             walk_to_contact(sess, reader)
         pre = reader.latest()
@@ -554,7 +762,13 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                              "offsets": dict(offsets), "steps": [], "hits": 0})
             break
         fm_before = reader.last_fm
-        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement)
+        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=_lead(state))
+        res["position_setup"] = how
+        res["lead_used"] = _lead(state)
+        state.setdefault("leads", []).extend(st["lead_measured"] for st in res.get("steps", [])
+                                             if isinstance(st.get("lead_measured"), int) and 0 <= st["lead_measured"] <= 12)
+        if plan.get("jump_in"):
+            res["jump_distance_extra"] = JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)]
         long = any(s.get("super_art") for s in steps)
         _wait_settled(reader, sess, neutral_a, neutral_d, 15.0 if long else 5.0)
         fm = reader.last_fm if reader.last_fm != fm_before else None
@@ -579,6 +793,10 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         else:
             if len(attempts) >= tries:
                 break
+            if plan.get("jump_in") and f.get("step") == 1 and f.get("kind") in ("whiff", "dropped", "first_blocked") \
+                    and jump_variant + 1 < len(JUMP_DISTANCES):
+                jump_variant += 1        # the jump-in missed: start from another distance first
+                continue
             nxt = next_offsets(steps, offsets, f, tried)
             if nxt is None:
                 break
@@ -591,7 +809,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
 
 
 def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "normal",
-                  max_difficulty: int | None = None, only: list[str] | None = None, tries: int = 5,
+                  max_difficulty: int | None = None, only: list[str] | None = None, tries: int = 40,
                   confirm: int = 2, limit: int | None = None, source: str = "community", again: bool = False,
                   guard: str = "after_first_hit", rounds: int = 1):
     from .catalog import learn_ids, make_reset
@@ -607,6 +825,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     skipped: dict = {}
     name = "Unknown"
     lab: dict = {}
+    lab_state: dict = {}
     setup_error = None
     try:
         st = reader.wait_newer(-1, 2.0)
@@ -636,6 +855,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
         guard_text = {"after_first_hit": "guard AFTER FIRST HIT (a block = not a true combo)",
                       "none": "guard NONE (gaps can go unnoticed: results are not marked true combos)"}[guard]
         ids = None
+        lab_state: dict = {"corner_hold": lab.get("corner_hold")}
         for rnd in range(max(1, rounds)):
             if sess.stop_event.is_set() or setup_error:
                 break
@@ -677,7 +897,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     break
                 print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
                       f"damage listed {combo.get('damage') or combo.get('est_damage')})")
-                summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard)
+                summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard, lab_state)
                 if (summ.get("failed_at") or {}).get("kind") == "first_blocked":
                     setup_error = ("The dummy BLOCKED the first hit. Set Training Mode's dummy guard to "
                                    "'After first hit' (or run with --guard none) and start again.")
@@ -707,6 +927,10 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     out.parent.mkdir(parents=True, exist_ok=True)
     lab["skipped"] = {**lab.get("skipped", {}), **skipped}
     lab["lead_constant"] = LEAD
+    if lab_state.get("corner_hold"):
+        lab["corner_hold"] = lab_state["corner_hold"]
+    if lab_state.get("leads"):
+        lab["lead_measured_median"] = _lead(lab_state)
     try:
         from .game_state import game_build
         b = game_build(cfg)
@@ -724,13 +948,22 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     return out
 
 
-def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement) -> dict:
-    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement)
+def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
+                  me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0) -> dict:
+    """Perform one planned route against the live state stream: every input is sent when the game's
+    own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
+    `abort()` (fighter) is polled between lines; a truthy value stops the route."""
+    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op)
     q = reader.subscribe()
     side = None
-    deadline = clock.now() + 12.0
+    deadline = clock.now() + timeout
+    aborted = None
     try:
         while not run.done and clock.now() < deadline and not sess.stop_event.is_set():
+            if abort is not None:
+                aborted = abort()
+                if aborted:
+                    break
             try:
                 st = q.get(timeout=0.05)
             except Exception:
@@ -741,7 +974,7 @@ def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movemen
             if k is None:
                 continue
             # mirror by POSITIONS (the facing flag lags through cross-ups; fighter.py, 0.8.0)
-            bx, dx = num(st.p1.get("x")), num(st.p2.get("x"))
+            bx, dx = num((st.raw.get(me) or {}).get("x")), num((st.raw.get(op) or {}).get("x"))
             if bx is not None and dx is not None and (side is None or abs(dx - bx) >= 0.15):
                 side = Facing.RIGHT if dx > bx else Facing.LEFT
                 sess.controller.set_facing(side)
@@ -749,11 +982,30 @@ def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movemen
             _, ok = runner.run(parse_sequence(steps[k]["sequence"], steps[k]["name"]), stop_event=sess.stop_event)
             if not ok:
                 break
+        if run.super_connected is not None:
+            # the super connected: follow the cinematic only for its damage (up to 10 s, until both idle)
+            calm, end = 0, clock.now() + 10.0
+            while clock.now() < end and calm < 30 and not sess.stop_event.is_set():
+                try:
+                    st = q.get(timeout=0.05)
+                except Exception:
+                    continue
+                run.observe(st.raw)
+                a1 = (st.raw.get(me) or {}).get("action_id")
+                a2 = (st.raw.get(op) or {}).get("action_id")
+                calm = calm + 1 if (a1 in neutral_a and a2 in neutral_d) else 0
     finally:
         reader.unsubscribe(q)
     if not run.done:
         run._finish(None, None) if run.rt[-1]["start"] is not None else run._finish("not_out", run._next())
-    return run.result()
+    res = run.result()
+    if aborted:
+        res["aborted"] = aborted
+    return res
+
+
+def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD) -> dict:
+    return perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead)
 
 
 def report_md(character: str, results: dict, skipped: dict, setup_error: str | None = None) -> str:

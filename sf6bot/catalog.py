@@ -198,8 +198,10 @@ def _run_triggered(runner, reader, sess, mv: dict, parent_id: int, attempt: int)
     """Parent sequence, then poll the game state until the parent's action is on frame
     press_at - INPUT_LEAD_FRAMES, then the child. The parent's last buttons stay held for a parry
     (Parry Drive Rush only comes out once the parry is out: user, 0.10.0). Attempts shift the press
-    frame by 0 / +2 / -2. Returns (timings, completed) like SequenceRunner.run."""
-    press_at = (mv.get("press_at") or 10) + (0, 2, -2)[attempt % 3]
+    frame by 0 / +2 / -1 (never before the window). Returns (timings, completed) like SequenceRunner.run."""
+    # press_at = the window's first frame + 1. Attempts: on time, 2 later, then 1 earlier = the window's
+    # first frame; never earlier, so the follow-up is not input before it can come out (user, 0.11.3)
+    press_at = (mv.get("press_at") or 10) + (0, 2, -1)[attempt % 3]
     timings, ok = runner.run(parse_sequence(mv["parent_sequence"], mv["name"] + " (parent)"),
                              stop_event=sess.stop_event, end_neutral=not mv.get("hold_parent"))
     if not ok:
@@ -232,13 +234,24 @@ def make_reset(sess, cfg: dict, reader):
         from .input_backend import SendInputKeyboard
         reset_backend = SendInputKeyboard()
 
-    def reset():
+    def reset(hold: int | None = None):
+        """`hold`: a SCREEN direction (numpad, 4 = left) held while resetting picks the position (user,
+        0.11.3): 2 = midscreen with the player on the left, 8 = midscreen on the right, 4 / 1 = left
+        corner, 6 / 3 = right corner."""
         if not c.armed:  # never send the reset key to another window (focus lost / paused)
             if not sess.wait_armed(timeout=10):
                 raise InterruptedError("not armed")
+        if hold:
+            from .actions import Facing
+            c.set_facing(Facing.RIGHT)          # facing right: numpad = screen directions
+            c.apply(InputState(hold), tag=f"reset_hold_{hold}")
+            time.sleep(0.1)
         reset_backend.send([(reset_key, True)])
         time.sleep(0.08)
         reset_backend.send([(reset_key, False)])
+        if hold:
+            time.sleep(0.25)
+            c.apply(InputState(), tag="reset_hold_end")
         sess.stop_event.wait(1.3)
         s2 = reader.latest()
         if s2 is not None and facing_of(s2.p1) is not None:

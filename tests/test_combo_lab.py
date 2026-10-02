@@ -113,6 +113,7 @@ def _steps(moves):
     for i, m in enumerate(moves):
         trig = "first" if i == 0 else "own_frame" if m["conn"] == "," else "contact"
         out.append({"name": f"m{i}", "connector": m["conn"], "trigger": trig, "at": moves[i - 1]["tot"] if i else None,
+                    "min_offset": {"first": 0, "own_frame": -cl.JITTER, "contact": -cl.CONTACT_PLUS - cl.JITTER}[trig],
                     "prefix": 6 if m["id"] == 921 else 0, "startup": m["su"], "total": m["tot"],
                     "expect_id": m["id"], "hitting": True, "capcom_damage": 500})
     return out
@@ -155,7 +156,7 @@ def test_early_link_is_eaten_and_search_goes_later():
 
 def test_plans_for_real_ken_routes():
     cap = _capcom("ken")
-    cat = json.load(gzip.open(DATA / "catalog_ken_0.9.0_hit.json.gz", "rt"))
+    cat = json.load(gzip.open(DATA / "catalog_ken_0.10.1_movelist.json.gz", "rt"))
     data = _combos("ken", cap)
     routes = {c["route"]: c for c in data["combos"]}
     # one table cell held three routes separated by line breaks: now three rows with their own damage
@@ -164,16 +165,23 @@ def test_plans_for_real_ken_routes():
     plan = cl.plan_route(routes["2LP , 5MP ~ HP > KK > 623K , 623HP"], cap, cat)
     assert plan["unsupported"] is None
     names = [s["name"] for s in plan["steps"]]
-    assert names == ["Crouching Light Punch", "Standing Medium Punch", "Standing Heavy Punch", "Quick Dash",
+    # '5MP ~ HP' is the target combo row Chin Buster, checked by its own catalog id (677)
+    assert names == ["Crouching Light Punch", "Standing Medium Punch", "Chin Buster", "Quick Dash",
                      "L Dragonlash Kick", "H Shoryuken"]
+    assert plan["steps"][2]["expect_id"] == 677 and plan["steps"][2]["target_combo"]
     trig = [(s["trigger"], s.get("at")) for s in plan["steps"]]
     assert trig[1] == ("own_frame", 14)              # link after 2LP: its measured total
     assert trig[2][0] == "contact"                   # target combo piece
     assert trig[4] == ("own_frame", 13)              # Quick Dash branch: Capcom note 'from frame 12'
     assert trig[5] == ("own_frame", 44)              # link after L Dragonlash Kick (catalog total)
+    floors = [st["min_offset"] for st in plan["steps"]]
+    assert floors[1] == -cl.JITTER and floors[2] == -cl.CONTACT_PLUS - cl.JITTER   # link / target combo
     j = cl.plan_route(routes["j.HP , 2HP > 236HK ~ 6HK , 623LP"], cap, cat)
-    assert j["steps"][0]["name"] == "Crouching Heavy Punch" and "jump-in" in j["notes"][0]
-    assert j["steps"][2]["name"] == "Senka Snap Kick" and j["steps"][2]["sequence"] == "6@2 6+HK@3"
+    # jump-in starters are performed (user, 0.11.3): forward jump, air button timed from the fall, then the
+    # landing link no earlier than landing + landing recovery
+    assert [(st["name"], st["trigger"], st["sequence"]) for st in j["steps"][:3]] == [
+        ("jump", "first", "9@3"), ("Jumping Heavy Punch", "air", "5+HP@3"), ("Crouching Heavy Punch", "landing", "2@2 2+HP@3")]
+    assert j["jump_in"] and j["steps"][4]["name"] == "Senka Snap Kick" and j["steps"][4]["sequence"] == "6@2 6+HK@3"
     assert all(not cl.plan_route(c, cap, cat)["unsupported"] for c in data["combos"])
 
 
@@ -220,7 +228,9 @@ def test_generator_uses_the_whole_catalogued_move_list():
     assert kinds["Kasai Thrust Kick (after OD Gorai Axe Kick)"] == "follow"
     assert nodes["Kasai Thrust Kick (after OD Gorai Axe Kick)"]["parents"] == ["OD Gorai Axe Kick"]
     assert nodes["Gorai Axe Kick"]["parents"] == ["L Jinrai Kick", "M Jinrai Kick", "H Jinrai Kick"]
-    assert "Jumping Heavy Punch" not in nodes and "Knee Strikes" not in nodes
+    assert kinds["Jumping Heavy Punch"] == "jump" and "Knee Strikes" not in nodes   # jump-ins start routes
+    assert nodes["Neutral Jumping Heavy Kick"]["token"] == "nj.HK" and nodes["Jumping Heavy Kick"]["token"] == "j.HK"
+    assert "Aerial Tatsumaki Senpu-kyaku" not in nodes                             # air specials: no
     edges = combo_gen.static_edges(nodes, comm)
     assert ("~", "Chin Buster", "target") in edges["Standing Medium Punch"]
     assert (">", combo_gen.DR, "cancel") in edges["Standing Heavy Punch"]
@@ -232,6 +242,8 @@ def test_generator_uses_the_whole_catalogued_move_list():
     texts = [r["route"] for r in gen]
     assert any("DRC ~" in t for t in texts) and any("236236P" in t for t in texts)
     assert any(" ~ 6" in t for t in texts)                       # Jinrai follow-ups are used
+    jumps = [r for r in gen if r["route"].startswith(("j.", "nj."))]
+    assert jumps and all(cl.plan_route(r, cap, cat)["steps"][1]["trigger"] == "air" for r in jumps)
     assert {r["position"] for r in gen} == {"Anywhere", "Corner"}
     known = {tuple(st.get("name") for st in c["steps"]) for c in comm}
     assert not any(tuple(st.get("name") for st in r["steps"]) in known for r in gen)
@@ -281,3 +293,95 @@ def test_first_hit_blocked_means_wrong_dummy_setting():
     sim.guard_all = True
     res = _run(sim, _steps(MOVES), {})
     assert res["fail"]["kind"] == "first_blocked"
+
+
+def _line(t, a, f, y=0.0, d=DUMMY_IDLE, hs=0, stun=0, hp=10000, block=0):
+    return {"stage_timer": t, "p1": {"action_id": a, "action_frame": f, "hitstop": 0, "y": y, "x": 0.0},
+            "p2": {"action_id": d, "hitstun": stun, "hitstop": hs, "blockstun": block, "hp": hp, "x": 0.8}}
+
+
+def test_jump_in_is_timed_from_the_fall_and_the_landing_link_waits_for_recovery():
+    """User, 0.11.3: jump-in starters are tested. j.HP (9F) is pressed while falling so it hits just before
+    landing; the landing 2HP is never pressed to arrive before landing + 3 frames of landing recovery."""
+    steps = [{"name": "jump", "system": "jump", "sequence": "9@3", "prefix": 0, "trigger": "first",
+              "allow_movement": True, "hitting": False, "min_offset": 0},
+             {"name": "j.HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "air", "startup": 9, "air": True,
+              "landing": 3, "hitting": True, "min_offset": cl.NO_FLOOR},
+             {"name": "2HP", "sequence": "2@2 2+HP@3", "prefix": 2, "trigger": "landing", "hitting": True,
+              "min_offset": -cl.JITTER}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, {37})
+    sent, hit_at, start_air, start_2hp = {}, None, None, None
+    y = lambda t: max(0.0, 0.2 * (t - 4) - 0.005 * (t - 4) ** 2) if t > 4 else 0.0   # airborne t 5..43
+    for t in range(1, 80):
+        air_id = 652 if start_air is not None and t >= start_air else 37
+        a = NEUTRAL if t <= 1 else air_id if 1 < t < 44 else (626 if start_2hp and t >= start_2hp else 5)
+        hp = 9200 if hit_at and t >= hit_at else 10000
+        hs = 8 if hit_at and hit_at <= t < hit_at + 8 else 0
+        react = REACT if hit_at and t >= hit_at else DUMMY_IDLE
+        k = run.feed(_line(t, a, 0, y(t), react, hs, 20 if hit_at else 0, hp))
+        if k is not None:
+            run.sent(k)
+            sent[k] = t
+            if k == 1:
+                start_air = t + 4
+                hit_at = start_air + 8
+            if k == 2:
+                start_2hp = t + 4 + 2
+        if run.done:
+            break
+    assert sent[0] == 1 and 25 < sent[1] < 44                  # pressed while falling
+    assert hit_at < 44                                           # ... so it hits before landing
+    land_tick = 44
+    assert sent[2] + 4 + 2 >= land_tick + 3 - cl.JITTER         # never before landing + recovery
+
+
+def test_route_ending_in_a_super_only_needs_the_super_to_connect():
+    """User, 0.11.3: a super ending passes as soon as the super connects; the cinematic (where the dummy's
+    state is unusual) is not judged."""
+    steps = [{"name": "5HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "first", "startup": 10, "total": 31,
+              "hitting": True, "min_offset": 0},
+             {"name": "SA3", "sequence": "2@3 3@3 6@3 2@3 3@3 6+HP@3", "prefix": 15, "trigger": "contact",
+              "startup": 7, "hitting": True, "super_art": True, "min_offset": -3}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    assert run.feed(_line(1, NEUTRAL, 0)) == 0
+    run.sent(0)
+    run.feed(_line(2, 606, 0))
+    run.feed(_line(11, 606, 9, d=REACT, hs=10, stun=20, hp=9200))      # 5HP hits
+    k = run.feed(_line(12, 606, 9, d=REACT, hs=9, stun=20, hp=9200))
+    assert k == 1
+    run.sent(1)
+    run.feed(_line(30, 1215, 0, d=REACT, stun=10, hp=9200))
+    run.feed(_line(36, 1215, 6, d=REACT, hs=12, stun=10, hp=8800))     # the super connects
+    assert run.done and run.super_connected == 36
+    run.observe(_line(200, 1217, 150, d=DUMMY_IDLE, hp=5200))           # cinematic damage still counted
+    res = run.result()
+    assert res["success"] and res["damage"] == 4800
+
+
+def test_super_without_a_cinematic_and_moves_after_a_super():
+    """User, 0.11.3: some supers have no cinematic (projectile supers, e.g. Shinku Hadoken). Ending a
+    route, it passes on connect like any super; in the middle of a route, the next move is timed and
+    checked like any other step (here a link after the super's measured total)."""
+    sa = {"name": "SA1", "sequence": "2@3 3@3 6@3 2@3 3@3 6+HP@3", "prefix": 15, "trigger": "contact",
+          "startup": 9, "total": 60, "hitting": True, "super_art": True, "min_offset": -3}
+    first = {"name": "2MP", "sequence": "2+MP@3", "prefix": 0, "trigger": "first", "startup": 6, "total": 22,
+             "hitting": True, "min_offset": 0}
+    # ending the route: done at the first super hit, the dummy simply stays in hit reaction (no cinematic)
+    run = cl.ComboRun([first, sa], {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(2, 623, 0)); run.feed(_line(7, 623, 5, d=REACT, hs=8, stun=20, hp=9400))
+    k = run.feed(_line(8, 623, 5, d=REACT, hs=7, stun=20, hp=9400)); run.sent(k)
+    run.feed(_line(20, 1200, 0, d=REACT, stun=10, hp=9400))
+    run.feed(_line(28, 1200, 8, d=REACT, hs=6, stun=30, hp=9000))
+    assert run.done and run.result()["success"]
+    # in the middle: a link after it waits for the super's recovery (frame 60), not its hit
+    link = {"name": "623HP", "sequence": "6@3 2@3 3+HP@3", "prefix": 6, "trigger": "own_frame", "at": 60,
+            "startup": 7, "hitting": True, "min_offset": -1}
+    run = cl.ComboRun([first, sa, link], {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(2, 623, 0)); run.feed(_line(7, 623, 5, d=REACT, hs=8, stun=20, hp=9400))
+    k = run.feed(_line(8, 623, 5, d=REACT, hs=7, stun=20, hp=9400)); run.sent(k)
+    run.feed(_line(20, 1200, 0, d=REACT, stun=10, hp=9400))
+    assert run.feed(_line(28, 1200, 8, d=REACT, hs=6, stun=30, hp=9000)) is None and not run.done
+    assert run.feed(_line(40, 1200, 40, d=REACT, stun=30, hp=9000)) is None    # far too early
+    assert run.feed(_line(50, 1200, 50, d=REACT, stun=30, hp=9000)) == 2       # 60 - 4 lead - 6 motion

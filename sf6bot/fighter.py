@@ -405,6 +405,39 @@ def _new_match_summary(me_key: str) -> dict:
             "note": "scripted rules (configs/fighter/ryu.yaml), not a learned policy"}
 
 
+FIGHT_NEUTRAL = set(range(0, 33))        # MEASURED: idle / walk / crouch ids < 33 for Ryu and Ken (fights)
+FIGHT_MOVEMENT = set(range(33, 41))      # jump ids 34-40 (fights)
+
+
+def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
+    """{move name: combo-lab plan} for the config's moves with a `route` (0.11.3): those are performed
+    from the game's clock, each input no earlier than the move can come out (combo_lab.perform_route).
+    Needs the character's Capcom frame data (menu F); the catalog (menu C) adds measured totals."""
+    from . import framedata as fd
+    from .combo_lab import plan_route
+    from .combos import resolve
+    capcom = fd.load(character, ds_root / "framedata")
+    if not capcom:
+        return {}
+    catalog = None
+    p = ds_root / "catalog" / f"{character}_movelist.json"
+    if p.exists():
+        try:
+            catalog = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError:
+            catalog = None
+    out: dict = {}
+    entries = list((fcfg.get("moves") or {}).values()) + list((fcfg.get("punish") or {}).get("options") or [])
+    for m in entries:
+        if not m.get("route"):
+            continue
+        r = resolve(m["route"], capcom["moves"])
+        plan = plan_route({"route": m["route"], **r}, capcom, catalog)
+        if not plan["unsupported"]:
+            out[m["name"]] = plan
+    return out
+
+
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches: int | None = 1,
               panel=None) -> dict:
     """Play matches as `player` until `matches` are done, `seconds` pass or F8.
@@ -432,6 +465,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
     summary = _new_match_summary(me_key)
     tracker = EpisodeTracker(self_index=player)
     fighter = None
+    plans: dict = {}
     self_moves: dict = {}
     pending: list = []   # (rule, t_sent, opp_hp_before) -> did it hit within 1.0 s?
     match_end_t = None
@@ -548,6 +582,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 summary["opponent_catalog"] = label or False
                 fighter = ScriptedFighter(fcfg, opp_moves)
                 self_moves, _ = opponent_moves(summary["character"], ds_root, fcfg)
+                plans = route_plans(fcfg, summary["character"], ds_root)
+                summary["routes_on_game_clock"] = sorted(plans)
                 try:
                     from .game_state import game_build
                     now = game_build(cfg)
@@ -610,6 +646,21 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 def urgent():
                     latest = reader.latest()
                     return fighter.urgent(latest.raw, player) if latest is not None else None
+                if d.name in plans:
+                    # combos run on the game's clock: each input no earlier than the move can come out;
+                    # a block of the first hit stops the rest (combo_lab.perform_route)
+                    from .combo_lab import perform_route
+                    res = perform_route(sess, reader, runner, plans[d.name]["steps"], {}, FIGHT_NEUTRAL,
+                                        FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=4.0,
+                                        abort=urgent if d.rule.startswith("neutral:") else None)
+                    c.apply(InputState(), tag="fighter_route_end")
+                    rk = "routes_completed" if res.get("success") else "routes_stopped"
+                    summary.setdefault(rk, {})
+                    why = d.name if res.get("success") else f"{d.name}: {(res.get('fail') or {}).get('kind') or res.get('aborted')}"
+                    summary[rk][why] = summary[rk].get(why, 0) + 1
+                    if res.get("aborted"):
+                        summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
+                    continue
                 _, ok = runner.run(parse_sequence(d.seq, d.name), stop_event=sess.stop_event,
                                    abort=urgent if d.rule.startswith("neutral:") else None)
                 c.apply(InputState(), tag="fighter_seq_end")

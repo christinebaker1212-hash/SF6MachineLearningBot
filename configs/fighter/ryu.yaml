@@ -31,9 +31,11 @@ punish:
   # on-block advantage (attacker) at or below the threshold -> that punish. Needs a catalog of the
   # OPPONENT's moves (datasets/catalog/<Opponent>_movelist.json); without one, no punishes.
   options:
-    - {max_adv: -10, name: "5HP > 623HP", seq: "5+HP@3 5@8 6@2 2@2 3+HP@3"}
+    # `route`: performed by the combo lab's executor (0.11.3): every input timed from the game's own
+    # clock, never before the move can come out. `seq` (wall-clock) is the fallback without Capcom data.
+    - {max_adv: -10, name: "5HP > 623HP", route: "5HP > 623HP", seq: "5+HP@3 5@8 6@2 2@2 3+HP@3"}
     - {max_adv: -7,  name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
-    - {max_adv: -4,  name: "5LP ~ 2LP ~ 5LP", seq: "5+LP@3 5@7 2+LP@3 5@7 5+LP@3"}
+    - {max_adv: -4,  name: "5LP ~ 2LP ~ 5LP", route: "5LP ~ 2LP ~ 5LP", seq: "5+LP@3 5@7 2+LP@3 5@7 5+LP@3"}
 # Opponents without a catalog: ids from the inferred move map (menu X, datasets/move_maps/), only at
 # this confidence or better. Capcom's on-block value + margin is used, so -4 on Capcom's page is
 # treated as -2 (no punish) and -12 as -10: punishes only where they have room to spare.
@@ -70,8 +72,8 @@ attack_id_min: 450     # heuristic: opponent action ids >= this are attacks (Ryu
 moves:
   hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}
   hadoken_hp: {name: "H Hadoken", seq: "2@3 3@3 6+HP@3"}
-  low_forward_fireball: {name: "2MK > 236MP", seq: "2+MK@3 2@6 3@3 6+MP@3"}   # SuperCombo: true blockstring, DI-safe
-  light_chain: {name: "2LK ~ 2LP ~ 5LP", seq: "2+LK@3 2@7 2+LP@3 5@7 5+LP@3"}
+  low_forward_fireball: {name: "2MK > 236MP", route: "2MK > 236MP", seq: "2+MK@3 2@6 3@3 6+MP@3"}   # SuperCombo: true blockstring, DI-safe
+  light_chain: {name: "2LK ~ 2LP ~ 5LP", route: "2LK ~ 2LP ~ 5LP", seq: "2+LK@3 2@7 2+LP@3 5@7 5+LP@3"}
   standing_hp: {name: "5HP", seq: "5+HP@3"}
   throw: {name: "Throw", seq: "5+LP+LK@3"}
   throw_tech: {name: "Throw tech", seq: "5+LP+LK@3"}
