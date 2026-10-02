@@ -426,6 +426,8 @@ def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
             catalog = json.loads(p.read_text(encoding="utf-8"))
         except ValueError:
             catalog = None
+    from .combo_lab import is_true, load_lab
+    lab = load_lab(ds_root, character).get("routes", {})
     out: dict = {}
     entries = list((fcfg.get("moves") or {}).values()) + list((fcfg.get("punish") or {}).get("options") or [])
     for m in entries:
@@ -434,6 +436,11 @@ def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
         r = resolve(m["route"], capcom["moves"])
         plan = plan_route({"route": m["route"], **r}, capcom, catalog)
         if not plan["unsupported"]:
+            # a true combo the lab proved: replay its recorded send points exactly (0.11.5)
+            entry = lab.get(f"midscreen | {m['route']}") or {}
+            rec = entry.get("recorded_timing") if is_true(entry) else None
+            if rec and len(rec.get("steps") or []) == len(plan["steps"]):
+                plan["recorded_timing"], plan["lead"] = rec["steps"], rec.get("lead")
             out[m["name"]] = plan
     return out
 
@@ -650,9 +657,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                     # combos run on the game's clock: each input no earlier than the move can come out;
                     # a block of the first hit stops the rest (combo_lab.perform_route)
                     from .combo_lab import perform_route
-                    res = perform_route(sess, reader, runner, plans[d.name]["steps"], {}, FIGHT_NEUTRAL,
+                    pl = plans[d.name]
+                    res = perform_route(sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
                                         FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=4.0,
-                                        abort=urgent if d.rule.startswith("neutral:") else None)
+                                        abort=urgent if d.rule.startswith("neutral:") else None,
+                                        lead=pl.get("lead") or 4, fixed=pl.get("recorded_timing"))
                     c.apply(InputState(), tag="fighter_route_end")
                     rk = "routes_completed" if res.get("success") else "routes_stopped"
                     summary.setdefault(rk, {})

@@ -423,3 +423,32 @@ def test_jump_in_hitstop_does_not_fake_a_landing():
     frozen = [run._ticks_to_land({"y": y(25), "hitstop": h}, 25 + k) for k, h in enumerate(range(10, 0, -1))]
     assert abs(est[-1] - 15) <= 1.5
     assert all(f == est[-1] for f in frozen)        # unchanged through hitstop, not ~0
+
+
+def test_first_success_is_recorded_and_replayed_exactly():
+    """User, 0.11.5: once a combo succeeds cleanly, record that exact state and repeat it unchanged. The
+    replay sends every input at the recorded point even if the input-delay estimate has moved since."""
+    steps = _steps(MOVES)
+    first = _run(Sim(MOVES, lead=4), steps, {})
+    assert first["success"]
+    rec = cl.recorded_timing(first)
+    assert rec[1]["prev_frame"] is not None and rec[2]["after_prev_start"] is not None
+
+    def sends(lead_estimate, fixed):
+        sim = Sim(MOVES, lead=4)
+        run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), lead=lead_estimate, fixed=fixed)
+        out = []
+        for _ in range(300):
+            line = sim.tick()
+            k = run.feed(line)
+            if k is not None:
+                run.sent(k)
+                out.append(sim.t)
+                sim.send(k, steps[k]["prefix"])
+            if run.done:
+                break
+        return out, run.result()
+    base, _ = sends(4, None)
+    moved, _ = sends(6, None)                    # without the recording, a new estimate moves the presses
+    replay, res = sends(6, rec)                  # with it, the presses are exactly the recorded ones
+    assert moved != base and replay == base and res["success"]

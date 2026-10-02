@@ -321,8 +321,12 @@ class ComboRun:
     The caller sends it and reports back with `sent()`. Bot = p1, dummy = p2."""
 
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
-                 movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None):
+                 movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
+                 fixed: list | None = None):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        # `fixed`: the exact send points recorded from this route's first clean success (recorded_timing).
+        # They are replayed as they are, with no offsets, floors or input-delay estimate involved.
+        self.fixed = fixed
         self.me, self.op = me, op            # the fighter can be P2
         self.bot_y = None                    # recent (y, tick) of the bot: jump-in timing
         self.gravity = gravity               # per tick^2 (negative), measured from the bot's jump
@@ -496,6 +500,19 @@ class ComboRun:
         if pr["start"] is None:
             return None
         trig, off = st["trigger"], self._off(n)
+        fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
+        if fx:
+            # replay the recorded success exactly (user, 0.11.5: "record that exact state and repeat it")
+            if trig in ("air", "landing") and fx.get("land") is not None:
+                if trig == "landing" and (num(p1.get("y")) or 0.0) > 0.01 and pr["contact"] is None:
+                    return None
+                if land is None:
+                    return n if trig == "landing" and (num(p1.get("y")) or 0.0) <= 0.01 else None
+                return n if land <= fx["land"] else None
+            if trig == "own_frame" and fx.get("prev_frame") is not None:
+                return n if pr["moving"] >= fx["prev_frame"] else None
+            if fx.get("after_prev_start") is not None:
+                return n if tick - pr["start"] >= fx["after_prev_start"] else None
         if trig == "air":
             # jump-in: the attack should hit JUMP_DEPTH frames before landing (deep), so press when
             # landing is (start-up - 1 + depth + input delay) frames away; later offsets = deeper
@@ -540,7 +557,9 @@ class ComboRun:
         p1 = (self.last or {}).get(self.me) or {}
         t = tick if tick is not None else (self.last or {}).get("stage_timer") or 0
         self.rt[k].update(sent=t, at_send=(p1.get("action_id"), p1.get("action_frame")),
-                          sent_moving_prev=self.rt[k - 1]["moving"] if k else None)
+                          sent_moving_prev=self.rt[k - 1]["moving"] if k else None,
+                          sent_after_prev_start=(t - self.rt[k - 1]["start"]) if k and self.rt[k - 1]["start"] is not None else None,
+                          land_at_send=self._land_est if self.steps[k].get("trigger") in ("air", "landing") else None)
         self.pending = k
 
     def _finish(self, kind, step):
@@ -584,7 +603,9 @@ class ComboRun:
                "dummy_x": [num(d0.get("x")), num(d1.get("x"))], "bot_x": [num(b0.get("x")), num(b1.get("x"))],
                "steps": [{"name": st.get("name"), "sent": r["sent"], "start": r["start"], "id": r["start_id"],
                           "contact": r["contact"], "lead_measured": r.get("lead_measured"),
-                          "offset": self._off(k)} for k, (st, r) in enumerate(zip(steps, self.rt))]}
+                          "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
+                          "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send")}
+                         for k, (st, r) in enumerate(zip(steps, self.rt))]}
         s0, s1 = side(b0, d0), side(b1, d1)
         out["side_switch"] = None if s0 is None or s1 is None else s0 != s1
         dx = out["dummy_x"]
@@ -811,6 +832,13 @@ def learn_jump(sess, reader, reset, direction: int = 9) -> dict:
     return {"travel": travel, "gravity": gravity, "air_frames": len(pts)}
 
 
+def recorded_timing(res: dict) -> list:
+    """The exact send point of every step of a successful attempt: the previous move's own frame (links,
+    follow-ups), frames after the previous move started (cancels, chains) or frames to landing (jump-ins)."""
+    return [{"prev_frame": s.get("prev_frame"), "after_prev_start": s.get("after_prev_start"), "land": s.get("land")}
+            if k else {} for k, s in enumerate(res.get("steps") or [])]
+
+
 def _lead(state: dict) -> int:
     """The input delay used for timing: the median of the measured delays (send -> move starts) of this
     run once there are 5, else the input-map measurement (4)."""
@@ -830,6 +858,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     offsets: dict = {}
     tried: dict = {}
     found = None            # offsets of the first success; then `confirm` repeats at them
+    found_lead = None
+    recorded = None         # exact send points of the first success, replayed unchanged
     confirms_left = confirm
     jump_variant = 0
     while not sess.stop_event.is_set():
@@ -854,10 +884,12 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             break
         fm_before = reader.last_fm
         jump = state.get(f"jump_{steps[0]['sequence'][0]}") if plan.get("jump_in") else None
-        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=_lead(state),
-                       gravity=(jump or {}).get("gravity"))
+        lead_now = found_lead if found is not None else _lead(state)
+        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead_now,
+                       gravity=(jump or {}).get("gravity"), fixed=recorded)
         res["position_setup"] = how
-        res["lead_used"] = _lead(state)
+        res["lead_used"] = lead_now
+        res["replayed_recorded_timing"] = recorded is not None
         # calibrate only on presses whose move can start as soon as the input arrives (the first move, and
         # links). A cancel is sent before contact and waits for it: its 17-22 frames (0.11.3 run) are not
         # input delay.
@@ -885,7 +917,10 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             if confirms_left <= 0:
                 break
         elif res["success"]:
-            found = dict(offsets)
+            # the first clean success (no block, no whiff, every move out) is recorded EXACTLY and repeated
+            # unchanged (user, 0.11.5): same send points, same input delay, same jump distance
+            found, found_lead = dict(offsets), lead_now
+            recorded = recorded_timing(res)
             if confirm <= 0:
                 break
         else:
@@ -900,6 +935,12 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 break
             offsets = nxt
     summ = _summary(attempts, plan, combo)
+    if recorded is not None:
+        replays = [a for a in attempts if a.get("replayed_recorded_timing")]
+        summ["recorded_timing"] = {"steps": recorded, "lead": found_lead, "offsets": {str(k): v for k, v in (found or {}).items()},
+                                   "jump_distance_extra": next((a.get("jump_distance_extra") for a in attempts if a["success"]), None),
+                                   "replays": len(replays), "replay_successes": sum(a["success"] for a in replays)}
+        summ["success_rate_final_timing"] = round((1 + sum(a["success"] for a in replays)) / (1 + len(replays)), 2)
     summ["guard"] = guard
     summ["true_combo"] = True if (summ["verified"] and guard == "after_first_hit") else (
         False if (summ.get("failed_at") or {}).get("kind") == "blocked" else None)
@@ -1048,11 +1089,12 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
-                  gravity: float | None = None) -> dict:
+                  gravity: float | None = None, fixed: list | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route."""
-    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity)
+    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
+                   fixed=fixed)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout
@@ -1104,9 +1146,9 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
 
 
 def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
-             gravity: float | None = None) -> dict:
+             gravity: float | None = None, fixed: list | None = None) -> dict:
     return perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead,
-                         gravity=gravity)
+                         gravity=gravity, fixed=fixed)
 
 
 def report_md(character: str, results: dict, skipped: dict, setup_error: str | None = None) -> str:

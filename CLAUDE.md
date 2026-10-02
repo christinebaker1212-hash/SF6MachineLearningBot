@@ -1346,6 +1346,20 @@ that don't cause a cinematic"; position resets by holding a direction.
 - Generator: community steps get the same treatment (KK > 623P → the QD-Shoryuken node; 214LK > 623MP →
   a link).
 
+## 0.11.5: a clean first success is recorded and replayed exactly
+- User (2026-10-02): "when a combo is successful for the first time and it doesn't get blocked, it doesn't
+  whiff, and no steps are missed, the combo recorder should record that exact state and repeat it. It
+  shouldn't change it."
+- Before: the confirm repeats kept the offsets, but the input-delay estimate was recalibrated after every
+  attempt, so the repeats could press at different frames than the success.
+- Now the first clean success stores `recorded_timing`: for every step the exact send point (the previous
+  move's own frame for links / follow-ups, frames after the previous move started for cancels / chains,
+  frames to landing for jump-ins), plus the input delay, offsets and jump distance used. The confirm
+  attempts replay those points unchanged (`ComboRun(fixed=...)`); nothing is searched or recalibrated
+  after a success. `recorded_timing.replays / replay_successes` give the repeat rate.
+- The fighter replays a route's recorded timing when the lab proved the same route a true combo.
+- Test: a success replayed with a different input-delay estimate sends every input on the same frames.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
