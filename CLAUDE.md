@@ -650,6 +650,33 @@ The safety tests are part of acceptance. During a run:
 - Test fixtures: `tests/data/capcom_ryu_frame_table.html.gz` (the real table) and
   `tests/data/catalog_ryu_0.3.2.json.gz` (the user's catalog, raw meter fields stripped).
 
+## Move-list catalog (0.4.0)
+- With Capcom data imported (menu F), the catalog (C/B) performs **the character's real move
+  list** in Capcom's order, not the generic inputs. `--generic` forces the old list.
+- `framedata.to_sequence` converts Capcom inputs to our notation:
+  - motions at 3F per step, 2F for supers
+  - command normals hold the direction 2F first
+  - OD `P+P` → LP+MP, `K+K` → LK+MK; a lone generic P/K uses the heavy button
+  - charge `[4]` → hold 50F (SF6 charge ~45F is a community figure, not measured)
+  - `360` = 6321478 at 2F each, ending up, so the button lands in pre-jump; `720` = two circles
+  - air charge (Blanka) = charge, back-jump, release in the air
+  - `22` puts a neutral between the presses; `5|6` / `LP|MP` use the first option
+- **Skipped, with a reason** (stored as `skipped_capcom_rows`):
+  - stance or follow-up setups ("During Prowler Stance", "During Shadow Rise", …)
+  - target combos `>`, holds, alternatives `/`
+  - variants: `[Denjin]`/`[Boosted]` names, CA (needs ≤25% HP), SA Lv2/Lv3
+  - dashes and runs
+  - parry variants and Drive Reversal (needs blocking or knockdown)
+  - duplicate inputs
+- All 31 characters convert: 1,513 moves performed, about 49 per character (Ryu 53).
+- Output: `datasets/catalog/<Character>_movelist.json`, keyed by the Capcom move name, with
+  `input` and `sequence`. Command grabs (360 + near) count as hits on a guarding dummy, like
+  throws.
+- `compare_catalog` matches move-list catalogs to Capcom by name. Air moves compare startup only.
+- **MOCK-tested only** (simulated exporter + the real Ryu page). Untested in game:
+  - charge timing, 360/720 execution, air-charge setup
+  - whether 2F motion steps are reliable for every special
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

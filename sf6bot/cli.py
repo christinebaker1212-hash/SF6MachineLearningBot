@@ -185,7 +185,7 @@ def cmd_dataset_from_run(args, cfg):
 def cmd_catalog(args, cfg):
     from .catalog import run_catalog
     with _session(args, cfg, f"catalog_guard_{args.guard}") as s:
-        run_catalog(s, cfg, args.guard, args.only.split(",") if args.only else None)
+        run_catalog(s, cfg, args.guard, args.only.split(",") if args.only else None, generic=args.generic)
     _print_report(s)
 
 
@@ -329,6 +329,8 @@ def main(argv=None):
     p.add_argument("--guard", choices=["none", "all"], required=True,
                    help="what the Training Mode dummy is set to: none = gets hit, all = blocks everything")
     p.add_argument("--only", default="", help="comma-separated move names, e.g. 5LP,2MK")
+    p.add_argument("--generic", action="store_true",
+                   help="use the generic inputs even if Capcom frame data was imported (menu F)")
     p.set_defaults(fn=cmd_catalog)
 
     p = sub.add_parser("framedata-import",

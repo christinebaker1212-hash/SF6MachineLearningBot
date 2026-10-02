@@ -84,3 +84,23 @@ def test_charge_and_circle_inputs():
     assert z["L Screw Piledriver"]["input"] == "(When near opponent) 360+LP"
     assert z["SA3 Bolshoi Storm Buster"]["input"] == "(When near opponent) 720+P"
     assert all("[key" not in m["input"] for m in list(g.values()) + list(z.values()))
+
+
+def test_capcom_inputs_to_sequences():
+    from sf6bot.framedata import catalog_moves, to_sequence
+    by_name, moves = _ryu()
+    seq = lambda n: to_sequence(by_name[n])[0]
+    assert seq("L Hadoken") == "2@3 3@3 6+LP@3"
+    assert seq("OD Shoryuken") == "6@3 2@3 3+LP+MP@3"
+    assert seq("Solar Plexus Strike") == "6@2 6+HP@3"
+    assert seq("Denjin Charge") == "2@3 5@2 2+HP@3"
+    assert seq("Aerial Tatsumaki Senpu-kyaku") == "9@3 5@14 2@3 1@3 4+HK@3"
+    assert seq("Shoulder Throw") == "5+LP+LK@3"
+    assert to_sequence(by_name["High Double Strike"])[0] is None   # target combo: not yet
+    assert to_sequence(by_name["CA Shin Shoryuken"])[0] is None
+    todo, skipped = catalog_moves({"moves": moves})
+    assert len(todo) == 53 and len({t["sequence"] for t in todo}) == 53
+    g = _moves("guile")
+    assert to_sequence(g["L Sonic Boom"])[0] == "4@50 6+LP@3"
+    z = _moves("zangief")
+    assert to_sequence(z["L Screw Piledriver"])[0].endswith("8+LP@3")

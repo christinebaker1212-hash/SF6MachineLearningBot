@@ -171,7 +171,26 @@ class _Collector:
         return out
 
 
-def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = None) -> Path | None:
+def _move_plan(name: str, cfg: dict, generic: bool):
+    """(moves, skipped, source). Moves are dicts: name, sequence, approach, long, throw, input.
+
+    With Capcom frame data imported for this character (menu F), the plan is the character's real
+    move list in Capcom's order; otherwise the generic inputs in MOVES.
+    """
+    from . import framedata as fd
+    data = None if generic else fd.load(name, Path(cfg.get("datasets", {}).get("root", "datasets")) / "framedata")
+    if data:
+        todo, skipped = fd.catalog_moves(data)
+        moves = [{"name": t["name"], "sequence": t["sequence"], "approach": not t["jump"],
+                  "long": t["long"], "throw": t["throw"], "input": t["input"]} for t in todo]
+        return moves, skipped, "capcom_movelist"
+    moves = [{"name": n, "sequence": q, "approach": a, "long": n.startswith(LONG_WINDOW_PREFIXES),
+              "throw": n == "throw", "input": None} for n, q, a in MOVES]
+    return moves, [], "generic"
+
+
+def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = None,
+                generic: bool = False) -> Path | None:
     name, chara = "Unknown", None
     game_dir = find_sf6_dir(cfg)
     path = locate_state_file(game_dir) if game_dir else None
@@ -184,6 +203,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
     reset_key = cfg.get("training", {}).get("reset_key", "SLASH")
     runner = SequenceRunner(c, sink=sess.recorder.event)
     results: dict = {}
+    plan, skipped, source = [], [], "generic"
     try:
         st = reader.wait_newer(-1, 2.0)
         if st is None or not st.ready:
@@ -194,7 +214,13 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         if chara is None:
             print("Character id unknown (it is read at match start): re-enter Training Mode once after "
                   "restarting SF6 so the exporter sees the character select.")
-        print(f"Cataloguing P1 = {name} (id {chara}), dummy guard = {guard}. {len(MOVES)} moves, ~4 s each.")
+        plan, skipped, source = _move_plan(name, cfg, generic)
+        if source == "capcom_movelist":
+            print(f"Using {name}'s real move list from Capcom's frame data: {len(plan)} moves "
+                  f"({len(skipped)} rows skipped: stances, follow-ups, variants, dashes).")
+        else:
+            print("No Capcom frame data for this character (menu F) - using the generic inputs.")
+        print(f"Cataloguing P1 = {name} (id {chara}), dummy guard = {guard}. {len(plan)} moves, ~4 s each.")
         if not sess.start_inputs():
             return None
 
@@ -238,7 +264,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         print(f"  neutral ids: bot {sorted(x for x in neutral_a if x is not None)}, "
               f"dummy {sorted(x for x in neutral_d if x is not None)}; movement ids {sorted(movement)}")
         first_ids: dict = {}
-        for mname, seq_text, approach in MOVES:
+        for mv in plan:
+            mname, seq_text, approach = mv["name"], mv["sequence"], mv["approach"]
             if only and mname not in only:
                 continue
             if sess.stop_event.is_set():
@@ -267,7 +294,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             import threading
             post: list = []
             # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
-            window = 9.0 if mname.startswith(LONG_WINDOW_PREFIXES) else 2.6
+            window = 9.0 if mv["long"] else 2.6
             th = threading.Thread(target=lambda: post.extend(col.collect(window)))
             th.start()
             timings, ok = runner.run(seq, stop_event=sess.stop_event)
@@ -282,7 +309,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             fmp = parse_frame_meter(fm_raw)
             updated = fm_raw is not None and fm_raw != fm_before
             first = move_ids[0] if move_ids else None
-            if mname == "throw":
+            if mv["throw"]:
                 # The LK of LP+LK can register a frame early: ids [611 (5LK), 715 (throw), ...].
                 # Use the first id that is not an already-catalogued normal.
                 first = next((a for a in move_ids if a not in first_ids), first)
@@ -292,7 +319,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 r.update(startup=fmp.get("startup"), total=fmp.get("total"), advantage=fmp.get("advantage"),
                          opponent_advantage=fmp.get("opponent_advantage"),
                          main_gauge_raw=fmp.get("main_gauge_raw"))
-                is_throw = mname == "throw"
+                is_throw = mv["throw"]  # throws and command grabs connect on a guarding dummy too
                 r["result"] = ("whiff" if not fmp.get("connected") else
                                "hit" if (guard == "none" or is_throw) else "block")
             else:
@@ -302,6 +329,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             r["own_measure"] = {k: own.get(k) for k in ("result", "startup", "advantage", "total_observed",
                                                         "game_total", "note")}
             r["own_measure"]["reliability"] = "low: wall-clock/stage_timer heuristics; use frame meter values"
+            if mv["input"]:
+                r["input"], r["sequence"] = mv["input"], seq_text
             fid = r["move_id"]
             if fid is None:
                 r["note"] = "no new action id: input not recognised as a move for this character"
@@ -334,8 +363,12 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         reader.stop()
     root = Path(cfg.get("datasets", {}).get("root", "datasets")) / "catalog"
     root.mkdir(parents=True, exist_ok=True)
-    out = root / f"{name.replace(' ', '').replace('.', '')}.json"
+    suffix = "_movelist" if source == "capcom_movelist" else ""
+    out = root / f"{name.replace(' ', '').replace('.', '')}{suffix}.json"
     data = json.loads(out.read_text()) if out.exists() else {"character": name, "id": chara, "moves": {}}
+    data["source"] = source
+    if skipped:
+        data["skipped_capcom_rows"] = skipped
     for k, v in results.items():
         data["moves"].setdefault(k, {})[f"guard_{guard}"] = v
     data["caveats"] = __doc__.split("Caveats (stated in the output too):")[1].strip()

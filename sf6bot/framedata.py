@@ -338,8 +338,9 @@ def compare_catalog(framedata: dict, catalog: dict) -> list[dict]:
     """
     rows, seen = [], set()
     cmoves = catalog.get("moves", {})
+    by_name = catalog.get("source") == "capcom_movelist"  # keys are Capcom move names
     for mv in framedata["moves"]:
-        key = catalog_key(mv)
+        key = mv["name"] if by_name else catalog_key(mv)
         if not key or key in seen or key not in cmoves:
             continue
         seen.add(key)
@@ -354,7 +355,8 @@ def compare_catalog(framedata: dict, catalog: dict) -> list[dict]:
         }
         capcom = {"startup": mv["startup_n"], "total": mv["total_n"], "on_block": mv["on_block_n"],
                   "on_hit": None if mv["on_hit_knockdown"] else mv["on_hit_n"]}
-        fields = ("startup",) if key.startswith("j.") else ("startup", "total", "on_block", "on_hit")
+        air = key.startswith("j.") or "jump" in mv["input"]
+        fields = ("startup",) if air else ("startup", "total", "on_block", "on_hit")
         for f in fields:
             a, b = capcom[f], game[f]
             if a is None or b is None:
@@ -364,7 +366,7 @@ def compare_catalog(framedata: dict, catalog: dict) -> list[dict]:
                          "game": b, "match": a == b, "same_as": same_as,
                          # Capcom lists the move but the catalog recorded another move: our input
                          # failed in that run, not a frame data disagreement.
-                         "catalog_input_failed": bool(same_as) and key[0] in "46"})
+                         "catalog_input_failed": bool(same_as) and (by_name or key[0] in "46")})
     return rows
 
 
@@ -377,3 +379,116 @@ def compare_report(rows: list[dict], character: str) -> str:
         why = " (catalog input came out as " + r["same_as"] + ")" if r["catalog_input_failed"] else ""
         out.append(f"- {r['move']} {r['field']}: Capcom {r['capcom']}, game {r['game']}{why}")
     return "\n".join(out)
+
+
+# --- Capcom input -> our timed sequence (for the move-list-driven catalog) ------------------
+
+# Qualifiers we can set up from neutral: a jump before the move. Everything else (stances,
+# follow-ups, low-HP Critical Arts, holds, parry/drive-rush states) is skipped with a reason.
+_JUMPS = {"During a jump": "8", "During a neutral jump": "8", "During a neutral or forward jump": "8",
+          "During a forward jump": "9"}
+_IGNORED_QUALIFIERS = {"When near opponent", "When close to a standing opponent"}  # catalog walks to contact anyway
+
+
+def _buttons(btns: list[str]) -> str:
+    """Capcom generic buttons -> concrete keys. P+P (OD) = LP+MP, K+K = LK+MK; a lone generic P/K
+    uses the heavy button (the catalog's supers did the same)."""
+    if btns in (["P", "P"],):
+        return "LP+MP"
+    if btns in (["K", "K"],):
+        return "LK+MK"
+    return "+".join({"P": "HP", "K": "HK"}.get(b, b) for b in btns)
+
+
+def _motion(dirs: str, btn: str, step: int) -> str:
+    """'236' + 'LP' -> '2@3 3@3 6+LP@3'. '[4]6' -> charge 50 frames then 6. '360' -> a full circle
+    ending upward (the button lands in the jump's pre-jump frames)."""
+    out: list[str] = []
+    i = 0
+    while i < len(dirs):
+        if dirs[i] == "[":
+            j = dirs.index("]", i)
+            out.append(f"{dirs[i + 1:j]}@50")  # charge time: ~45F in SF6 (community), 50 for margin
+            i = j + 1
+        elif dirs.startswith("720", i):
+            out += [f"{d}@2" for d in "632147896321478"]  # two circles, ending up
+            i += 3
+        elif dirs.startswith("360", i):
+            out += [f"{d}@2" for d in "6321478"]
+            i += 3
+        else:
+            if out and out[-1].split("@")[0] == dirs[i]:
+                out.append("5@2")  # '22': release between the two presses
+            out.append(f"{dirs[i]}@{step}")
+            i += 1
+    if not out:
+        return f"5+{btn}@3"
+    last = out[-1].split("@")[0]
+    out[-1] = f"{last}+{btn}@3"
+    if len(out) == 1 and last != "5":
+        out.insert(0, f"{last}@2")  # command normal: hold the direction 2F before the button
+    return " ".join(out)
+
+
+def to_sequence(move: dict) -> tuple[str | None, str]:
+    """Our sequence notation for a Capcom row, or (None, reason) if the catalog can't do it alone."""
+    name, inp = move["name"], move["input"]
+    if not inp or inp in ("-",) or "No input" in inp:
+        return None, "no input (triggered/automatic)"
+    if name.startswith(("[", "(")) or name.startswith("CA ") or re.search(r"Lv[23]", name):
+        return None, "variant (state/level/CA) of another row"
+    quals = re.findall(r"\(([^()]*)\)", inp)
+    rest = re.sub(r"\([^()]*\)", " ", inp).strip()
+    jump = None
+    for q in quals:
+        if q in _JUMPS:
+            jump = _JUMPS[q]
+        elif q not in _IGNORED_QUALIFIERS:
+            return None, f"needs setup: {q}"
+    if any(c in rest for c in ">/") or "Hold" in rest or "(" in rest:
+        return None, "follow-up / target combo / hold (not yet supported)"
+    rest = re.sub(r"(\d)\|\d", r"\1", rest)  # '5|6+LP+LK' -> '5+LP+LK' (first option)
+    rest = re.sub(r"^(\d) (?=[LMH][PK]$)", r"\1+", rest)  # Ingrid '4 MK' -> '4+MK'
+    rest = re.sub(r"\+(LP|MP|HP|LK|MK|HK|P|K)\|(LP|MP|HP|LK|MK|HK|P|K)$", r"+\1", rest)  # LP|MP -> LP
+    m = re.fullmatch(r"((?:\[\d\]|\d)*)\+?((?:LP|MP|HP|LK|MK|HK|P|K)(?:\+(?:LP|MP|HP|LK|MK|HK|P|K))*)", rest)
+    if not m:
+        if re.fullmatch(r"\d{2,}", rest):
+            return None, "movement (dash/run), not an attack"
+        return None, f"unparsed input {rest!r}"
+    dirs, btns = m.group(1), _buttons(m.group(2).split("+"))
+    if move["section"] == "Common Moves" and "Parry" in name:
+        return ("5+MP+MK@20", "") if name == "Drive Parry" else (None, "parry variant")
+    super_art = move["section"] == "Super Arts"
+    if jump and dirs.startswith("["):
+        # Air charge move (Blanka): charge on the ground, back-jump keeps the charge, release in air.
+        c = dirs[1]
+        back_jump = {"4": "7", "2": "1"}.get(c, "8")
+        return f"{c}@50 {back_jump}@3 {c}@11 " + _motion(dirs[3:], btns, 3), ""
+    seq = _motion(dirs, btns, 2 if super_art else 3)
+    if jump:
+        seq = f"{jump}@3 5@14 " + (seq if dirs else f"5+{btns}@3")
+    return seq, ""
+
+
+def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
+    """(moves to perform, skipped rows) for one character, in Capcom's order.
+
+    Rows with the same sequence are performed once; the later rows record `same_input_as`.
+    """
+    todo, skipped, by_seq = [], [], {}
+    for mv in framedata["moves"]:
+        seq, reason = to_sequence(mv)
+        if seq is None:
+            skipped.append({"name": mv["name"], "input": mv["input"], "reason": reason})
+            continue
+        if seq in by_seq:
+            skipped.append({"name": mv["name"], "input": mv["input"],
+                            "reason": f"same input as {by_seq[seq]}"})
+            continue
+        by_seq[seq] = mv["name"]
+        todo.append({"name": mv["name"], "input": mv["input"], "sequence": seq,
+                     "section": mv["section"], "jump": seq[0] in "89" and " 5@14 " in seq,
+                     "long": mv["section"] == "Super Arts",
+                     "throw": mv["section"] == "Throws" or "(When near opponent)" in mv["input"]
+                              and "360" in mv["input"]})
+    return todo, skipped

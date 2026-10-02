@@ -2,6 +2,7 @@
 mock input backend (walk, crouch, jab, jump, hit). Not the game; tests our logic only."""
 import json
 import threading
+from pathlib import Path
 
 from sf6bot import clock
 from sf6bot.session import Session
@@ -18,6 +19,7 @@ class SimExporter(threading.Thread):
         self.x1, self.x2, self.y, self.vy = -1.5, 1.5, 0.0, 0.0
         self.hp2, self.sup1, self.act, self.act_t, self.stun = 10000, 0, 0, 0, 0
         self.fm = None  # MOCK of exporter v5 frame meter (made-up numbers)
+        self.chara = None  # ESF id for p1 (exporter v4 `chara`), optional
 
     def run(self):
         f = open(self.path, "a")
@@ -54,8 +56,9 @@ class SimExporter(threading.Thread):
                 "hp": hp, "hp_max": 10000, "drive": 60000, "super": sup, "x": x, "y": y,
                 "facing_right": x < (self.x2 if x == self.x1 else self.x1), "action_id": act,
                 "pose": pose, "hitstun": stun}
+            p1x = {"chara": self.chara} if self.chara is not None else {}
             line = {"v": 2, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "fm": self.fm, "round": 1, "missing": [],
-                    "p1": p(self.x1, self.y, 10000, self.sup1, 2 if "S" in d else 0, self.act, 0),
+                    "p1": {**p(self.x1, self.y, 10000, self.sup1, 2 if "S" in d else 0, self.act, 0), **p1x},
                     "p2": p(self.x2, 0.0, self.hp2, 0, 0, 0, self.stun)}
             f.write(json.dumps(line) + "\n")
             f.flush()
@@ -204,3 +207,41 @@ def test_catalog_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     assert lp["move_id"] == 101 and lp["result"] == "whiff" and lp["startup"] == 5
     assert mk["move_id"] == 102 and mk["result"] == "hit" and mk["advantage"] == 2 and mk["damage"] == 600
     assert "SLASH" in {k for _, k, d in inp.log if d}   # training reset was pressed
+
+
+def test_catalog_uses_capcom_move_list(cfg, tmp_path, monkeypatch):
+    """MOCK: with Capcom frame data imported for Ryu (real page fixture), the catalog performs the
+    real move list, keyed by Capcom move name, and saves <Character>_movelist.json."""
+    import gzip
+    import sf6bot.catalog as cat
+    import sf6bot.session as sm
+    from sf6bot.framedata import parse_frame_page
+    from sf6bot.game_state import STATE_FILE
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    fdir = tmp_path / "datasets" / "framedata"
+    fdir.mkdir(parents=True)
+    html = gzip.open(Path(__file__).parent / "data" / "capcom_ryu_frame_table.html.gz", "rt",
+                     encoding="utf-8").read()
+    (fdir / "ryu.json").write_text(json.dumps({"slug": "ryu", "character": "Ryu",
+                                               "moves": parse_frame_page(html)}))
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(cat, "find_sf6_dir", lambda cfg: game)
+    cfg["datasets"] = {"root": str(tmp_path / "datasets")}
+    sim = SimExporter(game / STATE_FILE, inp)
+    sim.chara = 1  # Ryu
+    sim.start()
+    try:
+        with Session(cfg, "catalog_movelist_test", mock=True) as s:
+            out = cat.run_catalog(s, cfg, "none", only=["Standing Light Punch", "Crouching Medium Kick"])
+    finally:
+        sim.stop.set()
+    assert out.name == "Ryu_movelist.json"
+    data = json.loads(out.read_text())
+    assert data["source"] == "capcom_movelist" and data["skipped_capcom_rows"]
+    lp = data["moves"]["Standing Light Punch"]["guard_none"]
+    mk = data["moves"]["Crouching Medium Kick"]["guard_none"]
+    assert lp["input"] == "LP" and lp["move_id"] == 101
+    assert mk["sequence"] == "2@2 2+MK@3" and mk["result"] == "hit"

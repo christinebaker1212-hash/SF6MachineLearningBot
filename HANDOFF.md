@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.3.5**, REFramework exporter script **v5**, branch
-`claude/admiring-mccarthy-uyyay4`, 37 tests passing.*
+*State as of 2026-10-02: code version **0.4.0**, REFramework exporter script **v5**, branch
+`claude/admiring-mccarthy-uyyay4`, 39 tests passing.*
 
 ---
 
@@ -167,31 +167,38 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    - Next: drive the catalog from each character's real move list (`input` notation) instead of
      generic inputs; use the cancel column for combos.
 
-## 7. Recommended next steps (in order)
+## 7. Recommended next steps (in order) — the road to fights
 
-1. Process the results from §6: fix catalog issues, ingest the frame data, and settle 8×
-   recording.
-2. **Controlled-player identification** at round start: a tiny input probe, then see which
-   player's state responds. The bot isn't always p1; the user played as p2 vs CPU.
-3. **Gymnasium env** on the live game:
+The user asked (2026-10-02) how many more tests remain before the fights and "Amiibo" training.
+The agreed answer: three in-game checks before the bot fights the CPU, then data and training.
+
+1. **Move-list catalog, in game** (0.4.0, menus C then B). Check that charge, 360 and supers
+   come out. It also yields the action ids the fighting bot needs.
+2. **Controlled-player identification:** a tiny input probe at round start, then see which
+   player's state responds. The bot isn't always p1; the user played as p2 vs CPU. One short
+   user test.
+3. **Fight loop + Gymnasium env** on the live game:
    - real-time stepping on the stage_timer clock
+   - rounds and matches from the EpisodeTracker
    - Training Mode reset via `training.reset_key: SLASH` ("/")
-   - match resets via menus
-4. **Scripted reaction layer**, clearly labelled scripted:
-   - frame-perfect anti-air
-   - punish-on-block from catalog/frame data
-   - DI reaction
+   - match restarts via the rematch menu (screen reading or REFramework)
 
-   It doubles as the M3 baseline and as part of the hybrid plan.
-5. **Unattended replay batches:** screen-read the replay menus so the bot queues and records
-   replays itself, ideally at 8×. The user's time is the real data bottleneck.
-6. **Replay input-log discovery:** check whether the whole replay's inputs sit in memory at
-   load time. Inputs only; state still needs playback.
-7. **Behaviour cloning** on the replay datasets, with **splits by match/session, not by
-   frame**. Then evaluate vs CPU.
-8. Later: RL curriculum (M4), amiibo-style sparring vs the user, M5 evaluation.
-   - **Training compute:** the Ally X can run inference but is weak for training. Plan a
-     PC/cloud GPU and decide from measurements.
+   One user test: the bot plays a whole match vs CPU.
+4. **First fighter: a scripted, clearly labelled baseline.** It uses catalog/frame data for
+   punish-on-block, anti-air and DI reaction. This is the first real fights vs CPU, and it
+   doubles as the hybrid layer.
+5. **Behaviour cloning** from replays recorded at **1×** (8× drops frames), with splits by
+   match. The user's replay-recording time is the bottleneck.
+   - Evaluate vs CPU levels.
+6. **"Amiibo" training** (RL fine-tuning vs the user / Master Model Trainer) starts from the BC
+   policy.
+   - First decide the training compute: the Ally X can run inference but is weak for training.
+     Use measurements.
+7. Later:
+   - target-combo / stance / follow-up support in the catalog
+   - unattended replay batches (screen-read the replay menu)
+   - replay input-log discovery
+   - M5 evaluation
 
 ## 8. Codebase map (`sf6bot/`)
 
