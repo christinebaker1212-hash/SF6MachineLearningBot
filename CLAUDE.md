@@ -999,6 +999,24 @@ The safety tests are part of acceptance. During a run:
   - Tools (T, or M): setup R/F, data Y/X, checks G/I/W/O/9, older tests 1–8; PyTorch moved to Z
   - every old letter still works
 
+## 0.9.0 fights (user, 2026-10-02): CPU level 4 and 7 Ken, and the user (Ken) vs the bot
+- **CPU level 4: WON 2–0. CPU level 7: LOST 0–2** (R1 lost to an SA2 finish with Ken at 7.9% hp).
+  **vs the user: LOST 0–2**, R2 a perfect. All three recorded with 0–1 skipped frames
+  (`frames_by_source` almost all `tick`). Bot vs human (H, virtual pad) worked end to end.
+- User: "genuinely difficult to approach, but easily dispatched by overheads and mix-ups ... the
+  scripted responses are hurting it — it has absolutely no good punishes."
+- **Throw tech on reaction does not work:** throws seen/landed 3/3 (L4), 6/4 (L7), 2/1 (user), so 8
+  of 11 landed. The 5-frame start-up is shorter than seeing it plus 3–5 frames of input latency.
+  Throws have to be handled by prediction (delay tech, option selects, reads), not reaction.
+- **No punishes:** `opponent_catalog: false` in all three. The bot knows no Ken move ids, so it
+  can't tell a punishable move, an overhead or a low. It holds down-back by default, which loses to
+  every overhead.
+- The user asked for a plan toward decision-making "on the level of Daigo, Tokido, MenaRD": yomi,
+  match flow, its own combos, corner distance, throw loops, shimmies. Proposal (answered in chat,
+  HANDOFF §7): knowledge layer → generated punishes and combos verified in Training Mode →
+  decision points with equilibrium mixes plus an opponent model → value model and learning from
+  replays. Top-player decision-making stays an open research goal, not a promise.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
