@@ -4,22 +4,20 @@ The page is server-rendered: one <table> with section heading rows ("Normal Move
 Moves", ...) and one row per move with 15 cells. Each move's Classic input is drawn with
 controller icons, which are converted to our numpad + button notation (facing right).
 
-Fetched with the user's permission (2026-10-02). The page shows no patch date, so the fetch date
-and the site's Next.js build id are stored as provenance. The in-game frame meter stays
-authoritative for the patch installed on the user's PC.
+Scraping was authorised by the user (2026-10-02), but the site answers scripted requests with
+HTTP 403 (CloudFront), so pages are saved from the user's browser and imported here. The page
+shows no patch date, so the file date and the site's Next.js build id are stored as provenance.
+The in-game frame meter stays authoritative for the patch installed on the user's PC.
 """
 from __future__ import annotations
 
 import json
 import re
-import time
-import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
 BASE_URL = "https://www.streetfighter.com/6/{locale}/character/{slug}/frame"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) sf6bot-framedata"
 
 # Page slug -> name used in game_state.CHARACTERS (ESF ids).
 SLUGS = {
@@ -207,47 +205,71 @@ def build_id(html: str):
     return m.group(1) if m else None
 
 
-def fetch(slug: str, locale: str = "en-us", timeout: float = 30.0) -> str:
-    req = urllib.request.Request(BASE_URL.format(locale=locale, slug=slug),
-                                 headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8")
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", t.lower())
 
 
-def fetch_all(out_dir: Path, slugs=None, delay_s: float = 2.0, locale: str = "en-us",
-              log=print) -> dict:
-    """Fetch, parse and write datasets/framedata/<slug>.json. Polite: one request per delay_s."""
+def identify_slug(html: str) -> str | None:
+    """Which character a saved page is: the Next.js query name, else the <title>."""
+    m = re.search(r'"query":\{"name":"([a-z_]+)"\}', html)
+    if m and m.group(1) in SLUGS:
+        return m.group(1)
+    m = re.search(r"<title[^>]*>\s*([^<|]+?)\s+FRAME DATA", html, re.I)
+    if m:
+        t = _norm(m.group(1))
+        for slug, name in SLUGS.items():
+            if t in (_norm(name), _norm(slug)) or t in slug.split("_"):
+                return slug
+    return None
+
+
+def links_page(locale: str = "en-us") -> str:
+    """A small local HTML page with one link per character's frame data page."""
+    rows = "\n".join(f'<li><a href="{BASE_URL.format(locale=locale, slug=s)}" target="_blank">{n}</a></li>'
+                     for s, n in SLUGS.items())
+    return f"""<!doctype html><meta charset="utf-8"><title>SF6 frame data pages</title>
+<body style="font-family:sans-serif;max-width:40em;margin:2em auto">
+<h2>Save each character's frame data page</h2>
+<ol><li>Click a character below (opens Capcom's frame data page).</li>
+<li>Press <b>Ctrl+S</b>, choose <b>Webpage, HTML only</b> (any file name is fine) and save it
+into the bot's <b>framedata_pages</b> folder (the folder this page is in).</li>
+<li>When done, choose <b>F</b> in the menu again.</li></ol>
+<ul style="columns:2">{rows}</ul></body>"""
+
+
+def import_saved(pages_dir: Path, out_dir: Path, log=print) -> dict:
+    """Parse frame data pages the user saved from their browser into datasets/framedata/.
+
+    Capcom's site answers scripted requests with HTTP 403 (verified 2026-10-02 from both the
+    user's PC and the Claude container), so the user saves the pages from their browser.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "raw").mkdir(exist_ok=True)
-    summary, fails = {}, 0
-    for i, slug in enumerate(slugs or SLUGS):
-        if fails >= 2:  # blocked or offline: stop instead of hammering the site
-            summary[slug] = {"error": "skipped after 2 failures in a row"}
+    summary = {}
+    files = sorted(f for f in pages_dir.glob("*.htm*") if f.name != "open_these.html")
+    for f in files:
+        html = f.read_text(encoding="utf-8", errors="replace")
+        slug = identify_slug(html)
+        moves = parse_frame_page(html) if slug else []
+        if not slug or not moves:
+            log(f"  {f.name}: not a Capcom frame data page (or saved without the table) - skipped")
+            summary[f.name] = {"error": "not recognised"}
             continue
-        if i:
-            time.sleep(delay_s)
-        url = BASE_URL.format(locale=locale, slug=slug)
-        try:
-            html = fetch(slug, locale)
-            moves = parse_frame_page(html)
-        except Exception as e:  # keep going; report per character
-            log(f"  {slug}: FAILED {type(e).__name__}: {e}")
-            summary[slug] = {"error": f"{type(e).__name__}: {e}"}
-            fails += 1
-            continue
-        fails = 0
-        (out_dir / "raw" / f"{slug}.html").write_text(html, encoding="utf-8")  # re-parse offline
+        (out_dir / "raw" / f"{slug}.html").write_text(html, encoding="utf-8")
         doc = {
-            "character": SLUGS.get(slug, slug), "slug": slug, "source": url,
-            "fetched_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "character": SLUGS[slug], "slug": slug,
+            "source": BASE_URL.format(locale="en-us", slug=slug), "saved_file": f.name,
+            "imported_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "file_modified_utc": datetime.fromtimestamp(f.stat().st_mtime, timezone.utc)
+                                         .strftime("%Y-%m-%dT%H:%M:%SZ"),
             "site_build_id": build_id(html), "controls": "classic",
-            "notes": "Capcom official frame data. No patch date on the page; the in-game frame "
-                     "meter is authoritative for the installed patch.",
+            "notes": "Capcom official frame data, saved from the user's browser. No patch date on "
+                     "the page; the in-game frame meter is authoritative for the installed patch.",
             "moves": moves,
         }
         (out_dir / f"{slug}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False),
                                              encoding="utf-8")
-        log(f"  {slug}: {len(moves)} moves")
+        log(f"  {SLUGS[slug]}: {len(moves)} moves ({f.name})")
         summary[slug] = {"moves": len(moves)}
     # One combined file, easy to upload to Claude in one go.
     combined = {}
@@ -257,6 +279,7 @@ def fetch_all(out_dir: Path, slugs=None, delay_s: float = 2.0, locale: str = "en
             combined[d["slug"]] = d
     (out_dir / "all_characters.json").write_text(json.dumps(combined, ensure_ascii=False),
                                                 encoding="utf-8")
+    summary["_missing"] = [SLUGS[s] for s in SLUGS if s not in combined]
     return summary
 
 

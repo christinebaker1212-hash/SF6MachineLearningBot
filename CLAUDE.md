@@ -622,12 +622,18 @@ The safety tests are part of acceptance. During a run:
   - total = last active frame + recovery + landing frames. Ryu 5LP 4-6 + 7 = 13 and L Shoryuken
     14 + 21 + 12 = 47 both equal the in-game meter.
   - No patch date on the page: the fetch time and site build id are stored.
-- `sf6bot framedata-fetch` (menu **F**): fetches all 31 characters 2 s apart into
-  `datasets/framedata/<slug>.json` plus `raw/<slug>.html` and `all_characters.json`. It stops
-  after 2 failures in a row and writes a run report (with catalog cross-checks) for S.
-- **From the Claude container the site blocks requests:** the first 2 fetches succeeded, then
-  CloudFront returned 403 for everything, including robots.txt. No evasion was attempted; the
-  user runs menu F on their PC.
+- **Capcom's site refuses scripted downloads.** The container got 2 pages, then CloudFront 403
+  for everything. **The user's PC got 403 on the very first request** (0.3.3 menu F,
+  2026-10-02). So this is bot blocking, not rate limiting. We do **not** impersonate a browser to
+  get past it.
+- **0.3.4: `sf6bot framedata-import` (menu F)** reads pages the user saves from their own
+  browser.
+  - The first run creates `framedata_pages\open_these.html`, with links to all 31 characters,
+    and opens it. The user saves each page there (Ctrl+S, "Webpage, HTML only"), then runs F
+    again.
+  - Pages are identified by the Next.js query name, or failing that by the `<title>`.
+  - Output: `datasets/framedata/<slug>.json`, `raw/<slug>.html` and `all_characters.json`, plus a
+    run report with catalog cross-checks for S.
 - Test fixtures: `tests/data/capcom_ryu_frame_table.html.gz` (the real table) and
   `tests/data/catalog_ryu_0.3.2.json.gz` (the user's catalog, raw meter fields stripped).
 

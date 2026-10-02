@@ -34,7 +34,7 @@ echo  --- Milestone 3 data ---
 echo  D. Record a replay into training data (start the replay, bot presses nothing)
 echo  C. Move catalog, dummy guard NONE (Training Mode, about 4 min)
 echo  B. Move catalog, dummy guard ALL  (Training Mode, about 4 min)
-echo  F. Download Capcom frame data, all characters (no game needed, about 1 min)
+echo  F. Capcom frame data: import pages you saved from your browser (no game needed)
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
 echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
 echo  0. Open the results folder
@@ -60,7 +60,7 @@ if /i "%CH%"=="i" (%BOT% input-map & goto done)
 if /i "%CH%"=="d" (%BOT% replay-record & goto done)
 if /i "%CH%"=="c" (%BOT% catalog --guard none & goto done)
 if /i "%CH%"=="b" (%BOT% catalog --guard all & goto done)
-if /i "%CH%"=="f" (%BOT% framedata-fetch & goto done)
+if /i "%CH%"=="f" (%BOT% framedata-import & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="q" exit /b 0

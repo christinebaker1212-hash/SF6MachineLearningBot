@@ -6,3 +6,4 @@ runs/
 configs/local.yaml
 .pytest_cache/
 datasets/
+framedata_pages/

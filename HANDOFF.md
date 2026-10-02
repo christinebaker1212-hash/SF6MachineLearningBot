@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.3.3**, REFramework exporter script **v5**, branch
-`claude/admiring-mccarthy-uyyay4`, 35 tests passing.*
+*State as of 2026-10-02: code version **0.3.4**, REFramework exporter script **v5**, branch
+`claude/admiring-mccarthy-uyyay4`, 36 tests passing.*
 
 ---
 
@@ -39,8 +39,9 @@ controls**.
 - **Ranked deployment is a separate, later milestone,** gated on checking Capcom/Steam rules.
   The user makes the call.
 - **Scraping Capcom's website is allowed:** the user explicitly authorised it on 2026-10-02,
-  replacing an earlier "no scraping" rule. Keep it polite (2 s between requests) and never
-  evade blocks.
+  replacing an earlier "no scraping" rule. But the site returns 403 to scripts (from the user's
+  PC too), and we never evade blocks. So the user saves pages from their browser and menu F
+  imports them.
 - **The engineering spec:**
   - Never invent APIs, results or tests.
   - Label mocks explicitly.
@@ -158,8 +159,9 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
      inputs.
    - A 1× comparison of the same replay was not in the paste.
    - Fix to research: export on a per-game-tick hook instead of `re.on_frame`.
-3. **Capcom's official frame data:** the parser works on Ryu (75 moves). The site blocked the
-   Claude container after 2 requests, so the user runs **menu F** on their PC and uploads
+3. **Capcom's official frame data:** the parser works on Ryu (75 moves). The site blocks
+   scripted downloads (403 from the user's PC as well), so in 0.3.4 the user saves the pages from
+   their browser into `framedata_pages\` (menu F opens a links page), runs F again, and uploads
    `datasets\framedata\all_characters.json`.
    - Next: drive the catalog from each character's real move list (`input` notation) instead of
      generic inputs; use the cancel column for combos.
@@ -199,7 +201,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Episodes and data | `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F, Capcom frame data + cross-check) |
+| Episodes and data | `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 

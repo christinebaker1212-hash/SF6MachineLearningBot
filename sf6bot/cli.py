@@ -189,20 +189,35 @@ def cmd_catalog(args, cfg):
     _print_report(s)
 
 
-def cmd_framedata_fetch(args, cfg):
-    """Download Capcom's official frame data (no game needed) and cross-check our catalogs."""
+def cmd_framedata_import(args, cfg):
+    """Import Capcom frame data pages saved from the browser, and cross-check our catalogs.
+
+    Capcom's site refuses scripted downloads (HTTP 403), so the user saves the pages themselves.
+    """
     import json as _json
+    import os
     import time as _time
     from pathlib import Path
     from . import framedata as fd
+    pages = Path(args.dir)
+    pages.mkdir(parents=True, exist_ok=True)
+    links = pages / "open_these.html"
+    links.write_text(fd.links_page(), encoding="utf-8")
+    if not [f for f in pages.glob("*.htm*") if f != links]:
+        print(f"No saved pages yet in {pages.resolve()}.")
+        print("Opening a page with links to every character's frame data. For each one: open it,")
+        print("press Ctrl+S, choose 'Webpage, HTML only', save into that folder. Then choose F again.")
+        if hasattr(os, "startfile"):
+            os.startfile(links.resolve())  # Windows: open in the default browser
+        return
     ds = Path(cfg.get("datasets", {}).get("root", "datasets"))
     out = ds / "framedata"
-    slugs = args.chars.split(",") if args.chars else None
-    print(f"Downloading frame data for {len(slugs or fd.SLUGS)} characters into {out} (2 s apart)...")
-    summary = fd.fetch_all(out, slugs)
+    summary = fd.import_saved(pages, out)
+    missing = summary.pop("_missing", [])
     ok = [k for k, v in summary.items() if "moves" in v]
-    lines = [f"# Capcom frame data fetch", f"- characters saved: {len(ok)}/{len(summary)}",
-             f"- folder: {out} (upload all_characters.json to Claude)"]
+    lines = ["# Capcom frame data import", f"- pages imported this time: {len(ok)}",
+             f"- characters still missing ({len(missing)}): {', '.join(missing) or 'none'}",
+             f"- upload {out / 'all_characters.json'} to Claude"]
     lines += [f"- {k}: {v.get('moves', v.get('error'))}" for k, v in summary.items()]
     for cat in sorted((ds / "catalog").glob("*.json")) if (ds / "catalog").exists() else []:
         c = _json.loads(cat.read_text(encoding="utf-8"))
@@ -211,7 +226,8 @@ def cmd_framedata_fetch(args, cfg):
             lines += ["", fd.compare_report(fd.compare_catalog(f, c), c.get("character", cat.stem))]
     run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_framedata")
     run.mkdir(parents=True, exist_ok=True)
-    (run / "meta.json").write_text(_json.dumps({"kind": "framedata_fetch", "summary": summary}, indent=1))
+    (run / "meta.json").write_text(_json.dumps({"kind": "framedata_import", "summary": summary,
+                                                "missing": missing}, indent=1))
     (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
     print("\n".join(lines))
 
@@ -315,9 +331,10 @@ def main(argv=None):
     p.add_argument("--only", default="", help="comma-separated move names, e.g. 5LP,2MK")
     p.set_defaults(fn=cmd_catalog)
 
-    p = sub.add_parser("framedata-fetch", help="download Capcom's official frame data (all characters)")
-    p.add_argument("--chars", default=None, help="comma-separated page slugs, e.g. ryu,ken (default all)")
-    p.set_defaults(fn=cmd_framedata_fetch)
+    p = sub.add_parser("framedata-import",
+                       help="import Capcom frame data pages saved from your browser (no game needed)")
+    p.add_argument("--dir", default="framedata_pages", help="folder with the saved pages")
+    p.set_defaults(fn=cmd_framedata_import)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

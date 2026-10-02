@@ -58,3 +58,12 @@ def test_classic_input_icons():
     toks = [("p", "frame_classic___x"), ("img", "key-d"), ("img", "key-dl"), ("img", "key-l"),
             ("img", "key-plus"), ("img", "icon_kick_h"), ("text", "H")]
     assert classic_input(toks)[0] == "214+HK"
+
+
+def test_identify_saved_page():
+    from sf6bot.framedata import identify_slug
+    assert identify_slug('..."query":{"name":"gouki_akuma"}...') == "gouki_akuma"
+    assert identify_slug("<title>CHUN-LI FRAME DATA | STREET FIGHTER 6 | CAPCOM</title>") == "chunli"
+    assert identify_slug("<title>M. BISON FRAME DATA | STREET FIGHTER 6</title>") == "vega_mbison"
+    assert identify_slug("<title>AKUMA FRAME DATA</title>") == "gouki_akuma"
+    assert identify_slug("<title>Something else</title>") is None
