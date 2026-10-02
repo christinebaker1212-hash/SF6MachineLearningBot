@@ -217,6 +217,9 @@ Then the combo lab.
 **0.11.1 (user): the dummy must use Guard "After first hit": only TRUE combos count — a CRITICAL
 distinction.** The lab treats any block after the first hit as a gap. The generator now uses every
 catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's results (K → 3 = rounds).
+**0.11.4 (first Ken combo lab run: 6 true combos, damage = community):** the previous move changes what an
+input does (Quick Dash → [QD] Shoryuken / Tatsu), '>' that Capcom doesn't allow is timed after recovery,
+jump-in landing fixed. Re-run K → 1 (`--again` not needed: only failed routes are retried).
 **0.11.3:** recovery floors in every suite (no input before the move can come out), failing moves
 searched 5 frames earlier then 5 later, jump-in starters and target combos tested, supers pass on connect
 (cinematic or not), positions by hold-direction resets. The fighter's combos run on the game clock too.

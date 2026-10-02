@@ -1314,6 +1314,38 @@ that don't cause a cinematic"; position resets by holding a direction.
 - MOCK-tested only: jump-in timing and landing floor on a synthetic jump, super endings with and without
   a cinematic, a link after a super, the search order, real Ken/Ryu plans.
 
+## 0.11.4: first combo lab run (Ken) analysed; context variants, cancel rules, jump-in landing
+### The run (user, 2026-10-02, 0.11.3, guard After first hit, 9 community routes)
+- **6 TRUE combos:** 5LP~5LP~5LP>623HP (3/3, 1590 = community), 2LP~2LK~5LP>623HP (2/3), 2LK~2LP~5LP>623HP
+  (3/3), 5HP>623HP (2/4, offset −1), 2LP,5MP>214LK,623MP (3/5, 2050), 2LP~2LP,5LK>623HP (3/3). Every
+  measured damage equals the community's number; carry 2.65–3.77; end advantage +25 / +33.
+- **User: "quick dash into tatsu and quick dash into shoryuken were complete successes, but the bot
+  reported a failure, because it's not accounting for how the previous move CHANGES which move comes
+  out."** KK > 623P came out as 959 ([Quick Dash] Shoryuken), KK > 214K as 1003 ([QD] Tatsu).
+- **User: "not accounting for recovery frames ... a light tatsu is used, then a shoryuken is attempted
+  immediately after."** The route writes 2HP > 214LK > 623MP; the lab pressed the Shoryuken on the tatsu's
+  hit, but L Tatsu can't be canceled (Capcom cancel column empty).
+- The jump-in route also pressed the landing 2HP ~8 frames after j.HP: the jump-in's hitstop froze the
+  height, and the gravity estimate across the freeze predicted an instant landing.
+- Input-delay calibration took the median of all presses (6), including cancels (17–22 frames: they wait
+  for contact, not input delay).
+### Fixes (character-wide: everything comes from each character's Capcom rows and catalog)
+- `context_variant`: an input made DURING the previous move ('>' / '~') is the '(During X) input' or
+  '[X] Name' row of that move when the input matches (generic P / K accept any strength): KK > 623P =
+  [Quick Dash] Shoryuken (959), timed from Capcom's "branching attacks from frame 12". After a link (',',
+  the previous move has ended) the plain move comes out. OD and non-OD follow-ups never mix (H Jinrai ~ 6HK =
+  Senka, not OD Senka).
+- `cancel_allowed`: a '>' that Capcom's cancel column does not allow (C → specials and supers; SA → supers;
+  SA2/SA3 → that level and up) is timed after the previous move's recovery, like a link (floor: its total),
+  with a note. 214LK > 623MP → the Shoryuken at the tatsu's frame 46. Chains '~' are not cancels.
+- Jump-ins: gravity is measured once from the bot's jump (`learn_jump`: travel, gravity, air frames); lines
+  frozen in hitstop are skipped; the landing link is never pressed before the jump-in has hit (or the bot
+  has landed).
+- Lead calibration uses only first moves and links.
+- A wrong move's id is named in the report (`came_out_name`, from the catalog).
+- Generator: community steps get the same treatment (KK > 623P → the QD-Shoryuken node; 214LK > 623MP →
+  a link).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

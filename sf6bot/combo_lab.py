@@ -112,8 +112,50 @@ def _is_follow_up(row: dict, prev: dict | None) -> bool:
     pname = prev["name"]
     base = re.sub(r"^(OD|L|M|H) ", "", pname)
     q = " ".join(re.findall(r"\(([^()]*)\)", row.get("input") or ""))
-    return (q.startswith(("During ", "While ")) and (pname in q or base in q)) or \
-        row["name"].startswith(f"[{base}]") or row["name"].startswith(f"[{pname}]")
+    if q.startswith(("During ", "While ")):
+        # OD parents have their own follow-ups ('During OD Jinrai Kick'): never mix OD and non-OD
+        if bool(re.search(r"\b(OD|Overdrive)\b", q)) != pname.startswith("OD "):
+            return False
+        return pname in q or base in q
+    return row["name"].startswith(f"[{base}]") or row["name"].startswith(f"[{pname}]")
+
+
+def _input_parts(inp: str):
+    """'(During Quick Dash) 623+P' -> ('623', ['P']); '236+K+K' -> ('236', ['K', 'K'])."""
+    rest = re.sub(r"\([^()]*\)", " ", inp or "").strip()
+    m = re.fullmatch(r"((?:\[\d\]|\d)*)\+?((?:LP|MP|HP|LK|MK|HK|P|K)(?:\+(?:LP|MP|HP|LK|MK|HK|P|K))*)", rest)
+    return (m.group(1), m.group(2).split("+")) if m else (None, None)
+
+
+def _same_input(variant: dict, row: dict) -> bool:
+    """Does `row`'s input also perform `variant`? Generic P / K in the variant accept any strength."""
+    vd, vb = _input_parts(variant.get("input"))
+    rd, rb = _input_parts(row.get("input"))
+    if vd is None or rd is None or vd != rd or len(vb) != len(rb):
+        return False
+    return all(a == b or (a in ("P", "K") and b.endswith(a)) for a, b in zip(sorted(vb), sorted(rb)))
+
+
+def context_variant(row: dict, prev: dict | None, capcom: dict) -> dict:
+    """The move an input REALLY performs after the previous one (user, 0.11.4: "the previous move CHANGES
+    which move comes out with which input"). From each character's own Capcom rows: '(During X) input' and
+    '[X] Name' rows replace the plain move when the previous step is X. Ken: Quick Dash, then 623P =
+    [Quick Dash] Shoryuken (959), 214K = [Quick Dash] Tatsumaki (1003)."""
+    if not prev or prev.get("system") or not prev.get("name") or _is_follow_up(row, prev):
+        return row
+    for m in capcom.get("moves", []):
+        if m is not row and m.get("name") != row.get("name") and _is_follow_up(m, prev) and _same_input(m, row):
+            return m
+    return row
+
+
+def cancel_allowed(prev: dict, row: dict) -> bool:
+    """Capcom's cancel column: can `prev` be canceled into `row`? (C -> specials and supers, SA -> supers,
+    SA2/SA3 -> that level and up). Follow-ups and target combos are not cancels."""
+    from .combo_gen import _cancels_into
+    if prev.get("system") or not prev.get("cancel_col_known"):
+        return True
+    return _cancels_into({"cancel": prev.get("cancel")}, row)
 
 
 def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
@@ -186,6 +228,13 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
                 tc = next((m for m in capcom.get("moves", []) if (m.get("input") or "") == tc_input), None)
                 if tc is not None:
                     row = tc
+            # only an input made DURING the previous move ('>' / '~') becomes its variant; after a link
+            # (',' = once the previous move has ended) the plain move comes out
+            variant = context_variant(row, prev, capcom) if conn in (">", "~") else row
+            if variant is not row:
+                notes.append(f"after {prev['name']}, {s.get('token')} is {variant['name']} (Capcom: "
+                             f"{variant.get('input')})")
+                row = variant
             seq, why = step_sequence(row)
             if seq is None:
                 return {"unsupported": f"{row['name']}: {why}", "steps": []}
@@ -197,6 +246,7 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
                       total=meas.get("total") or row.get("total_n"),
                       hitting=bool(row.get("damage_n")), capcom_damage=row.get("damage_n"),
                       super_art=bool(re.match(r"(SA[123]|CA)\b", row["name"])), input_key=row.get("input"),
+                      cancel=row.get("cancel"), cancel_col_known=True,
                       target_combo=">" in (row.get("input") or ""),
                       hit_adv=(meas.get("advantage") if meas.get("result") == "hit" and isinstance(meas.get("advantage"), int)
                                and not row.get("on_hit_knockdown") else row.get("on_hit_n")
@@ -237,6 +287,16 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             st["window_from_notes"] = start
             st["min_offset"] = -1 - JITTER if start is not None else NO_FLOOR
             st["floor"] = f"Capcom window from frame {start}" if start is not None else "no window in Capcom's notes"
+        elif not system and conn == ">" and not st.get("target_combo") and not cancel_allowed(prev, row):
+            # the route says cancel / chain, but Capcom's cancel column does not allow it (Ken: L Tatsu has
+            # no cancel, so '214LK > 623MP' is a juggle AFTER the tatsu recovers): time it after recovery
+            st["trigger"], st["at"] = "own_frame", prev.get("total")
+            st["min_offset"], st["floor"] = -JITTER, f"previous move's recovery ends (frame {prev.get('total')})"
+            st["not_cancelable"] = True
+            notes.append(f"{prev['name']} can't be canceled into {st['name']} (Capcom cancel column "
+                         f"{prev.get('cancel')!r}): pressed after its recovery")
+            if prev.get("total") is None:
+                st["trigger"], st["min_offset"], st["floor"] = "prev_neutral", 0, "previous move back to neutral"
         else:
             st["trigger"], st["min_offset"] = "contact", -CONTACT_PLUS - JITTER
             st["floor"] = "the previous move has hit (contact)"
@@ -244,7 +304,14 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
         prev = st
     if not plan or (jump_row is not None and len(plan) < 2):
         return {"unsupported": "no moves left", "steps": []}
-    return {"steps": plan, "notes": notes, "unsupported": None, "jump_in": jump_row is not None}
+    id_names = {}
+    for k, v in ((catalog or {}).get("moves") or {}).items():
+        for g in ("guard_none", "guard_all"):
+            mid = (v.get(g) or {}).get("move_id")
+            if mid is not None and not (v.get(g) or {}).get("same_as"):
+                id_names.setdefault(mid, k)
+    return {"steps": plan, "notes": notes, "unsupported": None, "jump_in": jump_row is not None,
+            "id_names": id_names}
 
 
 # ---- execution against the state stream (pure: unit tested with synthetic lines) ------------------
@@ -254,10 +321,12 @@ class ComboRun:
     The caller sends it and reports back with `sent()`. Bot = p1, dummy = p2."""
 
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
-                 movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2"):
+                 movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None):
         self.steps, self.offsets, self.lead = steps, offsets, lead
         self.me, self.op = me, op            # the fighter can be P2
-        self.bot_y = None                    # (y, tick) of the previous line: jump-in timing
+        self.bot_y = None                    # recent (y, tick) of the bot: jump-in timing
+        self.gravity = gravity               # per tick^2 (negative), measured from the bot's jump
+        self._land_est = None
         self.neutral_a, self.neutral_d, self.movement = set(neutral_a), set(neutral_d), set(movement)
         self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None) for _ in steps]
         self.hits: list[dict] = []
@@ -280,25 +349,33 @@ class ComboRun:
         return max(self.offsets.get(k, 0) + st.get("base_offset", 0), st.get("min_offset", NO_FLOOR))
 
     def _ticks_to_land(self, p1: dict, tick: int):
-        """Frames until the bot lands, from its height, fall speed and the measured gravity (the last
-        three heights), or None if it is not falling."""
+        """Frames until the bot lands, from its height, fall speed and gravity, or None if it is not
+        falling. Lines frozen in hitstop are skipped: the jump-in's own hit freezes the height, and in the
+        0.11.3 run that made the speed jump and the landing look immediate (2HP pressed ~8 frames after
+        j.HP, before it even hit). Gravity is the bot's measured jump (lab) or estimated from free frames."""
         y = num(p1.get("y"))
-        hist = (self.bot_y or [])[-2:] + [(y, tick)]
-        self.bot_y = hist
-        if y is None or len(hist) < 2 or any(h[0] is None for h in hist) or hist[-1][1] <= hist[-2][1]:
+        if y is None:
             return None
         if y <= 0.01:
             return 0
+        if p1.get("hitstop") or (self.bot_y and self.bot_y[-1][0] == y):
+            return self._land_est                     # frozen: keep the last estimate
+        hist = (self.bot_y or [])[-2:] + [(y, tick)]
+        self.bot_y = hist
+        if len(hist) < 2 or hist[-1][1] <= hist[-2][1]:
+            return None
         (y1, t1), (y2, t2) = hist[-2], hist[-1]
         vy = (y2 - y1) / (t2 - t1)
-        ay = 0.0
-        if len(hist) == 3 and hist[0][1] < t1:
+        g = self.gravity
+        if g is None and len(hist) == 3 and hist[0][1] < t1:
             v0 = (y1 - hist[0][0]) / (t1 - hist[0][1])
-            ay = (vy - v0) / ((t2 - hist[0][1]) / 2)
-        if ay < -1e-6:                         # ballistic: 0 = y + vy t + ay t^2 / 2
-            disc = vy * vy - 2 * ay * y
-            return (-vy - disc ** 0.5) / ay
-        return y / -vy if vy < 0 else None
+            g = (vy - v0) / ((t2 - hist[0][1]) / 2)
+        if g is not None and g < -1e-6:              # ballistic: 0 = y + vy t + g t^2 / 2
+            disc = vy * vy - 2 * g * y
+            self._land_est = (-vy - disc ** 0.5) / g
+        else:
+            self._land_est = y / -vy if vy < 0 else None
+        return self._land_est
 
     def _active(self) -> int | None:
         started = [k for k, r in enumerate(self.rt) if r["start"] is not None]
@@ -428,8 +505,11 @@ class ComboRun:
         if trig == "landing":
             # after a jump-in: reach the game on landing + landing recovery (the earliest it can come out)
             rec = pst.get("landing") or LANDING_REC
+            y = num(p1.get("y")) or 0.0
+            if y > 0.01 and pr["contact"] is None:
+                return None                   # the jump-in has not hit yet: never press before it does
             if land is None:
-                return n if (num(p1.get("y")) or 0) <= 0.01 and pr["contact"] is not None else None
+                return n if y <= 0.01 else None
             return n if land + rec <= self.lead + st["prefix"] - off else None
         if trig == "own_frame":
             at = st.get("at")
@@ -624,7 +704,8 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
             f = fails[-1]
             k = f.get("step")
             out["failed_at"] = {"step": k, "move": plan["steps"][k]["name"] if k is not None and k < len(plan["steps"]) else None,
-                                "kind": f.get("kind"), "came_out": f.get("came_out")}
+                                "kind": f.get("kind"), "came_out": f.get("came_out"),
+                                "came_out_name": (plan.get("id_names") or {}).get(f.get("came_out"))}
     kinds = [(a.get("first_hit") or {}).get("kind") for a in attempts if a.get("first_hit")]
     out["first_hits"] = kinds
     want = {"counter_hit": "counter", "punish_counter": "punish_counter"}.get(out["hit_type"])
@@ -694,32 +775,40 @@ def walk_to_distance(sess, reader, target: float, max_s: float = 3.0) -> float |
     return d
 
 
-def learn_jump(sess, reader, reset, direction: int = 9) -> float:
-    """Measure the bot's jump: horizontal travel from take-off to landing (game units)."""
+def learn_jump(sess, reader, reset, direction: int = 9) -> dict:
+    """Measure the bot's jump: horizontal travel from take-off to landing (game units) and gravity
+    (height change per tick^2, the median second difference of the airborne heights)."""
     from .actions import InputState
     reset(2)
     q = reader.subscribe()
+    pts = []
     try:
         sess.controller.apply(InputState(direction), tag="learn_jump_arc")
         time.sleep(0.05)
         sess.controller.apply(InputState(), tag="learn_jump_arc_end")
-        xs, air, end = [], False, clock.now() + 1.6
+        air, end = False, clock.now() + 1.6
         while clock.now() < end:
             try:
                 st = q.get(timeout=0.05)
             except Exception:
                 continue
-            y, x = num(st.p1.get("y")) or 0.0, num(st.p1.get("x"))
+            y, x, t = num(st.p1.get("y")) or 0.0, num(st.p1.get("x")), st.raw.get("stage_timer")
             if y > 0.05:
                 air = True
-                xs.append(x)
+                pts.append((t, x, y))
             elif air:
-                xs.append(x)
+                pts.append((t, x, 0.0))
                 break
     finally:
         reader.unsubscribe(q)
-    xs = [x for x in xs if x is not None]
-    return round(abs(xs[-1] - xs[0]), 2) if len(xs) >= 2 else (0.0 if direction == 8 else 1.9)
+    xs = [p[1] for p in pts if p[1] is not None]
+    travel = round(abs(xs[-1] - xs[0]), 2) if len(xs) >= 2 else (0.0 if direction == 8 else 1.9)
+    dd = []
+    for a, b, c in zip(pts, pts[1:], pts[2:]):
+        if all(isinstance(p[0], int) for p in (a, b, c)) and b[0] - a[0] == 1 and c[0] - b[0] == 1 and c[2] > 0:
+            dd.append(c[2] - 2 * b[2] + a[2])
+    gravity = sorted(dd)[len(dd) // 2] if dd else None
+    return {"travel": travel, "gravity": gravity, "air_frames": len(pts)}
 
 
 def _lead(state: dict) -> int:
@@ -747,11 +836,13 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         how = set_position(sess, reader, reset, _position(combo), state)
         if plan.get("jump_in"):
             jd = steps[0]["sequence"][0]
-            key = f"jump_travel_{jd}"
+            key = f"jump_{jd}"
             if key not in state:
                 state[key] = learn_jump(sess, reader, reset, int(jd))
+                print(f"  measured jump: travel {state[key]['travel']}, gravity {state[key]['gravity']}, "
+                      f"{state[key]['air_frames']} frames in the air")
                 set_position(sess, reader, reset, _position(combo), state)
-            walk_to_distance(sess, reader, state[key] + JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)])
+            walk_to_distance(sess, reader, state[key]["travel"] + JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)])
         else:
             walk_to_contact(sess, reader)
         pre = reader.latest()
@@ -762,11 +853,18 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                              "offsets": dict(offsets), "steps": [], "hits": 0})
             break
         fm_before = reader.last_fm
-        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=_lead(state))
+        jump = state.get(f"jump_{steps[0]['sequence'][0]}") if plan.get("jump_in") else None
+        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=_lead(state),
+                       gravity=(jump or {}).get("gravity"))
         res["position_setup"] = how
         res["lead_used"] = _lead(state)
-        state.setdefault("leads", []).extend(st["lead_measured"] for st in res.get("steps", [])
-                                             if isinstance(st.get("lead_measured"), int) and 0 <= st["lead_measured"] <= 12)
+        # calibrate only on presses whose move can start as soon as the input arrives (the first move, and
+        # links). A cancel is sent before contact and waits for it: its 17-22 frames (0.11.3 run) are not
+        # input delay.
+        state.setdefault("leads", []).extend(
+            r["lead_measured"] for r, st in zip(res.get("steps", []), steps)
+            if st.get("trigger") in ("first", "own_frame") and not st.get("system") and not st.get("air")
+            and isinstance(r.get("lead_measured"), int) and 0 <= r["lead_measured"] <= 12)
         if plan.get("jump_in"):
             res["jump_distance_extra"] = JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)]
         long = any(s.get("super_art") for s in steps)
@@ -949,11 +1047,12 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 
 
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
-                  me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0) -> dict:
+                  me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
+                  gravity: float | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route."""
-    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op)
+    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout
@@ -1004,8 +1103,10 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     return res
 
 
-def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD) -> dict:
-    return perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead)
+def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
+             gravity: float | None = None) -> dict:
+    return perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead,
+                         gravity=gravity)
 
 
 def report_md(character: str, results: dict, skipped: dict, setup_error: str | None = None) -> str:

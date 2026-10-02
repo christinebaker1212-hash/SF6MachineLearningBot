@@ -217,6 +217,17 @@ def static_edges(nodes: dict, community: list[dict] | None = None) -> dict:
                 cur = next((k for k in cands if prev and prev in nodes.get(k, {}).get("parents", [])), cands[0])
             if prev == DR and st.get("connector"):
                 st = dict(st, connector="~")           # 'DRC , 5HK' and 'DRC ~ 5HK' are the same input
+            if prev is not None and cur is not None and prev != DR and cur != DR and st.get("connector") in (">", "~"):
+                from .combo_lab import _same_input, cancel_allowed
+                # the move an input really performs during the previous one ('KK > 623P' = [Quick Dash]
+                # Shoryuken), and a '>' Capcom doesn't allow as a cancel is a link after recovery (0.11.4)
+                var = next((k for k, n in nodes.items() if n["kind"] == "follow" and prev in n["parents"]
+                            and _same_input(n["row"], nodes[cur]["row"])), None)
+                if var is not None and nodes[cur]["kind"] != "follow":
+                    cur, st = var, dict(st, connector="~")
+                elif st["connector"] == ">" and nodes[cur]["kind"] not in ("follow", "target") and not cancel_allowed(
+                        {"cancel": nodes[prev]["cancel"], "cancel_col_known": True}, nodes[cur]["row"]):
+                    st = dict(st, connector=",")
             if prev is not None and cur is not None and st.get("connector"):
                 # a step seen only in corner routes (Dragonlash loops) is a corner-only edge
                 corner = "corner" in (c.get("position") or "").lower()

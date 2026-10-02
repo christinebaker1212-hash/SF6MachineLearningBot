@@ -167,13 +167,13 @@ def test_plans_for_real_ken_routes():
     names = [s["name"] for s in plan["steps"]]
     # '5MP ~ HP' is the target combo row Chin Buster, checked by its own catalog id (677)
     assert names == ["Crouching Light Punch", "Standing Medium Punch", "Chin Buster", "Quick Dash",
-                     "L Dragonlash Kick", "H Shoryuken"]
+                     "[Quick Dash] Dragonlash Kick", "H Shoryuken"]   # 623K during Quick Dash (0.11.4)
     assert plan["steps"][2]["expect_id"] == 677 and plan["steps"][2]["target_combo"]
     trig = [(s["trigger"], s.get("at")) for s in plan["steps"]]
     assert trig[1] == ("own_frame", 14)              # link after 2LP: its measured total
     assert trig[2][0] == "contact"                   # target combo piece
     assert trig[4] == ("own_frame", 13)              # Quick Dash branch: Capcom note 'from frame 12'
-    assert trig[5] == ("own_frame", 44)              # link after L Dragonlash Kick (catalog total)
+    assert trig[5] == ("own_frame", 47)              # link after [QD] Dragonlash Kick (catalog total)
     floors = [st["min_offset"] for st in plan["steps"]]
     assert floors[1] == -cl.JITTER and floors[2] == -cl.CONTACT_PLUS - cl.JITTER   # link / target combo
     j = cl.plan_route(routes["j.HP , 2HP > 236HK ~ 6HK , 623LP"], cap, cat)
@@ -255,17 +255,20 @@ def test_generator_builds_on_the_lab_results():
     """A prefix the lab proved NOT true (blocked) is never extended; a proven true combo is extended."""
     from sf6bot import combo_gen
     cap, cat, comm = _ken()
+    before = combo_gen.generate(cap, cat, comm)
+    victim = next(r for r in before if len(r["steps"]) >= 3 and not r["steps"][0].get("system")
+                  and not r["steps"][1].get("system") and not r["route"].startswith(("j.", "nj.")))
+    s0, s1 = victim["steps"][0], victim["steps"][1]
+    prefix = f"{s0['token']} {s1['connector']} {s1['token']}"
     lab = {"routes": {
-        "midscreen | 5HP > 623LK": {"verified": False, "guard": "after_first_hit",
-                                    "moves": ["Standing Heavy Punch", "L Dragonlash Kick"], "connectors": ["", ">"],
-                                    "failed_at": {"step": 1, "kind": "blocked"}},
+        f"midscreen | {prefix}": {"verified": False, "guard": "after_first_hit", "moves": [s0["name"], s1["name"]],
+                                 "connectors": ["", s1["connector"]], "failed_at": {"step": 1, "kind": "blocked"}},
         "midscreen | 2MP > 214LK": {"verified": True, "guard": "after_first_hit",
                                     "moves": ["Crouching Medium Punch", "L Tatsumaki Senpu-kyaku"],
                                     "connectors": ["", ">"]}}}
-    before = combo_gen.generate(cap, cat, comm)
     after = combo_gen.generate(cap, cat, comm, lab)
-    assert any(r["route"].startswith("5HP > 623LK") for r in before)
-    assert not any(r["route"].startswith("5HP > 623LK") for r in after)
+    assert any(r["route"].startswith(prefix + " ") for r in before)
+    assert not any(r["route"].startswith(prefix + " ") or r["route"] == prefix for r in after)
     assert any(r["route"].startswith("2MP > 214LK ") for r in after)
     assert not any(r["route"] == "2MP > 214LK" for r in after)        # already tested: not proposed again
 
@@ -385,3 +388,38 @@ def test_super_without_a_cinematic_and_moves_after_a_super():
     assert run.feed(_line(28, 1200, 8, d=REACT, hs=6, stun=30, hp=9000)) is None and not run.done
     assert run.feed(_line(40, 1200, 40, d=REACT, stun=30, hp=9000)) is None    # far too early
     assert run.feed(_line(50, 1200, 50, d=REACT, stun=30, hp=9000)) == 2       # 60 - 4 lead - 6 motion
+
+
+def test_previous_move_changes_what_an_input_does_and_cancels_follow_capcom():
+    """User, 0.11.4 (Ken lab run): 'KK > 623P' came out as [Quick Dash] Shoryuken (959) and 'KK > 214K' as
+    [Quick Dash] Tatsumaki (1003): successes reported as wrong moves. And '214LK > 623MP' pressed the
+    Shoryuken on the tatsu's hit although L Tatsu can't be canceled (Capcom cancel column empty)."""
+    cap, cat, _ = _ken()
+
+    def plan(route):
+        return cl.plan_route({"route": route, **combos.resolve(route, cap["moves"])}, cap, cat)
+    p = plan("5HP > KK > 623P")
+    assert [(st["name"], st["expect_id"]) for st in p["steps"]][2] == ("[Quick Dash] Shoryuken", 959)
+    assert p["steps"][2]["trigger"] == "own_frame" and p["steps"][2]["at"] == 13   # Capcom: from frame 12
+    assert plan("2LP , 5MP ~ HP > KK > 214K")["steps"][4]["expect_id"] == 1003
+    # after the dash has ENDED (',') the plain move comes out
+    assert plan("DI , 5HP > KK , 214K")["steps"][3]["name"] == "L Tatsumaki Senpu-kyaku"
+    j = plan("j.HP , 2HP > 214LK > 623MP")["steps"]
+    assert j[4]["name"] == "M Shoryuken" and j[4]["trigger"] == "own_frame" and j[4]["at"] == 46
+    assert j[4]["not_cancelable"]
+    # allowed cancels stay cancels: 5HP > 623HP ('C'), 623HP > SA3 ('SA3'), light chains '~'
+    k = plan("5HP > 623HP > 236236P")["steps"]
+    assert [st["trigger"] for st in k] == ["first", "contact", "contact"]
+    assert [st["trigger"] for st in plan("2LK ~ 2LP ~ 5LP > 623HP")["steps"]] == ["first", "contact", "contact", "contact"]
+
+
+def test_jump_in_hitstop_does_not_fake_a_landing():
+    """0.11.3 run: the jump-in's hitstop froze the height and the speed estimate made the landing look
+    immediate (2HP pressed 8 frames after j.HP). Frozen lines are skipped and gravity is the measured one."""
+    run = cl.ComboRun([{"name": "x", "trigger": "first", "prefix": 0}], {}, {NEUTRAL}, {DUMMY_IDLE}, set(),
+                      gravity=-0.01)
+    y = lambda t: 0.2 * t - 0.005 * t * t         # lands at t = 40
+    est = [run._ticks_to_land({"y": y(t)}, t) for t in range(20, 26)]
+    frozen = [run._ticks_to_land({"y": y(25), "hitstop": h}, 25 + k) for k, h in enumerate(range(10, 0, -1))]
+    assert abs(est[-1] - 15) <= 1.5
+    assert all(f == est[-1] for f in frozen)        # unchanged through hitstop, not ~0
