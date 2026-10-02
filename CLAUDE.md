@@ -862,7 +862,8 @@ The safety tests are part of acceptance. During a run:
   - anti-air Shoryukens landed 6/10, Hadokens 12/23
   - light chain 4/13, 5HP 5/6, 2MK > 236MP 2/22, throws 1/8
   - 125 hitstun frames
-- **Fight 2 (CPU level not stated): LOST 1–2.** It won R1 (45 s) and lost R2 (52 s) and R3 (48 s).
+- **Fight 2, CPU level 4 again (user, 2026-10-02): LOST 1–2.** So vs level 4 Ken: 1 match won, 1
+  lost; rounds 3–2. It won R1 (45 s) and lost R2 (52 s) and R3 (48 s).
   - anti-air 7/14, 2MK > 236MP 20/42, light chain 13/23, 5HP 8/19, Hadokens 8/27, throws 3/17
   - 304 hitstun frames, and 3,862 "block" decisions: mostly holding down-back, which loses to
     overheads, throws and cross-ups

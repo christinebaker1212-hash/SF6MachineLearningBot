@@ -171,7 +171,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
      read "confirmed …".
    - A second 8× recording should then show `skipped_during_fight` near 0.
 3. **Re-record** important replays: pre-0.6.0 files miss the first ~264 frames of round 1.
-4. **First fight DONE (0.6.0): beat CPU level 4 Ken 2–0.** It missed one DI (no Ken catalog);
+4. **First fights DONE (0.6.0), both vs CPU level 4 Ken: won 2–0, then lost 1–2.** It missed one DI (no Ken catalog);
    0.6.2 reacts to DI from shared ids and waits for "Fight!". Next: higher CPU levels, and a
    catalog run of the opponent's character (C/B as that character) to enable punishes.
 5. **Bot controller:** K, then input-map (I), which verifies the pad layout. Then fight with the
