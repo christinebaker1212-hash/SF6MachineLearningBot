@@ -174,6 +174,22 @@ def _earlier_result(cfg: dict, name: str, guard: str, move: str | None) -> dict 
     return m.get(f"guard_{guard}") or m.get("guard_none") or m.get("guard_all")
 
 
+def _bar_of_move(states: list[dict], r: dict) -> dict | None:
+    """The move's frame bar (exporter v9): both players' cells as run-length text, plus whether the
+    community FrameType numbers agree with the meter's Startup / Total for this move (framebar.py)."""
+    from . import framebar
+    tr = framebar.BarTrack("p1")
+    for s2 in states:
+        tr.feed(s2)
+    if not tr:
+        return None
+    start = next((t for t, mine, _ in tr.t if mine == 7), None)
+    out = {"p1": framebar.runs([m for _, m, _ in tr.t]), "p2": framebar.runs([o for _, _, o in tr.t])}
+    if start is not None:
+        out["check"] = framebar.meter_check(framebar.move_cells(tr, start), r.get("startup"), r.get("total"))
+    return out
+
+
 def _wait_settled(reader, sess, neutral_a: set, neutral_d: set, max_s: float, need: int = 30) -> bool:
     """Wait until bot and dummy have both been in a neutral action for `need` consecutive lines."""
     q = reader.subscribe()
@@ -445,6 +461,9 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     r["result"] = "unknown (frame meter did not update)"
                 r["damage"] = own.get("damage")
                 r["frame_meter_raw"] = fm_raw
+                bar = _bar_of_move(pre + post, r)
+                if bar:
+                    r["frame_bar"] = bar
                 r["own_measure"] = {k: own.get(k) for k in ("result", "startup", "advantage", "total_observed",
                                                             "game_total", "note")}
                 r["own_measure"]["reliability"] = "low: wall-clock/stage_timer heuristics; use frame meter values"

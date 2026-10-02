@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 from . import clock
+from . import framebar
 from . import framedata as fd
 from .game_state import character_name, file_stem, num, open_state_reader
 from .hits import classify_hit
@@ -349,6 +350,7 @@ class ComboRun:
         self.pending = None
         self.ticks_after_last = 0
         self.super_connected = None
+        self.bar = framebar.BarTrack(me)     # the Training Mode frame bar (exporter v9), if present
 
     def _off(self, k: int) -> int:
         """The step's timing offset, never under its floor (see plan_route)."""
@@ -413,6 +415,7 @@ class ComboRun:
             return None
         if self.first_line is None:
             self.first_line, self.t0 = raw, tick
+        self.bar.feed(raw)
         for who, p in (("bot", p1), ("dummy", p2)):
             for f in ("hp", "drive", "super"):
                 v = num(p.get(f))
@@ -437,7 +440,11 @@ class ComboRun:
             pid, pfr = r["at_send"]
             allowed_move = st.get("system") == "dash" or st.get("allow_movement")
             known_prev = set(self.steps[k - 1].get("known_ids") or []) if k else set()
+            start_ids = st.get("start_ids")
             new = aid is not None and aid not in self.neutral_a and (allowed_move or aid not in self.movement) \
+                and (not start_ids or aid in start_ids) \
+                and not (st.get("system") == "jump" and not start_ids and not 33 <= aid <= 40
+                         and not (num(p1.get("y")) or 0) > 0.01) \
                 and (aid != pid or (isinstance(afr, (int, float)) and isinstance(pfr, (int, float)) and afr < pfr)) \
                 and not (aid in known_prev and aid != st.get("expect_id"))
             if new:
@@ -623,8 +630,11 @@ class ComboRun:
                "steps": [{"name": st.get("name"), "sent": r["sent"], "start": r["start"], "id": r["start_id"],
                           "contact": r["contact"], "lead_measured": r.get("lead_measured"),
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
-                          "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send")}
+                          "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
+                          "bar_link": self.bar.link(self.rt[k - 1]["start"], r["start"], st.get("startup"))
+                          if k and st.get("trigger") in ("own_frame", "prev_neutral") and self.bar else None}
                          for k, (st, r) in enumerate(zip(steps, self.rt))]}
+        out["frame_bar"] = bool(self.bar)
         s0, s1 = side(b0, d0), side(b1, d1)
         out["side_switch"] = None if s0 is None or s1 is None else s0 != s1
         dx = out["dummy_x"]
@@ -634,6 +644,32 @@ class ComboRun:
             cap = steps[src].get("capcom_damage") if src is not None else None
             out["first_hit"] = classify_hit(before, after, cap)
         return out
+
+
+def bar_offsets(steps: list[dict], offsets: dict, fail: dict, res: dict, tried: dict) -> dict | None:
+    """Timing correction read off the frame bar (user, 0.11.9: the bar shows "when it is allowed to input a
+    move after the last move has connected and the animation has finished"). A link that missed although
+    the bot had been free `gap` frames before the move began was pressed `gap` frames late: try it that
+    much earlier, straight away. None when the bar has nothing to say (the blind search goes on)."""
+    k, kind = fail.get("step"), fail.get("kind")
+    if not isinstance(k, int) or k >= len(steps) or kind not in ("dropped", "whiff", "blocked"):
+        return None
+    bl = ((res.get("steps") or [{}] * (k + 1))[k] or {}).get("bar_link") or {}
+    gap = bl.get("gap")
+    if not isinstance(gap, int) or gap <= 0:
+        return None
+    base = steps[k].get("base_offset", 0)
+    cur = max(offsets.get(k, 0), steps[k].get("min_offset", NO_FLOOR) - base)   # what _off() applied
+    d = max(cur - gap, steps[k].get("min_offset", NO_FLOOR) - base)
+    if d == cur or ("bar", k, d) in tried:
+        return None
+    tried[("bar", k, d)] = True
+    todo = tried.get(("passes", k))
+    if todo and d in todo:
+        todo.remove(d)
+    o = dict(offsets)
+    o[k] = d
+    return o
 
 
 def next_offsets(steps: list[dict], offsets: dict, fail: dict, tried: dict) -> dict | None:
@@ -709,6 +745,91 @@ def wrong_hit_setting(hit_pass: str, first_hits: list) -> str | None:
     return None
 
 
+def load_rules(root: Path | None = None) -> dict:
+    """configs/combo_rules.yaml: the user's hit-type rules, punish-only starters, counter-hit bonuses."""
+    import yaml
+    p = Path(root or Path(__file__).resolve().parent.parent) / "configs" / "combo_rules.yaml"
+    try:
+        return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _starter(combo: dict, capcom: dict) -> dict | None:
+    """The Capcom row of the route's first attack (a jump-in's air attack counts; Drive Rush / DI don't)."""
+    rows = _rows_by_name(capcom)
+    for s in combo.get("steps") or []:
+        if s.get("system"):
+            return None
+        return _row(s.get("name") or "", None, rows)
+    return None
+
+
+def route_requirements(combo: dict, capcom: dict, rules: dict, character: str | None = None) -> dict:
+    """What a route needs before it can connect (user, 0.11.9): {hit_type, situation, source}.
+    Precedence: the user's rules (configs/combo_rules.yaml) > the wiki's label / route text / notes >
+    the starter (an invincible reversal or a super is only landed as a punish = punish counter) > frame
+    data (the first link works only with the counter-hit / punish-counter extra frames)."""
+    text = " | ".join([*(combo.get("headings") or []), *(combo.get("tabs") or []), combo.get("table") or ""]).lower()
+    for r in ((rules.get("hit_type_overrides") or {}).get(character or "") or []):
+        sec, rt = (r.get("section") or "").lower(), (r.get("route") or "").lower()
+        if (sec and sec in text) or (rt and rt in (combo.get("route") or "").lower()):
+            return {"hit_type": r["hit_type"], "situation": "punish" if r["hit_type"] == "punish_counter" else None,
+                    "source": f"rule: {r.get('source') or r.get('section') or r.get('route')}"}
+    ht, src = combo.get("hit_type"), combo.get("hit_type_source")
+    labelled = ht is not None and combo.get("source") != "generated"
+    starter = _starter(combo, capcom)
+    po = rules.get("punish_only_starters") or {}
+    if starter is not None:
+        name = starter.get("name") or ""
+        is_super = bool(re.match(r"(SA[123]|CA)\b", name))
+        reversal = "invincib" in (starter.get("notes") or "").lower() and not is_super
+        if (is_super and po.get("supers", True)) or (reversal and po.get("invincible_reversals", True)):
+            why = "a Super Art" if is_super else "an invincible reversal"
+            if not labelled or ht == "punish_counter":
+                return {"hit_type": "punish_counter", "situation": "punish",
+                        "source": f"starter {name} is {why}: only landed as a punish (punish counter)"}
+            return {"hit_type": ht, "situation": "punish", "source": f"{src or 'label'}; starter {name} is {why}"}
+    if labelled:
+        return {"hit_type": ht, "situation": "punish" if ht == "punish_counter" else None, "source": src or "label"}
+    bonus = rules.get("hit_bonus") or {}
+    win = (combo.get("link_windows") or [None])[0] if combo.get("source") == "generated" else None
+    first_link = _first_link_window(combo, capcom)
+    w = first_link if first_link is not None else win
+    if isinstance(w, int) and w < 1:
+        for kind in ("counter_hit", "punish_counter"):
+            b = bonus.get(kind)
+            if isinstance(b, int) and w + b >= 1:
+                return {"hit_type": kind, "situation": "punish" if kind == "punish_counter" else None,
+                        "source": f"frame data: first link window {w} on a normal hit, {w + b} with the "
+                                  f"{kind.replace('_', ' ')} bonus (+{b})"}
+    return {"hit_type": ht, "situation": None, "source": src}
+
+
+def _first_link_window(combo: dict, capcom: dict) -> int | None:
+    """Link window (frames) of the route's first link when it follows the starter directly."""
+    steps = combo.get("steps") or []
+    if len(steps) < 2 or steps[1].get("connector") != "," or any(s.get("system") for s in steps[:2]):
+        return None
+    rows = _rows_by_name(capcom)
+    a, b = _row(steps[0].get("name") or "", None, rows), _row(steps[1].get("name") or "", None, rows)
+    if not a or not b or a.get("on_hit_knockdown"):
+        return None
+    adv, su = a.get("on_hit_n"), b.get("startup_n")
+    return adv - su + 1 if isinstance(adv, int) and isinstance(su, int) else None
+
+
+def apply_requirements(combos: list[dict], capcom: dict, rules: dict, character: str | None) -> list[dict]:
+    out = []
+    for c in combos:
+        req = route_requirements(c, capcom, rules, character)
+        c2 = dict(c, situation=req["situation"], requirement_source=req["source"])
+        if req["hit_type"] != c.get("hit_type"):
+            c2.update(hit_type=req["hit_type"], hit_type_source=req["source"], page_hit_type=c.get("hit_type"))
+        out.append(c2)
+    return out
+
+
 def select_routes(combos: list[dict], position: str = "any", hit_type: str = "normal",
                   max_difficulty: int | None = None, only: list[str] | None = None) -> list[dict]:
     """Routes for one hit type. A route the page does not label (hit_type None) runs with the normal-hit
@@ -763,7 +884,9 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
            "success_rate_final_timing": round(sum(a["success"] for a in at_final) / len(at_final), 2) if at_final else 0,
            "offsets": {str(k): v for k, v in (good[-1]["offsets"] if good else final).items()},
            "damage": min(dmg) if dmg else None, "damage_all": dmg,
-           "moves": [s["name"] for s in plan["steps"]], "connectors": [s.get("connector") or "" for s in plan["steps"]],
+           "moves": [st["name"] for st in plan["steps"] if st.get("system") != "jump"],
+           "move_labels": move_names(plan["steps"]),
+           "connectors": [s.get("connector") or "" for s in plan["steps"] if s.get("system") != "jump"],
            "notes": plan.get("notes") or [],
            "time": time.strftime("%Y-%m-%d %H:%M:%S")}
     if good:
@@ -776,7 +899,12 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
         if fails:
             f = fails[-1]
             k = f.get("step")
-            out["failed_at"] = {"step": k, "move": plan["steps"][k]["name"] if k is not None and k < len(plan["steps"]) else None,
+            steps_ = plan["steps"]
+            jumped = k is not None and k < len(steps_) and steps_[k].get("system") == "jump"
+            mk = k + 1 if jumped and k + 1 < len(steps_) else k
+            out["failed_at"] = {"step": k, "move_no": move_no(steps_, k) if k is not None and k < len(steps_) else None,
+                                "move": (steps_[mk]["name"] + (" (the jump did not come out)" if jumped else ""))
+                                if mk is not None and mk < len(steps_) else None,
                                 "kind": f.get("kind"), "came_out": f.get("came_out"),
                                 "came_out_name": (plan.get("id_names") or {}).get(f.get("came_out"))}
     kinds = [(a.get("first_hit") or {}).get("kind") for a in attempts if a.get("first_hit")]
@@ -787,7 +915,7 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
                                     f"{sorted(set(kinds))}: set Training Mode's counter-hit setting")
     leads = [s["lead_measured"] for a in attempts for s in a["steps"] if s.get("lead_measured") is not None]
     out["lead_measured"] = leads
-    out["moves_kept"] = max((a.get("kept_steps") or 0 for a in attempts), default=0)
+    out["moves_kept"] = _kept_moves(plan["steps"], max((a.get("kept_steps") or 0 for a in attempts), default=0))
     return out
 
 
@@ -856,7 +984,10 @@ def learn_jump(sess, reader, reset, direction: int = 9) -> dict:
     reset(2)
     q = reader.subscribe()
     pts = []
+    ids, stand_id = [], None
     try:
+        st0 = reader.latest()
+        stand_id = st0.p1.get("action_id") if st0 is not None else None
         sess.controller.apply(InputState(direction), tag="learn_jump_arc")
         time.sleep(0.05)
         sess.controller.apply(InputState(), tag="learn_jump_arc_end")
@@ -867,7 +998,12 @@ def learn_jump(sess, reader, reset, direction: int = 9) -> dict:
             except Exception:
                 continue
             y, x, t = num(st.p1.get("y")) or 0.0, num(st.p1.get("x")), st.raw.get("stage_timer")
+            aid = st.p1.get("action_id")
+            if not air and aid is not None and aid != stand_id and aid not in ids:
+                ids.append(aid)                  # pre-jump / take-off ids (before the bot is airborne)
             if y > 0.05:
+                if aid is not None and aid not in ids:
+                    ids.append(aid)
                 air = True
                 pts.append((t, x, y))
             elif air:
@@ -882,7 +1018,21 @@ def learn_jump(sess, reader, reset, direction: int = 9) -> dict:
         if all(isinstance(p[0], int) for p in (a, b, c)) and b[0] - a[0] == 1 and c[0] - b[0] == 1 and c[2] > 0:
             dd.append(c[2] - 2 * b[2] + a[2])
     gravity = sorted(dd)[len(dd) // 2] if dd else None
-    return {"travel": travel, "gravity": gravity, "air_frames": len(pts)}
+    # the jump's own action ids: the jump step of a jump-in only counts as started on one of them, so
+    # the end of the walk to the start distance (walk-stop ids) is never taken for the jump (user, 0.11.9)
+    return {"travel": travel, "gravity": gravity, "air_frames": len(pts), "ids": ids}
+
+
+def move_no(steps: list[dict], k: int) -> int:
+    """The move number the user sees (1-based). The jump of a jump-in is not a move of its own: the jump-in
+    ATTACK is move 1 (user, 0.11.9), and a jump that never left the ground is move 1's failure."""
+    return max(1, sum(1 for st in steps[:k + 1] if st.get("system") != "jump"))
+
+
+def move_names(steps: list[dict]) -> list[str]:
+    jump = any(st.get("system") == "jump" for st in steps)
+    return [("jump-in " if jump and st.get("air") else "") + (st.get("name") or "")
+            for st in steps if st.get("system") != "jump"]
 
 
 def recorded_timing(res: dict) -> list:
@@ -890,6 +1040,11 @@ def recorded_timing(res: dict) -> list:
     follow-ups), frames after the previous move started (cancels, chains) or frames to landing (jump-ins)."""
     return [{"prev_frame": s.get("prev_frame"), "after_prev_start": s.get("after_prev_start"), "land": s.get("land")}
             if k else {} for k, s in enumerate(res.get("steps") or [])]
+
+
+def _kept_moves(steps: list[dict], kept_n: int) -> int:
+    """How many of the user's moves the first `kept_n` steps are (the jump alone is none)."""
+    return sum(1 for st in steps[:kept_n] if st.get("system") != "jump")
 
 
 def _lead(state: dict) -> int:
@@ -933,6 +1088,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                       f"{state[key]['air_frames']} frames in the air")
                 set_position(sess, reader, reset, _position(combo), state)
             walk_to_distance(sess, reader, state[key]["travel"] + JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)])
+            _wait_settled(reader, sess, neutral_a, neutral_d, 2.0, need=10)    # the walk is over before the jump
+            steps[0]["start_ids"] = state[key].get("ids") or None
         else:
             walk_to_contact(sess, reader)
         pre = reader.latest()
@@ -968,12 +1125,12 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         res["offsets"] = dict(offsets)
         attempts.append(res)
         f = res.get("fail") or {}
-        tag = "OK" if res["success"] else (f"failed at move {f['step'] + 1} ({f.get('kind')})"
+        tag = "OK" if res["success"] else (f"failed at move {move_no(steps, f['step'])} ({f.get('kind')})"
                                            if f.get("step") is not None else f"failed ({f.get('kind')})")
         dmg = f", {res['damage']} dmg" if res.get("damage") else ""
         print(f"  try {len(attempts)}: {tag}, {res['hits']} hits{dmg}, offsets {offsets or '{}'}")
-        if kept_n and recorded is None:
-            print(f"    (moves 1-{kept_n} replayed exactly as they worked)")
+        if kept_n and recorded is None and _kept_moves(steps, kept_n):
+            print(f"    (moves 1-{_kept_moves(steps, kept_n)} replayed exactly as they worked)")
         if f.get("kind") == "first_blocked":
             break                    # the dummy blocked the very first hit: the setup is wrong
         if found is not None:
@@ -1001,15 +1158,22 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 if prefix_misses < PREFIX_MISSES:
                     continue
                 kept_n, prefix_misses = k, 0         # it keeps failing there: search that move again
-                print(f"    moves 1-{kept_n + 1} no longer work as recorded: searching move {k + 1} again")
+                print(f"    move {move_no(steps, k)} no longer works as recorded: searching its timing again")
             elif isinstance(k, int) and k > kept_n and f.get("kind") != "first_blocked":
                 # a new best: moves 1..k came out (and hit where they should): keep them exactly
                 kept, kept_n, prefix_misses = recorded_timing(res), k, 0
                 kept_lead = lead_now
-                print(f"    keeping moves 1-{k} exactly; searching move {k + 1}'s timing")
+                if _kept_moves(steps, k):
+                    print(f"    keeping moves 1-{_kept_moves(steps, k)} exactly; searching move "
+                          f"{move_no(steps, k)}'s timing")
             else:
                 prefix_misses = 0
-            nxt = next_offsets(steps, offsets, f, tried)
+            nxt = bar_offsets(steps, offsets, f, res, tried)
+            if nxt is not None:
+                print(f"    frame bar: move {move_no(steps, f['step'])} began "
+                      f"{res['steps'][f['step']]['bar_link']['gap']} frame(s) after the bot was free: pressing it earlier")
+            else:
+                nxt = next_offsets(steps, offsets, f, tried)
             if nxt is None:
                 break
             offsets = nxt
@@ -1073,6 +1237,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
         elif source in ("community", "both"):
             print(f"No community combos for {name}: save its SuperCombo Combos page and import (menu T, A).")
         lab = load_lab(ds, name)
+        rules = load_rules()
         guard_text = {"after_first_hit": "guard AFTER FIRST HIT (a block = not a true combo)",
                       "none": "guard NONE (gaps can go unnoticed: results are not marked true combos)"}[guard]
         ids = None
@@ -1086,9 +1251,10 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                 if sess.stop_event.is_set() or setup_error or pass_error:
                     break
                 combos = list(community) if source in ("community", "both") else []
-                if source in ("generated", "both") and hit_pass == "normal":
-                    from .combo_gen import generate        # the bot's own routes are normal-hit routes
-                    combos += generate(capcom, catalog, community, lab)
+                if source in ("generated", "both"):
+                    from .combo_gen import generate        # the bot's own routes: normal hits, except
+                    combos += generate(capcom, catalog, community, lab)   # punish-only starters (below)
+                combos = apply_requirements(combos, capcom, rules, name)
                 todo = select_routes(combos, position, hit_pass, max_difficulty, only)
                 if not again or rnd > 0:
                     # done = already a true combo; with guard none, anything verified before
@@ -1133,6 +1299,10 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                         break
                     print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
                           f"damage listed {combo.get('damage') or combo.get('est_damage')})")
+                    if combo.get("page_hit_type", combo.get("hit_type")) != combo.get("hit_type") or combo.get("situation"):
+                        print(f"    needs: {PASS_TEXT.get(combo.get('hit_type') or 'normal')}"
+                              f"{', only as a punish' if combo.get('situation') == 'punish' else ''} "
+                              f"({combo.get('requirement_source')})")
                     summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard, lab_state)
                     if (summ.get("failed_at") or {}).get("kind") == "first_blocked":
                         setup_error = ("The dummy BLOCKED the first hit. Set Training Mode's dummy guard to "
@@ -1147,6 +1317,8 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                         print("  " + wrong)
                         break
                     summ["tested_as"] = hit_pass
+                    summ["situation"] = combo.get("situation")        # "punish": the fighter uses it only to punish
+                    summ["requirement_source"] = combo.get("requirement_source")
                     summ["unlabelled"] = combo.get("hit_type") is None and combo.get("source") == "community"
                     if summ["unlabelled"] and not summ["verified"]:
                         summ["true_combo"] = None      # it may simply need a counter hit: not a verdict

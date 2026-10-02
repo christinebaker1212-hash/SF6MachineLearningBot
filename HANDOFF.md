@@ -220,6 +220,10 @@ catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's 
 **0.11.4 (first Ken combo lab run: 6 true combos, damage = community):** the previous move changes what an
 input does (Quick Dash → [QD] Shoryuken / Tatsu), '>' that Capcom doesn't allow is timed after recovery,
 jump-in landing fixed. Re-run K → 1 (`--again` not needed: only failed routes are retried).
+**0.11.9:** frame bar exported (v9: menu R as admin, restart SF6). The jump-in attack is move 1. Dragonlash
+loops and DP/super starters go to the punish-counter pass (`configs/combo_rules.yaml`). Waiting on the user:
+counter-hit / punish-counter frame bonus values (`hit_bonus`). Verify the bar mapping with C → 4 on a few moves
+(5LP, 2MK, a Shoryuken, Hadoken, DI) and send S: `frame_bar.check` should read startup_ok / total_ok true.
 **0.11.8 (user: a 7-move "success" whose last move whiffed):** a hit now counts for a move only once that
 move can be active, so the previous move's late hit no longer passes a whiffed last move. In the timing
 search, moves that worked are replayed exactly (send points and input delay frozen) and only the failing

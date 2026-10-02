@@ -62,3 +62,21 @@ def test_chosen_method_that_writes_nothing_is_replaced(tmp_path):
     assert "CHOSEN=nBattle.cPlayer.move_player" in out and "FAILED=nBattle.sGame.UpdateTick" in out
     tick = [t for s, t in rows if s == "tick"]
     assert tick and tick == list(range(tick[0], 8 * 760 + 1))     # every frame once the good one is in
+
+
+def test_frame_bar_cells_are_exported_once_each_in_order(tmp_path):
+    """v9 (user, 0.11.9): the Training Mode frame bar, one cell per game frame. Simulated widget: a ring of 20
+    cells, cleared when a move starts after idle, one 30-frame move that wraps the ring. Every cell the game
+    writes is exported exactly once, in order, and idle frames export nothing."""
+    out = subprocess.run([LUA, str(ROOT / "tests/lua/stub_run.lua"), str(ROOT / "reframework/autorun/sf6bot_state.lua"),
+                          str(tmp_path), "1", "220", "1", "-1", "1", "0", "1"], check=True, timeout=120,
+                         capture_output=True, text=True)
+    lines = [json.loads(l) for l in (tmp_path / "sf6bot_state.jsonl").read_text().splitlines()]
+    got = [(l["stage_timer"], c[1], c[5]) for l in lines if l.get("bar") for c in l["bar"]["c"]]
+    want = []
+    for t in range(1, 221):
+        pos, n = ((t - 1) % 16 + 1, 10) if t <= 160 else (t - 160, 30)
+        if pos <= n:
+            p1 = [7, 7, 7, 13, 13, 8, 8, 8, 8, 8][pos - 1] if n == 10 else (7 if pos <= 5 else 13 if pos <= 8 else 8)
+            want.append((t, p1, 9 if pos >= 4 else 0))
+    assert got == want

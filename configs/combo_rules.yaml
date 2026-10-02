@@ -1,0 +1,26 @@
+# Combo lab rules: what a route needs before it can connect. Used by the combo lab (menu K) to put each
+# route in the right pass (normal hit / counter hit / punish counter) and by the fighter to know when a
+# route may be used. Edit freely; the lab prints which rule decided each route.
+
+# Hit type a route needs, set by the user. Overrides the wiki page. Matched per character on a section
+# heading, tab or table title (case-insensitive substring), or on the route text.
+hit_type_overrides:
+  Ken:
+    - section: "Dragonlash Loops"
+      hit_type: punish_counter
+      source: "user, 2026-10-02: Dragonlash loops always need a punish counter to begin"
+
+# Starters that are only ever landed as a PUNISH (the opponent recovering from a move), i.e. as a punish
+# counter in SF6: invincible reversals (Shoryuken-type, Capcom notes say "invincible") and Super Arts /
+# Critical Arts. Routes starting with them are tested in the punish-counter pass and used by the fighter
+# only to punish. Set to false to test them as normal hits instead.
+punish_only_starters:
+  invincible_reversals: true
+  supers: true
+
+# Frames a counter hit / punish counter ADDS to the hit's frame advantage (user: "punish counters give a
+# flat addition to frames"). null = not given yet: the user will supply the values. Once set, an
+# unlabelled route whose first link only works with the extra frames is put in that hit type's pass.
+hit_bonus:
+  counter_hit: null
+  punish_counter: null

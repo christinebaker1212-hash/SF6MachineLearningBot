@@ -1386,7 +1386,7 @@ that don't cause a cinematic"; position resets by holding a direction.
 - `sf6bot erase old` (menu E → 4) shows what it would remove and needs a typed YES:
   - runs: every run not made by the current version
   - fights: recorded before 0.11.5 (the bot's combo timing changed)
-  - combo lab: route results before 0.11.8 (0.11.8 false successes; 0.11.6 hit-type passes; 0.11.4 move variants, cancel rules); the
+  - combo lab: route results before 0.11.9 (0.11.9 hit-type rules and jump-in numbering; 0.11.8 false successes; 0.11.6 hit-type passes; 0.11.4 move variants, cancel rules); the
     file's measured corner position stays
   - move maps: before 0.11.7 (rebuilt by Tools → X)
   - `erase.VALID_SINCE` holds these versions: bump an entry when a change makes older data wrong.
@@ -1416,6 +1416,77 @@ that don't cause a cinematic"; position resets by holding a direction.
   - Test (frame simulator, NOT the game): a 4-move route whose last link is planned 4 frames early, with a
     noisy input-delay estimate. Moves 1-3 go out on exactly the same frames in every attempt; move 4 is
     shifted until it hits. The old search moved moves 1-3 with each new estimate and lost them.
+
+## 0.11.9: frame bar (exporter v9), jump-in = move 1, punish-counter rules
+User (2026-10-02), restating 0.11.8: "it successfully hit six hits ... the seventh hit whiffed, it should retry
+with the same exact inputs up to the sixth hit, and then retry different timings on the seventh hit". That is
+what 0.11.8's kept prefix does (moves 1..k replayed on their recorded frames, input delay frozen; only move k+1
+searched).
+### Frame bar (exporter v9) — user: "critically important for the bot to understand when it is allowed to input"
+- The user's in-game legend ("The Frame Meter and You"):
+  - green = Counter State (startup), red = hitbox
+  - blue = Punish Counter State, cyan = non-counter recovery
+  - orange = projectile active, purple = parry/counter active
+  - yellow = post-damage/block recovery, white/striped = invincibility
+  - dark = free to act
+- Before v9 only the meter's numbers were read (snapshot `SnapShotDatas[0]`: Startup / Total / Advantage,
+  verified). The per-frame bar (`FrameNumDatas`) was skipped by design ("Datas" fields).
+- v9 reads the LIVE widget, as haruno-ku/SF6_Tools does:
+  - path: `TrainingManager._ViewUIWigetDict` key 5 → `get_SSData().MeterDatas[0|1].FrameNumDatas`
+  - it is a ring buffer, one cell per frame
+  - only the new cells are read and exported each line: `"bar":{"n":size,"c":[[idx, FrameType, Type, MainGauge,
+    Frame] for P1 then P2]}`
+  - a cell identical to the previous lap is ignored unless a player is busy (`act_st ≠ 0`)
+  - a cleared bar restarts from cell 0
+  - MOCK-tested on a simulated widget (20-cell ring, restart after idle, a 30-frame move that wraps): every
+    cell exactly once, in order
+- **FrameType numbers are community values (SF6_Tools marks them unverified):** 7 startup, 13/14 active,
+  8 recovery, 9 hitstun, 10 blockstun, 0 empty. `framebar.meter_check` verifies them per move against the
+  meter's own Startup (startup cells + 1) and Total (busy cells). The catalog stores the result
+  (`frame_bar.check`) with both players' bars as run-length text (`frame_bar.p1/p2`).
+  - Not known: whether the bar adds cells during hitstop. The test simulator adds none, because the meter's
+    Total equals Capcom's.
+- **Combo lab:**
+  - Every link step records `bar_link`:
+    - `free_at`: the bot's first free frame after the previous move's recovery
+    - `gap`: free frames before the next move's startup began; 0 = the earliest possible frame
+    - `stun_end`: the dummy's last hitstun frame
+    - `late_by`
+  - A link that missed with `gap` > 0 is retried exactly `gap` frames earlier straight away (`bar_offsets`)
+    before the ±1..5 search ("frame bar: move N began G frame(s) after the bot was free").
+### Jump-ins (user: "The actual jump in attack should be the first move")
+- The jump is no longer a move of its own. The jump-in attack is move 1 in every message, `failed_at.move_no`,
+  `moves`, `move_labels` ("jump-in j.HP") and the kept-moves count. A jump that never left the ground is
+  move 1's failure.
+- "It takes into account the movement as well as the jump":
+  - the jump step accepted ANY movement id, so the end of the walk to the start distance (walk-stop ids)
+    counted as the jump
+  - now only the jump's own ids, measured by `learn_jump` (pre-jump and airborne), start it; without them,
+    ids 33–40 or being airborne
+  - the lab also waits for both players to be neutral after the walk
+### What a route needs (`configs/combo_rules.yaml`, `combo_lab.route_requirements`)
+- Precedence:
+  1. the user's rules: `hit_type_overrides`, e.g. **Ken "Dragonlash Loops" → punish counter**
+  2. the wiki label / route text / notes
+  3. punish-only starters
+  4. frame data
+- **Punish-only starters** (user: "a DP punish can only be used under specific circumstances"):
+  - which: an invincible reversal (Capcom notes "invincible"; Shoryuken-type) or a Super Art / CA
+  - why: such a move is only landed as a punish, and in SF6 a punish is a punish counter
+  - effect: the route goes to the punish-counter pass with `situation: punish`, stored in the lab result for
+    the fighter. Generated routes are now produced in every pass and sorted the same way.
+- **Counter-hit / punish-counter frame bonus** (user: "punish counters give a flat addition to frames"):
+  - `hit_bonus` is in the config, **null until the user supplies the frame data**
+  - once set, an unlabelled route whose first link only works with the extra frames goes to that pass
+  - the test uses a placeholder value, not the game's
+- Ken: the 4 Dragonlash-loop routes and the SA3 starter → punish counter. The third loop's own notes say
+  "doesn't require CH or PC"; the user's rule wins (to confirm with the user).
+### C (catalog) and the frame bar
+- The meter numbers the catalog uses (Startup / Total / Advantage) are unchanged, and verified against
+  Capcom (Ken 172/179), so **existing catalogs stay valid; no full retest**.
+- A short re-test (C → 4, a few moves) records the bar and verifies the FrameType mapping.
+- A full re-run adds per-move bars (active frames, invincibility, punish-counter windows); it is worth it only
+  after a patch or once the mapping is verified.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

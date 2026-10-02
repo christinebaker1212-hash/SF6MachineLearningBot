@@ -261,6 +261,8 @@ def lab_knowledge(lab: dict | None) -> tuple[set, set, set, set]:
             continue                    # may need a counter hit: not proof that the prefix has a gap
         f = v.get("failed_at") or {}
         k = f.get("step")
+        if isinstance(f.get("move_no"), int):
+            k = f["move_no"] - 1        # 0.11.9: a jump-in's jump is not a move of its own
         if not v.get("verified") and isinstance(k, int):
             if f.get("kind") in ("blocked", "dropped", "whiff"):
                 bad.add(seq[:k + 1])        # a gap before move k: no extension of this prefix is true

@@ -20,7 +20,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 8          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 9          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -369,6 +369,120 @@ local function read_frame_meter()
     return "{" .. table.concat(parts, ",") .. "}"
 end
 
+-- Training Mode FRAME BAR (v9, user 2026-10-02: "critically important for the bot to understand when it
+-- is allowed to input a move"). READ only. The live frame-meter widget (TrainingManager._ViewUIWigetDict
+-- key 5 -> get_SSData().MeterDatas[0 = P1, 1 = P2].FrameNumDatas) is a ring buffer with one cell per game
+-- frame: FrameType 0 = empty; community (SF6_Tools, unverified): 7 startup, 13/14 active, 8 recovery,
+-- 9 hitstun, 10 blockstun. Head tracking as in SF6_Tools (next cell, current cell, else a bounded backward
+-- scan) but only the NEW cells are read and exported each line (a full scan costs ~3 ms):
+-- "bar":{"n":size,"c":[[idx, ft1, type1, gauge1, frame1, ft2, type2, gauge2, frame2], ...]}.
+local bar = { p1 = nil, p2 = nil, refresh = 0, head = -1, idle_i = nil, last_timer = nil, seen = {} }
+
+local function bar_lists()
+    bar.p1, bar.p2 = nil, nil
+    local mgr = sdk.get_managed_singleton("app.training.TrainingManager")
+    if not mgr then return end
+    local dict = mgr:get_field("_ViewUIWigetDict")
+    local entries = dict and dict:get_field("_entries")
+    if not entries then return end
+    for i = 0, entries:call("get_Count") - 1 do
+        local entry = entries:call("get_Item", i)
+        if entry and entry:get_field("key") == 5 then
+            local widget = entry:get_field("value"):call("get_Item", 0)
+            local md = widget:call("get_SSData"):get_field("MeterDatas")
+            if md and md:call("get_Count") >= 2 then
+                bar.p1 = md:call("get_Item", 0):get_field("FrameNumDatas")
+                bar.p2 = md:call("get_Item", 1):get_field("FrameNumDatas")
+            end
+            return
+        end
+    end
+end
+
+local function bar_num(it, name)
+    local ok, v = pcall(function() return it:get_field(name) end)
+    return ok and (tonumber(tostring(v)) or 0) or 0
+end
+
+local function bar_cell(i)
+    local a = bar.p1:call("get_Item", i)
+    local b = bar.p2:call("get_Item", i)
+    if not a or not b then return nil end
+    return { bar_num(a, "FrameType"), bar_num(a, "Type"), bar_num(a, "MainGauge"), bar_num(a, "Frame"),
+             bar_num(b, "FrameType"), bar_num(b, "Type"), bar_num(b, "MainGauge"), bar_num(b, "Frame") }
+end
+
+local function bar_active(i, cnt)
+    if i < 0 or i >= cnt then return false end
+    local c = bar_cell(i)
+    return c ~= nil and (c[1] ~= 0 or c[5] ~= 0), c
+end
+
+-- a cell still holding what was read there one lap earlier is stale (the ring buffer wrapped), not new;
+-- while a player is busy (act_st ~= 0) the game writes a cell every frame, so the next one is new anyway
+local function bar_new(i, cnt)
+    local act, c = bar_active(i, cnt)
+    if not act then return false end
+    local sig = table.concat(c, ",")
+    if bar.seen[i] == sig and not bar.busy then return false end
+    return true, c, sig
+end
+
+local function read_frame_bar(stage_timer, busy)
+    bar.busy = busy
+    bar.refresh = bar.refresh - 1
+    if bar.refresh <= 0 or not bar.p1 or not bar.p2 then
+        bar.refresh = 300
+        pcall(bar_lists)
+    end
+    if not bar.p1 or not bar.p2 then return nil end
+    local ok, cnt = pcall(function() return bar.p1:call("get_Count") end)
+    if not ok or not cnt or cnt <= 0 then bar.p1 = nil; return nil end
+    -- at most one new cell per game frame since the last line (8x replays: several)
+    local adv = 1
+    if type(stage_timer) == "number" and type(bar.last_timer) == "number" then
+        adv = math.max(0, math.min(12, stage_timer - bar.last_timer))
+    end
+    bar.last_timer = stage_timer
+    local out, h = {}, bar.head
+    local function take(i, c, sig)
+        out[#out + 1] = "[" .. i .. "," .. table.concat(c, ",") .. "]"
+        bar.seen[i] = sig
+        h = i
+    end
+    for _ = 1, adv do
+        local nxt = (h + 1) % cnt
+        local new, c, sig = bar_new(nxt, cnt)
+        if not new then break end
+        take(nxt, c, sig)
+    end
+    if #out == 0 and not bar_active(h, cnt) then
+        -- the bar was cleared: a new sequence starts from the left (cell 0), else a bounded backward scan
+        -- (20 cells per line) finds where it went
+        bar.seen = {}
+        local new, c, sig = bar_new(0, cnt)
+        if new then
+            take(0, c, sig)
+            for _ = 2, adv do
+                local n2, c2, s2 = bar_new(h + 1, cnt)
+                if not n2 then break end
+                take(h + 1, c2, s2)
+            end
+        else
+            local i, n = bar.idle_i or (cnt - 1), 0
+            while i >= 0 and n < 20 do
+                local n3, c3, s3 = bar_new(i, cnt)
+                if n3 then take(i, c3, s3); bar.idle_i = nil; break end
+                i, n = i - 1, n + 1
+            end
+            if #out == 0 then bar.idle_i = (i >= 0) and i or (cnt - 1) end
+        end
+    end
+    bar.head = h
+    if #out == 0 then return nil end
+    return '{"n":' .. cnt .. ',"c":[' .. table.concat(out, ",") .. "]}"
+end
+
 local PFIELDS = { "chara", "input", "input_sw", "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
                   "facing_right", "dir_bit", "action_id", "action_frame", "action_frames_total", "hitstop",
                   "hitstun", "blockstun", "pose", "act_st", "invuln" }
@@ -462,6 +576,9 @@ export_battle = function(src)
             fm_last, fm_last_frame = fm, frame_no
         end
     end
+    local okbar, barj = pcall(read_frame_bar, stage_timer,
+        (tonumber(tostring(r1.act_st)) or 0) ~= 0 or (tonumber(tostring(r2.act_st)) or 0) ~= 0)
+    if okbar and barj then fm_part = fm_part .. ',"bar":' .. barj end
     last_missing = table.concat(missing, ", ")
     write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"src":"' .. src .. '","in_battle":true,"ready":' ..
                enc(ready) .. ',"stage_timer":' .. enc(stage_timer) ..

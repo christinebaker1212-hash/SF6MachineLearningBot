@@ -40,6 +40,7 @@ class Sim:
         self.hp = 10000
         self.arrivals = []
         self.guard_all = False
+        self.bar_on = False       # emit the Training Mode frame bar (exporter v9)
         self.block = 0
 
     def send(self, k, prefix):
@@ -80,11 +81,20 @@ class Sim:
         if self.stun > 0 and self.hitstop == 0:
             self.stun -= 1
         c = self.cur
+        bar = None
+        if self.bar_on and not self.hitstop:     # the meter's Total equals Capcom's: no cells in hitstop
+            t1 = 0 if c is None else 7 if c["frame"] < c["m"]["su"] - 1 else 13 if c["frame"] < c["m"]["su"] + 1 else 8
+            t2 = 9 if (self.stun or self.hitstop) else 0
+            if t1 or t2:
+                bar = {"n": 100, "c": [[self.t % 100, t1, 0, 0, 0, t2, 0, 0, 0]]}
         p1 = {"action_id": c["m"]["id"] if c else NEUTRAL, "action_frame": c["frame"] if c else 0,
               "hitstop": self.hitstop if c and c["hit"] else 0, "x": 0.0, "hp": 10000, "drive": 60000, "super": 30000}
         p2 = {"action_id": REACT if (self.stun or self.hitstop) else DUMMY_IDLE, "hitstun": self.stun,
               "hitstop": self.hitstop, "blockstun": self.block, "hp": self.hp, "x": 0.8}
-        return {"stage_timer": self.t, "p1": p1, "p2": p2}
+        line = {"stage_timer": self.t, "p1": p1, "p2": p2}
+        if bar:
+            line["bar"] = bar
+        return line
 
 
 def _run(sim, steps, offsets, ticks=400):
@@ -561,3 +571,86 @@ def test_moves_that_worked_are_replayed_exactly_while_the_failing_move_is_search
         assert [s[k] for k in range(3)] == [first_fail[k] for k in range(3)]   # moves 1-3: exactly as before
     assert len({s[3] for s in sends}) > 1                     # move 4: its timing was searched
     assert summ["offsets"] == {"3": summ["offsets"]["3"]} and summ["offsets"]["3"] > 0
+
+
+def test_frame_bar_shows_a_late_link_and_the_search_presses_it_that_much_earlier():
+    """User, 0.11.9: the frame bar tells when the bot may input after the last move ended. A link pressed
+    late leaves free frames on the bot's bar before the next move's startup; the search moves the press
+    earlier by exactly that many frames instead of trying one frame at a time."""
+    from sf6bot import framebar
+    moves = [{"id": 618, "su": 4, "tot": 14, "adv": 5, "conn": ""},
+             {"id": 611, "su": 4, "tot": 13, "adv": 4, "conn": ","}]       # 2LP , 5LP: a 2-frame link
+    steps = _steps(moves)
+    steps[1]["min_offset"] = cl.NO_FLOOR
+    sim = Sim(moves, lead=4)
+    sim.bar_on = True
+    res = _run(sim, steps, {1: 4})                              # pressed 4 frames late: the dummy recovers
+    assert not res["success"] and res["frame_bar"]
+    bl = res["steps"][1]["bar_link"]
+    assert bl["gap"] == 4 and bl["late_by"] > 0
+    tried = {}
+    nxt = cl.bar_offsets(steps, {1: 4}, res["fail"], res, tried)
+    assert nxt == {1: 0}
+    sim = Sim(moves, lead=4)
+    sim.bar_on = True
+    again = _run(sim, steps, nxt)
+    assert again["success"] and again["steps"][1]["bar_link"]["gap"] == 0
+    # the mapping check the catalog runs: 3 startup cells + 1 = start-up 4, 14 busy cells = total 14
+    tr = framebar.BarTrack()
+    sim = Sim(moves[:1], lead=4)
+    sim.bar_on = True
+    sim.send(0, 0)
+    for _ in range(30):
+        tr.feed(sim.tick())
+    chk = framebar.meter_check(framebar.move_cells(tr, tr.t[0][0]), 4, 14)
+    assert chk["startup_ok"] and chk["total_ok"], chk
+
+
+def test_jump_in_attack_is_move_one_and_the_walk_is_not_the_jump():
+    """User, 0.11.9: 'The jump in does not seem to count as the first move ... it takes into account the
+    movement as well as the jump.' The walk to the start distance ends with walk-stop ids; those are not
+    the jump (only the jump's own ids, measured by learn_jump, are), and the jump-in attack is move 1."""
+    steps = [{"name": "jump", "system": "jump", "sequence": "9@3", "prefix": 0, "trigger": "first",
+              "allow_movement": True, "hitting": False, "min_offset": 0, "start_ids": [36, 37]},
+             {"name": "j.HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "air", "startup": 9, "air": True,
+              "hitting": True, "min_offset": cl.NO_FLOOR},
+             {"name": "2HP", "sequence": "2@2 2+HP@3", "prefix": 2, "trigger": "landing", "hitting": True,
+              "min_offset": -cl.JITTER}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, {10, 11, 36, 37})
+    assert run.feed(_line(1, 10, 5)) == 0                        # still walking when the jump is sent
+    run.sent(0)
+    run.feed(_line(2, 11, 0))                                    # walk-stop: NOT the jump
+    assert run.rt[0]["start"] is None
+    run.feed(_line(3, 37, 0, y=0.1))
+    assert run.rt[0]["start"] == 3 and run.rt[0]["start_id"] == 37
+    assert [cl.move_no(steps, k) for k in range(3)] == [1, 1, 2]
+    assert cl.move_names(steps) == ["jump-in j.HP", "2HP"]
+
+
+def test_dragonlash_loops_and_punish_only_starters_go_to_the_punish_counter_pass():
+    """User, 0.11.9: 'Dragonlash loops always need a punish counter to begin' (configs/combo_rules.yaml) and
+    'something like a DP punish can only be used under specific circumstances': a route starting with an
+    invincible reversal or a super is only landed as a punish = punish counter. With the user's counter-hit /
+    punish-counter frame bonus set, a first link that needs the extra frames picks that pass."""
+    cap, cat, comm = _ken()
+    rules = cl.load_rules()
+    comm = [dict(c, source="community") for c in comm]
+    got = cl.apply_requirements(comm, cap, rules, "Ken")
+    loops = [c for c in got if "Dragonlash Loops" in (c.get("headings") or [])]
+    assert loops and all(c["hit_type"] == "punish_counter" and c["situation"] == "punish" for c in loops)
+    assert not cl.select_routes(loops, hit_type="normal")
+    dp = {"route": "623HP , 2LP", "source": "generated", "hit_type": "normal",
+          "steps": [{"token": "623HP", "name": "H Shoryuken"}, {"token": "2LP", "name": "Crouching Light Punch", "connector": ","}]}
+    req = cl.route_requirements(dp, cap, rules, "Ken")
+    assert req["hit_type"] == "punish_counter" and "invincible reversal" in req["source"]
+    # 2MP is +5 on hit at most; 5HK (start-up > 5) does not link on a normal hit: with a +4 punish-counter
+    # bonus (a placeholder value for the test, NOT the game's) it is the punish-counter pass
+    rows = {m["name"]: m for m in cap["moves"]}
+    a, b = "Crouching Medium Punch", "Standing Heavy Kick"
+    w = rows[a]["on_hit_n"] - rows[b]["startup_n"] + 1
+    assert w < 1
+    route = {"route": "2MP , 5HK", "source": "community", "hit_type": None,
+             "steps": [{"token": "2MP", "name": a}, {"token": "5HK", "name": b, "connector": ","}]}
+    assert cl.route_requirements(route, cap, rules, "Ken")["hit_type"] is None        # no bonus given yet
+    bonus = dict(rules, hit_bonus={"counter_hit": None, "punish_counter": 1 - w})
+    assert cl.route_requirements(route, cap, bonus, "Ken")["hit_type"] == "punish_counter"
