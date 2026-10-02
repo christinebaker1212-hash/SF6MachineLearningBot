@@ -253,8 +253,12 @@ def lab_knowledge(lab: dict | None) -> tuple[set, set, set, set]:
             continue
         seq = tuple(zip([""] + conns[1:], moves))
         tested.add(key)
+        if v.get("tested_as", "normal") != "normal" or (v.get("hit_type") or "normal") != "normal":
+            continue                    # counter / punish-counter results say nothing about normal hits
         if v.get("verified") and v.get("guard") == "after_first_hit":
             true.add(seq)
+        if v.get("unlabelled") and not v.get("verified"):
+            continue                    # may need a counter hit: not proof that the prefix has a gap
         f = v.get("failed_at") or {}
         k = f.get("step")
         if not v.get("verified") and isinstance(k, int):

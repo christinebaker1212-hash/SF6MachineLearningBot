@@ -659,14 +659,47 @@ def load_lab(datasets_root: Path, character: str) -> dict:
         return {"character": character, "routes": {}}
 
 
+PASSES = ("normal", "counter_hit", "punish_counter")
+PASS_TEXT = {"normal": "normal-hit", "counter_hit": "counter-hit", "punish_counter": "punish-counter"}
+PASS_SETTING = {"normal": "OFF (normal hits)", "counter_hit": "COUNTER HIT", "punish_counter": "PUNISH COUNTER"}
+
+
+def console_prompt(hit_pass: str, n: int) -> bool:
+    """Ask the user to switch the dummy's counter-hit setting before a counter / punish-counter pass."""
+    print(f"\n{n} {PASS_TEXT[hit_pass]} routes are next. In SF6: Training Mode settings -> dummy -> counter "
+          f"hit = {PASS_SETTING[hit_pass]} (keep guard = After first hit).")
+    try:
+        ans = input("Press Enter when it is set (or type S to skip them), then click back into the game: ")
+    except EOFError:
+        return False
+    return ans.strip().lower() not in ("s", "skip", "n", "no")
+
+
+def wrong_hit_setting(hit_pass: str, first_hits: list) -> str | None:
+    """The measured first hits say the dummy's counter-hit setting is not the one this pass needs
+    (hits.py: counter = 1.2x damage; punish counter also costs the dummy Drive)."""
+    kinds = [k for k in first_hits if k in ("normal", "counter", "punish_counter")]
+    if not kinds:
+        return None
+    if hit_pass == "normal" and all(k != "normal" for k in kinds):
+        return ("The first hits landed as counter hits: turn the dummy's counter-hit setting OFF for the "
+                "normal-hit routes. Those results were not kept.")
+    if hit_pass != "normal" and all(k == "normal" for k in kinds):
+        return (f"The first hits landed as NORMAL hits: set the dummy's counter-hit setting to "
+                f"{PASS_SETTING[hit_pass]} for these routes. Those results were not kept.")
+    return None
+
+
 def select_routes(combos: list[dict], position: str = "any", hit_type: str = "normal",
                   max_difficulty: int | None = None, only: list[str] | None = None) -> list[dict]:
+    """Routes for one hit type. A route the page does not label (hit_type None) runs with the normal-hit
+    routes, flagged `unlabelled`: a failure there is not counted against it."""
     out = []
     for c in combos:
         if c.get("controls", "classic") != "classic":
             continue
         ht = c.get("hit_type") or "normal"
-        if hit_type != "any" and ht != hit_type:
+        if hit_type not in ("any", "all") and ht != hit_type:
             continue
         if position != "any" and _position(c) != position:
             continue
@@ -950,7 +983,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
 def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "normal",
                   max_difficulty: int | None = None, only: list[str] | None = None, tries: int = 40,
                   confirm: int = 2, limit: int | None = None, source: str = "community", again: bool = False,
-                  guard: str = "after_first_hit", rounds: int = 1):
+                  guard: str = "after_first_hit", rounds: int = 1, prompt=None):
     from .catalog import learn_ids, make_reset
     from .combos import load as load_combos
     ds = Path(cfg.get("datasets", {}).get("root", "datasets"))
@@ -966,6 +999,8 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     lab: dict = {}
     lab_state: dict = {}
     setup_error = None
+    setup_notes: list = []
+    prompt = prompt or console_prompt
     try:
         st = reader.wait_newer(-1, 2.0)
         if st is None or not st.ready:
@@ -995,62 +1030,92 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                       "none": "guard NONE (gaps can go unnoticed: results are not marked true combos)"}[guard]
         ids = None
         lab_state: dict = {"corner_hold": lab.get("corner_hold")}
-        for rnd in range(max(1, rounds)):
+        passes = list(PASSES) if hit_type == "all" else [hit_type]
+        for n_pass, hit_pass in enumerate(passes):
             if sess.stop_event.is_set() or setup_error:
                 break
-            combos = list(community) if source in ("community", "both") else []
-            if source in ("generated", "both"):
-                from .combo_gen import generate
-                combos += generate(capcom, catalog, community, lab)
-            todo = select_routes(combos, position, hit_type, max_difficulty, only)
-            if not again or rnd > 0:
-                # done = already a true combo; with guard none, anything verified before
-                todo = [x for x in todo if not (is_true(lab["routes"].get(route_key(x), {})) or (
-                    guard == "none" and lab["routes"].get(route_key(x), {}).get("verified"))
-                    or route_key(x) in run_results)]
-            seen_keys: set = set()
-            plans = []
-            for combo in todo:
-                k = route_key(combo)
-                if k in seen_keys:
-                    continue
-                seen_keys.add(k)
-                plan = plan_route(combo, capcom, catalog)
-                if plan["unsupported"]:
-                    skipped[k] = plan["unsupported"]
-                    continue
-                plans.append((combo, plan))
-            if limit:
-                plans = plans[:limit]
-            print(f"Combo lab: {name}, round {rnd + 1}/{max(1, rounds)}: {len(plans)} routes to try "
-                  f"({len(skipped)} not supported yet), position {position}, hit type {hit_type}.\n"
-                  f"Dummy: standing, {guard_text}; Super and Drive gauges max.")
-            if not plans:
-                break
-            if ids is None:
-                if not sess.start_inputs():
-                    return None
-                ids = learn_ids(sess, reader, reset)
-            for n_route, (combo, plan) in enumerate(plans, 1):
-                if sess.stop_event.is_set():
+            pass_error = None
+            for rnd in range(max(1, rounds) if hit_pass == "normal" else 1):
+                if sess.stop_event.is_set() or setup_error or pass_error:
                     break
-                print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
-                      f"damage listed {combo.get('damage') or combo.get('est_damage')})")
-                summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard, lab_state)
-                if (summ.get("failed_at") or {}).get("kind") == "first_blocked":
-                    setup_error = ("The dummy BLOCKED the first hit. Set Training Mode's dummy guard to "
-                                   "'After first hit' (or run with --guard none) and start again.")
-                    print(setup_error)
+                combos = list(community) if source in ("community", "both") else []
+                if source in ("generated", "both") and hit_pass == "normal":
+                    from .combo_gen import generate        # the bot's own routes are normal-hit routes
+                    combos += generate(capcom, catalog, community, lab)
+                todo = select_routes(combos, position, hit_pass, max_difficulty, only)
+                if not again or rnd > 0:
+                    # done = already a true combo; with guard none, anything verified before
+                    todo = [x for x in todo if not (is_true(lab["routes"].get(route_key(x), {})) or (
+                        guard == "none" and lab["routes"].get(route_key(x), {}).get("verified"))
+                        or route_key(x) in run_results)]
+                seen_keys: set = set()
+                plans = []
+                for combo in todo:
+                    k = route_key(combo)
+                    if k in seen_keys:
+                        continue
+                    seen_keys.add(k)
+                    plan = plan_route(combo, capcom, catalog)
+                    if plan["unsupported"]:
+                        skipped[k] = plan["unsupported"]
+                        continue
+                    plans.append((combo, plan))
+                if limit:
+                    plans = plans[:limit]
+                if not plans:
                     break
-                run_results[route_key(combo)] = summ
-                lab["routes"][route_key(combo)] = summ
-                if summ["verified"]:
-                    msg = (f"{'TRUE COMBO' if summ['true_combo'] else 'connects (dummy not guarding)'} "
-                           f"{summ['successes']}/{summ['attempts']}, {summ.get('damage')} dmg")
-                else:
-                    msg = f"not done: {summ.get('failed_at')}"
-                print("  -> " + msg)
-                sess.narrate(f"{combo['route']}: {msg}", source="measured")
+                if n_pass > 0 and rnd == 0:
+                    # a counter-hit / punish-counter pass needs the dummy set for it first (user, 0.11.6)
+                    c.release_all("combo lab: waiting for the dummy setting")
+                    if not prompt(hit_pass, len(plans)):
+                        print(f"  skipped the {PASS_TEXT[hit_pass]} routes.")
+                        break
+                    if not sess.wait_armed(timeout=180):
+                        print("  SF6 was not focused again: stopping.")
+                        break
+                print(f"Combo lab: {name}, {PASS_TEXT[hit_pass].upper()} routes, round {rnd + 1}: {len(plans)} to try "
+                      f"({len(skipped)} not supported yet), position {position}.\n"
+                      f"Dummy: standing, {guard_text}; counter-hit setting: {PASS_SETTING[hit_pass]}; "
+                      f"Super and Drive gauges max.")
+                if ids is None:
+                    if not sess.start_inputs():
+                        return None
+                    ids = learn_ids(sess, reader, reset)
+                for n_route, (combo, plan) in enumerate(plans, 1):
+                    if sess.stop_event.is_set():
+                        break
+                    print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
+                          f"damage listed {combo.get('damage') or combo.get('est_damage')})")
+                    summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard, lab_state)
+                    if (summ.get("failed_at") or {}).get("kind") == "first_blocked":
+                        setup_error = ("The dummy BLOCKED the first hit. Set Training Mode's dummy guard to "
+                                       "'After first hit' (or run with --guard none) and start again.")
+                        print(setup_error)
+                        break
+                    wrong = wrong_hit_setting(hit_pass, summ.get("first_hits") or [])
+                    if wrong:
+                        # results under the wrong counter-hit setting are not kept (they would mark good
+                        # routes as failures and teach the generator nothing true)
+                        pass_error = wrong
+                        print("  " + wrong)
+                        break
+                    summ["tested_as"] = hit_pass
+                    summ["unlabelled"] = combo.get("hit_type") is None and combo.get("source") == "community"
+                    if summ["unlabelled"] and not summ["verified"]:
+                        summ["true_combo"] = None      # it may simply need a counter hit: not a verdict
+                        summ.setdefault("notes", []).append(
+                            "hit type not labelled on the page: a failure here may mean it needs a counter hit")
+                    run_results[route_key(combo)] = summ
+                    lab["routes"][route_key(combo)] = summ
+                    if summ["verified"]:
+                        msg = (f"{'TRUE COMBO' if summ['true_combo'] else 'connects (dummy not guarding)'} "
+                               f"{summ['successes']}/{summ['attempts']}, {summ.get('damage')} dmg")
+                    else:
+                        msg = f"not done: {summ.get('failed_at')}"
+                    print("  -> " + msg)
+                    sess.narrate(f"{combo['route']}: {msg}", source="measured")
+            if pass_error:
+                setup_notes.append(pass_error)
     except InterruptedError:
         print("Stopped (focus lost or paused too long).")
     finally:
@@ -1080,8 +1145,9 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     out.write_text(json.dumps(lab, indent=1, default=str), encoding="utf-8")
     sess.recorder.write_json("combo_lab_result.json", {"character": name, "file": str(out), "guard": guard,
                                                         "routes": run_results, "skipped": skipped,
-                                                        "setup_error": setup_error})
-    (sess.recorder.dir / "combo_lab.md").write_text(report_md(name, run_results, skipped, setup_error),
+                                                        "setup_error": setup_error, "setup_notes": setup_notes})
+    (sess.recorder.dir / "combo_lab.md").write_text(report_md(name, run_results, skipped,
+                                                               "; ".join([setup_error] * bool(setup_error) + setup_notes) or None),
                                                    encoding="utf-8")
     print(f"\nSaved {out}")
     return out

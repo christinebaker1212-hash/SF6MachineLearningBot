@@ -1360,6 +1360,24 @@ that don't cause a cinematic"; position resets by holding a direction.
 - The fighter replays a route's recorded timing when the lab proved the same route a true combo.
 - Test: a success replayed with a different input-delay estimate sends every input on the same frames.
 
+## 0.11.6: normal-hit, counter-hit and punish-counter routes are separate passes
+- User (2026-10-02): "the combo tester is testing routes that only work on counter hit and only work on
+  punish counter in its normal test suite." Cause (not a design choice): the lab filtered by the page's
+  label for each table / section, and an unlabelled route counted as normal hit. Ken's "Dragonlash Loops"
+  and "Jinrai Loops" sections have no label, and notes like "ONLY OFF A COUNTER, PUNISH COUNTER, OR STRAY
+  DRIVE RUSH 5HP" were not read. Testing such a route on a normal hit teaches nothing true: it fails, the
+  failure is stored, and the generator then treats its prefix as disproven.
+- `combos.required_hit_type`: when the page has no label, the route ('PC ...', 'CH ...') or the notes ('only
+  off a counter', "doesn't require CH or PC") decide; otherwise the route stays unlabelled (None). Ken: 1
+  route counter-hit from its notes, 2 normal, 3 unlabelled.
+- `combo-lab --hit-type all` (default; menu K → 1): the normal-hit routes, then a prompt to set the dummy's
+  counter hit to COUNTER HIT for the counter-hit routes, then PUNISH COUNTER; S skips a pass. A pass is
+  only offered when it has routes. The bot's own routes are normal-hit routes.
+- Each route's measured first hit (hits.py) must match the pass: counter hits in the normal pass, or normal
+  hits in a counter pass, stop that pass and its result is NOT kept (`wrong_hit_setting`).
+- Unlabelled routes run with the normal hits; a failure is not a verdict (`true_combo: None`, note) and
+  never prunes the generator. Results record `tested_as`; only normal-hit results steer the generator.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

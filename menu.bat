@@ -100,11 +100,12 @@ echo  Combo lab: Training Mode, the bot as P1. Dummy: standing, Guard = AFTER FI
 echo  (it blocks anything that is not a true combo). Super and Drive gauges on max/infinite.
 echo  Positions are set with the hold-direction resets (down + reset = midscreen, a corner direction
 echo  + reset = corner); jump-in routes walk to a jump distance first. Nothing to set by hand.
-echo    1  Community routes (imported with T then A)
+echo    1  Community routes (imported with T then A): normal-hit routes first, then it asks you to
+echo       set the dummy's counter hit to COUNTER HIT, then to PUNISH COUNTER (S skips a step)
 echo    2  The bot's own routes: built from every catalogued move (run C first)
 echo    3  Keep exploring: own routes, 3 rounds (each round extends what worked)
 echo    4  Only routes containing some text (e.g. DRC)
-echo    5  Counter-hit routes      6  Punish-counter routes  (set Training Mode's counter setting first)
+echo    5  Only counter-hit routes   6  Only punish-counter routes  (set the dummy's counter hit first)
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)

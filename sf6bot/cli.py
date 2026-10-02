@@ -560,9 +560,10 @@ def main(argv=None):
     p.add_argument("--source", choices=["community", "generated", "both"], default="community",
                    help="community routes (menu T, A), routes worked out from Capcom data, or both")
     p.add_argument("--position", choices=["any", "midscreen", "corner"], default="any")
-    p.add_argument("--hit-type", dest="hit_type", default="normal",
-                   choices=["normal", "counter_hit", "punish_counter", "any"],
-                   help="routes for this starting hit (counter routes need Training Mode's counter-hit setting)")
+    p.add_argument("--hit-type", dest="hit_type", default="all",
+                   choices=["all", "normal", "counter_hit", "punish_counter"],
+                   help="all = normal-hit routes, then (after a prompt to change the dummy's counter-hit "
+                        "setting) counter-hit routes, then punish-counter routes; or just one of them")
     p.add_argument("--max-difficulty", dest="max_difficulty", type=int, default=None)
     p.add_argument("--only", default="", help="comma-separated text the route must contain, e.g. '2MK,DRC'")
     p.add_argument("--tries", type=int, default=40,

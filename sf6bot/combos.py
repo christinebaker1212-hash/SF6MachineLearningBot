@@ -131,6 +131,24 @@ def _hit_type(text: str):
         "normal" if "normal hit" in t else None
 
 
+def required_hit_type(route: str, notes: str) -> str | None:
+    """The hit a route needs, from its own text when its section has no label: 'PC ...' / 'CH ...'
+    starters, or notes like 'only off a counter' / "doesn't require CH or PC". The weakest hit named
+    counts ('ONLY OFF A COUNTER, PUNISH COUNTER' = counter hit or better)."""
+    r = route.strip().upper()
+    if r.startswith("PC "):
+        return "punish_counter"
+    if r.startswith("CH "):
+        return "counter_hit"
+    n = (notes or "").lower()
+    if re.search(r"(doesn'?t|does not|no need to|without) (require|need)[^.]*\b(ch|pc|counter)", n):
+        return "normal"
+    m = re.search(r"only (?:off|on|from|works? (?:on|off)|after|with) (?:an? )?(punish counter|counter[- ]?hit|counter|pc|ch)\b", n)
+    if m:
+        return "punish_counter" if m.group(1) in ("punish counter", "pc") else "counter_hit"
+    return None
+
+
 def _row(route: str, r: dict, headings: list, tabs: list, title, hit_type, damage, variant) -> dict:
     row = {"route": route, "headings": headings, "tabs": tabs, "table": title, "hit_type": hit_type,
            "position": r.get("position") or "Anywhere",
@@ -141,8 +159,14 @@ def _row(route: str, r: dict, headings: list, tabs: list, title, hit_type, damag
            "notes": r.get("notes", "")}
     # Modern-controls routes (L/M/H/S buttons, A[...] assist) are kept but tagged: the bot plays Classic
     row["controls"] = "modern" if re.search(r"A\[|\b\d*[LMHS]\b|\b\d+X+\b", route) else "classic"
-    if route.upper().startswith("PC ") and not hit_type:
-        row["hit_type"] = "punish_counter"
+    row["hit_type_source"] = "label" if hit_type else None
+    if not hit_type:
+        # no Normal / Counter / Punish Counter label on the table or section: the route itself or its notes
+        # may say it (Ken's 'Dragonlash Loops': "ONLY OFF A COUNTER, PUNISH COUNTER, OR STRAY DRIVE RUSH
+        # 5HP"; Ryu's "CH LP / MP Hasho , ..."). Unlabelled routes stay None (unknown), not "normal".
+        ht = required_hit_type(route, row["notes"])
+        if ht:
+            row["hit_type"], row["hit_type_source"] = ht, "route/notes"
     row["flags"] = sorted(k for k, pat in FLAGS.items() if re.search(pat, f"{row['notes']} {route}", re.I))
     if variant is not None:
         row["variant"] = variant

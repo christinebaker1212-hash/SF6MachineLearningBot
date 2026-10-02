@@ -294,8 +294,11 @@ def test_combo_lab_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     (ds / "combos").mkdir(parents=True)
     html = gzip.open(Path(__file__).parent / "data" / "capcom_ryu_frame_table.html.gz", "rt",
                      encoding="utf-8").read()
-    (ds / "framedata" / "ryu.json").write_text(json.dumps({"slug": "ryu", "character": "Ryu",
-                                                          "moves": parse_frame_page(html)}))
+    moves = parse_frame_page(html)
+    for m in moves:          # the simulator's 2MK does 600: make it Capcom's number, so it reads as a NORMAL hit
+        if m["name"] == "Crouching Medium Kick":
+            m["damage_n"] = 600
+    (ds / "framedata" / "ryu.json").write_text(json.dumps({"slug": "ryu", "character": "Ryu", "moves": moves}))
     step = {"token": "2MK", "name": "Crouching Medium Kick", "mods": []}
     routes = [{"route": "2MK", "steps": [dict(step, connector="")]},
               {"route": "2MK , 2MK", "steps": [dict(step, connector=""), dict(step, connector=",")]}]

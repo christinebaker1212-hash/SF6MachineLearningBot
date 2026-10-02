@@ -452,3 +452,35 @@ def test_first_success_is_recorded_and_replayed_exactly():
     moved, _ = sends(6, None)                    # without the recording, a new estimate moves the presses
     replay, res = sends(6, rec)                  # with it, the presses are exactly the recorded ones
     assert moved != base and replay == base and res["success"]
+
+
+def test_counter_and_punish_counter_routes_are_kept_out_of_the_normal_hit_pass():
+    """User, 0.11.6: counter-hit-only and punish-counter-only routes ran in the normal suite. Ken's
+    'Dragonlash Loops' section has no label; one route's notes say 'ONLY OFF A COUNTER, PUNISH COUNTER'."""
+    cap, cat, comm = _ken()
+    normal = cl.select_routes(comm, "any", "normal")
+    loop = next(c for c in comm if c["notes"].startswith("ONLY OFF A COUNTER"))
+    assert loop["hit_type"] == "counter_hit" and loop not in normal
+    assert loop in cl.select_routes(comm, "any", "counter_hit")
+    assert not any(c["hit_type"] == "punish_counter" for c in normal)
+    free = [c for c in comm if "doesn't require CH or PC" in c["notes"]]
+    assert free and all(c["hit_type"] == "normal" for c in free)
+    unl = [c for c in normal if c["hit_type"] is None]             # unlabelled: tried with normal hits
+    assert unl
+    assert combos.required_hit_type("PC 5HP > 214HP", "") == "punish_counter"
+    assert combos.required_hit_type("CH LP / MP Hasho , PDR", "") == "counter_hit"
+
+
+def test_wrong_counter_setting_is_detected_and_not_kept():
+    assert cl.wrong_hit_setting("normal", ["counter", "counter"]) is not None
+    assert cl.wrong_hit_setting("counter_hit", ["normal", "normal", "normal"]) is not None
+    assert cl.wrong_hit_setting("punish_counter", ["counter"]) is None       # PC may read as counter
+    assert cl.wrong_hit_setting("normal", ["normal", "unknown"]) is None
+    from sf6bot import combo_gen
+    cap, cat, comm = _ken()
+    # an unlabelled route that failed, or a counter-hit result, never prunes the generator's normal-hit search
+    lab = {"routes": {"midscreen | 5HP > 623HP": {
+        "verified": False, "unlabelled": True, "guard": "after_first_hit", "moves": ["Standing Heavy Punch",
+        "H Shoryuken"], "connectors": ["", ">"], "failed_at": {"step": 1, "kind": "dropped"}}}}
+    true, bad, hard, tested = combo_gen.lab_knowledge(lab)
+    assert not bad
