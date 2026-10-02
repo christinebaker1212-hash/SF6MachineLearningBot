@@ -7,24 +7,30 @@ draws it. The user's in-game legend ("The Frame Meter and You", 2026-10-02):
   blockstun | Invincibility / Strike Invincibility / Projectile Invincibility (white / striped).
   Dark cells = nothing happening: the player can act.
 
-The game stores the colour as a number (FrameType). Which number is which colour is NOT documented. The
-community (haruno-ku/SF6_Tools, marked unverified there) uses 7 startup, 13/14 active, 8 recovery,
-9 hitstun, 10 blockstun, 0 empty. `meter_check` verifies this against the meter's own Startup / Total for
-every move the catalog performs, so the mapping is measured, not assumed, before anything relies on it.
+The game stores the colour as a number (FrameType), not documented by Capcom. VERIFIED on the user's game
+(Ryu catalog, guard None + All, exporter v9, 2026-10-02): for every single-part move the bar matches the
+meter's Startup (cells before the first active cell + 1) and Total (all the move's cells; a jump's airborne
+cells before the attack excluded), e.g. 5LP '7x3 13x3 8x7' = Startup 4 / Total 13, dummy '9x14'.
 """
 from __future__ import annotations
 
-FRAME_TYPES = {      # community numbers + the user's legend; status: unverified until meter_check agrees
-    0: "free",
-    7: "startup",          # green, Counter State
-    13: "active",          # red, Hitbox Appearance Period
-    14: "active",
-    8: "recovery",         # blue, Punish Counter State
-    9: "hitstun",          # yellow, Post-Damage Recovery
-    10: "blockstun",       # yellow, Post-Block Recovery
+FRAME_TYPES = {      # number -> the user's legend; measured on Ryu (see above)
+    0: "free",                         # dark: can act
+    1: "invincible",                   # white (OD Shoryuken frames 1-5, supers, the throw animation)
+    2: "strike invincible",            # striped (SA1 Shinku Hadoken)
+    5: "non-counter",                  # cyan, Non-Counter Action Recovery (jumps, dashes)
+    7: "counter state",                # green: startup, and the gaps between hits of a multi-hit move
+    8: "punish counter",               # blue, Punish Counter State: recovery
+    9: "hitstun",                      # yellow, Post-Damage Recovery
+    10: "blockstun",                   # yellow, Post-Block Recovery
+    11: "armored startup",             # Drive Impact frames 1-25
+    12: "parry",                       # purple, Parry/Counter Active Time (Drive Parry, PDR)
+    13: "active",                      # red, Hitbox Appearance Period
+    14: "projectile active",           # orange, Projectile's Active Time
 }
-BUSY = {7, 8, 13, 14}      # the player's own move (startup / active / recovery)
+ACTIVE = {13, 14}
 STUN = {9, 10}             # in hitstun / blockstun
+BUSY = set(FRAME_TYPES) - {0} - STUN      # the player's own move
 
 
 def cells(raw: dict, me: str = "p1") -> list[tuple]:
@@ -62,26 +68,26 @@ class BarTrack:
         return bool(self.t)
 
     def link(self, prev_start: int | None, next_start: int | None, startup: int | None = None) -> dict | None:
-        """How a link came out, from the bar: when the bot became free after the previous move (its last
-        recovery / active cell), how many free frames passed before the next move's startup began (`gap`:
-        0 = pressed at the earliest possible frame), and when the dummy's hitstun ended (`stun_end`)."""
+        """How a link came out, from the bar: when the bot became free after the previous move (`free_at`:
+        its first free cell, or, for a link pressed on the earliest frame, the first startup cell straight
+        after its recovery), how many free frames passed before the next move's startup began (`gap`: 0 =
+        the earliest possible frame), and when the dummy's hitstun ended (`stun_end`)."""
         if prev_start is None or not self.t:
             return None
         seq = [x for x in self.t if x[0] >= prev_start]
-        busy_end, free_at, next_bar = None, None, None
-        seen_rec = False
+        free_at, next_bar, prev_cell = None, None, None
         for tick, mine, _ in seq:
-            if mine in (8,):
-                seen_rec, busy_end = True, tick
-            elif seen_rec and busy_end is not None and free_at is None:
-                free_at = tick
-                if mine == 7:
-                    next_bar = tick           # the next move's startup began on the first free frame
-            if free_at is not None and next_bar is None and mine == 7:
+            if free_at is None:
+                if mine == 0:
+                    free_at = tick
+                elif mine in (7, 11, 12, 1, 2) and prev_cell == 8 and next_start is not None \
+                        and tick >= next_start - 2:
+                    free_at = next_bar = tick         # recovery straight into the next move: no free frame
+                    break
+            elif mine not in (0, 5):
                 next_bar = tick
                 break
-            if next_bar is not None:
-                break
+            prev_cell = mine
         if free_at is None:
             return None
         nxt = next_bar if next_bar is not None else next_start
@@ -121,11 +127,22 @@ def move_cells(track: BarTrack, start: int) -> list[int]:
     return out
 
 
+def first_move_start(track: BarTrack) -> int | None:
+    """Tick of the bot's first busy cell (the move's first frame)."""
+    return next((t for t, mine, _ in track.t if mine in BUSY), None)
+
+
 def meter_check(types: list[int], startup: int | None, total: int | None) -> dict:
-    """Does the community mapping agree with the game's own numbers for this move? Startup = startup cells
-    + 1 (the first active frame), Total = startup + active + recovery cells."""
-    n_start = sum(1 for t in types if t == 7)
-    n_busy = sum(1 for t in types if t in BUSY)
+    """Does the bar agree with the meter's own numbers for this move? Startup = the cells before the first
+    active cell + 1; Total = all the move's cells. A jump's airborne cells (5) before a jump attack are the
+    jump, not the attack, and are left out."""
+    t = list(types)
+    if t and t[0] == 5 and any(x != 5 for x in t):
+        while t and t[0] == 5:
+            t.pop(0)
+    first_active = next((i for i, x in enumerate(t) if x in ACTIVE), None)
+    n_start = first_active if first_active is not None else sum(1 for x in t if x == 7)
+    n_busy = len(t)
     return {"bar": runs(types), "startup_cells": n_start, "busy_cells": n_busy,
             "startup_ok": (n_start + 1 == startup) if isinstance(startup, int) else None,
             "total_ok": (n_busy == total) if isinstance(total, int) else None}

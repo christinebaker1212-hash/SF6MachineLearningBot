@@ -183,7 +183,7 @@ def _bar_of_move(states: list[dict], r: dict) -> dict | None:
         tr.feed(s2)
     if not tr:
         return None
-    start = next((t for t, mine, _ in tr.t if mine == 7), None)
+    start = framebar.first_move_start(tr)
     out = {"p1": framebar.runs([m for _, m, _ in tr.t]), "p2": framebar.runs([o for _, _, o in tr.t])}
     if start is not None:
         out["check"] = framebar.meter_check(framebar.move_cells(tr, start), r.get("startup"), r.get("total"))

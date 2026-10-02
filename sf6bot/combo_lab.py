@@ -52,6 +52,8 @@ SEARCH_EARLIER = [-1, -2, -3, -4, -5]
 SEARCH_LATER = [1, 2, 3, 4, 5]
 HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up - 1 - this); earlier = the
                        # previous move's late hit (multi-hit special, projectile), not this move's
+CANDIDATE_WAIT = 4     # frames an unexpected new action id waits for the step's own (catalogued) id before it
+                       # counts as the step's start (a Drive Rush changing to its next id is not the 2MK)
 PREFIX_MISSES = 2      # a kept (frozen) prefix that fails this many times in a row is searched again
 FIGHT_IDLE_MAX = 33    # MEASURED (fights 2026-10-02): idle / walk / crouch ids of Ryu and Ken are < 33
 DASH_TOTAL = 19        # Ken forward dash, catalog-measured; used when the catalog has none
@@ -153,6 +155,12 @@ def context_variant(row: dict, prev: dict | None, capcom: dict) -> dict:
     return row
 
 
+def _is_special(row: dict) -> bool:
+    """A special or super (a motion or charge input), not a normal or command normal."""
+    inp = re.sub(r"\([^()]*\)", " ", row.get("input") or "")
+    return bool(re.search(r"\d{2,}|\[\d\]", inp)) or bool(re.match(r"(SA[123]|CA)\b", row.get("name") or ""))
+
+
 def cancel_allowed(prev: dict, row: dict) -> bool:
     """Capcom's cancel column: can `prev` be canceled into `row`? (C -> specials and supers, SA -> supers,
     SA2/SA3 -> that level and up). Follow-ups and target combos are not cancels."""
@@ -171,6 +179,22 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
     plan: list[dict] = []
     if combo.get("unresolved"):
         return {"unsupported": f"moves not matched to Capcom rows: {combo['unresolved']}", "steps": []}
+    # Denjin Charge ('DC') is a STATE the route needs, activated first (user, 2026-10-02: "for any moves tagged
+    # with DC, we need Denjin charge state to be the first thing we activate"): a leading 'DC ,' step and any
+    # '[Denjin Charge] ...' move make the lab charge before the route starts; it is not a move of the route
+    setup = None
+    state_rows = [s.get("name") for s in steps_in if (s.get("name") or "").startswith("[")]
+    if steps_in and steps_in[0].get("name") == "Denjin Charge":
+        steps_in = steps_in[1:]
+        if steps_in:
+            steps_in[0] = dict(steps_in[0], connector="")
+        state_rows.append("[Denjin Charge]")
+    if any(n.startswith("[Denjin Charge]") for n in state_rows):
+        drow = _row("Denjin Charge", None, rows)
+        dseq = (fd.to_sequence(drow)[0] if drow else None) or "2@3 5@2 2+LP@3"
+        dmeas = _measured(catalog, _catalog_name("Denjin Charge", None, catalog))
+        setup = {"name": "Denjin Charge", "sequence": dseq, "expect_id": dmeas.get("move_id"),
+                 "why": "the route uses Denjin-charged moves: charge first"}
     jump_row = None
     if steps_in and not steps_in[0].get("system"):
         r0 = _row(steps_in[0].get("name") or "", None, rows)
@@ -271,6 +295,17 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
         elif prev.get("system") == "drive_rush":
             st["trigger"], st["at"], st["min_offset"] = "own_frame", RUSH_AT, NO_FLOOR
             st["floor"] = "unknown (Drive Rush frame is a guess)"
+        elif conn == "," and not system and prev.get("cancel") == "C" and not prev.get("air") \
+                and _is_special(row) and cancel_allowed(prev, row) \
+                and isinstance(prev.get("hit_adv"), int) and isinstance(st.get("startup"), int) \
+                and prev["hit_adv"] - st["startup"] + 1 < 1:
+            # written as a link, but a link cannot work (point blank) while Capcom lets the normal be
+            # CANCELLED into it (user, 2026-10-02: "moves that can be cancelled into other moves are not
+            # properly canceled"): cancel, as a player reads it
+            st["trigger"], st["min_offset"] = "contact", -CONTACT_PLUS - JITTER
+            st["floor"], st["link_as_cancel"] = "the previous move has hit (contact)", True
+            notes.append(f"{prev['name']} , {st['name']}: no link window ({prev['hit_adv']:+d} on hit vs "
+                         f"{st['startup']}F start-up) but the normal is special-cancelable: performed as a cancel")
         elif conn == ",":
             st["trigger"], st["at"] = "own_frame", prev.get("total")
             st["min_offset"], st["floor"] = -JITTER, f"previous move's recovery ends (frame {prev.get('total')})"
@@ -314,8 +349,10 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             mid = (v.get(g) or {}).get("move_id")
             if mid is not None and not (v.get(g) or {}).get("same_as"):
                 id_names.setdefault(mid, k)
+    if setup:
+        notes.append(f"setup: Denjin Charge ({setup['sequence']}) before the route")
     return {"steps": plan, "notes": notes, "unsupported": None, "jump_in": jump_row is not None,
-            "id_names": id_names}
+            "id_names": id_names, "setup": setup}
 
 
 # ---- execution against the state stream (pure: unit tested with synthetic lines) ------------------
@@ -427,6 +464,12 @@ class ComboRun:
         a = self._active()
         aid, afr = p1.get("action_id"), p1.get("action_frame")
         if a is not None:
+            exp = self.steps[a].get("expect_id")
+            if exp is not None and aid == exp and self.rt[a]["start_id"] != exp and not self.rt[a].get("exp_seen"):
+                # the step's own id appeared after another one (a Parry Drive Rush starts with the parry,
+                # 480, then the rush, 500): its frames count from here (0.11.10; before, the rush's frames
+                # counted from the parry and the next normal was pressed during the parry)
+                self.rt[a].update(exp_seen=tick, start_id=exp)
             # the move's own frame: action_frame while the move's id is on screen (it freezes in hitstop,
             # measured), else counted ticks outside hitstop
             if aid == self.rt[a]["start_id"] and isinstance(afr, (int, float)):
@@ -447,9 +490,22 @@ class ComboRun:
                          and not (num(p1.get("y")) or 0) > 0.01) \
                 and (aid != pid or (isinstance(afr, (int, float)) and isinstance(pfr, (int, float)) and afr < pfr)) \
                 and not (aid in known_prev and aid != st.get("expect_id"))
+            exp = st.get("expect_id")
+            s_tick, s_aid, s_afr = tick, aid, afr
+            if new and exp is not None and aid != exp and aid not in (st.get("known_ids") or []):
+                cand = r.get("candidate")
+                if cand is None:
+                    r["candidate"] = cand = (tick, aid, afr)
+                if tick - cand[0] < CANDIDATE_WAIT:
+                    new = False                # wait a little for the expected move
+                else:
+                    s_tick, s_aid, s_afr = cand    # it never showed: the unexpected id was the start
+                    r["unexpected"] = s_aid
             if new:
-                r.update(start=tick, start_id=aid, moving=int(afr) if isinstance(afr, (int, float)) else 0,
-                         lead_measured=tick - r["sent"] - st["prefix"])
+                r.update(start=s_tick, start_id=s_aid, moving=int(s_afr) if isinstance(s_afr, (int, float)) else 0,
+                         lead_measured=s_tick - r["sent"] - st["prefix"])
+                if s_tick != tick and s_aid != aid:
+                    r["moving"] += max(0, tick - s_tick)
                 self.pending = None
             elif tick - r["sent"] > st["prefix"] + self.lead + 15:
                 self._finish("not_out", k)
@@ -525,6 +581,9 @@ class ComboRun:
         pr, pst = self.rt[n - 1], self.steps[n - 1]
         if pr["start"] is None:
             return None
+        if pst.get("system") == "drive_rush" and pst.get("expect_id") is not None \
+                and pr["start_id"] != pst["expect_id"]:
+            return None          # still in the parry of a Parry Drive Rush: the rush itself has not started
         trig, off = st["trigger"], self._off(n)
         fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
         if fx:
@@ -628,7 +687,7 @@ class ComboRun:
                "super_spent": (num(b0.get("super")) - self.min["bot_super"]) if num(b0.get("super")) is not None and "bot_super" in self.min else None,
                "dummy_x": [num(d0.get("x")), num(d1.get("x"))], "bot_x": [num(b0.get("x")), num(b1.get("x"))],
                "steps": [{"name": st.get("name"), "sent": r["sent"], "start": r["start"], "id": r["start_id"],
-                          "contact": r["contact"], "lead_measured": r.get("lead_measured"),
+                          "contact": r["contact"], "lead_measured": r.get("lead_measured"), "unexpected": r.get("unexpected"),
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
                           "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
                           "bar_link": self.bar.link(self.rt[k - 1]["start"], r["start"], st.get("startup"))
@@ -1035,6 +1094,29 @@ def move_names(steps: list[dict]) -> list[str]:
             for st in steps if st.get("system") != "jump"]
 
 
+def _do_setup(sess, reader, runner, setup: dict, neutral_a: set, neutral_d: set) -> bool:
+    """A state the route needs before it starts (Denjin Charge): perform it, check it came out (its catalog
+    id, else any non-neutral action), then wait until both players are neutral again."""
+    from .catalog import _wait_settled
+    q = reader.subscribe()
+    seen = False
+    try:
+        _, ok = runner.run(parse_sequence(setup["sequence"], setup["name"]), stop_event=sess.stop_event)
+        end = clock.now() + 1.5
+        while ok and clock.now() < end and not seen:
+            try:
+                st = q.get(timeout=0.05)
+            except Exception:
+                continue
+            aid = st.p1.get("action_id")
+            seen = aid == setup.get("expect_id") if setup.get("expect_id") is not None else (
+                aid is not None and aid not in neutral_a)
+    finally:
+        reader.unsubscribe(q)
+    _wait_settled(reader, sess, neutral_a, neutral_d, 3.0, need=10)
+    return seen
+
+
 def recorded_timing(res: dict) -> list:
     """The exact send point of every step of a successful attempt: the previous move's own frame (links,
     follow-ups), frames after the previous move started (cancels, chains) or frames to landing (jump-ins)."""
@@ -1063,6 +1145,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     neutral_a, neutral_d, movement = ids
     steps = plan["steps"]
     attempts: list[dict] = []
+    details: list[dict] = []
     offsets: dict = {}
     tried: dict = {}
     found = None            # offsets of the first success; then `confirm` repeats at them
@@ -1092,6 +1175,14 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             steps[0]["start_ids"] = state[key].get("ids") or None
         else:
             walk_to_contact(sess, reader)
+        if plan.get("setup"):
+            if not _do_setup(sess, reader, runner, plan["setup"], neutral_a, neutral_d):
+                print(f"  setup {plan['setup']['name']} did not come out")
+                attempts.append({"success": False, "fail": {"kind": "setup", "step": None},
+                                 "offsets": dict(offsets), "steps": [], "hits": 0})
+                if len(attempts) >= 3 and not any(a["success"] for a in attempts):
+                    break
+                continue
         pre = reader.latest()
         need_super = (combo.get("super_bars") or 0) * SUPER_BAR
         if pre is not None and need_super and (num(pre.p1.get("super")) or 0) < need_super:
@@ -1112,9 +1203,11 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         # calibrate only on presses whose move can start as soon as the input arrives (the first move, and
         # links). A cancel is sent before contact and waits for it: its 17-22 frames (0.11.3 run) are not
         # input delay.
+        # (not after a Drive Rush or another system step either: those presses wait for the rush, 0.11.10)
         state.setdefault("leads", []).extend(
-            r["lead_measured"] for r, st in zip(res.get("steps", []), steps)
+            r["lead_measured"] for k, (r, st) in enumerate(zip(res.get("steps", []), steps))
             if st.get("trigger") in ("first", "own_frame") and not st.get("system") and not st.get("air")
+            and not (k and steps[k - 1].get("system")) and not r.get("unexpected")
             and isinstance(r.get("lead_measured"), int) and 0 <= r["lead_measured"] <= 12)
         if plan.get("jump_in"):
             res["jump_distance_extra"] = JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)]
@@ -1124,6 +1217,14 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         res["end_advantage"] = parse_frame_meter(fm).get("advantage") if fm else None
         res["offsets"] = dict(offsets)
         attempts.append(res)
+        # every attempt, step by step (0.11.10: the first Ryu run kept only the last failure, so a timing
+        # problem could not be traced): what came out when, which step got the hit, the bar's link reading
+        details.append({"fail": res.get("fail"), "offsets": dict(offsets), "lead": lead_now,
+                        "kept": res.get("kept_steps"), "replay": res.get("replayed_recorded_timing"),
+                        "steps": [{k2: s2.get(k2) for k2 in ("name", "id", "sent", "start", "contact",
+                                                              "lead_measured", "prev_frame", "after_prev_start",
+                                                              "bar_link")}
+                                  for s2 in res.get("steps") or []]})
         f = res.get("fail") or {}
         tag = "OK" if res["success"] else (f"failed at move {move_no(steps, f['step'])} ({f.get('kind')})"
                                            if f.get("step") is not None else f"failed ({f.get('kind')})")
@@ -1185,6 +1286,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                                    "replays": len(replays), "replay_successes": sum(a["success"] for a in replays)}
         summ["success_rate_final_timing"] = round((1 + sum(a["success"] for a in replays)) / (1 + len(replays)), 2)
     summ["guard"] = guard
+    summ["attempt_details"] = details[-12:]
     summ["sf6bot_version"] = __import__("sf6bot").__version__
     summ["true_combo"] = True if (summ["verified"] and guard == "after_first_hit") else (
         False if (summ.get("failed_at") or {}).get("kind") == "blocked" else None)

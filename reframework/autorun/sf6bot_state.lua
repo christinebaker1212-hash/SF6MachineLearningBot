@@ -420,11 +420,11 @@ end
 
 -- a cell still holding what was read there one lap earlier is stale (the ring buffer wrapped), not new;
 -- while a player is busy (act_st ~= 0) the game writes a cell every frame, so the next one is new anyway
-local function bar_new(i, cnt)
+local function bar_new(i, cnt, strict)
     local act, c = bar_active(i, cnt)
     if not act then return false end
     local sig = table.concat(c, ",")
-    if bar.seen[i] == sig and not bar.busy then return false end
+    if bar.seen[i] == sig and (strict or not bar.busy) then return false end
     return true, c, sig
 end
 
@@ -441,7 +441,8 @@ local function read_frame_bar(stage_timer, busy)
     -- at most one new cell per game frame since the last line (8x replays: several)
     local adv = 1
     if type(stage_timer) == "number" and type(bar.last_timer) == "number" then
-        adv = math.max(0, math.min(12, stage_timer - bar.last_timer))
+        -- +1: a cell can arrive on a frame the clock did not advance (measured: M Tatsu lost one cell)
+        adv = math.max(0, math.min(12, stage_timer - bar.last_timer)) + 1
     end
     bar.last_timer = stage_timer
     local out, h = {}, bar.head
@@ -450,9 +451,9 @@ local function read_frame_bar(stage_timer, busy)
         bar.seen[i] = sig
         h = i
     end
-    for _ = 1, adv do
+    for n = 1, adv do
         local nxt = (h + 1) % cnt
-        local new, c, sig = bar_new(nxt, cnt)
+        local new, c, sig = bar_new(nxt, cnt, n == adv and adv > 1)   -- the extra cell: never a stale one
         if not new then break end
         take(nxt, c, sig)
     end

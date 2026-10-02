@@ -194,14 +194,34 @@ def _expand_repeats(r: str) -> str:
     return r
 
 
+# community nicknames for motions (Ryu's page: "DC Hasho", "LP / MP Hasho"); a button before the name sets it
+ALIASES = {"hasho": "214", "hashogeki": "214", "hado": "236", "hadoken": "236"}
+
+
+def _aliases(r: str) -> str:
+    def rep(m):
+        btn = m.group(1) or m.group(2) or ""
+        btn = {"L": "LP", "M": "MP", "H": "HP"}.get(btn, btn) or "P"
+        return ALIASES[m.group(3).lower()] + btn
+    # 'LP / MP Hasho' = L or M Hashogeki (the first): not a standing jab
+    r = re.sub(r"\b(LP|MP|HP)\s*/\s*(?:LP|MP|HP)\s*(?=(?:hashogeki|hasho|hadoken|hado)\b)", r"\1 ", r, flags=re.I)
+    return re.sub(r"\b(?:(LP|MP|HP|PP|P)\s*|(L|M|H|OD)\s+)?(hashogeki|hasho|hadoken|hado)\b", rep, r, flags=re.I)
+
+
 def split_route(route: str) -> list[tuple[str, str]]:
     """'5MP , 2HP > 236HK ~ 6HK , 623LP' -> [('', '5MP'), (',', '2HP'), ('>', '236HK'), ('~', '6HK'),
     (',', '623LP')]. Connector of the first move is ''."""
     r = route.strip()
     r = re.sub(r"\b(f\s*[~,]\s*f|ff)\b", "66", r)                     # 'f~f' = forward dash
     r = _expand_repeats(r)                                           # '( ... )x2' -> written out twice
+    r = _aliases(r)                                                  # 'DC Hasho' -> 'DC 214P'
+    r = re.sub(r"Denjin Charge\s*\(\s*DC\s*\)", "DC", r)              # 'Denjin Charge ( DC )' = 'DC'
+    # 'HP /DC Hasho' is NOT 'HP or DC Hasho': it is 5HP cancelled into the Denjin-charged Hashogeki (user,
+    # 2026-10-02). A '/' straight before a Denjin-state move is a cancel.
+    r = re.sub(r"\s*/\s*(?=(?:DC|Denjin)\b)", " > ", r)
     r = r.replace("(", " ").replace(")", " ")
     r = re.sub(r"\b(PDR|DRC|DR)\s+(?=[\dj]|[LMH][PK]\b)", r"\1 ~ ", r)   # 'PDR 5HP' = rush, then 5HP
+    r = re.sub(r"\s+OR\s+", " / ", r)                                 # '214MK OR 236MK' = alternatives
     r = re.sub(r"\s*/\s*[^>~,]+", "", r)                             # 'A / B' alternatives: first
     parts = re.split(r"\s*(>|~|,|xx)\s*", r)
     out, conn = [], ""
@@ -290,11 +310,16 @@ def resolve(route: str, capcom_moves: list[dict]) -> dict:
         row = None
         state = re.match(r"^([A-Za-z]+)\s+(.+)$", tok.strip())
         if state and state.group(1).lower() not in ("dl", "pc", "ch") and not re.fullmatch(_BTN, state.group(1)):
-            # 'Denjin 214PP' -> the '[Denjin Charge]OD Hashogeki' row: a state variant
+            # 'Denjin 214PP' / 'DC 214P' -> the '[Denjin Charge]...' row: a state variant
             skey, _ = _norm_token(state.group(2))
-            word = state.group(1).lower()
+            word = {"dc": "denjin"}.get(state.group(1).lower(), state.group(1).lower())
             row = next((m for m in capcom_moves if m["name"].lower().startswith("[" + word)
                         and _key_of(m) == skey), None)
+            if row is None and re.search(r"[LMH][PK]$", skey):
+                # 'Denjin 214HP': the Denjin Hashogeki takes any punch (Capcom: 214+P)
+                gkey = re.sub(r"[LMH]([PK])$", r"\1", skey)
+                row = next((m for m in capcom_moves if m["name"].lower().startswith("[" + word)
+                            and _key_of(m) == gkey), None)
             if row is not None:
                 key = skey
         if prev is not None and conn == "~" and row is None:

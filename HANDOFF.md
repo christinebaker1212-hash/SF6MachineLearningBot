@@ -224,6 +224,10 @@ catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's 
 **0.11.4 (first Ken combo lab run: 6 true combos, damage = community):** the previous move changes what an
 input does (Quick Dash → [QD] Shoryuken / Tatsu), '>' that Capcom doesn't allow is timed after recovery,
 jump-in landing fixed. Re-run K → 1 (`--again` not needed: only failed routes are retried).
+**0.11.10 (first Ryu C + K with the frame bar):** bar mapping verified against the meter. Fixed: "HP /DC Hasho"
+(cancel into the Denjin Hashogeki), Denjin Charge performed first for DC routes, impossible links from cancelable
+normals performed as cancels, Drive Rush timing (counted from the parry). Next: E → 4 (purge: the 9 true combos
+get re-tested too), K → 1 as Ryu, send S.
 **0.11.9:** frame bar exported (v9: menu R as admin, restart SF6). The jump-in attack is move 1. Dragonlash
 loops and DP/super starters go to the punish-counter pass (`configs/combo_rules.yaml`). Waiting on the user:
 counter-hit / punish-counter frame bonus values (`hit_bonus`). Verify the bar mapping with C → 4 on a few moves

@@ -1387,7 +1387,7 @@ that don't cause a cinematic"; position resets by holding a direction.
 - `sf6bot erase old` (menu E → 4) shows what it would remove and needs a typed YES:
   - runs: every run not made by the current version
   - fights: recorded before 0.11.5 (the bot's combo timing changed)
-  - combo lab: route results before 0.11.9 (0.11.9 hit-type rules and jump-in numbering; 0.11.8 false successes; 0.11.6 hit-type passes; 0.11.4 move variants, cancel rules); the
+  - combo lab: route results before 0.11.10 (0.11.10 Denjin setup, cancels, rush timing; 0.11.9 hit-type rules and jump-in numbering; 0.11.8 false successes; 0.11.6 hit-type passes; 0.11.4 move variants, cancel rules); the
     file's measured corner position stays
   - move maps: before 0.11.7 (rebuilt by Tools → X)
   - `erase.VALID_SINCE` holds these versions: bump an entry when a change makes older data wrong.
@@ -1488,6 +1488,54 @@ searched).
 - A short re-test (C → 4, a few moves) records the bar and verifies the FrameType mapping.
 - A full re-run adds per-move bars (active frames, invincibility, punish-counter windows); it is worth it only
   after a patch or once the mapping is verified.
+
+## 0.11.10: first Ryu catalog + combo lab with the frame bar (user, 2026-10-02)
+### Frame bar VERIFIED on the user's game (Ryu catalog, guard None + All, exporter v9)
+- Every single-part move's bar equals the meter: Startup = cells before the first active cell + 1,
+  Total = all the move's cells.
+  - Example: 5LP `7x3 13x3 8x7` = 4 / 13, with the dummy in hitstun 9 for 14 frames.
+  - Result: 48–51 of 63 moves pass. The rest are known definitions:
+    - target combos (the meter shows the last part)
+    - Denjin moves performed with the 52-frame charge
+    - supers (the bar stops in the cinematic)
+    - throws (the known 1-frame LK)
+    - M Tatsu, one cell lost (exporter now reads one extra cell, guarded against stale cells)
+  - No cells are added during hitstop.
+- FrameType → the user's legend:
+  - 0 free, 1 invincible, 2 strike invincible
+  - 5 non-counter (jump/dash, cyan)
+  - 7 counter state (startup AND the gaps between hits), 8 punish-counter recovery
+  - 9 hitstun, 10 blockstun
+  - 11 Drive Impact armored startup, 12 parry (purple)
+  - 13 active, 14 projectile active (orange)
+### Combo lab run (Ryu, 12 routes): 9 TRUE combos, all damages = community (one +200)
+### Bugs found and fixed
+- **"HP /DC Hasho" = 5HP > [Denjin Charge] Hashogeki** (user: "heavy punch into denjin charge hashogeki").
+  - The parser read "/" as "5HP or DC Hasho" and dropped the Hashogeki, so the bot did 5HP , 214LP and the
+    dummy blocked the gap.
+  - Now "/" before DC/Denjin is a cancel.
+  - Nicknames are mapped: Hasho/Hashogeki = 214P, Hado/Hadoken = 236P. "LP / MP Hasho" = L Hashogeki.
+  - "OR" counts as an alternative. "Denjin 214HP" = the Denjin Hashogeki (any punch).
+- **Denjin Charge first** (user: "for any moves tagged with DC, we need Denjin charge state to be the first
+  thing we activate"):
+  - a route with a [Denjin Charge] move, or a leading "DC ,", gets `plan.setup`
+  - the lab performs Denjin Charge (22P), checks it came out, and waits for neutral before every attempt
+  - a following jump-in becomes the route's starter
+- **A link that can't work from a special-cancelable normal is performed as a cancel.** The condition is
+  ',' + no link window at point blank + Capcom's cancel column allows it, and it adds a note.
+- **"PDR , 2MK , 5LK": 5LK came out never.**
+  - Screenshot: 2MK hit at +5; the 5LK press was read 25 frames after 2MK's, inside its 29-frame Total.
+  - Cause: the PDR's frames counted from the parry (480), not the rush (500), so the 2MK was timed off the
+    parry, and the rush's next id could count as the 2MK's start.
+  - Now:
+    - a Drive Rush step's frames start at the rush id
+    - the next step waits for the rush
+    - an unexpected id counts as a step's start only if its catalogued id doesn't appear within 4 frames
+      (`CANDIDATE_WAIT`)
+  - Input-delay calibration skips presses after a system step and unexpected starts. The measured delays
+    included −7 and 11–14 from these.
+- Results now keep the last 12 attempts step by step (`attempt_details`: ids, sent/start/contact frames,
+  `bar_link`), so a timing problem can be traced from S.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

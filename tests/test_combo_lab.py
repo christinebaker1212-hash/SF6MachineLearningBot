@@ -654,3 +654,67 @@ def test_dragonlash_loops_and_punish_only_starters_go_to_the_punish_counter_pass
     assert cl.route_requirements(route, cap, rules, "Ken")["hit_type"] is None        # no bonus given yet
     bonus = dict(rules, hit_bonus={"counter_hit": None, "punish_counter": 1 - w})
     assert cl.route_requirements(route, cap, bonus, "Ken")["hit_type"] == "punish_counter"
+
+
+def test_hp_dc_hasho_is_a_cancel_into_the_denjin_hashogeki_after_charging():
+    """User, 2026-10-02: 'heavy punch into denjin charge hashogeki' was not cancelled, and 'for any moves tagged
+    with DC, we need Denjin charge state to be the first thing we activate'. 'HP /DC Hasho' read as 'HP or DC
+    Hasho' dropped the Hashogeki: the bot did 5HP , 214LP and the dummy blocked the gap."""
+    cap = _capcom("ryu")
+    route = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("HP /DC Hasho , 214LP"))
+    assert [(s["connector"], s["name"]) for s in route["steps"]][:3] == [
+        ("", "Standing Heavy Punch"), (">", "[Denjin Charge]Hashogeki"), (",", "L Hashogeki")]
+    plan = cl.plan_route(route, cap, None)
+    assert plan["setup"]["name"] == "Denjin Charge" and plan["steps"][1]["trigger"] == "contact"
+    lp = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("CH LP / MP Hasho , PDR , 2MP > Denjin"))
+    assert lp["steps"][0]["name"] == "L Hashogeki" and lp["steps"][-1]["name"] == "[Denjin Charge]Hashogeki"
+    dc = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("DC , j.HP , 5HP"))
+    plan = cl.plan_route(dc, cap, None)
+    assert plan["setup"] and plan["jump_in"] and plan["steps"][1]["name"] == "Jumping Heavy Punch"
+
+
+def test_drive_rush_frames_count_from_the_rush_and_its_next_id_is_not_the_normal():
+    """First Ryu lab run (0.11.9): 'PDR , 2MK , 5LK' pressed 5LK ~4 frames too early (screenshot: 2MK hit,
+    5LK never came out). The PDR's frames counted from the parry (480) instead of the rush (500), and the
+    next id after the rush could be taken as the 2MK's start."""
+    steps = [{"name": "parry_drive_rush", "system": "drive_rush", "sequence": "5+MP+MK@8", "prefix": 8,
+              "trigger": "first", "expect_id": 500, "hitting": False, "min_offset": 0},
+             {"name": "2MK", "sequence": "2+MK@3", "prefix": 0, "trigger": "own_frame", "at": 11, "startup": 8,
+              "total": 29, "expect_id": 640, "hitting": True, "min_offset": cl.NO_FLOOR}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), lead=4)
+    assert run.feed(_line(1, NEUTRAL, 0)) == 0
+    run.sent(0)
+    sent1 = None
+    t = 1
+    for a, n in ((480, 14), (500, 12)):                  # parry 14 frames, then the rush
+        for f in range(n):
+            t += 1
+            k = run.feed(_line(t, a, f))
+            if k == 1:
+                sent1 = (a, f)
+                run.sent(1)
+    assert sent1 is not None and sent1[0] == 500 and sent1[1] == 11 - 4    # rush frame 7: not during the parry
+    t += 1
+    run.feed(_line(t, 501, 0))                          # the rush's next id: NOT the 2MK
+    assert run.rt[1]["start"] is None
+    t += 1
+    run.feed(_line(t, 640, 0))
+    assert run.rt[1]["start"] == t and run.rt[1]["start_id"] == 640
+
+
+def test_frame_bar_types_measured_on_ryu_match_the_meter():
+    """The user's Ryu catalog (exporter v9): bars vs the meter's Startup / Total. Jump normals start with the
+    jump's non-counter cells (5), OD Shoryuken with invincible cells (1), Hashogeki has counter cells (7)
+    between its hits, Drive Impact armored startup (11)."""
+    from sf6bot import framebar
+
+    def cells(runs):
+        out = []
+        for r in runs.split():
+            ty, n = r.split("x")
+            out += [int(ty)] * int(n)
+        return out
+    for bar, su, tot in (("7x3 13x3 8x7", 4, 13), ("5x17 7x8 13x6 8x15", 9, 29), ("1x5 13x10 8x52", 6, 67),
+                         ("7x11 13x1 7x5 8x18", 12, 35), ("11x25 13x2 8x35", 26, 62), ("14x1 8x19", None, None)):
+        chk = framebar.meter_check(cells(bar), su, tot)
+        assert chk["startup_ok"] in (True, None) and chk["total_ok"] in (True, None), (bar, chk)
