@@ -73,3 +73,14 @@ def test_all_sequences_parse():
         parse_sequence(m["seq"], k)
     for o in FCFG["punish"]["options"]:
         parse_sequence(o["seq"], o["name"])
+
+
+def test_di_reaction_without_opponent_catalog():
+    """Ken has no catalog, but his Drive Impact uses the shared id 855 (measured in the user's
+    replays): the bot must still react (0.5.0 missed a DI vs CPU Ken for this reason)."""
+    from sf6bot.fighter import _common_moves
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    d = f.decide(state(op={"x": 2.2, "action_id": 855}), 0.0, 0)
+    assert d.rule == "di_reaction"
+    d = f.decide(state(me={"blockstun": 3}, op={"x": 0.9, "action_id": 930}), 0.1, 0)
+    assert d.rule == "block"            # no catalog: no punish guesses

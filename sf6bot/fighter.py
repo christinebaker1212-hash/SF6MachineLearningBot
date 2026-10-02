@@ -25,7 +25,8 @@ import yaml
 
 from . import clock
 from .actions import InputState
-from .episodes import EpisodeTracker
+from .dataset import DatasetBuilder
+from .episodes import FIGHT_START_FRAME, EpisodeTracker
 from .game_state import character_name, facing_of, file_stem, num, open_state_reader, player_distance
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
@@ -73,6 +74,11 @@ def load_opponent_catalog(chara_name: str, datasets_root: Path) -> dict:
 
 
 _num = num
+
+
+def _common_moves(fcfg: dict) -> dict:
+    """System moves with the same action id for every character (measured: Ryu and Ken)."""
+    return {int(k): {"block_adv": None, **v} for k, v in (fcfg.get("common_moves") or {}).items()}
 
 
 class ScriptedFighter:
@@ -174,7 +180,10 @@ class ScriptedFighter:
 
 
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict:
-    reader = open_state_reader(cfg)
+    # Every state line also goes into a dataset of this fight (datasets/fights/, kept apart from the
+    # replay demonstrations: scripted bot play is for evaluation, not for imitation).
+    data = DatasetBuilder()
+    reader = open_state_reader(cfg, on_state=lambda st: data.add(st.raw, st.t_recv))
     if reader is None:
         return {}
     fcfg = load_fighter_config(cfg.get("fighter", {}).get("config_dir", "configs/fighter"))
@@ -227,14 +236,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict
                 summary["opponent"] = character_name(op["chara"])
                 opp_moves = load_opponent_catalog(summary["opponent"], ds_root)
                 summary["opponent_catalog"] = bool(opp_moves)
-                fighter = ScriptedFighter(fcfg, opp_moves)
+                fighter = ScriptedFighter(fcfg, {**_common_moves(fcfg), **opp_moves})
                 if summary["character"] not in ("Ryu", "?"):
                     print(f"WARNING: the bot side is {summary['character']}, but these rules are written for Ryu.")
                 sess.narrate(f"Opponent {summary['opponent']}: "
                              + ("move catalog loaded (punishes and DI reactions on)." if opp_moves
-                                else "no move catalog (no punishes / DI reactions)."), source="scripted")
+                                else "no move catalog: no punishes; DI reactions from the shared "
+                                     "system-move ids."), source="scripted")
             if fighter is None:
-                fighter = ScriptedFighter(fcfg, {})
+                fighter = ScriptedFighter(fcfg, _common_moves(fcfg))
             # resolve outcomes of earlier actions
             ohp = _num(op.get("hp"))
             for p in list(pending):
@@ -244,7 +254,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict
                     pending.remove(p)
                 elif t - t0 > 1.0:
                     pending.remove(p)
-            active = (st.ready and (_num(me.get("hp")) or 0) > 0 and (_num(op.get("hp")) or 0) > 0
+            timer = st.raw.get("stage_timer")
+            # not before "Fight!": 0.5.0 threw Hadokens during the round-start pause (real fight log)
+            active = (st.ready and isinstance(timer, int) and timer >= FIGHT_START_FRAME
+                      and (_num(me.get("hp")) or 0) > 0 and (_num(op.get("hp")) or 0) > 0
                       and me.get("action_id") not in INTRO_IDS and op.get("action_id") not in INTRO_IDS)
             if not active:
                 c.apply(InputState(), tag="fighter_idle")
@@ -273,6 +286,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict
     finally:
         c.release_all("fighter end")
         reader.stop()
+    if data.rows:
+        out = data.save(ds_root, "fights", "scripted_fight",
+                        f"bot={me_key}, scripted rules, vs {summary.get('opponent')}")
+        summary["dataset"] = str(out)
     sess.recorder.write_json("fight_summary.json", summary)
     print(json.dumps(summary, indent=2, default=str))
     return summary

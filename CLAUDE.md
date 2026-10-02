@@ -856,6 +856,48 @@ The safety tests are part of acceptance. During a run:
 - The main screen shows play/record, bot controller, setup and results. The older diagnostics
   are under **M**. All old letters still work.
 
+## First real fight (0.6.0, 2026-10-02): scripted Ryu (P1) vs CPU level 4 Ken — WON 2–0
+- User: "won easily", but it missed reacting to a Drive Impact.
+- `fight_summary`:
+  - anti-air Shoryukens: 6 of 10 landed (hp drop within 1 s)
+  - Hadokens landed 12/23
+  - light chain 4/13, 5HP 5/6, 2MK > 236MP 2/22, throws 1/8
+  - 125 hitstun frames
+- **Why DI was missed:** `opponent_catalog: false`. Only Ryu had a catalog, so the DI rule was
+  off.
+- **Measured fix:** system moves share action ids across characters. Ken's DI 855, parry
+  480/482 and throws 715/720 equal Ryu's in the user's replays (8× Ryu vs Ken, and the Master
+  Ken vs Ryu replay). `common_moves` in `configs/fighter/ryu.yaml` gives DI reactions against any
+  opponent. Punishes still need the opponent's catalog.
+- **Also fixed (0.6.2):** it pressed buttons before "Fight!" (Hadokens at distance 3.00 during
+  the round-start pause). It now acts only when stage_timer ≥ 190 and outside the intro.
+- Fights are saved to `datasets/fights/` (state + both players' inputs), separate from the
+  replay demonstrations: an evaluation record, not imitation data.
+
+## First real fights (0.6.0, 2026-10-02): scripted Ryu (P1) vs CPU Ken
+- **Fight 1, CPU level 4: WON 2–0.** User: "won easily", but it missed reacting to a Drive
+  Impact.
+  - anti-air Shoryukens landed 6/10, Hadokens 12/23
+  - light chain 4/13, 5HP 5/6, 2MK > 236MP 2/22, throws 1/8
+  - 125 hitstun frames
+- **Fight 2 (CPU level not stated): LOST 1–2.** It won R1 (45 s) and lost R2 (52 s) and R3 (48 s).
+  - anti-air 7/14, 2MK > 236MP 20/42, light chain 13/23, 5HP 8/19, Hadokens 8/27, throws 3/17
+  - 304 hitstun frames, and 3,862 "block" decisions: mostly holding down-back, which loses to
+    overheads, throws and cross-ups
+  - 26 facing changes (side switches)
+  - 0.6.0 did not save the fight's state stream, so what hit the bot cannot be analysed. 0.6.2
+    saves it.
+- **Why DI was missed:** `opponent_catalog: false`. Only Ryu had a catalog, so the DI rule was
+  off.
+- **Measured fix:** system moves share action ids across characters. Ken's DI 855, parry
+  480/482 and throws 715/720 equal Ryu's in the user's replays (8× Ryu vs Ken, and the Master
+  Ken vs Ryu replay). `common_moves` in `configs/fighter/ryu.yaml` gives DI reactions against any
+  opponent. Punishes still need the opponent's catalog.
+- **Also fixed (0.6.2):** it pressed buttons before "Fight!" (Hadokens at distance 3.00 during
+  the round-start pause). It now acts only when stage_timer ≥ 190 and outside the intro.
+- Fights are saved to `datasets/fights/` (state + both players' inputs), separate from the
+  replay demonstrations: an evaluation record, not imitation data.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
