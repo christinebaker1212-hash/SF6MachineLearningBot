@@ -265,7 +265,12 @@ class ComboRun:
         hs, hs0 = p2.get("hitstop") or 0, d_prev.get("hitstop") or 0
         hp, hp0 = num(p2.get("hp")), num(d_prev.get("hp"))
         if (p2.get("blockstun") or 0) > 0 and not (d_prev.get("blockstun") or 0) and self.blocked is None:
-            self.blocked = tick
+            # Training Mode guard "After first hit" (user, 0.11.1): the dummy blocks whatever is not a
+            # TRUE combo. A block after the first hit = a gap before the move that was blocked.
+            self.blocked = {"tick": tick, "step": self._active(), "before_first_hit": not self.hits}
+            self.last = raw
+            self._finish("first_blocked" if not self.hits else "blocked", self._active())
+            return None
         hit = (hs > 0 and hs0 == 0 and not (p2.get("blockstun") or 0)) or (hp is not None and hp0 is not None and hp < hp0)
         if hit and prev is not None and self.hits and self.escape is None \
                 and not (d_prev.get("hitstun") or 0) and not hs0 and not (200 <= (d_prev.get("action_id") or 0) < 400):
@@ -289,12 +294,10 @@ class ComboRun:
             if self.escape is not None or self.ticks_after_last > END_TICKS:
                 self._finish(None, None)
             return None
-        if self.escape is not None or self.blocked is not None:
+        if self.escape is not None:
             # a press that produced nothing before the dummy recovered: not_out (pressed too early or too late)
             act = self._active()
-            if self.escape is None:
-                kind, step = "blocked", act
-            elif act is not None and self.rt[act]["contact"] is None and self.steps[act].get("hitting"):
+            if act is not None and self.rt[act]["contact"] is None and self.steps[act].get("hitting"):
                 kind, step = "dropped", act        # the running move never connected in time
             elif self.pending is not None:
                 kind, step = "not_out", self.pending
@@ -407,7 +410,7 @@ def next_offsets(steps: list[dict], offsets: dict, fail: dict, tried: dict) -> d
         return dict(offsets)                       # a misread motion: same timing once more
     if kind == "not_out":
         order = [1, 2, 3, -1, -2, 4, 6] if st["trigger"] != "contact" else [2, -2, 4, -1, 1, 6]
-    elif kind in ("dropped", "whiff"):
+    elif kind in ("dropped", "whiff", "blocked"):
         order = [-1, -2, -3, 1, -4, 2]
     else:
         order = [1, -1, 2, -2]
@@ -492,7 +495,8 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
            "success_rate_final_timing": round(sum(a["success"] for a in at_final) / len(at_final), 2) if at_final else 0,
            "offsets": {str(k): v for k, v in (good[-1]["offsets"] if good else final).items()},
            "damage": min(dmg) if dmg else None, "damage_all": dmg,
-           "moves": [s["name"] for s in plan["steps"]], "notes": plan.get("notes") or [],
+           "moves": [s["name"] for s in plan["steps"]], "connectors": [s.get("connector") or "" for s in plan["steps"]],
+           "notes": plan.get("notes") or [],
            "time": time.strftime("%Y-%m-%d %H:%M:%S")}
     if good:
         g = good[-1]
@@ -517,10 +521,80 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
     return out
 
 
+GUARDS = ("after_first_hit", "none")
+
+
+def is_true(entry: dict) -> bool:
+    """A route verified against a dummy set to block after the first hit: a TRUE combo (user, 0.11.1:
+    'a CRITICAL distinction'). Against a non-guarding dummy a gap can go unnoticed."""
+    return bool(entry.get("verified")) and entry.get("guard") == "after_first_hit"
+
+
+def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard) -> dict:
+    """Try one route until a timing works (or the search gives up), then repeat it `confirm` times."""
+    from .catalog import walk_to_contact, _wait_settled, parse_frame_meter
+    neutral_a, neutral_d, movement = ids
+    steps = plan["steps"]
+    attempts: list[dict] = []
+    offsets: dict = {}
+    tried: dict = {}
+    found = None            # offsets of the first success; then `confirm` repeats at them
+    confirms_left = confirm
+    while not sess.stop_event.is_set():
+        reset()
+        if _position(combo) == "corner":
+            push_to_corner(sess, reader)
+        else:
+            walk_to_contact(sess, reader)
+        pre = reader.latest()
+        need_super = (combo.get("super_bars") or 0) * SUPER_BAR
+        if pre is not None and need_super and (num(pre.p1.get("super")) or 0) < need_super:
+            print("  not enough Super gauge: set Training Mode's Super gauge to max/infinite")
+            attempts.append({"success": False, "fail": {"kind": "no_super", "step": None},
+                             "offsets": dict(offsets), "steps": [], "hits": 0})
+            break
+        fm_before = reader.last_fm
+        res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement)
+        long = any(s.get("super_art") for s in steps)
+        _wait_settled(reader, sess, neutral_a, neutral_d, 15.0 if long else 5.0)
+        fm = reader.last_fm if reader.last_fm != fm_before else None
+        res["end_advantage"] = parse_frame_meter(fm).get("advantage") if fm else None
+        res["offsets"] = dict(offsets)
+        attempts.append(res)
+        f = res.get("fail") or {}
+        tag = "OK" if res["success"] else (f"failed at move {f['step'] + 1} ({f.get('kind')})"
+                                           if f.get("step") is not None else f"failed ({f.get('kind')})")
+        dmg = f", {res['damage']} dmg" if res.get("damage") else ""
+        print(f"  try {len(attempts)}: {tag}, {res['hits']} hits{dmg}, offsets {offsets or '{}'}")
+        if f.get("kind") == "first_blocked":
+            break                    # the dummy blocked the very first hit: the setup is wrong
+        if found is not None:
+            confirms_left -= 1
+            if confirms_left <= 0:
+                break
+        elif res["success"]:
+            found = dict(offsets)
+            if confirm <= 0:
+                break
+        else:
+            if len(attempts) >= tries:
+                break
+            nxt = next_offsets(steps, offsets, f, tried)
+            if nxt is None:
+                break
+            offsets = nxt
+    summ = _summary(attempts, plan, combo)
+    summ["guard"] = guard
+    summ["true_combo"] = True if (summ["verified"] and guard == "after_first_hit") else (
+        False if (summ.get("failed_at") or {}).get("kind") == "blocked" else None)
+    return summ
+
+
 def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "normal",
                   max_difficulty: int | None = None, only: list[str] | None = None, tries: int = 5,
-                  confirm: int = 2, limit: int | None = None, source: str = "community", again: bool = False):
-    from .catalog import learn_ids, make_reset, walk_to_contact, _wait_settled, parse_frame_meter
+                  confirm: int = 2, limit: int | None = None, source: str = "community", again: bool = False,
+                  guard: str = "after_first_hit", rounds: int = 1):
+    from .catalog import learn_ids, make_reset
     from .combos import load as load_combos
     ds = Path(cfg.get("datasets", {}).get("root", "datasets"))
     reader = open_state_reader(cfg)
@@ -533,6 +607,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     skipped: dict = {}
     name = "Unknown"
     lab: dict = {}
+    setup_error = None
     try:
         st = reader.wait_newer(-1, 2.0)
         if st is None or not st.ready:
@@ -551,100 +626,72 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
         else:
             print(f"No move catalog for {name} yet (menu C): timing uses Capcom's numbers and moves "
                   "can't be checked by id.")
-        combos: list[dict] = []
-        if source in ("community", "both"):
-            cdata = load_combos(name, ds)
-            if not cdata:
-                print(f"No community combos for {name}: save its SuperCombo Combos page and import (menu T, A).")
-            else:
-                combos += [dict(x, source="community") for x in cdata["combos"]]
-        if source in ("generated", "both"):
-            from .combo_gen import generate
-            combos += generate(capcom, catalog, combos)
-        todo = select_routes(combos, position, hit_type, max_difficulty, only)
+        community: list[dict] = []
+        cdata = load_combos(name, ds)
+        if cdata:
+            community = [dict(x, source="community") for x in cdata["combos"]]
+        elif source in ("community", "both"):
+            print(f"No community combos for {name}: save its SuperCombo Combos page and import (menu T, A).")
         lab = load_lab(ds, name)
-        if not again:
-            todo = [x for x in todo if not lab["routes"].get(route_key(x), {}).get("verified")]
-        seen_keys: set = set()
-        plans = []
-        for combo in todo:
-            k = route_key(combo)
-            if k in seen_keys:
-                continue
-            seen_keys.add(k)
-            plan = plan_route(combo, capcom, catalog)
-            if plan["unsupported"]:
-                skipped[k] = plan["unsupported"]
-                continue
-            plans.append((combo, plan))
-        if limit:
-            plans = plans[:limit]
-        print(f"Combo lab: {name}, {len(plans)} routes to try ({len(skipped)} not supported yet), "
-              f"position {position}, hit type {hit_type}. Dummy: guard NONE, no recovery, gauges full.")
-        if not plans:
-            return None
-        if not sess.start_inputs():
-            return None
-        neutral_a, neutral_d, movement = learn_ids(sess, reader, reset)
-        for n_route, (combo, plan) in enumerate(plans, 1):
-            if sess.stop_event.is_set():
+        guard_text = {"after_first_hit": "guard AFTER FIRST HIT (a block = not a true combo)",
+                      "none": "guard NONE (gaps can go unnoticed: results are not marked true combos)"}[guard]
+        ids = None
+        for rnd in range(max(1, rounds)):
+            if sess.stop_event.is_set() or setup_error:
                 break
-            steps = plan["steps"]
-            print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, community damage "
-                  f"{combo.get('damage')})")
-            attempts: list[dict] = []
-            offsets: dict = {}
-            tried: dict = {}
-            found = None            # offsets of the first success; then `confirm` repeats at them
-            confirms_left = confirm
-            while not sess.stop_event.is_set():
-                reset()
-                if _position(combo) == "corner":
-                    push_to_corner(sess, reader)
-                else:
-                    walk_to_contact(sess, reader)
-                pre = reader.latest()
-                need_super = (combo.get("super_bars") or 0) * SUPER_BAR
-                if pre is not None and need_super and (num(pre.p1.get("super")) or 0) < need_super:
-                    print("  not enough Super gauge: set Training Mode's Super gauge to max/infinite")
-                    attempts.append({"success": False, "fail": {"kind": "no_super", "step": None},
-                                     "offsets": dict(offsets), "steps": [], "hits": 0})
+            combos = list(community) if source in ("community", "both") else []
+            if source in ("generated", "both"):
+                from .combo_gen import generate
+                combos += generate(capcom, catalog, community, lab)
+            todo = select_routes(combos, position, hit_type, max_difficulty, only)
+            if not again or rnd > 0:
+                # done = already a true combo; with guard none, anything verified before
+                todo = [x for x in todo if not (is_true(lab["routes"].get(route_key(x), {})) or (
+                    guard == "none" and lab["routes"].get(route_key(x), {}).get("verified"))
+                    or route_key(x) in run_results)]
+            seen_keys: set = set()
+            plans = []
+            for combo in todo:
+                k = route_key(combo)
+                if k in seen_keys:
+                    continue
+                seen_keys.add(k)
+                plan = plan_route(combo, capcom, catalog)
+                if plan["unsupported"]:
+                    skipped[k] = plan["unsupported"]
+                    continue
+                plans.append((combo, plan))
+            if limit:
+                plans = plans[:limit]
+            print(f"Combo lab: {name}, round {rnd + 1}/{max(1, rounds)}: {len(plans)} routes to try "
+                  f"({len(skipped)} not supported yet), position {position}, hit type {hit_type}.\n"
+                  f"Dummy: standing, {guard_text}; Super and Drive gauges max.")
+            if not plans:
+                break
+            if ids is None:
+                if not sess.start_inputs():
+                    return None
+                ids = learn_ids(sess, reader, reset)
+            for n_route, (combo, plan) in enumerate(plans, 1):
+                if sess.stop_event.is_set():
                     break
-                fm_before = reader.last_fm
-                res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement)
-                long = any(s.get("super_art") for s in steps)
-                _wait_settled(reader, sess, neutral_a, neutral_d, 15.0 if long else 5.0)
-                fm = reader.last_fm if reader.last_fm != fm_before else None
-                res["end_advantage"] = parse_frame_meter(fm).get("advantage") if fm else None
-                res["offsets"] = dict(offsets)
-                attempts.append(res)
-                f = res.get("fail") or {}
-                tag = "OK" if res["success"] else (f"failed at move {f['step'] + 1} ({f.get('kind')})"
-                                                   if f.get("step") is not None else f"failed ({f.get('kind')})")
-                dmg = f", {res['damage']} dmg" if res.get("damage") else ""
-                print(f"  try {len(attempts)}: {tag}, {res['hits']} hits{dmg}, offsets {offsets or '{}'}")
-                if found is not None:
-                    confirms_left -= 1
-                    if confirms_left <= 0:
-                        break
-                elif res["success"]:
-                    found = dict(offsets)
-                    if confirm <= 0:
-                        break
+                print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
+                      f"damage listed {combo.get('damage') or combo.get('est_damage')})")
+                summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard)
+                if (summ.get("failed_at") or {}).get("kind") == "first_blocked":
+                    setup_error = ("The dummy BLOCKED the first hit. Set Training Mode's dummy guard to "
+                                   "'After first hit' (or run with --guard none) and start again.")
+                    print(setup_error)
+                    break
+                run_results[route_key(combo)] = summ
+                lab["routes"][route_key(combo)] = summ
+                if summ["verified"]:
+                    msg = (f"{'TRUE COMBO' if summ['true_combo'] else 'connects (dummy not guarding)'} "
+                           f"{summ['successes']}/{summ['attempts']}, {summ.get('damage')} dmg")
                 else:
-                    if len(attempts) >= tries:
-                        break
-                    nxt = next_offsets(steps, offsets, f, tried)
-                    if nxt is None:
-                        break
-                    offsets = nxt
-            summ = _summary(attempts, plan, combo)
-            run_results[route_key(combo)] = summ
-            lab["routes"][route_key(combo)] = summ
-            msg = (f"VERIFIED {summ['successes']}/{summ['attempts']}, {summ.get('damage')} dmg" if summ["verified"]
-                   else f"not done: {summ.get('failed_at')}")
-            print("  -> " + msg)
-            sess.narrate(f"{combo['route']}: {msg}", source="measured")
+                    msg = f"not done: {summ.get('failed_at')}"
+                print("  -> " + msg)
+                sess.narrate(f"{combo['route']}: {msg}", source="measured")
     except InterruptedError:
         print("Stopped (focus lost or paused too long).")
     finally:
@@ -668,9 +715,11 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     except Exception:
         pass
     out.write_text(json.dumps(lab, indent=1, default=str), encoding="utf-8")
-    sess.recorder.write_json("combo_lab_result.json", {"character": name, "file": str(out),
-                                                        "routes": run_results, "skipped": skipped})
-    (sess.recorder.dir / "combo_lab.md").write_text(report_md(name, run_results, skipped), encoding="utf-8")
+    sess.recorder.write_json("combo_lab_result.json", {"character": name, "file": str(out), "guard": guard,
+                                                        "routes": run_results, "skipped": skipped,
+                                                        "setup_error": setup_error})
+    (sess.recorder.dir / "combo_lab.md").write_text(report_md(name, run_results, skipped, setup_error),
+                                                   encoding="utf-8")
     print(f"\nSaved {out}")
     return out
 
@@ -707,17 +756,23 @@ def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movemen
     return run.result()
 
 
-def report_md(character: str, results: dict, skipped: dict) -> str:
+def report_md(character: str, results: dict, skipped: dict, setup_error: str | None = None) -> str:
     ok = {k: v for k, v in results.items() if v.get("verified")}
-    lines = [f"## Combo lab: {character}", f"- routes tried: {len(results)}, verified: {len(ok)}, "
+    true = sum(1 for v in ok.values() if v.get("true_combo"))
+    gaps = sum(1 for v in results.values() if (v.get("failed_at") or {}).get("kind") == "blocked")
+    lines = [f"## Combo lab: {character}", f"- routes tried: {len(results)}, landed: {len(ok)} (TRUE combos vs a "
+             f"dummy blocking after the first hit: {true}), blocked = not true: {gaps}, "
              f"not supported yet: {len(skipped)}"]
+    if setup_error:
+        lines.append(f"- SETUP: {setup_error}")
     leads = [x for v in results.values() for x in v.get("lead_measured") or []]
     if leads:
         from collections import Counter
         lines.append(f"- measured input delay (frames, send -> move starts): {dict(sorted(Counter(leads).items()))}")
     for k, v in results.items():
         if v.get("verified"):
-            lines.append(f"- OK {v['successes']}/{v['attempts']} | {k} | {v.get('damage')} dmg (community "
+            tag = "TRUE" if v.get("true_combo") else "OK (guard none)"
+            lines.append(f"- {tag} {v['successes']}/{v['attempts']} | {k} | {v.get('damage')} dmg (community "
                          f"{v.get('community_damage')}) | hits {v.get('hits')} | drive {v.get('drive_spent')} "
                          f"super {v.get('super_spent')} | carry {v.get('carry')} | side switch {v.get('side_switch')} "
                          f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}")
@@ -732,10 +787,14 @@ def report_md(character: str, results: dict, skipped: dict) -> str:
 
 # ---- using verified routes -----------------------------------------------------------------------
 
-def verified_routes(datasets_root: Path, character: str, min_rate: float = 0.5) -> list[dict]:
+def verified_routes(datasets_root: Path, character: str, min_rate: float = 0.5,
+                    true_only: bool = True) -> list[dict]:
+    """Routes the bot can use: by default only TRUE combos (verified against a dummy blocking after the
+    first hit), at the timing that worked at least `min_rate` of the time."""
     lab = load_lab(datasets_root, character)
     return [v for v in lab.get("routes", {}).values()
-            if v.get("verified") and (v.get("success_rate_final_timing") or 0) >= min_rate]
+            if (is_true(v) if true_only else v.get("verified"))
+            and (v.get("success_rate_final_timing") or 0) >= min_rate]
 
 
 def lethal_route(routes: list[dict], opponent_hp: float, drive: float, super_: float,

@@ -214,9 +214,12 @@ Then the combo lab.
 3. Fight Ken again (V, H). Check `hits_by_bot`, and whether Gorai / Thunder Kick are now blocked
    standing.
 4. Ask which keyboard keys SF6 uses for menu MENU/VIEW/LB/LT (`input.menu_keys`).
-**0.11.0 open items for the user:**
-1. Combo lab, Ken: Training Mode, Ken vs a standing dummy with guard NONE, gauges max. Run menu K → 1
-   (community routes), then K → 2 (the bot's own routes). Send S. Look at: verified count, the failing
+**0.11.1 (user): the dummy must use Guard "After first hit": only TRUE combos count — a CRITICAL
+distinction.** The lab treats any block after the first hit as a gap. The generator now uses every
+catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's results (K → 3 = rounds).
+**0.11.0/0.11.1 open items for the user:**
+1. Combo lab, Ken: Training Mode, Ken vs a standing dummy with Guard = After first hit, gauges max. Run
+   menu K → 1 (community routes), then K → 3 (the bot's own routes, 3 rounds). Send S. Look at: verified count, the failing
    step and kind per route, `lead_measured` (is 4 right?), damage vs the community's numbers.
 2. If the dummy's health never drops (catalog damage was 0), set the dummy's health so it goes down;
    the lab's damage and the lethal check need it.

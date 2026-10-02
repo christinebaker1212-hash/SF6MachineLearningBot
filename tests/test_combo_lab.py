@@ -39,6 +39,8 @@ class Sim:
         self.stun = 0
         self.hp = 10000
         self.arrivals = []
+        self.guard_all = False
+        self.block = 0
 
     def send(self, k, prefix):
         self.arrivals.append((self.t + self.lead + prefix, k))
@@ -67,18 +69,21 @@ class Sim:
         c = self.cur
         if c is not None and c["frame"] == c["m"]["su"] - 1 and c["hit"] is None:
             c["hit"] = self.t                # startup s: hits on its frame s-1 (measured, Ryu 5HP)
-            self.hp -= c["m"].get("dmg", 500)
             self.hitstop = self.HITSTOP
-            # stunned through the tick the bot's move ends + adv - 1: a next move of start-up s linked on
-            # the first free tick hits while stun > 0 iff s <= adv (the usual "+5 links a 5F move")
-            self.stun = (c["m"]["tot"] - c["m"]["su"]) + c["m"]["adv"] + 1
+            if self.guard_all:
+                self.block = 10              # Training Mode guard: all
+            else:
+                self.hp -= c["m"].get("dmg", 500)
+                # stunned through the tick the bot's move ends + adv - 1: a next move of start-up s linked
+                # on the first free tick hits while stun > 0 iff s <= adv (the usual "+5 links a 5F move")
+                self.stun = (c["m"]["tot"] - c["m"]["su"]) + c["m"]["adv"] + 1
         if self.stun > 0 and self.hitstop == 0:
             self.stun -= 1
         c = self.cur
         p1 = {"action_id": c["m"]["id"] if c else NEUTRAL, "action_frame": c["frame"] if c else 0,
               "hitstop": self.hitstop if c and c["hit"] else 0, "x": 0.0, "hp": 10000, "drive": 60000, "super": 30000}
         p2 = {"action_id": REACT if (self.stun or self.hitstop) else DUMMY_IDLE, "hitstun": self.stun,
-              "hitstop": self.hitstop, "blockstun": 0, "hp": self.hp, "x": 0.8}
+              "hitstop": self.hitstop, "blockstun": self.block, "hp": self.hp, "x": 0.8}
         return {"stage_timer": self.t, "p1": p1, "p2": p2}
 
 
@@ -197,16 +202,82 @@ def test_lethal_route_picks_the_cheapest_sure_kill():
     assert cl.lethal_route(routes, 4800, 0, 0, position="corner")["damage"] == 5000
 
 
-def test_generator_proposes_links_cancels_and_chains_from_capcom_data():
-    from sf6bot import combo_gen
+def _ken():
     cap = _capcom("ken")
-    comm = _combos("ken", cap)["combos"]
-    gen = combo_gen.generate(cap, None, comm)
-    by = {r["route"]: r for r in gen}
-    # Ken 2MP is +5 on hit and 5LP starts on frame 4: a 2-frame link; 5LP cancels into specials ('C')
-    assert by["2MP , 5LP > 623HP"]["link_windows"] == [2]
-    assert by["5MK > 236236P"]["super_bars"] == 3          # 5MK cancel column 'SA': Super Arts only
-    assert not any(r["route"].startswith("5MK > 623") for r in gen)
-    assert all(cl.plan_route(r, cap, None)["unsupported"] is None for r in gen)
-    known = {tuple(s.get("name") for s in c["steps"]) for c in comm}
-    assert not any(tuple(s["name"] for s in r["steps"]) in known for r in gen)
+    cat = json.load(gzip.open(DATA / "catalog_ken_0.10.1_movelist.json.gz", "rt"))
+    return cap, cat, _combos("ken", cap)["combos"]
+
+
+def test_generator_uses_the_whole_catalogued_move_list():
+    """User, 0.11.1: once a character is catalogued, all its moves can be tested. The graph has the
+    follow-ups (Jinrai, Quick Dash branches, Kasai), target combos and Drive Rush; every proposal plans."""
+    from sf6bot import combo_gen
+    cap, cat, comm = _ken()
+    nodes = combo_gen.move_nodes(cap, cat)
+    kinds = {n["key"]: n["kind"] for n in nodes.values()}
+    assert kinds["Senka Snap Kick"] == "follow" and kinds["Thunder Kick"] == "follow"
+    assert kinds["Chin Buster"] == "target" and kinds["Triple Flash Kicks (3)"] == "target"
+    assert kinds["Kasai Thrust Kick (after OD Gorai Axe Kick)"] == "follow"
+    assert nodes["Kasai Thrust Kick (after OD Gorai Axe Kick)"]["parents"] == ["OD Gorai Axe Kick"]
+    assert nodes["Gorai Axe Kick"]["parents"] == ["L Jinrai Kick", "M Jinrai Kick", "H Jinrai Kick"]
+    assert "Jumping Heavy Punch" not in nodes and "Knee Strikes" not in nodes
+    edges = combo_gen.static_edges(nodes, comm)
+    assert ("~", "Chin Buster", "target") in edges["Standing Medium Punch"]
+    assert (">", combo_gen.DR, "cancel") in edges["Standing Heavy Punch"]
+    assert (">", "SA3 Shinryu Reppa", "cancel") in edges["Standing Medium Kick"]   # 5MK cancel 'SA'
+    assert not any(e[1] == "H Shoryuken" for e in edges["Standing Medium Kick"])   # ... supers only
+    gen = combo_gen.generate(cap, cat, comm)
+    assert len(gen) >= 40
+    assert all(cl.plan_route(r, cap, cat)["unsupported"] is None for r in gen)
+    texts = [r["route"] for r in gen]
+    assert any("DRC ~" in t for t in texts) and any("236236P" in t for t in texts)
+    assert any(" ~ 6" in t for t in texts)                       # Jinrai follow-ups are used
+    assert {r["position"] for r in gen} == {"Anywhere", "Corner"}
+    known = {tuple(st.get("name") for st in c["steps"]) for c in comm}
+    assert not any(tuple(st.get("name") for st in r["steps"]) in known for r in gen)
+    # corner-only community steps (Dragonlash loops) never appear in a midscreen proposal
+    assert not any(r["position"] == "Anywhere" and "623MK , 2LP > 623MK" in r["route"] for r in gen)
+
+
+def test_generator_builds_on_the_lab_results():
+    """A prefix the lab proved NOT true (blocked) is never extended; a proven true combo is extended."""
+    from sf6bot import combo_gen
+    cap, cat, comm = _ken()
+    lab = {"routes": {
+        "midscreen | 5HP > 623LK": {"verified": False, "guard": "after_first_hit",
+                                    "moves": ["Standing Heavy Punch", "L Dragonlash Kick"], "connectors": ["", ">"],
+                                    "failed_at": {"step": 1, "kind": "blocked"}},
+        "midscreen | 2MP > 214LK": {"verified": True, "guard": "after_first_hit",
+                                    "moves": ["Crouching Medium Punch", "L Tatsumaki Senpu-kyaku"],
+                                    "connectors": ["", ">"]}}}
+    before = combo_gen.generate(cap, cat, comm)
+    after = combo_gen.generate(cap, cat, comm, lab)
+    assert any(r["route"].startswith("5HP > 623LK") for r in before)
+    assert not any(r["route"].startswith("5HP > 623LK") for r in after)
+    assert any(r["route"].startswith("2MP > 214LK ") for r in after)
+    assert not any(r["route"] == "2MP > 214LK" for r in after)        # already tested: not proposed again
+
+
+def test_block_after_first_hit_marks_a_gap():
+    """Guard 'After first hit': the dummy blocks the move after a gap, even with no idle frame between."""
+    steps = _steps(MOVES)
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    line = lambda t, a, f, d, hs=0, stun=0, block=0, hp=10000: {
+        "stage_timer": t, "p1": {"action_id": a, "action_frame": f, "hitstop": 0},
+        "p2": {"action_id": d, "hitstun": stun, "hitstop": hs, "blockstun": block, "hp": hp}}
+    assert run.feed(line(1, NEUTRAL, 0, DUMMY_IDLE)) == 0
+    run.sent(0)
+    run.feed(line(2, 618, 0, DUMMY_IDLE))
+    run.feed(line(5, 618, 3, REACT, hs=8, stun=10, hp=9700))          # first hit
+    run.rt[1].update(sent=6, at_send=(618, 3)); run.pending = 1
+    run.feed(line(20, 604, 0, REACT, stun=1, hp=9700))               # 5MP starts
+    run.feed(line(24, 604, 4, 160, hs=6, block=12, hp=9700))          # ... and is BLOCKED
+    res = run.result()
+    assert res["fail"] == {"kind": "blocked", "step": 1} and not res["success"]
+
+
+def test_first_hit_blocked_means_wrong_dummy_setting():
+    sim = Sim(MOVES, lead=4)
+    sim.guard_all = True
+    res = _run(sim, _steps(MOVES), {})
+    assert res["fail"]["kind"] == "first_blocked"

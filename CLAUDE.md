@@ -1218,6 +1218,39 @@ The safety tests are part of acceptance. During a run:
 - Example (Ken): 2MP , 5LP > 623HP — 2MP is +5, 5LP starts on frame 4: a 2-frame link.
 - These are proposals; only the lab's verified ones count.
 
+## 0.11.1: true combos only; the bot's own routes from every catalogued move
+### True-combo test (user, 2026-10-02: "Block after first hit ... This is a CRITICAL distinction")
+- The combo lab now expects Training Mode's dummy guard = **After first hit** (`--guard after_first_hit`,
+  the default). Any block after the first hit means a gap: that route is **not a true combo**
+  (`failed_at.kind: blocked`, `true_combo: false`). The search then presses the blocked move earlier.
+- A route counts as a TRUE combo only if it was verified with that guard (`true_combo: true`,
+  `combo_lab.is_true`). `verified_routes()` (what the fighter will use) returns true combos only.
+- If the dummy blocks the FIRST hit, the guard setting is wrong (Guard All): the lab stops with a message.
+- `--guard none` still works, but its results are marked "connects (dummy not guarding)", not true.
+- Earlier signals stay: dummy back to idle, or a fresh hit on a dummy not in hit reaction, = dropped.
+- MOCK-tested only (synthetic lines: a dummy going straight from hit reaction into blockstun → `blocked`
+  at that move; a Guard-All simulator → `first_blocked`).
+### Generator over the whole catalogued move list (`combo_gen.py`, user: "once a new C has been
+catalogued, all moves for that character can be tested and iterated")
+- A move graph over every move the catalog saw come out (Ken: 54 nodes: 12 normals, 20 specials,
+  15 follow-ups, 3 target combos, 3 supers, Quick Dash). Edges:
+  - link (catalog-measured hit advantage ≥ start-up; +4 after a Drive Rush, community figure)
+  - cancel (Capcom's cancel column, incl. Cancel Drive Rush from special-cancelable normals)
+  - rapid-cancel chains, target combos, follow-ups ('(During X)', '[X] Name': Jinrai, Quick Dash, Kasai)
+  - community steps, only from normal-hit routes without stun / crumple / wall splat / counter /
+    Drive Impact / juggle context; steps seen only in corner routes make the proposal a corner route
+- Beam search up to 6 steps with a quota per group (meterless / OD / Drive Rush / Super) and per
+  starter; output 8 per group, midscreen and corner (≤ 64). Ranking = estimated damage (unverified
+  scaling table), 1-frame links ×0.8.
+- **Built on the lab's results:** a prefix proven not true (blocked / dropped / whiff) is never
+  extended; a prefix that was hard to execute (nothing came out) is ranked down ×0.5; routes extending a
+  proven true combo rank up; already-tested routes are not proposed again. `combo-lab --source generated
+  --rounds N` (menu K → 3) repeats test → regenerate → test.
+- Ken example (real catalog + Capcom + community data): 5HP > DRC ~ 5HP > 214KK, 5MP ~ 5HP > 236KK ~
+  6MK ~ 6K, 236HK ~ 6LK , 236LK ~ 6HK , 623HP (corner). All proposals plan; none repeats a community route.
+- Test fixture `catalog_ken_0.10.1_movelist.json.gz`: the user's 0.9.0 guard None + 0.10.1 C2 guard
+  All (71 moves) + C4 re-test, raw meter fields stripped.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

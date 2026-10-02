@@ -197,7 +197,7 @@ def cmd_combo_lab(args, cfg):
         run_combo_lab(s, cfg, position=args.position, hit_type=args.hit_type,
                       max_difficulty=args.max_difficulty, only=[o for o in args.only.split(",") if o] or None,
                       tries=args.tries, confirm=args.confirm, limit=args.limit, source=args.source,
-                      again=args.again)
+                      again=args.again, guard=args.guard, rounds=args.rounds)
     _print_report(s)
 
 
@@ -548,8 +548,14 @@ def main(argv=None):
                    help="use the generic inputs even if Capcom frame data was imported (menu F)")
     p.set_defaults(fn=cmd_catalog)
 
-    p = sub.add_parser("combo-lab", help="try combo routes in Training Mode and keep what works (bot = P1, "
-                                         "dummy guard NONE)")
+    p = sub.add_parser("combo-lab", help="try combo routes in Training Mode and keep the TRUE combos (bot = P1, "
+                                         "dummy guard 'After first hit')")
+    p.add_argument("--guard", choices=["after_first_hit", "none"], default="after_first_hit",
+                   help="the dummy's Training Mode guard setting: after_first_hit (a block = not a true combo) "
+                        "or none (gaps can go unnoticed)")
+    p.add_argument("--rounds", type=int, default=1,
+                   help="generated routes: test, regenerate from the results (extend what worked, drop "
+                        "what was blocked), test again; this many rounds")
     p.add_argument("--source", choices=["community", "generated", "both"], default="community",
                    help="community routes (menu T, A), routes worked out from Capcom data, or both")
     p.add_argument("--position", choices=["any", "midscreen", "corner"], default="any")

@@ -25,7 +25,7 @@ echo.
 echo  RECORD
 echo    D  Record a replay you play back (training data)
 echo    C  Move catalog in Training Mode
-echo    K  Combo lab: try combo routes in Training Mode, keep what works
+echo    K  Combo lab: find TRUE combos in Training Mode (dummy guard: After first hit)
 echo.
 echo  OVERLAY BUTTONS  (press P1's keys)
 echo    P  Use the buttons      L  Teach a routine      U  Run a routine
@@ -96,16 +96,19 @@ goto menu
 
 :combolab
 echo.
-echo  Combo lab: Training Mode, the bot as P1, the dummy standing with guard NONE, Super and Drive
-echo  gauges on max/infinite. Corner routes push the dummy to the corner by themselves.
-echo    1  Community routes (imported with T then A)   2  Routes the bot works out from Capcom data
-echo    3  Both                                       4  Only routes containing some text (e.g. DRC)
+echo  Combo lab: Training Mode, the bot as P1. Dummy: standing, Guard = AFTER FIRST HIT
+echo  (it blocks anything that is not a true combo). Super and Drive gauges on max/infinite.
+echo  Corner routes push the dummy to the corner by themselves.
+echo    1  Community routes (imported with T then A)
+echo    2  The bot's own routes: built from every catalogued move (run C first)
+echo    3  Keep exploring: own routes, 3 rounds (each round extends what worked)
+echo    4  Only routes containing some text (e.g. DRC)
 echo    5  Counter-hit routes      6  Punish-counter routes  (set Training Mode's counter setting first)
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)
 if "%LC%"=="2" (%BOT% combo-lab --source generated & goto done)
-if "%LC%"=="3" (%BOT% combo-lab --source both & goto done)
+if "%LC%"=="3" (%BOT% combo-lab --source generated --rounds 3 & goto done)
 if "%LC%"=="5" (%BOT% combo-lab --hit-type counter_hit & goto done)
 if "%LC%"=="6" (%BOT% combo-lab --hit-type punish_counter & goto done)
 if "%LC%"=="4" (
