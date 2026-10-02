@@ -12,7 +12,8 @@ FCFG = load_fighter_config(Path(__file__).parent.parent / "configs" / "fighter")
 
 
 def state(me=None, op=None, timer=500):
-    base = {"x": 0.0, "y": 0.0, "hp": 10000, "facing_right": True, "action_id": 1, "hitstun": 0, "blockstun": 0}
+    base = {"x": 0.0, "y": 0.0, "hp": 10000, "facing_right": True, "action_id": 1, "hitstun": 0, "blockstun": 0,
+            "drive": 60000}
     p1 = {**base, **(me or {})}
     p2 = {**base, "x": 2.0, "facing_right": False, **(op or {})}
     return {"ready": True, "stage_timer": timer, "p1": p1, "p2": p2}
@@ -168,3 +169,36 @@ def test_di_reaction_without_opponent_catalog():
     assert d.rule == "di_reaction"
     d = f.decide(state(me={"blockstun": 3}, op={"x": 0.9, "action_id": 930}), 0.1, 0)
     assert d.rule == "block"            # no catalog: no punish guesses
+
+
+def test_never_spends_into_burnout():
+    """User rule: no burnout unless lethal is certain. DI costs 1 bar (10000)."""
+    f = ScriptedFighter(FCFG, {855: {"name": "Drive Impact", "di": True, "block_adv": None}}, seed=1)
+    d = f.decide(state(me={"drive": 10000}, op={"x": 1.5, "action_id": 855}), 0.0, 0)
+    assert d.rule != "di_reaction"                     # exactly 1 bar left: DI would burn out
+    assert f.can_spend({"drive": 10000}, "drive_impact", lethal=True)
+    d = f.decide(state(me={"drive": 20000}, op={"x": 1.5, "action_id": 856}), 0.1, 0)
+    d = f.decide(state(me={"drive": 20000}, op={"x": 1.5, "action_id": 855}), 0.2, 0)
+    assert d.rule == "di_reaction"
+
+
+def test_overheads_blocked_standing_lows_crouching(tmp_path):
+    """Real Ken data: Gorai Axe Kick (925) is Capcom 'Mid' = overhead; 2MK (634) is 'Low'."""
+    import gzip as gz
+    from sf6bot import framedata as fd
+    from sf6bot.fighter import opponent_moves
+    html = gz.open(DATA / "capcom_ken_frame_table.html.gz", "rt", encoding="utf-8").read()
+    (tmp_path / "framedata").mkdir()
+    (tmp_path / "framedata" / "ken.json").write_text(json.dumps({"name": "Ken", "moves": fd.parse_frame_page(html)}))
+    (tmp_path / "catalog").mkdir()
+    cat = json.loads(gz.open(DATA / "catalog_ken_0.9.0_hit.json.gz", "rt", encoding="utf-8").read())
+    cat["moves"]["Gorai Axe Kick"] = {"guard_none": {"move_id": 925, "action_ids": [925]}}
+    (tmp_path / "catalog" / "Ken_movelist.json").write_text(json.dumps(cat))
+    moves, label = opponent_moves("Ken", tmp_path, FCFG)
+    assert moves[925]["guard"] == "overhead" and moves[634]["guard"] == "low" and "Capcom" in label
+    assert moves[955]["block_adv"] == -23 + 1                    # L Shoryuken: Capcom -23, margin 1
+    f = ScriptedFighter(FCFG, moves, seed=1)
+    assert f.decide(state(me={"blockstun": 8}, op={"x": 0.9, "action_id": 925}), 0.0, 0).direction == 4
+    assert f.decide(state(me={"blockstun": 8}, op={"x": 0.9, "action_id": 634}), 0.1, 0).direction == 1
+    d = f.decide(state(op={"x": 1.0, "action_id": 925}), 0.2, 0)
+    assert d.kind == "hold" and d.direction == 4

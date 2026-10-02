@@ -65,6 +65,11 @@ def load_fighter_config(root: Path | str = "configs/fighter", name: str = "ryu")
     return yaml.safe_load((Path(root) / f"{name}.yaml").read_text(encoding="utf-8"))
 
 
+def catalog_build(chara_name: str, datasets_root: Path) -> dict | None:
+    p = Path(datasets_root) / "catalog" / f"{file_stem(chara_name)}_movelist.json"
+    return json.loads(p.read_text(encoding="utf-8")).get("game_build") if p.exists() else None
+
+
 def load_opponent_catalog(chara_name: str, datasets_root: Path) -> dict:
     """action_id -> {"name", "block_adv", "di"} from the opponent's move catalog, if we have one.
     Every action id of a move maps to it (e.g. 2HK 643 and its follow-through 645)."""
@@ -109,15 +114,62 @@ def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dic
     return out
 
 
+def guard_of(properties: str | None) -> str | None:
+    """Capcom's attack property -> how to block it. Capcom's English pages use the Japanese levels:
+    "High" (jodan) blocks standing or crouching, "Mid" (chudan) is an OVERHEAD (stand only, jump
+    attacks are listed as Mid), "Low" (gedan) crouch only."""
+    p = (properties or "").lower()
+    if "throw" in p:
+        return "throw"
+    if p.startswith("mid"):
+        return "overhead"
+    if p.startswith("low"):
+        return "low"
+    if p.startswith("high"):
+        return "high"
+    return None
+
+
+def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: dict) -> int:
+    """Add Capcom's data to known ids by move name: block type, projectile, start-up, damage, and
+    on-block advantage where the catalog has no measured guard-All value (a catalog run with the
+    dummy on guard None, like the user's Ken run, measures hits only). Returns entries filled."""
+    from . import framedata as fd
+    data = fd.load(chara_name, Path(datasets_root) / "framedata")
+    if not data:
+        return 0
+    rows = {m["name"]: m for m in data["moves"]}
+    margin = int((fcfg.get("capcom") or {}).get("block_adv_margin", 1))
+    n = 0
+    for info in moves.values():
+        row = rows.get(info.get("name"))
+        if not row:
+            continue
+        info.setdefault("guard", guard_of(row.get("properties")))
+        info.setdefault("projectile", "projectile" in (row.get("properties") or "").lower())
+        info.setdefault("startup", row.get("startup_n"))
+        info.setdefault("punish_class", fd.punish_class(row))
+        info.setdefault("damage", row.get("damage_n"))
+        if info.get("block_adv") is None and isinstance(row.get("on_block_n"), int):
+            info["block_adv"] = row["on_block_n"] + margin
+            info.setdefault("block_adv_source", "capcom")
+        n += 1
+    return n
+
+
 def opponent_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> tuple[dict, str]:
     """Merged move knowledge, best source wins per id: catalog (measured) > inferred map > shared
-    system ids. Returns (moves, label for commentary)."""
+    system ids, each enriched with Capcom's block type / on-block by move name.
+    Returns (moves, label for commentary)."""
     cat = load_opponent_catalog(chara_name, datasets_root)
     inf = load_inferred_moves(chara_name, datasets_root, fcfg)
     parts = [f"catalog {len(cat)} ids"] if cat else []
     if inf:
         parts.append(f"inferred {len(set(inf) - set(cat))} ids (Capcom on-block, safety margin)")
-    return {**_common_moves(fcfg), **inf, **cat}, ", ".join(parts)
+    merged = {k: dict(v) for k, v in {**_common_moves(fcfg), **inf, **cat}.items()}
+    if enrich_with_capcom(merged, chara_name, datasets_root, fcfg):
+        parts.append("Capcom block types")
+    return merged, ", ".join(parts)
 
 
 _num = num
@@ -148,6 +200,7 @@ class ScriptedFighter:
         self.tech_handled = None
         self.blocked_id = None
         self.punished = False
+        self.last_hit: dict | None = None      # hits.classify_hit of the bot's latest first hit
         self.next_neutral_t = 0.0
         self.block_until = 0.0
 
@@ -188,6 +241,18 @@ class ScriptedFighter:
             self.vel_ok = True
         if isinstance(tmr, int) and x is not None:
             self.prev_op = (tmr, x, y)
+
+    def can_spend(self, me: dict, action: str, lethal: bool = False) -> bool:
+        """Never go into burnout (drive 0) unless the follow-up is certain to kill (user rule,
+        2026-10-02). `lethal` is only ever True once a combo's damage is known to beat the
+        opponent's hp; until combo routes are verified nothing passes it as True."""
+        cost = (self.c.get("drive_costs") or {}).get(action, 0)
+        drive = _num(me.get("drive"))
+        if not cost:
+            return True
+        if drive is None:
+            return False
+        return drive - cost > self.c.get("drive_reserve", 0) or lethal
 
     def _landing_side(self, me: dict, op: dict) -> Facing | None:
         if not self.vel_ok:
@@ -235,6 +300,13 @@ class ScriptedFighter:
         # jump attacks are overheads: block them standing (0.6.x crouch-blocked everything), and toward
         # where an airborne opponent will be when our input lands (cross-ups, air Tatsu)
         block_dir, block_face = (4, self._landing_side(me, op)) if op_y > 0.3 else (1, None)
+        # Capcom's block type of the move the opponent is doing NOW: overheads (Gorai Axe Kick 925,
+        # Thunder Kick 682 - 58% of the damage the user did to the bot, 0.9.0) need a standing block
+        guard = info.get("guard")
+        if guard == "overhead":
+            block_dir = 4
+        elif guard == "low":
+            block_dir = 1
 
         # 1. being hit: nothing to do
         if (_num(me.get("hitstun")) or 0) > 0:
@@ -249,7 +321,8 @@ class ScriptedFighter:
         if op_act not in self.throw_ids:
             self.tech_handled = None
         # 3. Drive Impact reaction (shared id 855, or the opponent's catalog)
-        if info.get("di") and op_act != self.di_handled_id and dist < 3.0 and me_y <= 0.05:
+        if (info.get("di") and op_act != self.di_handled_id and dist < 3.0 and me_y <= 0.05
+                and self.can_spend(me, "drive_impact")):
             self.di_handled_id = op_act
             return self._move("drive_impact", "di_reaction", f"opponent Drive Impact at {dist:.2f}")
         if not info.get("di"):
@@ -327,6 +400,7 @@ def _new_match_summary(me_key: str) -> dict:
     return {"player": me_key, "decisions": {}, "landed": {}, "rounds": [], "match": None,
             "opponent_catalog": False, "character": None, "opponent": None, "interrupted": {},
             "throws_against": {"seen": 0, "thrown": 0}, "facing_flag_disagreed": 0,
+            "hits_by_bot": {}, "hits_on_bot": {},
             "note": "scripted rules (configs/fighter/ryu.yaml), not a learned policy"}
 
 
@@ -357,9 +431,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
     summary = _new_match_summary(me_key)
     tracker = EpisodeTracker(self_index=player)
     fighter = None
+    self_moves: dict = {}
     pending: list = []   # (rule, t_sent, opp_hp_before) -> did it hit within 1.0 s?
     match_end_t = None
     prev_op_act = prev_me_act = None
+    prev_raw: dict | None = None
     was_active = False
 
     def set_panel(locked: bool) -> None:
@@ -426,6 +502,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                         match_end_t = t
                     elif e["event"] == "fight_start":
                         sess.narrate("Fight!", source="measured")
+                if fighter is not None and st.in_battle and prev_raw is not None:
+                    _count_hits(prev_raw, st.raw, me_key, op_key, self_moves, fighter.opp, summary, sess, fighter)
+                prev_raw = st.raw if st.in_battle else None
                 if fighter is not None and st.in_battle:
                     me_, op_ = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
                     # throws against the bot, and whether they connected (victim ids vs Ken: 721/725)
@@ -467,6 +546,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 opp_moves, label = opponent_moves(summary["opponent"], ds_root, fcfg)
                 summary["opponent_catalog"] = label or False
                 fighter = ScriptedFighter(fcfg, opp_moves)
+                self_moves, _ = opponent_moves(summary["character"], ds_root, fcfg)
+                try:
+                    from .game_state import game_build
+                    now = game_build(cfg)
+                except Exception:
+                    now = None
+                stale = [c for c in {summary["character"], summary["opponent"]}
+                         if now and catalog_build(c, ds_root) not in (None, now)]
+                if stale:
+                    summary["stale_catalogs"] = stale
+                    sess.narrate(f"The game was updated since the move catalog of {', '.join(stale)} was "
+                                 "measured: re-run C as that character.", source="measured")
                 if summary["character"] not in ("Ryu", "?"):
                     print(f"WARNING: the bot side is {summary['character']}, but these rules are written for Ryu.")
                 sess.narrate(f"Opponent {summary['opponent']}: "
@@ -543,6 +634,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
         sess.recorder.write_json("fight_summary.json", result)
     print(json.dumps(result, indent=2, default=str))
     return result
+
+
+def _count_hits(prev: dict, cur: dict, me_key: str, op_key: str, self_moves: dict, opp_moves: dict,
+                summary: dict, sess, fighter) -> None:
+    """Classify each first hit (normal / counter / punish counter, hits.py) both ways."""
+    from .hits import classify_hit
+    for atk, dfn, moves, key in ((me_key, op_key, self_moves, "hits_by_bot"), (op_key, me_key, opp_moves, "hits_on_bot")):
+        info = moves.get((cur.get(atk) or {}).get("action_id")) or {}
+        h = classify_hit(prev.get(dfn) or {}, cur.get(dfn) or {}, info.get("damage"))
+        if not h or h["kind"] == "combo":
+            continue
+        summary[key][h["kind"]] = summary[key].get(h["kind"], 0) + 1
+        if key == "hits_by_bot":
+            fighter.last_hit = {**h, "move": info.get("name")}
+            if h["kind"] in ("counter", "punish_counter"):
+                sess.narrate(f"{h['kind'].replace('_', ' ').title()}: {info.get('name')} did {h['damage']} "
+                             f"({h.get('ratio')}x listed), opponent drive -{h['drive_drop']}", source="measured")
 
 
 def tracker_in_match(summary: dict) -> bool:

@@ -5,6 +5,7 @@ import gzip
 import json
 from pathlib import Path
 
+from sf6bot import framedata as fd
 from sf6bot.framedata import catalog_key, classic_input, compare_catalog, parse_frame_page
 
 DATA = Path(__file__).parent / "data"
@@ -99,8 +100,63 @@ def test_capcom_inputs_to_sequences():
     assert to_sequence(by_name["High Double Strike"])[0] is None   # target combo: not yet
     assert to_sequence(by_name["CA Shin Shoryuken"])[0] is None
     todo, skipped = catalog_moves({"moves": moves})
-    assert len(todo) == 53 and len({t["sequence"] for t in todo}) == 53
+    plain = [t for t in todo if not t.get("kind")]           # 0.10.0 adds chained rows on top
+    assert len(plain) == 53 and len({t["sequence"] for t in plain}) == 53 and len(todo) == 68
     g = _moves("guile")
     assert to_sequence(g["L Sonic Boom"])[0] == "4@50 6+LP@3"
     z = _moves("zangief")
     assert to_sequence(z["L Screw Piledriver"])[0].endswith("8+LP@3")
+
+
+def _ken():
+    html = gzip.open(DATA / "capcom_ken_frame_table.html.gz", "rt", encoding="utf-8").read()
+    return {"name": "Ken", "moves": fd.parse_frame_page(html)}
+
+
+def test_follow_ups_target_combos_and_stances_are_planned():
+    """0.10.0 (user: 'Jinrai kicks only had their first input tested ... Quick Dash never had its
+    follow-ups'): rows that need a parent move are performed as a chain, timed from Capcom's notes."""
+    todo, skipped = fd.catalog_moves(_ken())
+    by = {t["name"]: t for t in todo}
+    for name in ("Gorai Axe Kick", "Kazekama Shin Kick", "Senka Snap Kick", "Thunder Kick", "Emergency Stop",
+                 "Forward Step Kick", "[Quick Dash] Shoryuken", "[Quick Dash] Tatsumaki Senpu-kyaku",
+                 "[Quick Dash] Dragonlash Kick", "Chin Buster", "Triple Flash Kicks (3)", "OD Gorai Axe Kick",
+                 "Parry Drive Rush", "Cancel Drive Rush", "Forward Dash"):
+        assert name in by, name
+    g = by["Gorai Axe Kick"]
+    assert g["parent"] == "L Jinrai Kick" and g["kind"] == "follow_up" and len(g["alternatives"]) == 2
+    # the follow-up's button lands inside Capcom's window "frames 32 - 35" of L Jinrai Kick
+    steps = g["sequence"].split()
+    parent_end = sum(int(s.split("@")[1]) for s in steps[:3])         # 2@3 3@3 6+LK@3
+    press = sum(int(s.split("@")[1]) for s in steps[:-1]) - parent_end + 3 + 1
+    assert 32 <= press <= 35 and steps[-1] == "6+MK@3"
+    assert by["Thunder Kick"]["sequence"].endswith("5+MK@3")
+    assert len(todo) >= 70 and {s["name"] for s in skipped} >= {"Perfect Parry (strike)", "CA Shinryu Reppa"}
+
+
+def test_window_parsing_from_notes():
+    qd = {"notes": "Can transition into Forward Step Kick from frame 10, and other branching attacks from frame 12"}
+    assert fd._window_start(qd, "Forward Step Kick") == 10 and fd._window_start(qd, "Thunder Kick") == 12
+    jr = {"notes": "Can transition to Kazekama Shin Kick and Gorai Axe Kick from frames 32 - 35 / "
+                   "Can transition to Senka Snap Kick from frames 30 - 35"}
+    assert fd._window_start(jr, "Gorai Axe Kick") == 32 and fd._window_start(jr, "Senka Snap Kick") == 30
+    odj = {"notes": "Can transition to Overdrive Kazekama Shin Kick and Overdrive Gorai Axe Kick from frames 21 - 27"}
+    assert fd._window_start(odj, "OD Gorai Axe Kick") == 21
+    assert fd._window_start({"notes": "*1 Can be canceled from the 4th frame via Drive Rush"}, "Parry Drive Rush") == 4
+
+
+def test_ryu_target_combos_and_denjin_variants():
+    html = gzip.open(DATA / "capcom_ryu_frame_table.html.gz", "rt", encoding="utf-8").read()
+    todo, _ = fd.catalog_moves({"name": "Ryu", "moves": fd.parse_frame_page(html)})
+    by = {t["name"]: t for t in todo}
+    assert by["High Double Strike"]["kind"] == "target_combo" and by["High Double Strike"]["sequence"].startswith("5+HP@3")
+    assert by["[Denjin Charge]Hadoken"]["kind"] == "state_variant"
+
+
+def test_punish_classes_on_real_ken_data():
+    p = fd.punishability(_ken())
+    names = {k: {m["name"] for m in v} for k, v in p.items()}
+    assert {"Gorai Axe Kick", "Thunder Kick", "Senka Snap Kick", "Crouching Medium Punch"} <= names["perfect_parry_only"]
+    assert {"L Shoryuken", "Crouching Medium Kick", "Crouching Heavy Kick"} <= names["punishable"]
+    assert names["projectile"] == {"L Hadoken", "M Hadoken", "H Hadoken", "OD Hadoken"}
+    assert names["throw"] == {"Knee Strikes", "Hell Wheel"} and "H Dragonlash Kick" in names["plus_on_block"]

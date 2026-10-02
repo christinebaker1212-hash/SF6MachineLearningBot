@@ -93,6 +93,17 @@ def find_sf6_dir(cfg: dict) -> Path | None:
     return Path(exe).parent if exe else None
 
 
+def game_build(cfg: dict) -> dict | None:
+    """Fingerprint of the installed game (StreetFighter6.exe size + modified time). Measured data
+    (catalogs) records it; a different fingerprint later means a patch: re-run the catalog."""
+    gd = find_sf6_dir(cfg)
+    exe = gd / cfg["game"]["exe_name"] if gd else None
+    if exe is None or not exe.exists():
+        return None
+    st = exe.stat()
+    return {"exe_size": st.st_size, "exe_mtime": int(st.st_mtime)}
+
+
 def installed_script_current(game_dir: Path) -> bool | None:
     dst = game_dir / "reframework" / "autorun" / LUA_NAME
     if not dst.is_file():

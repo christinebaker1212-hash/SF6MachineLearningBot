@@ -1017,6 +1017,101 @@ The safety tests are part of acceptance. During a run:
   decision points with equilibrium mixes plus an opponent model → value model and learning from
   replays. Top-player decision-making stays an open research goal, not a promise.
 
+## 0.10.0: complete move knowledge (follow-ups, target combos), overheads, hit types, community combos
+### What the 0.9.0 fights showed (user's three fight files + Ken catalog, guard None)
+- With the Ken catalog, the unknown ids that hit the bot are identified from Ken's inputs in the recordings:
+  **925 = Gorai Axe Kick** (L Jinrai 920, then 6+MK), **682 = Thunder Kick** (Quick Dash 680, then MK),
+  681 = Emergency Stop, 959 = [Quick Dash] Shoryuken, 857/856 = Drive Impact hit continuation.
+- **vs the user, Gorai Axe Kick did 58% of all damage (11,740 of 20,000, 13 hits), every hit while
+  the bot held down-back.** It's an overhead: Capcom's property "Mid" (the Japanese chudan,
+  stand-block only; jump attacks are also "Mid"). "High" = jodan (block either way), "Low" =
+  crouch only. Thunder Kick is also "Mid".
+- Ken catalog ids (on hit): Ken's Shoryukens 955–958, Tatsus 1000–1005/1009/1012, Dragonlash 980–985,
+  Jinrai 920–928, Quick Dash 680, throws 715 (forward) / 717 (back), DI 855, parry 480.
+### Catalog: follow-ups, target combos, stances, state variants (user: "the bot NEEDS to learn the followups")
+- `framedata.chain_plans`: rows the catalog skipped are now performed as a chain from the parent:
+  - "(During X) input": Jinrai and Quick Dash follow-ups, Kasai, stances, Parry Drive Rush
+  - "[X] Name" state variants: [Quick Dash] Shoryuken / Tatsu / Dragonlash, Ryu's [Denjin Charge] moves
+  - target combos "A>B>C": Chin Buster, Triple Flash Kicks, High Double Strike
+  - Cancel Drive Rush, plus forward and back dashes (movement ids)
+- Timing comes from Capcom's notes where they give a window. Examples: "Can transition to Kazekama
+  Shin Kick and Gorai Axe Kick from frames 32 - 35"; "Quick Dash ... other branching attacks from frame
+  12"; "Can be canceled from the 4th frame via Drive Rush". The follow-up's button is scheduled to
+  land inside the window. Each chain has 3 timing alternatives, tried until a new action id appears.
+  A chain's `move_id` is the first id its parent did not produce.
+- "(During Jinrai Kick)" with only L/M/H rows → uses L Jinrai Kick as the parent.
+- Coverage: **1,513 → 1,938 moves performed** across the 31 characters (Ken 48 → 71 of 76, Ryu 53 → 68).
+- Still skipped:
+  - CA (needs ≤25% hp)
+  - SA Lv2/Lv3 holds and "Hold" inputs (46)
+  - Drive Reversal (needs blocking or knockdown)
+  - Perfect Parry (needs an attacking dummy)
+  - resource states: Jamie drink levels, Mai/Kimberly stocks, A.K.I. and so on
+- **MOCK-tested only:** whether the timings come out in game. "During a jump" is now a forward jump
+  (9), so neutral-jump variants are distinct moves.
+### Fighter
+- `enrich_with_capcom`: every known id gets, by exact Capcom move name:
+  - `guard` (overhead / low / high / throw), `projectile`, `startup`, `damage`
+  - `punish_class`
+  - `block_adv`: Capcom on-block + 1 when no guard-All run exists
+- **Block height by the opponent's current move:** overhead → stand (4), low → crouch (1).
+- **Burnout rule (user):** "going into burnout should ONLY happen when the bot is certain the next
+  combo ... will absolutely kill."
+  - `ScriptedFighter.can_spend(me, action, lethal=False)` checks every Drive spend against
+    `drive_costs` (community values, not measured).
+  - No caller passes `lethal=True` yet, because combo damage isn't verified.
+### Hit type: normal / counter / punish counter (`sf6bot/hits.py`) — MEASURED
+- First hits in the user's 0.9.0 fights:
+  - defender idle: damage = Capcom's listed damage exactly (32/32)
+  - defender attacking: 1.2× (18), sometimes with the defender's Drive also dropping ~2,500–3,000,
+    which is a punish counter
+- `classify_hit(before, after, capcom_damage)` labels each first hit (combo hits are scaled and
+  skipped). `fight_summary` gets `hits_by_bot` / `hits_on_bot`. Counter hits and punish counters are
+  narrated `[measured]`, and `fighter.last_hit` keeps the result so follow-ups can depend on it.
+- No hidden counter-hit flag is known (community scripts searched).
+### Punishability / Perfect Parry targets (`framedata.punish_class`, stored per move by menu F)
+- Research ([Infil](https://words.infil.net/w03-sf6beta-p3.html), SuperCombo Defense):
+  - Perfect Parry = parry at most 2 frames before the hit. Against strikes the screen freezes, the
+    parrier recovers almost at once, the attacker can't cancel, and the punish is scaled to 50%.
+  - Against projectiles it depends on distance. A failed attempt is a normal parry, which against a
+    projectile gives the Drive back.
+- Classes: throw / projectile / punishable (≤ −4, the fastest normals are 4F) / perfect_parry_only
+  (−3..0) / plus_on_block / unknown.
+  - All 31 characters: 888 punishable, 436 perfect-parry-only, 133 plus, 229 projectiles, 128
+    throws, 628 unknown.
+  - Ken's perfect-parry-only moves include Thunder Kick, Gorai, Senka and H Jinrai.
+  - Capcom's values are at point blank; pushback can make a "punishable" move safe at range.
+- **User policy: perfect parry every projectile where possible.** Not implemented yet. It needs
+  projectile timing (no projectile positions are exported yet) and calibration against our 3–5
+  frame input-latency jitter versus the 2-frame window.
+### Community combo routes (`sf6bot/combos.py`, `sf6bot combos-import`, Tools menu A)
+- Every combo table of a character's SuperCombo "Combos" page, **including every tab** (tabber
+  panels are all in the HTML), with:
+  - context: headings, tab, table title → `hit_type` normal / counter_hit / punish_counter
+  - position, damage, Drive bars, Super bars, difficulty, notes
+  - flags: side_switch, corner_carry, oki, wall_splat, crumple, punish_counter, drive_rush …
+  - `controls` classic / modern (the "… 2" tabs are Modern)
+- Routes are split into moves and connectors (`>` cancel, `~` chain / follow-up, `,` link), and each
+  move is matched to the character's Capcom row. That handles: Jinrai `~ 6HK` → Senka Snap Kick,
+  `Denjin 214PP` → [Denjin Charge]OD Hashogeki, `KK` → Quick Dash, generic `623P` → L, `f~f` = dash,
+  `( … )x2` repeats, `A / B` alternatives.
+- Real pages: **Ryu 136 combos** (87 Classic, 399/456 moves matched; the rest are prose like "Any
+  Medium starter"), **Ken 50** (272/274).
+- **Download:** a plain request worked for Ryu and Ken early on, but **the wiki then blocked automated
+  downloads (Anubis) on the first request of the full run. We don't work around it.** The importer
+  writes `combo_pages/open_these.html` with links to every character; the user saves the pages
+  (recognised by title) and runs A again.
+- **Not yet used for play.** Execution timing for links and cancels has to be measured: the planned
+  combo lab tries each route in Training Mode and keeps what works.
+### "One size fits all" (user question) — the honest answer
+- Action ids, startup / total / advantage and properties are battle data. They change only when a
+  patch changes battle data (balance patches, new characters, rarely ids). **0.10.0 stamps each
+  catalog with the game build** (`game_build`: StreetFighter6.exe size + modified time) and the
+  fighter warns when the installed game differs (`stale_catalogs`). So staleness is detected, not
+  assumed.
+- Not one-shot, by nature: anything that depends on the situation (spacing, pushback, corner,
+  counter state, scaling) is measured live; and the opponent model is per opponent.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -1,7 +1,7 @@
 {
- "catalog_plan:guile": "a2c23e05c2a133de",
- "catalog_plan:ryu": "ce322e738e238358",
- "catalog_plan:zangief": "a4c6345a0460b413",
+ "catalog_plan:guile": "f97f10788dd56b2e",
+ "catalog_plan:ryu": "ee2d1ab052c32838",
+ "catalog_plan:zangief": "42949091e5d43b4b",
  "compare:ryu_0.3.2": "52df9a208922c6d4",
  "dataset_meta:watch_2026-10-01_match2.jsonl.gz": "70f6973f9f3ab96c",
  "dataset_meta:watch_2026-10-01_ryu_vs_cpu.jsonl.gz": "d2899ca580431242",
@@ -9,7 +9,7 @@
  "dataset_rows:watch_2026-10-01_ryu_vs_cpu.jsonl.gz": "ee87668ffb830be1",
  "episodes:watch_2026-10-01_match2.jsonl.gz": "55db9ebb7d2d06fc",
  "episodes:watch_2026-10-01_ryu_vs_cpu.jsonl.gz": "793c3608acd52302",
- "fighter_decisions": "208c8a3d1de2341c",
+ "fighter_decisions": "a3b322155cbea188",
  "framedata:guile": "e880d450f2e401b8",
  "framedata:ryu": "db2b97d95227b81f",
  "framedata:zangief": "393ded9ffe685ecf"

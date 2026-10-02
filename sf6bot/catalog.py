@@ -169,8 +169,10 @@ def _move_plan(name: str, cfg: dict, generic: bool):
     data = None if generic else fd.load(name, Path(cfg.get("datasets", {}).get("root", "datasets")) / "framedata")
     if data:
         todo, skipped = fd.catalog_moves(data)
-        moves = [{"name": t["name"], "sequence": t["sequence"], "approach": not t["jump"],
-                  "long": t["long"], "throw": t["throw"], "input": t["input"]} for t in todo]
+        moves = [{"name": t["name"], "sequence": t["sequence"], "approach": not t["jump"] and t.get("kind") != "movement",
+                  "long": t["long"], "throw": t["throw"], "input": t["input"],
+                  "alternatives": t.get("alternatives") or [], "parent": t.get("parent"),
+                  "kind": t.get("kind")} for t in todo]
         return moves, skipped, "capcom_movelist"
     moves = [{"name": n, "sequence": q, "approach": a, "long": n.startswith(LONG_WINDOW_PREFIXES),
               "throw": n == "throw", "input": None} for n, q, a in MOVES]
@@ -263,7 +265,10 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 break
             # Capcom lists every row as a distinct move, so coming out as an already-catalogued move
             # means our input was misread (0.4.0: SA1 came out as H Shoryuken). Retry up to twice.
-            attempts = 3 if source == "capcom_movelist" else 1
+            # Follow-ups / target combos / stance moves (0.10.0) retry with their other timings.
+            variants = [seq_text] + list(mv.get("alternatives") or [])
+            parent_ids = set((results.get(mv.get("parent") or "") or {}).get("action_ids") or [])
+            attempts = max(3, len(variants)) if source == "capcom_movelist" else 1
             stopped = False
             for attempt in range(attempts):
                 reset()
@@ -285,6 +290,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     sess.stop_event.wait(0.4)   # let the walk-stop transition finish
                 fm_before = reader.last_fm
                 pre = _ready_dicts(reader.collect(0.15))
+                seq_text = variants[attempt % len(variants)]
                 seq = parse_sequence(seq_text, mname)
                 import threading
                 post: list = []
@@ -314,6 +320,10 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 fmp = parse_frame_meter(fm_raw)
                 updated = fm_raw is not None and fm_raw != fm_before
                 first = move_ids[0] if move_ids else None
+                if mv.get("parent"):
+                    # a chain starts with the parent's ids (Jinrai 920 -> Gorai 925): the move is the
+                    # first id the parent did not produce
+                    first = next((a for a in move_ids if a not in parent_ids and a not in first_ids), None)
                 if mv["throw"]:
                     # The LK of LP+LK can register a frame early: ids [611 (5LK), 715 (throw), ...].
                     # Use the first id that is not an already-catalogued normal.
@@ -343,8 +353,11 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     r["same_as"] = first_ids[fid]
                 else:
                     first_ids[fid] = mname
-                if r.get("same_as") and attempt + 1 < attempts:
-                    print(f"  {mname}: came out as {r['same_as']} - retrying ({attempt + 2}/{attempts})")
+                if mv.get("parent"):
+                    r["parent"], r["kind"], r["timing_variant"] = mv["parent"], mv.get("kind"), attempt % len(variants)
+                if (r.get("same_as") or (mv.get("parent") and fid is None)) and attempt + 1 < attempts:
+                    why = f"came out as {r['same_as']}" if r.get("same_as") else "only the first part came out"
+                    print(f"  {mname}: {why} - retrying with timing {attempt + 2}/{attempts}")
                     continue
                 break
             if stopped:
@@ -386,6 +399,13 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
     data["caveats"] = __doc__.split("Caveats (stated in the output too):")[1].strip()
     data.setdefault("runs", []).append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "guard": guard,
                                         "moves": len(results)})
+    try:
+        from .game_state import game_build
+        build = game_build(cfg)
+        if build:
+            data["game_build"] = build       # a patch changes this: the fighter then warns
+    except Exception:
+        pass
     out.write_text(json.dumps(data, indent=2, default=str))
     sess.recorder.write_json("catalog_result.json", {"file": str(out), "guard": guard, "character": name,
                                                       "results": results})

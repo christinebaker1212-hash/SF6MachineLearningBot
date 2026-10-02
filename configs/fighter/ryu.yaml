@@ -40,6 +40,21 @@ punish:
 inferred:
   min_confidence: medium
   block_adv_margin: 2
+# Capcom on-block for catalogued moves without a measured guard-All value (matched by exact move
+# name, so only the 1-2F differences between Capcom's page and the meter need a margin; measured
+# 0.3.3: 2HP 34 vs 36, 4HP 35 vs 36, 4HK 43 vs 44).
+capcom:
+  block_adv_margin: 1
+# Drive gauge units (exporter `drive`: 60000 = 6 bars). Costs per SF6's rules (community-documented,
+# not measured here): Drive Impact 1 bar, Drive Parry 0.5 to start, Drive Rush from a cancel 3 bars,
+# OD moves 2 bars, Drive Reversal 2 bars. RULE (user): never spend into burnout unless lethal is certain.
+drive_costs:
+  drive_impact: 10000
+  drive_parry: 5000
+  cancel_drive_rush: 30000
+  od_move: 20000
+  drive_reversal: 20000
+drive_reserve: 0
 # System moves share action ids across characters. MEASURED in the user's replays (2026-10-02):
 # Ken's Drive Impact 855, parry 480/482, throws 715/720 equal Ryu's catalog ids. Used when the
 # opponent has no move catalog, so DI reactions work against any opponent seen so far.

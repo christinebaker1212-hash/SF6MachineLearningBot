@@ -326,6 +326,42 @@ def cmd_routine(args, cfg):
         s.recorder.write_json("routine_run.json", {"routine": args.name, "steps_done": n, "pad": pad})
 
 
+def cmd_combos_import(args, cfg):
+    """Community combo routes for every character (SuperCombo Combos pages, every tab)."""
+    import time as _time
+    from pathlib import Path
+    from .combos import import_all
+    root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    pages = Path("combo_pages")
+    print("Reading every character's Combos page (one page every few seconds). Pages you saved from a\n"
+          f"browser into {pages}\\ are used first.")
+    summary = import_all(root, pages if pages.exists() else None, fetch=not args.no_fetch)
+    ok = {k: v for k, v in summary.items() if "combos" in v}
+    if len(ok) < len(summary):
+        from .combos import links_page
+        pages.mkdir(exist_ok=True)
+        lp = pages / "open_these.html"
+        lp.write_text(links_page(), encoding="utf-8")
+        print(f"\n{len(summary) - len(ok)} characters still missing. Opening {lp}: save each page into "
+              f"{pages}\\ from your browser (Ctrl+S, 'Webpage, HTML only'), then run this again.")
+        try:
+            import os
+            os.startfile(str(lp.resolve()))     # Windows only
+        except (AttributeError, OSError):
+            pass
+    lines = ["# Community combo routes (wiki.supercombo.gg, every tab of each Combos page)",
+             f"- characters imported: {len(ok)}/{len(summary)}; combos: {sum(v['combos'] for v in ok.values())}",
+             f"- moves matched to Capcom rows: {sum(v['moves_resolved'] for v in ok.values())}/"
+             f"{sum(v['moves_total'] for v in ok.values())} (Classic routes; Modern routes are kept, tagged)"]
+    lines += [f"- {k}: {v.get('combos', 0)} combos, matched {v.get('moves_resolved', 0)}/{v.get('moves_total', 0)}"
+              if "combos" in v else f"- {k}: {v['error']}" for k, v in summary.items()]
+    run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_combos")
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "meta.json").write_text(json.dumps({"kind": "combos_import"}, indent=1))
+    (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+
+
 def cmd_erase(args, cfg):
     """Delete recorded data after a typed confirmation. Catalogs, Capcom frame data and routines are
     never touched."""
@@ -528,6 +564,10 @@ def main(argv=None):
     p = sub.add_parser("routine", help="replay a taught routine on the device it was taught on (no name: list)")
     p.add_argument("name", nargs="?", default="")
     p.set_defaults(fn=cmd_routine)
+
+    p = sub.add_parser("combos-import", help="community combo routes for every character (SuperCombo, every tab)")
+    p.add_argument("--no-fetch", action="store_true", help="only use pages saved in combo_pages/")
+    p.set_defaults(fn=cmd_combos_import)
 
     p = sub.add_parser("erase", help="delete recorded data: runs, training (replays) or fights; asks for YES")
     p.add_argument("what", choices=("runs", "training", "fights"))

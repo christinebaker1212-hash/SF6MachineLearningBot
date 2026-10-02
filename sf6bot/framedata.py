@@ -275,6 +275,8 @@ def import_saved(pages_dir: Path, out_dir: Path, log=print) -> dict:
                      "the page; the in-game frame meter is authoritative for the installed patch.",
             "moves": moves,
         }
+        for m in moves:          # how a defender deals with it (punish / perfect parry / ...), 0.10.0
+            m["punish_class"] = punish_class(m)
         (out_dir / f"{slug}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False),
                                              encoding="utf-8")
         log(f"  {SLUGS[slug]}: {len(moves)} moves ({f.name})")
@@ -385,7 +387,7 @@ def compare_report(rows: list[dict], character: str) -> str:
 
 # Qualifiers we can set up from neutral: a jump before the move. Everything else (stances,
 # follow-ups, low-HP Critical Arts, holds, parry/drive-rush states) is skipped with a reason.
-_JUMPS = {"During a jump": "8", "During a neutral jump": "8", "During a neutral or forward jump": "8",
+_JUMPS = {"During a jump": "9", "During a neutral jump": "8", "During a neutral or forward jump": "8",
           "During a forward jump": "9"}
 _IGNORED_QUALIFIERS = {"When near opponent", "When close to a standing opponent"}  # catalog walks to contact anyway
 
@@ -471,14 +473,223 @@ def to_sequence(move: dict) -> tuple[str | None, str]:
     return seq, ""
 
 
+# ---- what can be punished, and how ----------------------------------------------------------------
+
+FASTEST_PUNISH = 4    # the fastest normals in SF6 start on frame 4 (Ryu 5LP/2LP: catalog-measured)
+
+
+def punish_class(move: dict, fastest: int = FASTEST_PUNISH) -> str:
+    """How a defender deals with this move, from Capcom's on-block value and properties:
+      throw                 - not blockable: tech, or avoid (jump/backdash) on a read
+      projectile            - perfect parry it (user policy, 2026-10-02): a failed attempt is a normal
+                              parry, which against a projectile costs no Drive
+      punishable            - on block <= -4: a 4-frame normal punishes it (if still in range)
+      perfect_parry_only    - -3..0 on block: safe after a normal block; only a Perfect Parry
+                              (2-frame window, punish at 50% damage) makes it punishable
+      plus_on_block         - attacker is plus: Perfect Parry, Drive Reversal, or respect it
+      unknown               - no on-block value (stance, follow-up-only, special state)"""
+    props = (move.get("properties") or "").lower()
+    if "throw" in props:
+        return "throw"
+    if "projectile" in props:
+        return "projectile"
+    ob = move.get("on_block_n")
+    if not isinstance(ob, int):
+        return "unknown"
+    if ob <= -fastest:
+        return "punishable"
+    return "perfect_parry_only" if ob <= 0 else "plus_on_block"
+
+
+def punishability(framedata: dict) -> dict:
+    out: dict = {}
+    for m in framedata["moves"]:
+        out.setdefault(punish_class(m), []).append(
+            {"name": m["name"], "on_block": m.get("on_block_n"), "startup": m.get("startup_n")})
+    return out
+
+
+# ---- follow-ups, target combos, stances: performed as a chain from the parent move --------------
+
+_NOTE_WINDOW = re.compile(r"[Cc]an transition (?:in)?to (.+?) from frames? (\d+)(?:\s*-\s*(\d+))?")
+_FROM_NTH = re.compile(r"from the (\d+)(?:st|nd|rd|th) frame")
+_CANCEL_QUAL = "While connecting with a special-cancelable move"
+
+
+def _prefix_frames(seq: str) -> int:
+    """Frames in a sequence before its last step (the step holding the final button)."""
+    steps = seq.split()
+    return sum(int(t.split("@")[1]) for t in steps[:-1])
+
+
+def _window_start(parent: dict, child_name: str) -> int | None:
+    """First frame (of the parent move) the follow-up may be input, from Capcom's notes:
+    'Can transition to Kazekama Shin Kick and Gorai Axe Kick from frames 32 - 35',
+    'Can transition into Forward Step Kick from frame 10, and other branching attacks from frame 12',
+    '*1 Can be canceled from the 4th frame via Drive Rush'."""
+    notes = parent.get("notes") or ""
+    base = re.sub(r"^(OD|Overdrive) ", "", child_name)
+    other = None
+    for part in re.split(r" / |, and ", notes):
+        m = _NOTE_WINDOW.search(part) or (re.search(r"(other branching attacks) from frames? (\d+)()", part))
+        if m:
+            who, start = m.group(1), int(m.group(2))
+            names = [re.sub(r"^(Overdrive|OD) ", "", n.strip()) for n in re.split(r",| and ", who)]
+            if base in names or child_name in names:
+                return start
+            if "other" in who:
+                other = start
+        m2 = _FROM_NTH.search(part)
+        if m2 and other is None:
+            other = int(m2.group(1))
+    return other
+
+
+def _hold_last(seq: str, frames: int = 3) -> str:
+    """Shorten a long final hold (parry is held 20F in the catalog) so a follow-up can come in time."""
+    steps = seq.split()
+    last, f = steps[-1].split("@")
+    steps[-1] = f"{last}@{min(int(f), frames)}"
+    return " ".join(steps)
+
+
+def _chain(parent_seq: str, child_seq: str, press_at: int) -> str:
+    """Parent, then the child's inputs timed so its final button lands on parent frame `press_at`
+    (frame 1 = the frame the parent's final button is pressed)."""
+    wait = press_at - 1 - 3 - _prefix_frames(child_seq)       # parent's final button is held 3F
+    return parent_seq + (f" 5@{wait}" if wait > 0 else "") + " " + child_seq
+
+
+def chain_plans(framedata: dict) -> dict:
+    """Sequences for rows the plain catalog skips: '(During X) input' follow-ups and stances,
+    '[X] Name' state variants, target combos 'A>B>C', Cancel Drive Rush and dashes.
+    Returns {row name: {"sequences": [timing alternatives...], "parent": name|None, "kind": ...}}.
+    Timing comes from Capcom's notes where given ('from frames 32 - 35'), else alternatives the
+    catalog tries in turn until a new action id comes out."""
+    rows = {m["name"]: m for m in framedata["moves"]}
+    plain: dict = {}
+    for m in framedata["moves"]:
+        seq, _ = to_sequence(m)
+        if seq is not None:
+            plain.setdefault(m["name"], seq)
+    by_input = {}
+    for m in framedata["moves"]:
+        if m["name"] in plain:
+            by_input.setdefault(m["input"], m)
+    out: dict = {}
+
+    def child_seq(inp: str) -> str | None:
+        fake = {"name": "x", "input": inp, "section": ""}
+        seq, _ = to_sequence(fake)
+        return seq
+
+    def seq_of(name: str):
+        if name in plain:
+            return plain[name]
+        if name in out:
+            return out[name]["sequences"][0]
+        return None
+
+    for _ in range(3):                          # parents first; 3 passes resolve chains of chains
+        for m in framedata["moves"]:
+            name, inp = m["name"], m["input"] or ""
+            if name in plain or name in out:
+                continue
+            quals = re.findall(r"\(([^()]*)\)", inp)
+            rest = re.sub(r"\([^()]*\)", " ", inp).strip()
+            during = next((q for q in quals if q.startswith(("During ", "While "))), None)
+            if during == _CANCEL_QUAL:
+                # Cancel Drive Rush: from the first special-cancelable ground normal, on contact
+                starter = next((r for r in framedata["moves"] if r["section"] == "Normal Moves"
+                                and "C" in (r.get("cancel") or "") and r["name"] in plain
+                                and "jump" not in r["input"]), None)
+                if starter and isinstance(starter.get("startup_n"), int):
+                    dr = "6@3 5@2 6@3"
+                    su = starter["startup_n"]
+                    out[name] = {"parent": starter["name"], "kind": "cancel_drive_rush",
+                                 "sequences": [_chain(plain[starter["name"]], dr, su + d) for d in (2, 6, 10)]}
+                continue
+            if during:
+                pname = re.sub(r"^(During|While) (an? |the )?", "", during)
+                parent = (rows.get(pname) or rows.get(pname.replace("Overdrive ", "OD "))
+                          # 'During Jinrai Kick' while Capcom lists L/M/H Jinrai Kick: use the light one
+                          or next((rows[n] for n in (f"L {pname}", f"M {pname}", f"H {pname}") if n in rows), None)
+                          or next((r for r in framedata["moves"] if r["name"].endswith(pname)
+                                   and r["name"] in plain), None))
+                pseq = seq_of(parent["name"]) if parent else None
+                cseq = child_seq(rest) if rest else None
+                if rest and re.fullmatch(r"\d{2}", rest):            # '66' after a parry = Parry Drive Rush
+                    cseq = " ".join(f"{d}@3" if k != 1 else "5@2 " + f"{d}@3" for k, d in enumerate(rest))
+                if not (pseq and cseq):
+                    continue
+                pseq = _hold_last(pseq)
+                start = _window_start(parent, name)
+                if start is not None:
+                    times = [start + 1, start, start + 3]
+                else:   # stance / state: no window given; try soon after start-up, then later
+                    su = parent.get("startup_n") or 10
+                    tot = parent.get("total_n") or (su + 20)
+                    times = [su + 2, max(su + 2, tot - 8), tot + 2]
+                out[name] = {"parent": parent["name"], "kind": "follow_up",
+                             "sequences": [_chain(pseq, cseq, t) for t in times], "window_from_notes": start}
+                continue
+            mb = re.match(r"^\[([^\]]+)\]\s*(.+)$", name)
+            if mb and not quals and mb.group(1) in rows and seq_of(mb.group(1)):
+                # '[Denjin Charge]Hadoken': the move done while the parent's state is active
+                parent = rows[mb.group(1)]
+                cseq = child_seq(inp)
+                tot = parent.get("total_n") or 40
+                if cseq:
+                    out[name] = {"parent": parent["name"], "kind": "state_variant",
+                                 "sequences": [seq_of(parent["name"]) + f" 5@{w} " + cseq for w in (tot + 2, tot + 15, 60)]}
+                continue
+            if ">" in rest and not quals:
+                # target combo 'MP>HP', 'MK>MK>HK': press each part once the previous one connects
+                parts = rest.split(">")
+                seqs = []
+                for delay in (4, 8, 12):
+                    built, prev_su = None, None
+                    for k, part in enumerate(parts):
+                        ps = child_seq(part)
+                        if ps is None:
+                            built = None
+                            break
+                        if built is None:
+                            built = ps
+                        else:
+                            prev_row = (rows.get(next((r["name"] for r in framedata["moves"]
+                                                       if r["input"] == ">".join(parts[:k])), ""))
+                                        or by_input.get(parts[k - 1]) or {})
+                            prev_su = prev_row.get("startup_n") or prev_su or 6
+                            built = _chain(built, ps, prev_su + delay)
+                    if built:
+                        seqs.append(built)
+                if seqs:
+                    out[name] = {"parent": by_input.get(parts[0], {}).get("name"), "kind": "target_combo",
+                                 "sequences": seqs}
+                continue
+            if re.fullmatch(r"(66|44)", rest) and not quals:
+                d = rest[0]
+                out[name] = {"parent": None, "kind": "movement", "sequences": [f"{d}@3 5@3 {d}@3 5@12"]}
+    return out
+
+
 def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
     """(moves to perform, skipped rows) for one character, in Capcom's order.
 
     Rows with the same sequence are performed once; the later rows record `same_input_as`.
     """
     todo, skipped, by_seq = [], [], {}
+    chains = chain_plans(framedata)
     for mv in framedata["moves"]:
         seq, reason = to_sequence(mv)
+        if seq is None and mv["name"] in chains:
+            ch = chains[mv["name"]]
+            todo.append({"name": mv["name"], "input": mv["input"], "sequence": ch["sequences"][0],
+                         "alternatives": ch["sequences"][1:], "parent": ch["parent"], "kind": ch["kind"],
+                         "section": mv["section"], "jump": False, "long": mv["section"] == "Super Arts",
+                         "throw": False})
+            continue
         if seq is None:
             skipped.append({"name": mv["name"], "input": mv["input"], "reason": reason})
             continue

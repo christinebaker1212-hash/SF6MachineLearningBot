@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.9.0**, REFramework exporter script **v8**, branch
+*State as of 2026-10-02: code version **0.10.0**, REFramework exporter script **v8**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -199,6 +199,19 @@ the overlay buttons (P/L/U) and routines press P1's keyboard keys, and only H us
 controller as P2. The old saved `input.backend: virtual_pad` (menu K) is ignored. The menu was
 regrouped (Fight / Record / Overlay buttons / Results, plus Tools T and Erase data E).
 Ask the user which keyboard keys SF6 uses for menu MENU/VIEW/LB/LT (`input.menu_keys`, unset).
+
+**0.10.0 open items for the user:**
+1. Re-run the catalog for Ken AND Ryu (C → 3, both guards). The follow-ups, target combos and
+   variants are new rows; guard All gives measured on-block values.
+2. Tools → A: combo pages. The wiki blocks automated downloads, so save each character's Combos page
+   from the browser into `combo_pages\` (the links page opens itself).
+3. Fight Ken again (V, H). Check `hits_by_bot`, and whether Gorai / Thunder Kick are now blocked
+   standing.
+4. Ask which keyboard keys SF6 uses for menu MENU/VIEW/LB/LT (`input.menu_keys`).
+**Next build steps:** combo lab (verify routes and cancel timings — SA / Drive Rush / DI — in Training
+Mode) → punish table from verified routes by start-up, position, resources and hit type → lethal check
+(burnout only when lethal) → projectile perfect parry (export projectile positions, calibrate timing)
+→ decision layer with the opponent model.
 
 ## 7. Recommended next steps (in order) — the road to fights
 
