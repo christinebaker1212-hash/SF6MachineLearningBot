@@ -149,11 +149,14 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    - Check that move_ids are no longer the walk id 11.
    - Check that frame-meter values look right: `5LK: id 611 | startup 5F, total 18F, …`.
    - Check that throw/DI/parry/supers connect.
-2. **8× replay test:** record the **same replay** with **D** at 1× and at 8×, then compare
-   `skipped_game_frames` in the meta.
-   - The exporter writes once per **rendered** frame (`re.on_frame`). At 8× it may skip game
-     frames.
-   - If it does, move the export onto a per-game-tick hook (not yet researched).
+2. **8× replay test — result (watch run 20261001_203652, Chun-Li vs Akuma replay at 8×):**
+   round 0 reached stage_timer 5834 about 21 s after the first ready line, i.e. roughly
+   **280 game frames/s**, while the exporter wrote about **57 lines/s**. So at 8× roughly
+   **4 of every 5 game frames are never exported**, including their input masks.
+   - Consequence: record demonstrations at **1×** for now. 8× data is not usable for per-frame
+     inputs.
+   - A 1× comparison of the same replay was not in the paste.
+   - Fix to research: export on a per-game-tick hook instead of `re.on_frame`.
 3. **Capcom's official frame data:** the user offered to send it. It includes inputs and cancel
    routes. Ask for **Ryu first**, plus the **patch version/date**.
    - Plan: parse it into `datasets/framedata/<char>.json`.

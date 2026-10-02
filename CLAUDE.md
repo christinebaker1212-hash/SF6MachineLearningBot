@@ -591,6 +591,16 @@ The safety tests are part of acceptance. During a run:
       giving `move_id`.
     - Own measurements go under `own_measure`, flagged low reliability.
     - Supers added: 236236P/K and 214214P/K, with a 6 s window.
+  - **0.3.2 catalog run, guard All (2026-10-01, partial paste: drive_parry onward).**
+    - Walk id 11 is gone: every move has its own `move_id` (j.LP 651 … j.HK 656, 236P 900/904,
+      236K 1025/1029, 214P 1036/1039, 214K 1000/1005, 623P 930/934).
+    - Supers connect on block: 236236P → 1200 (7F, -24), 214214P → 1212 (12F, -20),
+      236236K → 1233 (5F, -52).
+    - `same_as` works: 41236x/63214x equal the 236x/214x moves, 623K gives 2LK/2HK,
+      214214K gives 214HK (Ryu has no 214214K super), [4]6 and [2]8 give normals/jumps.
+    - Parry whiffs against a blocking dummy, which is expected (nothing hits it).
+    - Not seen in the paste: the normals, throw and DI, and the guard None run.
+    - Values were not yet cross-checked against Capcom's published frame data.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
