@@ -1,20 +1,23 @@
 -- sf6bot game-state exporter for REFramework (Street Fighter 6).
 -- Writes one JSON line per GAME frame (stage_timer tick) to reframework/data/sf6bot_state.jsonl.
--- v6: lines are written from a hook on app.FBattleMediator.UpdateGameInfo ("src":"tick") when that
--- runs once per game tick, so fast replays (8x) no longer skip frames; the per-render callback
--- ("src":"frame") writes only when stage_timer moved without a tick line, plus a heartbeat every
--- 30 renders when the clock is stopped (pause). Whether UpdateGameInfo is per tick is UNVERIFIED:
--- the counters in the heartbeat file (hook_calls, tick_lines, frame_lines) show it.
+-- Sources ("src"): "tick" = a per-game-tick method found by v7 discovery (below), "ugi" =
+-- app.FBattleMediator.UpdateGameInfo (measured 2026-10-02: once per RENDER, so it misses frames at
+-- 8x), "frame" = the render callback (fallback + pause heartbeat). Lines are deduplicated on
+-- (round, stage_timer), so each game frame is written once.
+-- v7 DISCOVERY: when the game runs faster than it renders (fast replay), READ-ONLY counting hooks
+-- on update-like methods of the battle objects we already read find the method that runs once
+-- per game tick; it is then used to write lines and saved to reframework/data/sf6bot_tickhook.json
+-- for the next start. The heartbeat file reports the candidates and the choice.
 -- Read-only: it reads battle state and never changes the game.
 -- Field names come from community scripts (rkaganda/SF6_replay_capture, haruno-ku/SF6_Tools);
 -- every read is protected so a renamed field shows up in "missing" instead of crashing.
--- Use OFFLINE only (Training Mode / CPU). Disable REFramework before playing online.
+-- Offline, or in the Capcom-authorised ranked experiment only (see HANDOFF.md section 2).
 
 -- io.open path rules differ between REFramework builds; try these in order and report which worked.
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 6          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 7          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -30,7 +33,9 @@ local last_missing = ""
 local hook_calls, tick_lines, frame_lines = 0, 0, 0
 local last_key = nil              -- "round:stage_timer" of the last battle line written
 local renders_since_write = 0
-local export_battle = nil         -- defined below; called from the hook and from re.on_frame
+local export_battle = nil         -- defined below; called from the hooks and from re.on_frame
+local tick_report = nil           -- defined below (v7 discovery report for the heartbeat file)
+local ugi_lines = 0
 
 local open_errors = {}
 
@@ -56,6 +61,7 @@ local function write_info(in_battle)
         json.dump_file("sf6bot_exporter_info.json", {
             version = SCRIPT_VERSION, frame = frame_no, path = OUT_PATH, lines = lines, enabled = enabled,
             hook_calls = hook_calls, tick_lines = tick_lines, frame_lines = frame_lines,
+            ugi_lines = ugi_lines, tick_hook = tick_report and tick_report() or nil,
             in_battle = in_battle, last_error = last_error, missing = last_missing,
             open_errors = table.concat(open_errors, " | "),
         })
@@ -107,12 +113,152 @@ pcall(function()
     end, function(retval)
         hook_calls = hook_calls + 1
         if enabled and export_battle then
-            local ok, err = pcall(export_battle, "tick")
-            if not ok then last_error = "tick: " .. tostring(err) end
+            local ok, err = pcall(export_battle, "ugi")
+            if not ok then last_error = "ugi: " .. tostring(err) end
         end
         return retval
     end)
 end)
+
+-- ---- v7: per-game-tick method discovery (READ-ONLY counting hooks) ----------------------------
+local TICK_FILE = "sf6bot_tickhook.json"
+local DISCOVER_RENDERS = 600      -- evaluate after this many in-battle renders...
+local FAST_RATIO = 1.5            -- ...if the clock advanced at least this much faster than renders
+local MAX_CANDIDATES = 40
+local MAX_CALLS_PER_RENDER = 200  -- stop counting methods called more often than this (cost)
+local NAME_HINTS = { "update", "step", "tick", "exec", "proc", "frame", "move" }
+local tick = { chosen = nil, candidates = {}, started = false, done = false, renders = 0, advance = 0,
+               last_timer = nil, result = "not started", writes = 0 }
+
+local function battle_timer()
+    local gb = sdk.find_type_definition("gBattle")
+    return gb and try(function() return gb:get_field("Game"):get_data(nil).stage_timer end)
+end
+
+local function hook_counter(td, m, label)
+    local c = { name = label, calls = 0, changes = 0, last = nil, off = false }
+    local ok = pcall(sdk.hook, m, function(args) end, function(retval)
+        if tick.chosen == label then
+            if enabled and export_battle then
+                tick.writes = tick.writes + 1
+                local okx, err = pcall(export_battle, "tick")
+                if not okx then last_error = "tick: " .. tostring(err) end
+            end
+        elseif not tick.done and not c.off then
+            c.calls = c.calls + 1
+            local t = battle_timer()
+            if t ~= c.last then c.changes = c.changes + 1; c.last = t end
+        end
+        return retval
+    end)
+    if ok then tick.candidates[#tick.candidates + 1] = c end
+    return ok
+end
+
+local function method_label(td, m)
+    local tn = try(function() return td:get_full_name() end) or "?"
+    local mn = try(function() return m:get_name() end) or "?"
+    return tn .. "." .. mn
+end
+
+local function load_chosen()
+    local saved = try(function() return json.load_file(TICK_FILE) end)
+    if type(saved) ~= "table" or type(saved.method) ~= "string" then return false end
+    local tn, mn = saved.method:match("^(.*)%.([^%.]+)$")
+    local td = tn and sdk.find_type_definition(tn)
+    local m = td and try(function() return td:get_method(mn) end)
+    if not m then tick.result = "saved method not found: " .. saved.method; return false end
+    if hook_counter(td, m, saved.method) then
+        tick.chosen, tick.done, tick.result = saved.method, true, "loaded " .. TICK_FILE
+        return true
+    end
+    return false
+end
+
+local function start_discovery(p1)
+    tick.started = true
+    if load_chosen() then return end
+    local seen, tds = {}, {}
+    local function add(td)
+        local n = td and try(function() return td:get_full_name() end)
+        if n and not seen[n] then seen[n] = true; tds[#tds + 1] = td end
+    end
+    local gb = sdk.find_type_definition("gBattle")
+    add(sdk.find_type_definition("app.FBattleMediator"))
+    add(gb)
+    for _, f in ipairs({ "Game", "Round", "Player", "Team" }) do
+        local o = gb and try(function() return gb:get_field(f):get_data(nil) end)
+        add(o and try(function() return o:get_type_definition() end))
+    end
+    add(p1 and try(function() return p1:get_type_definition() end))
+    for _, td in ipairs(tds) do
+        local methods = try(function() return td:get_methods() end) or {}
+        for _, m in ipairs(methods) do
+            if #tick.candidates >= MAX_CANDIDATES then break end
+            local mn = (try(function() return m:get_name() end) or ""):lower()
+            if mn ~= "updategameinfo" then
+                for _, h in ipairs(NAME_HINTS) do
+                    if mn:find(h, 1, true) then hook_counter(td, m, method_label(td, m)); break end
+                end
+            end
+        end
+    end
+    tick.result = "discovering (" .. #tick.candidates .. " candidates); play a replay at 8x"
+end
+
+-- A per-tick method found earlier is hooked at script start, so no frame is missed.
+if pcall(load_chosen) and tick.chosen then tick.started = true end
+
+-- once per render while in battle
+local function discovery_step()
+    if tick.done then return end
+    local t = battle_timer()
+    if type(t) == "number" and type(tick.last_timer) == "number" and t > tick.last_timer then
+        tick.advance = tick.advance + (t - tick.last_timer)
+    end
+    tick.last_timer = t
+    tick.renders = tick.renders + 1
+    for _, c in ipairs(tick.candidates) do
+        if c.calls > MAX_CALLS_PER_RENDER * tick.renders then c.off = true end
+    end
+    if tick.renders < DISCOVER_RENDERS then return end
+    if tick.advance < FAST_RATIO * tick.renders then
+        -- not running fast (1x play): per-render and per-tick methods look the same; keep waiting
+        tick.renders, tick.advance = 0, 0
+        for _, c in ipairs(tick.candidates) do c.calls, c.changes = 0, 0 end
+        tick.result = "waiting for a fast replay (8x) to tell per-tick from per-render methods"
+        return
+    end
+    local best = nil
+    for _, c in ipairs(tick.candidates) do
+        if not c.off and c.changes >= 0.95 * tick.advance and c.calls <= 4 * tick.advance then
+            if best == nil or math.abs(c.calls - tick.advance) < math.abs(best.calls - tick.advance) then
+                best = c
+            end
+        end
+    end
+    tick.done = true
+    if best then
+        tick.chosen = best.name
+        tick.result = "chosen " .. best.name
+        pcall(json.dump_file, TICK_FILE, { method = best.name, calls = best.calls, changes = best.changes,
+                                           advance = tick.advance, renders = tick.renders })
+    else
+        tick.result = "no per-tick method among " .. #tick.candidates .. " candidates"
+    end
+end
+
+tick_report = function()
+    local top = {}
+    for _, c in ipairs(tick.candidates) do top[#top + 1] = c end
+    table.sort(top, function(a, b) return a.changes > b.changes end)
+    local out = {}
+    for i = 1, math.min(8, #top) do
+        out[i] = { name = top[i].name, calls = top[i].calls, changes = top[i].changes, off = top[i].off }
+    end
+    return { chosen = tick.chosen, result = tick.result, renders = tick.renders, advance = tick.advance,
+             writes = tick.writes, candidates = #tick.candidates, top = out }
+end
 
 -- Training Mode frame meter (the game's own Startup / Total / Advantage). READ only. Field names are
 -- not documented, so every scalar field of both players' MeterDatas items is exported (discovery);
@@ -264,7 +410,9 @@ export_battle = function(src)
                ',"missing":[' .. table.concat(m, ",") .. ']}')
     last_key = key
     renders_since_write = 0
-    if src == "tick" then tick_lines = tick_lines + 1 else frame_lines = frame_lines + 1 end
+    if src == "tick" then tick_lines = tick_lines + 1
+    elseif src == "ugi" then ugi_lines = ugi_lines + 1
+    else frame_lines = frame_lines + 1 end
     return true
 end
 
@@ -274,6 +422,14 @@ re.on_frame(function()
     renders_since_write = renders_since_write + 1
     local ok, err = pcall(function()
         local in_battle = export_battle("frame")
+        if in_battle then
+            if not tick.started then
+                local gb = sdk.find_type_definition("gBattle")
+                local pl = gb and try(function() return gb:get_field("Player"):get_data(nil).mcPlayer end)
+                start_discovery(pl and try(function() return pl[0] end))
+            end
+            discovery_step()
+        end
         if frame_no % INFO_EVERY == 1 then write_info(in_battle) end
         if not in_battle and frame_no % IDLE_EVERY == 0 then
             write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":false,"ready":false}')
@@ -287,8 +443,9 @@ re.on_draw_ui(function()
         local changed, v = imgui.checkbox("Export enabled", enabled)
         if changed then enabled = v end
         imgui.text("Script version " .. SCRIPT_VERSION .. ". Lines written: " .. tostring(lines) .. "  file: " .. OUT_PATH)
-        imgui.text("Game-tick hook calls: " .. hook_calls .. ", lines from hook: " .. tick_lines ..
-                   ", from render: " .. frame_lines)
+        imgui.text("Lines from per-tick hook: " .. tick_lines .. ", UpdateGameInfo: " .. ugi_lines ..
+                   ", render: " .. frame_lines)
+        imgui.text("Per-tick discovery: " .. tick.result)
         if last_missing ~= "" then imgui.text("Missing fields: " .. last_missing) end
         if last_error ~= "" then imgui.text("Last error: " .. last_error) end
         imgui.tree_pop()

@@ -16,7 +16,10 @@ capture:
   target_fps: 120         # dxcam polling rate; 0 = unpaced (may use a full CPU core)
 
 input:
-  backend: sendinput_keyboard   # sendinput_keyboard | mock (MOCK: sends nothing)
+  # sendinput_keyboard: the bot types on the keyboard (shares Player 1 with you).
+  # virtual_pad: the bot gets its OWN virtual Xbox controller (vgamepad + ViGEmBus driver), so you
+  #              can play against it with your keyboard/pad. mock: sends nothing (tests).
+  backend: sendinput_keyboard
   min_hold_frames: 2            # reject sequences that hold a button < this many frames
   # Logical input -> keyboard key (names in sf6bot/keys.py).
   # UNVERIFIED vs. SF6 defaults: open SF6 Controls > Keyboard and make the game's
@@ -33,6 +36,21 @@ input:
     LK: J
     MK: K
     HK: L
+  # Logical input -> virtual Xbox pad button (used when backend: virtual_pad).
+  # SF6 Classic pad layout as commonly documented: UNVERIFIED on the user's game. Check SF6
+  # Controls > Controller, and verify with the input map (menu I), which reads the game's own
+  # input bits.
+  pad_bindings:
+    UP: DPAD_UP
+    DOWN: DPAD_DOWN
+    LEFT: DPAD_LEFT
+    RIGHT: DPAD_RIGHT
+    LP: X
+    MP: Y
+    HP: RB
+    LK: A
+    MK: B
+    HK: RT
 
 training:
   reset_key: SLASH        # Training Mode "reset position" on the user's keyboard (user-reported: "/")

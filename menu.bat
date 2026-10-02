@@ -15,6 +15,30 @@ echo ================= sf6bot =================
 %BOT% --version
 echo  Safety while the bot runs: F8 or click BOTH thumbsticks = STOP   F7 = pause   F6 = flip facing
 echo.
+echo  --- Play and record ---
+echo  V. FIGHT: scripted Ryu vs CPU, bot on the LEFT (P1). Start the match first
+echo  N. FIGHT: same, bot on the RIGHT (P2)
+echo  D. Record a replay into training data (start the replay, the bot presses nothing)
+echo  Y. Training data summary: merges repeat recordings of the same replay (no game needed)
+echo  C. Move catalog, dummy guard NONE (Training Mode)    B. same, dummy guard ALL
+echo  --- Bot controller ---
+echo  K. Give the bot its OWN virtual controller (so you can play against it)
+echo  J. Put the bot back on the keyboard
+echo  P. Bot controller buttons in the overlay (click to press, for menus)
+echo  L. Teach a routine: your clicks are recorded under a name
+echo  U. Run a taught routine
+echo  --- Setup and results ---
+echo  R. Install the game-state script (run menu.bat as ADMIN, then restart SF6)
+echo  F. Capcom frame data: import pages you saved from your browser
+echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
+echo  M. More tools (diagnostics and older tests)
+echo  0. Open the results folder      Q. Quit
+echo.
+goto ask
+
+:more
+cls
+echo ============ sf6bot: more tools ============
 echo  1. System info (saved to runs\sysinfo.txt)
 echo  2. Check that the SF6 window is found
 echo  3. Capture test, 20 s, no inputs  (have SF6 in Training Mode)
@@ -25,24 +49,14 @@ echo  7. Latency probe (you drag a box around the input display)
 echo  8. Random-input loop, 30 s (Training Mode only)
 echo  9. Release all keys (if a key seems stuck)
 echo  O. Overlay test: show the debug window for 15 s (no game needed)
-echo  --- Milestone 2 ---
-echo  R. Install the REFramework game-state script (SF6 must be running)
 echo  G. Game-state check (Training Mode, Ryu vs standing dummy)
 echo  W. Watch: record while YOU play a CPU match, up to 5 min, bot presses nothing
-echo  I. Input map: measure which input bit each key sets (Training Mode)
-echo  --- Milestone 3 data ---
-echo  D. Record a replay into training data (start the replay, bot presses nothing)
-echo  C. Move catalog, dummy guard NONE (Training Mode, about 4 min)
-echo  B. Move catalog, dummy guard ALL  (Training Mode, about 4 min)
-echo  F. Capcom frame data: import pages you saved from your browser (no game needed)
-echo  --- Fights ---
-echo  V. FIGHT: scripted Ryu vs CPU, bot on the LEFT (P1). Start the match first, up to 5 min
-echo  N. FIGHT: same, bot on the RIGHT (P2)
+echo  I. Input map: measure which input bit each key or pad button sets (Training Mode)
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
-echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
-echo  0. Open the results folder
-echo  Q. Quit
+echo  Enter on its own: back to the main menu
 echo.
+
+:ask
 set "CH="
 set /p CH=Choose: 
 if /i "%CH%"=="1" (%BOT% sysinfo > runs\sysinfo.txt 2>&1 & type runs\sysinfo.txt & goto done)
@@ -68,8 +82,30 @@ if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
+if /i "%CH%"=="y" (%BOT% dataset-summary & goto done)
+if /i "%CH%"=="k" (%BOT% controller pad & goto done)
+if /i "%CH%"=="j" (%BOT% controller keyboard & goto done)
+if /i "%CH%"=="p" (%BOT% pad & goto done)
+if /i "%CH%"=="l" goto teach
+if /i "%CH%"=="u" goto routine
+if /i "%CH%"=="m" goto more
 if /i "%CH%"=="q" exit /b 0
 goto menu
+
+:teach
+set "RN="
+set /p RN=Name for the routine (letters, digits, _ only, e.g. pick_ryu): 
+if "%RN%"=="" goto menu
+%BOT% pad --teach "%RN%"
+goto done
+
+:routine
+%BOT% routine
+set "RN="
+set /p RN=Routine to run (Enter = cancel): 
+if "%RN%"=="" goto menu
+%BOT% routine "%RN%"
+goto done
 
 :torch
 ".venv\Scripts\python.exe" -m pip install torch

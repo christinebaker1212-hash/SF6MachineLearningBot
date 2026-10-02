@@ -239,6 +239,93 @@ def cmd_fight(args, cfg):
     _print_report(s)
 
 
+def _with_pad(cfg):
+    """Config copy whose input backend is the bot's virtual controller."""
+    import copy
+    c = copy.deepcopy(cfg)
+    c["input"]["backend"] = "virtual_pad"
+    return c
+
+
+def cmd_controller(args, cfg):
+    from .config import set_local
+    backend = {"keyboard": "sendinput_keyboard", "pad": "virtual_pad"}[args.mode]
+    p = set_local(["input", "backend"], backend)
+    if args.mode == "pad":
+        print(f"The bot now uses its OWN virtual Xbox controller (saved in {p}).\n"
+              "In SF6, that controller is a separate player: you can play against the bot with your\n"
+              "keyboard or pad. In Versus, give the bot's controller the side you start it on (V/N).")
+    else:
+        print(f"The bot now types on the keyboard again (saved in {p}). It shares Player 1 with you.")
+
+
+def cmd_pad(args, cfg):
+    """Clickable bot controller in the overlay; with --teach NAME the clicks become a routine."""
+    import re
+    from .pad_teach import PadPanel
+    if args.teach and not re.fullmatch(r"[A-Za-z0-9_]{1,40}", args.teach):
+        print("Routine names may only use letters, digits and _ (e.g. pick_ryu).")
+        return
+    cfg = _with_pad(cfg)
+    with _session(args, cfg, f"pad_{args.teach}" if args.teach else "pad") as s:
+        if s.overlay is None:
+            print("The clickable controller lives in the debug overlay; run without --no-overlay.")
+            return
+        panel = PadPanel(s.controller.backend, routine=args.teach, grabber=s.grabber, sink=s.recorder.event)
+        s.overlay.pad_panel = panel
+        what = f"Teaching routine '{args.teach}': every button you click is recorded." if args.teach \
+            else "Click the buttons in the debug overlay to press the bot's controller."
+        print(what + f" F8 (or {args.minutes:.0f} min) ends it.")
+        s.stop_event.wait(args.minutes * 60)
+        p = panel.save()
+        if p:
+            print(f"Saved {len(panel.steps)} steps to {p}. Replay it with menu U.")
+            s.recorder.write_json("routine_taught.json", {"routine": args.teach, "steps": panel.steps})
+
+
+def cmd_routine(args, cfg):
+    from .pad_teach import list_routines, play_routine
+    names = list_routines()
+    if not args.name:
+        print("Taught routines: " + (", ".join(names) or "none yet (teach one with menu L)"))
+        return
+    if args.name not in names:
+        print(f"No routine '{args.name}'. Taught routines: {', '.join(names) or 'none'}")
+        return
+    cfg = _with_pad(cfg)
+    with _session(args, cfg, f"routine_{args.name}") as s:
+        if not s.start_inputs():
+            return
+        n = play_routine(s.controller.backend, args.name, stop_event=s.stop_event, sink=s.recorder.event)
+        print(f"Routine '{args.name}': {n} steps pressed.")
+        s.recorder.write_json("routine_run.json", {"routine": args.name, "steps_done": n})
+
+
+def cmd_dataset_summary(args, cfg):
+    """Merge repeat recordings of the same replay and report usable training data (no game needed)."""
+    import time as _time
+    from pathlib import Path
+    from .training_data import summarize
+    root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    rep = summarize(root)
+    lines = ["# Training data summary",
+             f"- recordings: {rep['recordings']}, unique matches: {rep['unique_matches']} "
+             f"(repeat recordings of the same replay are merged)",
+             f"- training samples (in-fight frames x 2 players): {rep['samples_total']}",
+             f"- in-fight frames by character: {rep['samples_by_character']}"]
+    for m in rep["matches"]:
+        lines.append(f"- {m['characters'][0]} vs {m['characters'][1]}: {len(m['recordings'])} recording(s), "
+                     f"coverage each {m['coverage_each_pct']}% -> merged {m['coverage_pct']}% "
+                     f"({m['in_fight_frames']} frames, {m['gaps']} gaps)")
+    if rep["recordings_without_ko"]:
+        lines.append(f"- not merged (no KO recorded, so the match can't be identified): {rep['recordings_without_ko']}")
+    run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_datasets")
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "meta.json").write_text(json.dumps({"kind": "dataset_summary"}, indent=1))
+    (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -349,6 +436,22 @@ def main(argv=None):
     p.add_argument("--player", choices=("p1", "p2"), default="p1", help="which side the bot plays")
     p.add_argument("--seconds", type=float, default=300.0)
     p.set_defaults(fn=cmd_fight)
+
+    p = sub.add_parser("controller", help="the bot uses the keyboard or its own virtual Xbox controller")
+    p.add_argument("mode", choices=("keyboard", "pad"))
+    p.set_defaults(fn=cmd_controller)
+
+    p = sub.add_parser("pad", help="clickable bot controller in the overlay (menu navigation, teaching)")
+    p.add_argument("--teach", default=None, help="record the clicks as a routine with this name")
+    p.add_argument("--minutes", type=float, default=10.0)
+    p.set_defaults(fn=cmd_pad)
+
+    p = sub.add_parser("routine", help="replay a taught routine on the bot's controller (no name: list)")
+    p.add_argument("name", nargs="?", default="")
+    p.set_defaults(fn=cmd_routine)
+
+    sub.add_parser("dataset-summary", help="merge repeat recordings of the same replay; report usable "
+                   "training data").set_defaults(fn=cmd_dataset_summary)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

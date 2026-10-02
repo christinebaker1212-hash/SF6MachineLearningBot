@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from . import clock
-from .game_state import StateReader, character_name, find_sf6_dir, locate_state_file
+from .game_state import character_name, open_state_reader, player_distance
 from .session import Session
 
 ZONES = ((1.0, "close"), (2.5, "mid"), (float("inf"), "far"))  # provisional thresholds (game units)
@@ -42,13 +42,10 @@ def activity(p: dict, prev: dict | None) -> str:
 
 
 def run_watch(sess: Session, cfg: dict, seconds: float) -> dict:
-    game_dir = find_sf6_dir(cfg)
-    path = locate_state_file(game_dir) if game_dir else None
-    if path is None:
-        print("No REFramework state file found. Install the exporter (menu R) and restart SF6.")
-        return {}
     ev = sess.recorder.event
-    reader = StateReader(path, on_state=lambda st: ev({"type": "state", "t": st.t_recv, **st.raw})).start()
+    reader = open_state_reader(cfg, on_state=lambda st: ev({"type": "state", "t": st.t_recv, **st.raw}))
+    if reader is None:
+        return {}
     sess.narrate("Watching only: the bot sends no inputs.", source="measured")
     print(f"Watching for up to {seconds:.0f} s (F8 to stop). The bot presses nothing. Play a match vs CPU.")
     summary = {"transitions": [], "rounds_seen": [], "kos": [], "hp_events": 0, "ready_s": 0.0, "lines": 0,
@@ -97,8 +94,7 @@ def run_watch(sess: Session, cfg: dict, seconds: float) -> dict:
                                                        "stage_timer": st.game_frame})
                                 sess.narrate(f"{name} KO'd.", source="measured")
                 if t - last_status > 0.25:
-                    x1, x2 = st.p1.get("x"), st.p2.get("x")
-                    dist = abs(x1 - x2) if isinstance(x1, (int, float)) and isinstance(x2, (int, float)) else None
+                    dist = player_distance(st.p1, st.p2)
                     pp = prev if prev is not None and prev.ready else None
                     sess.status["spacing"] = f"{zone(dist)} ({dist:.2f})" if dist is not None else "?"
                     sess.status["P1"] = (f"hp {st.p1.get('hp')} drv {st.p1.get('drive')} sup {st.p1.get('super')} | "

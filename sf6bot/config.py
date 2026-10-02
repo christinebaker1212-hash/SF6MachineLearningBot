@@ -39,3 +39,17 @@ def load_moves(path: str | Path, min_hold_frames: int = 1):
     from .sequences import parse_sequence
     data = load_yaml(path)
     return {name: parse_sequence(text, name, min_hold_frames) for name, text in data["moves"].items()}
+
+
+def set_local(keys: list[str], value, local: str | Path | None = None) -> Path:
+    """Set one value in configs/local.yaml (created if missing), keeping everything else."""
+    p = Path(local) if local else ROOT / "configs" / "local.yaml"
+    data = load_yaml(p) if p.exists() else {}
+    d = data
+    for k in keys[:-1]:
+        d = d.setdefault(k, {})
+    d[keys[-1]] = value
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False)
+    return p

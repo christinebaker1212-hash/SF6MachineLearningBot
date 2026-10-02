@@ -13,16 +13,15 @@ import threading
 from . import clock
 from .actions import Facing
 from .config import load_moves
-from .game_state import (StateReader, find_sf6_dir, locate_state_file, read_exporter_info,
-                         reframework_status)
+from .game_state import (StateReader, find_sf6_dir, locate_state_file, num, player_distance,
+                         read_exporter_info, reframework_status)
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 from .stats import summarize_ms
 
 
 def _num(d: dict, k: str):
-    v = d.get(k)
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    return num(d.get(k))
 
 
 class Checker:
@@ -41,13 +40,7 @@ class Checker:
         print(f"  [{status:12s}] {name}  {json.dumps(details, default=str)}")
 
     def collect(self, seconds: float) -> list:
-        out, last, end = [], -1, clock.now() + seconds
-        while clock.now() < end and not self.s.stop_event.is_set():
-            st = self.r.wait_newer(last, timeout=0.1)
-            if st is not None:
-                last = st.frame
-                out.append(st)
-        return out
+        return self.r.collect(seconds, self.s.stop_event)
 
     def run_seq(self, text_or_move: str) -> float:
         seq = self.moves.get(text_or_move) or parse_sequence(text_or_move)
@@ -58,8 +51,7 @@ class Checker:
 
     @staticmethod
     def dist(st) -> float | None:
-        a, b = _num(st.p1, "x"), _num(st.p2, "x")
-        return None if a is None or b is None else abs(a - b)
+        return player_distance(st.p1, st.p2)
 
 
 def run_state_check(sess: Session, cfg: dict) -> list[dict]:

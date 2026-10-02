@@ -102,8 +102,13 @@ they have, cannot queue below Diamond. No alt account will be used.
 - The ranked milestone therefore needs offline evidence of roughly Diamond-level play first:
   CPU, the Model Trainer (Master), and consenting players.
 - The first ranked games are a high-stakes test on the user's real account.
-- Ranked deployment remains a separate milestone, gated on checking Capcom/Steam rules for
-  automated play and mods.
+- Ranked deployment remains a separate milestone.
+  - **Capcom Support authorised ranked testing in writing (2026-10-02, pasted by the user).**
+    Conditions: the CFN is disclosed to Capcom beforehand, and Capcom may use the bot's data for
+    internal research and its SIM SIM bot. Scope changes must be re-cleared.
+  - A follow-up email confirms that REFramework and memory reading are within the disclosed
+    method. Material additions need Capcom's OK before ranked use. No data goes to Capcom until
+    the data and the transfer method are agreed. Details are in HANDOFF.md §2.
 
 **Requirement: opponent assessment (planned for M2–M4, recorded here so it isn't lost).**
 The agent should notice opponent mistakes and judge whether the opponent is below its level.
@@ -753,6 +758,81 @@ The safety tests are part of acceptance. During a run:
   - rounds and match result
 - MOCK-tested only: decision unit tests on synthetic states with the real Ryu catalog, and a 3 s
   run against the simulated exporter.
+
+## 0.6.0: bot controller, routines, 8x discovery, training data, regression baseline
+### 8x result (exporter v6, 2026-10-02, same Ken vs Ryu replay)
+- 1×: 7,426 frames, 325 skipped, `frames_by_source` almost all from the UpdateGameInfo hook. Most
+  of the skips are expected to be KO slow-motion. The new meta field `skipped_during_fight`
+  separates them.
+- 8×: 2,383 frames, 4,970 skipped. **UpdateGameInfo runs once per RENDER**, so it doesn't fix 8×.
+- 8× also exposed a bug: the finish classifier used wall-clock seconds, so a super 29 game-s
+  before the KO looked like the finisher. **Fixed:** it now uses game time (stage_timer/60), with
+  a regression test that compresses the real match 8×.
+### Recorder bug fixed: first ~264 fight frames of every match were dropped
+- The clock restarts when the match intro ends (intro 1..264, then 0). Dedup on (round,
+  stage_timer) treated those fight frames as duplicates. That's the user's 1× run:
+  `duplicate_lines_dropped: 264`.
+- Rows are now keyed (round, `seg`, frame). `seg` increments when the clock jumps back within a
+  round, and `fight` marks fight-start → round-end. On the real match 2 this recovers 259 frames.
+- **Recordings made before 0.6.0 lack those frames; re-record important replays.**
+### Exporter v7: per-tick method discovery (`reframework/autorun/sf6bot_state.lua`)
+- On the first in-battle frame, v7 hooks update-like methods (name contains update/step/tick/
+  exec/proc/frame/move, at most 40) on the types the exporter already reads: FBattleMediator,
+  gBattle and its Game/Round/Player/Team objects, and the player object type. These are
+  READ-ONLY counting hooks.
+- When the clock advances ≥1.5× faster than renders (a fast replay), after 600 renders it
+  picks the method called once per game tick: changes ≥95% of the clock advance, calls ≤4×.
+  That method then writes the lines (`src: tick`), and the choice is saved to
+  `reframework/data/sf6bot_tickhook.json` and loaded at the next start.
+- At 1× it can't tell per-tick from per-render, so it waits for a fast replay. `src: ugi` =
+  UpdateGameInfo, `frame` = render fallback.
+- The heartbeat `tick_hook` (top candidates and the choice) goes into the replay meta
+  (`exporter`), so S shows it.
+- MOCK: a stub reproduces the measured behaviour (UGI per render). Discovery finds the per-tick
+  method and then writes every frame; the saved choice works from frame 1; 1× and no-candidate
+  fallbacks are covered.
+- **UNVERIFIED in game:** whether any candidate method is per tick, and whether hooking them is
+  safe and cheap.
+### Bot controller (virtual Xbox pad) and taught routines
+- `input.backend: virtual_pad` uses vgamepad + the ViGEmBus driver. SF6 sees a separate
+  controller, so the user can fight the bot.
+  - `pad_bindings` follow the commonly documented Classic pad layout (UNVERIFIED); input-map
+    (menu I) verifies them.
+  - The backend refuses LS+RS together, which is the kill combo.
+  - Training reset ("/") still goes through the keyboard.
+  - Menus: K = pad, J = keyboard. This writes `configs/local.yaml`.
+- `sf6bot pad` (menu P) adds a clickable pad to the overlay that presses the bot's controller.
+  `pad --teach NAME` (menu L) records the clicks into `routines/NAME/routine.yaml` (button,
+  wait, hold) plus a screenshot per step. `routine NAME` (menu U) replays it.
+  - The screenshots are for a future screen check before each press; playback doesn't use them
+    yet.
+- Untested in game: the ViGEmBus install via pip, Steam Input interfering with the virtual pad,
+  whether SF6 accepts pad input from the bot while the user plays, and the overlay mouse clicks
+  through Parsec.
+### Training data (`sf6bot/training_data.py`, `sf6bot dataset-summary`, menu Y)
+- Recordings of the same replay are grouped by characters and round losers, then confirmed by
+  per-frame agreement (hp/x/action ids; replays are deterministic). They are merged frame by
+  frame into `datasets/merged/`, so gaps in one recording are filled from another (e.g. 1× + 8×).
+- `perspectives()`: two samples per fight frame (p1 and p2 both as "self"), with x mirrored so
+  forward is +x. `missing_before` flags gaps.
+- Real-data tests: two partial recordings with different phases merge back to the full match.
+### Code consolidation + regression baseline
+- Shared helpers in `game_state.py`:
+  - `open_state_reader` (one helpful message when SF6 state is missing)
+  - `num`, `player_distance`, `facing_of`, `file_stem`
+  - `StateReader.collect`
+
+  They replace copies in catalog, fighter, watch, dataset, input_map and state_check.
+- `tests/test_regression.py`: fingerprints of the pipeline's outputs on all real fixtures
+  (episodes, dataset, Capcom parse, catalog plans, catalog compare, fighter decisions) are in
+  `tests/data/golden.json`.
+  - The consolidation left all of them unchanged.
+  - The only intended change since then is the recorder fix, which changed the 4 dataset
+    fingerprints.
+  - Update with `python -m tests.test_regression --update` after reviewing.
+### Menu
+- The main screen shows play/record, bot controller, setup and results. The older diagnostics
+  are under **M**. All old letters still work.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

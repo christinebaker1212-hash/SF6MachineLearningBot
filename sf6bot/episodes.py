@@ -23,6 +23,8 @@ INTRO_ACTION_IDS = {400, 401}
 SUPER_BAR = 10000            # observed: super gauge max 30000 = 3 bars
 DRIVE_BAR = 10000            # observed: drive gauge max 60000 = 6 bars
 FINISH_WINDOW_S = 10.0       # a super spent this long before the KO counts as the finisher (inference)
+# The window is measured in GAME time (stage_timer / 60), not wall-clock: at 8x replay speed a super
+# 29 game-seconds before the KO was 3.6 wall-seconds before it and was misread as the finisher (0.5.0).
 CRITICAL_ART_HP = 0.25       # SF6 rule (game knowledge, not measured): Lv3 at <=25% HP becomes a Critical Art
 
 
@@ -74,10 +76,15 @@ class EpisodeTracker:
         loser = 1 - winner
         wk, lk = ("p1", "p2")[winner], ("p1", "p2")[loser]
         w, l = raw.get(wk) or {}, raw.get(lk) or {}
-        t_end = self._hist[-1][0] if self._hist else 0.0
+        def game_s(t, r):
+            st = r.get("stage_timer")
+            return st / 60.0 if isinstance(st, int) else t
+
+        t_end = game_s(*self._hist[-1]) if self._hist else 0.0
         spent, spend_t, spend_hp = 0, None, None
         prev = None
-        for t, r in self._hist:
+        for t_wall, r in self._hist:
+            t = game_s(t_wall, r)
             sup = (r.get(wk) or {}).get("super")
             if isinstance(sup, (int, float)) and isinstance(prev, (int, float)) and prev - sup >= SUPER_BAR * 0.9 \
                     and t_end - t <= FINISH_WINDOW_S:

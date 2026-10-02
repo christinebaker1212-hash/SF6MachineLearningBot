@@ -31,7 +31,7 @@ from pathlib import Path
 
 from . import clock
 from .actions import InputState
-from .game_state import StateReader, character_name, find_sf6_dir, locate_state_file
+from .game_state import character_name, facing_of, file_stem, num, open_state_reader, player_distance
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 
@@ -95,8 +95,7 @@ def parse_frame_meter(fm: dict | None) -> dict:
     return out
 
 
-def _n(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+_n = num  # short alias used throughout analyze_move
 
 
 def analyze_move(states: list[dict], t_sent: float, neutral_a: set, neutral_d: set) -> dict:
@@ -155,20 +154,9 @@ def analyze_move(states: list[dict], t_sent: float, neutral_a: set, neutral_d: s
     return res
 
 
-class _Collector:
-    def __init__(self, reader: StateReader) -> None:
-        self.reader = reader
-
-    def collect(self, seconds: float) -> list[dict]:
-        out, last, end = [], -1, clock.now() + seconds
-        while clock.now() < end:
-            st = self.reader.wait_newer(last, 0.05)
-            if st is None:
-                continue
-            last = st.frame
-            if st.ready:
-                out.append(dict(st.raw, t=st.t_recv))
-        return out
+def _ready_dicts(states) -> list[dict]:
+    """Usable (ready) states as raw dicts with the receive time under 't' (analyze_move's input)."""
+    return [dict(st.raw, t=st.t_recv) for st in states if st.ready]
 
 
 def _move_plan(name: str, cfg: dict, generic: bool):
@@ -192,15 +180,17 @@ def _move_plan(name: str, cfg: dict, generic: bool):
 def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = None,
                 generic: bool = False) -> Path | None:
     name, chara = "Unknown", None
-    game_dir = find_sf6_dir(cfg)
-    path = locate_state_file(game_dir) if game_dir else None
-    if path is None:
-        print("No REFramework state file found (menu R, restart SF6).")
+    reader = open_state_reader(cfg)
+    if reader is None:
         return None
-    reader = StateReader(path).start()
-    col = _Collector(reader)
     c = sess.controller
     reset_key = cfg.get("training", {}).get("reset_key", "SLASH")
+    # Training Mode reset is a KEYBOARD key ("/", user-reported). With the virtual pad backend the
+    # bot's controller has no such key, so the reset goes through the keyboard.
+    reset_backend = c.backend
+    if c.backend.name == "virtual_pad":
+        from .input_backend import SendInputKeyboard
+        reset_backend = SendInputKeyboard()
     runner = SequenceRunner(c, sink=sess.recorder.event)
     results: dict = {}
     plan, skipped, source = [], [], "generic"
@@ -228,22 +218,21 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             if not c.armed:  # never send the reset key to another window (focus lost / paused)
                 if not sess.wait_armed(timeout=10):
                     raise InterruptedError("not armed")
-            c.backend.send([(reset_key, True)])
+            reset_backend.send([(reset_key, True)])
             time.sleep(0.08)
-            c.backend.send([(reset_key, False)])
+            reset_backend.send([(reset_key, False)])
             sess.stop_event.wait(1.3)
             s2 = reader.latest()
-            if s2 is not None and isinstance(s2.p1.get("facing_right"), bool):
-                from .actions import Facing
-                c.set_facing(Facing.RIGHT if s2.p1["facing_right"] else Facing.LEFT)
+            if s2 is not None and facing_of(s2.p1) is not None:
+                c.set_facing(facing_of(s2.p1))
 
         # Learn neutral action ids (standing/crouching idle) and MOVEMENT ids (walk forward/back incl.
         # the stop transition, neutral jump), so a move's own id is never confused with the approach
         # walk (0.3.1 bug: every move's id list started with walk id 11).
         reset()
-        idle = col.collect(1.0)
+        idle = _ready_dicts(reader.collect(1.0))
         c.apply(InputState(2), tag="learn_crouch")
-        crouch = col.collect(1.0)
+        crouch = _ready_dicts(reader.collect(1.0))
         c.apply(InputState(), tag="learn_end")
         neutral_a = {s["p1"].get("action_id") for s in idle + crouch[20:]}
         neutral_d = {s["p2"].get("action_id") for s in idle}
@@ -251,16 +240,16 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         for d in (6, 4):
             reset()
             c.apply(InputState(d), tag="learn_walk")
-            movement |= {s["p1"].get("action_id") for s in col.collect(0.5)}
+            movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(0.5))}
             c.apply(InputState(), tag="learn_walk_end")
-            movement |= {s["p1"].get("action_id") for s in col.collect(0.5)}
+            movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(0.5))}
         # Neutral, forward and back jump: 0.4.0 tagged the forward-jump id (37) as Aerial Tatsumaki.
         for d in (8, 9, 7):
             reset()
             c.apply(InputState(d), tag="learn_jump")
             sess.stop_event.wait(0.05)
             c.apply(InputState(), tag="learn_jump_end")
-            movement |= {s["p1"].get("action_id") for s in col.collect(1.2)}
+            movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(1.2))}
         movement -= neutral_a
         movement.discard(None)
         print(f"  neutral ids: bot {sorted(x for x in neutral_a if x is not None)}, "
@@ -287,8 +276,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                         if s2 is None:
                             continue
                         last_d = s2.frame
-                        x1, x2 = _n(s2.p1.get("x")), _n(s2.p2.get("x"))
-                        d = abs(x1 - x2) if x1 is not None and x2 is not None else None
+                        d = player_distance(s2.p1, s2.p2)
                         if d is not None and (best is None or d < best - 1e-3):
                             best, still = d, 0
                         else:
@@ -296,13 +284,13 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     c.apply(InputState(), tag="approach_end")
                     sess.stop_event.wait(0.4)   # let the walk-stop transition finish
                 fm_before = reader.last_fm
-                pre = col.collect(0.15)
+                pre = _ready_dicts(reader.collect(0.15))
                 seq = parse_sequence(seq_text, mname)
                 import threading
                 post: list = []
                 # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
                 window = 9.0 if mv["long"] else 2.6
-                th = threading.Thread(target=lambda: post.extend(col.collect(window)))
+                th = threading.Thread(target=lambda: post.extend(_ready_dicts(reader.collect(window))))
                 th.start()
                 timings, ok = runner.run(seq, stop_event=sess.stop_event)
                 th.join()
@@ -380,7 +368,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         print("Stopped (focus lost or paused too long).")
     finally:
         try:
-            c.backend.send([(reset_key, False)])
+            reset_backend.send([(reset_key, False)])
         except Exception:
             pass
         c.release_all("catalog end")
@@ -388,7 +376,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
     root = Path(cfg.get("datasets", {}).get("root", "datasets")) / "catalog"
     root.mkdir(parents=True, exist_ok=True)
     suffix = "_movelist" if source == "capcom_movelist" else ""
-    out = root / f"{name.replace(' ', '').replace('.', '')}{suffix}.json"
+    out = root / f"{file_stem(name)}{suffix}.json"
     data = json.loads(out.read_text()) if out.exists() else {"character": name, "id": chara, "moves": {}}
     data["source"] = source
     if skipped:

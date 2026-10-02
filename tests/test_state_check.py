@@ -114,7 +114,7 @@ def test_watch_records_hits_and_ko(cfg, tmp_path, monkeypatch):
     (game / "reframework" / "data").mkdir(parents=True)
     path = game / "reframework" / "data" / "sf6bot_state.jsonl"
     path.write_text("")
-    monkeypatch.setattr(wm, "find_sf6_dir", lambda cfg: game)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
 
     def writer(stop):
         hp = 1000
@@ -154,7 +154,7 @@ def test_input_map_against_simulated_masks(cfg, tmp_path, monkeypatch):
     path.write_text("")
     inp = MockInputBackend()
     monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
-    monkeypatch.setattr(im, "find_sf6_dir", lambda cfg: game)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
     fake_bits = {"W": 1, "S": 2, "A": 4, "D": 8, "U": 16, "I": 32, "O": 64, "J": 128, "K": 256, "L": 512}
 
     def writer(stop):
@@ -193,7 +193,7 @@ def test_catalog_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     (game / "reframework" / "data").mkdir(parents=True)
     inp = MockInputBackend()
     monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
-    monkeypatch.setattr(cat, "find_sf6_dir", lambda cfg: game)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
     cfg["datasets"] = {"root": str(tmp_path / "datasets")}
     sim = SimExporter(game / STATE_FILE, inp)
     sim.start()
@@ -228,7 +228,7 @@ def test_catalog_uses_capcom_move_list(cfg, tmp_path, monkeypatch):
                                                "moves": parse_frame_page(html)}))
     inp = MockInputBackend()
     monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
-    monkeypatch.setattr(cat, "find_sf6_dir", lambda cfg: game)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
     cfg["datasets"] = {"root": str(tmp_path / "datasets")}
     sim = SimExporter(game / STATE_FILE, inp)
     sim.chara = 1  # Ryu
@@ -262,7 +262,7 @@ def test_fight_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     (game / "reframework" / "data").mkdir(parents=True)
     inp = MockInputBackend()
     monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
-    monkeypatch.setattr(fi, "find_sf6_dir", lambda cfg: game)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
     cfg["datasets"] = {"root": str(tmp_path / "datasets")}
     cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
     sim = SimExporter(game / STATE_FILE, inp)

@@ -1,6 +1,7 @@
 """MOCK: run the REFramework exporter under a stubbed REFramework API with lua5.4 (not the game).
-Checks the v6 rule: one line per game frame (stage_timer) whatever the replay speed, when the
-UpdateGameInfo hook runs per tick; render-only fallback; pause heartbeat. Skipped without lua5.4."""
+The stub reproduces what was measured in game: UpdateGameInfo once per RENDER, several game
+ticks per render at fast replay speed. Checks v7: per-tick method discovery, one line per game
+frame once found, the saved choice, the fallback, and the pause heartbeat. Skipped without lua5.4."""
 import json
 import shutil
 import subprocess
@@ -13,28 +14,39 @@ LUA = shutil.which("lua5.4")
 pytestmark = pytest.mark.skipif(LUA is None, reason="lua5.4 not installed")
 
 
-def _run(tmp_path, tpr, renders, hook=True, pause_at=-1):
-    subprocess.run([LUA, str(ROOT / "tests/lua/stub_run.lua"), str(ROOT / "reframework/autorun/sf6bot_state.lua"),
-                    str(tmp_path), str(tpr), str(renders), "1" if hook else "0", str(pause_at)],
-                   check=True, timeout=60)
+def _run(tmp_path, tpr, renders, per_tick=True, pause_at=-1, saved=False):
+    out = subprocess.run([LUA, str(ROOT / "tests/lua/stub_run.lua"), str(ROOT / "reframework/autorun/sf6bot_state.lua"),
+                          str(tmp_path), str(tpr), str(renders), "1" if per_tick else "0", str(pause_at),
+                          "1" if saved else "0"], check=True, timeout=120, capture_output=True, text=True).stdout
     lines = [json.loads(l) for l in (tmp_path / "sf6bot_state.jsonl").read_text().splitlines()]
-    return [(l.get("src"), l.get("stage_timer")) for l in lines if l.get("in_battle")]
+    rows = [(l.get("src"), l.get("stage_timer")) for l in lines if l.get("in_battle")]
+    chosen = out.strip().splitlines()[-1].split("=", 1)[1]
+    return rows, chosen
 
 
-def test_every_game_frame_once_at_8x(tmp_path):
-    rows = _run(tmp_path, tpr=8, renders=50)
+def test_discovery_finds_per_tick_method_at_8x(tmp_path):
+    rows, chosen = _run(tmp_path, tpr=8, renders=700)
+    assert chosen == "nBattle.sGame.UpdateTick"
     timers = [t for _, t in rows]
-    assert timers == list(range(1, 401))          # 8 ticks per render: all 400 game frames, once each
-    assert {s for s, _ in rows} == {"tick"}
+    assert len(timers) == len(set(timers))                       # each game frame at most once
+    after = [t for s, t in rows if s == "tick"]
+    assert after and after == list(range(after[0], 8 * 700 + 1))  # once chosen: every frame, no gaps
+    assert after[0] <= 8 * 601 + 1                                # chosen right after 600 renders
 
 
-def test_render_only_fallback_skips_like_v5(tmp_path):
-    rows = _run(tmp_path, tpr=4, renders=30, hook=False)
-    assert [t for _, t in rows] == list(range(4, 121, 4))   # without per-tick calls: 1 in 4, as before
+def test_saved_choice_gives_every_frame_from_the_start(tmp_path):
+    rows, chosen = _run(tmp_path, tpr=8, renders=50, saved=True)
+    assert [t for _, t in rows] == list(range(1, 401)) and {s for s, _ in rows} == {"tick"}
+
+
+def test_no_choice_at_1x_and_fallback_without_per_tick_method(tmp_path):
+    rows, chosen = _run(tmp_path, tpr=1, renders=700)
+    assert chosen == "nil" and [t for _, t in rows] == list(range(1, 701))   # 1x: complete anyway
+    rows, chosen = _run(tmp_path / "x", tpr=4, renders=700, per_tick=False) if (tmp_path / "x").mkdir() is None else None
+    assert chosen == "nil" and [t for _, t in rows][:5] == [4, 8, 12, 16, 20]  # 1 in 4, as measured before
 
 
 def test_pause_heartbeat(tmp_path):
-    rows = _run(tmp_path, tpr=1, renders=100, pause_at=20)
+    rows, _ = _run(tmp_path, tpr=1, renders=100, pause_at=20)
     timers = [t for _, t in rows]
-    assert timers[:20] == list(range(1, 21))
-    assert timers[20:] == [20, 20]                 # clock stopped: one repeat every 30 renders
+    assert timers[:20] == list(range(1, 21)) and timers[20:] == [20, 20]

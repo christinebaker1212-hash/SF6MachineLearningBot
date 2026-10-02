@@ -1,6 +1,7 @@
 """Demonstration datasets from REFramework state (replays or live play).
 
-One output line per game frame (deduplicated on (round, stage_timer)) with both players'
+One output line per game frame (deduplicated on (round, clock segment, stage_timer); "fight" marks
+frames between the fight start and the round end) with both players'
 state and decoded inputs. Inputs come from the game's own per-player input mask
 (pl_input_new), decoded with the MEASURED bit table (configs/input_bits.yaml); directions are
 converted from screen-absolute to facing-relative numpad (6 = forward).
@@ -15,7 +16,7 @@ import time
 from pathlib import Path
 
 from .episodes import EpisodeTracker
-from .game_state import character_name, decode_input_relative, load_input_bits
+from .game_state import character_name, decode_input_relative, file_stem, load_input_bits
 
 PLAYER_FIELDS = ("chara", "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
                  "facing_right", "action_id", "action_frame", "action_frames_total", "hitstop", "hitstun",
@@ -31,6 +32,10 @@ class DatasetBuilder:
         self._seen: set = set()
         self.duplicates = 0
         self.skipped_frames = 0
+        self.skipped_after_ko = 0    # KO slow-motion advances stage_timer ~3 per render (real data)
+        self.skipped_in_fight = 0    # between fight start and KO: these are the frames that matter
+        self._segment = 0
+        self._fighting = False
         self.lines_without_input = 0
         self.characters = [None, None]
         self._last_key = None
@@ -40,20 +45,39 @@ class DatasetBuilder:
         for e in self.tracker.update(raw, t):
             e["t"] = t
             self.events.append(e)
+            if e["event"] == "fight_start":
+                self._fighting = True
+            elif e["event"] in ("round_end", "round_start"):
+                self._fighting = False
         if not raw.get("ready", False):
             return
-        key = (raw.get("round"), raw.get("stage_timer"))
+        rnd, timer = raw.get("round"), raw.get("stage_timer")
+        # The clock restarts within a round when the match intro ends (real data: intro 1..264,
+        # then 0). Without a segment number those fight frames looked like duplicates of the intro
+        # and were dropped (0.5.0 and earlier: the first ~264 frames of round 1, in every recording).
+        if self._last_key is not None and rnd != self._last_key[0]:
+            self._segment = 0
+        elif (self._last_key is not None and isinstance(timer, int) and isinstance(self._last_key[2], int)
+              and timer < self._last_key[2] - 5):
+            self._segment += 1
+        key = (rnd, self._segment, timer)
         if key in self._seen:
             self.duplicates += 1
             return
-        if self._last_key is not None and key[0] == self._last_key[0] and isinstance(key[1], int) \
-                and isinstance(self._last_key[1], int) and key[1] > self._last_key[1] + 1:
-            self.skipped_frames += key[1] - self._last_key[1] - 1
+        if self._last_key is not None and key[:2] == self._last_key[:2] and isinstance(key[2], int) \
+                and isinstance(self._last_key[2], int) and key[2] > self._last_key[2] + 1:
+            gap = key[2] - self._last_key[2] - 1
+            self.skipped_frames += gap
+            hps = [(raw.get(k) or {}).get("hp") for k in ("p1", "p2")]
+            if any(isinstance(h, (int, float)) and h <= 0 for h in hps):
+                self.skipped_after_ko += gap
+            elif self._fighting:
+                self.skipped_in_fight += gap
         self._seen.add(key)
         self._last_key = key
         src = raw.get("src", "v5 (per render)")
         self.src_counts[src] = self.src_counts.get(src, 0) + 1
-        row = {"t": round(t, 4), "round": key[0], "frame": key[1]}
+        row = {"t": round(t, 4), "round": rnd, "seg": self._segment, "frame": timer, "fight": self._fighting}
         for i, pk in enumerate(("p1", "p2")):
             p = raw.get(pk) or {}
             q = {k: p.get(k) for k in PLAYER_FIELDS}
@@ -77,6 +101,8 @@ class DatasetBuilder:
             "characters": [character_name(c) for c in self.characters], "character_ids": self.characters,
             "frames": len(self.rows), "duplicate_lines_dropped": self.duplicates,
             "skipped_game_frames": self.skipped_frames,
+            "skipped_after_ko": self.skipped_after_ko,
+            "skipped_during_fight": self.skipped_in_fight,
             "frames_by_source": self.src_counts,
             "player_lines_without_input": self.lines_without_input,
             "rounds": [{k: e.get(k) for k in ("round", "winner", "reason", "confidence", "finish")} for e in rounds],
@@ -88,7 +114,7 @@ class DatasetBuilder:
     def save(self, root: str | Path, kind: str, source: str, notes: str = "") -> Path:
         out_dir = Path(root) / kind
         out_dir.mkdir(parents=True, exist_ok=True)
-        names = [character_name(c).replace(" ", "").replace(".", "") for c in self.characters]
+        names = [file_stem(character_name(c)) for c in self.characters]
         stem = f"{time.strftime('%Y%m%d_%H%M%S')}_{names[0]}_vs_{names[1]}"
         path = out_dir / f"{stem}.jsonl.gz"
         with gzip.open(path, "wt", encoding="utf-8") as f:
@@ -114,14 +140,11 @@ def run_replay_record(sess, cfg: dict, seconds: float, notes: str = "") -> Path 
     """Live: record a replay (or any match) the user plays back in SF6 into a dataset file.
     Stops at F8, after `seconds`, or 5 s after the match ends. The bot sends no inputs."""
     from . import clock
-    from .game_state import StateReader, find_sf6_dir, locate_state_file
-    game_dir = find_sf6_dir(cfg)
-    path = locate_state_file(game_dir) if game_dir else None
-    if path is None:
-        print("No REFramework state file found (menu R, restart SF6).")
+    from .game_state import open_state_reader
+    reader = open_state_reader(cfg)
+    if reader is None:
         return None
     b = DatasetBuilder()
-    reader = StateReader(path).start()
     sess.narrate("Recording replay data: the bot sends no inputs.", source="measured")
     print(f"Recording up to {seconds:.0f} s. Start the replay now. F8 stops early; it also stops ~5 s after "
           "the match ends.")
@@ -153,6 +176,15 @@ def run_replay_record(sess, cfg: dict, seconds: float, notes: str = "") -> Path 
         return None
     out = b.save(cfg.get("datasets", {}).get("root", "datasets"), "replays", "replay_record", notes)
     m = b.meta("replay_record", notes)
+    try:  # exporter v7: which per-game-tick method (if any) is writing the lines
+        from .game_state import find_sf6_dir, read_exporter_info
+        gd = find_sf6_dir(cfg)
+        info = read_exporter_info(gd) if gd else None
+        if info:
+            m["exporter"] = {k: info.get(k) for k in ("version", "tick_lines", "ugi_lines", "frame_lines",
+                                                      "tick_hook")}
+    except Exception as e:  # never lose a recording over diagnostics
+        m["exporter"] = {"error": repr(e)}
     sess.recorder.write_json("dataset_meta.json", m | {"file": str(out)})
     print(f"Saved {out}\n{json.dumps(m, indent=2, default=str)[:2500]}")
     return out

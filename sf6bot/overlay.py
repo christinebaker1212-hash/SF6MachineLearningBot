@@ -37,6 +37,8 @@ class DebugOverlay:
         self.status = status if status is not None else {}
         self._thread = threading.Thread(target=self._run, name="Overlay", daemon=True)
         self.error: BaseException | None = None
+        self.pad_panel = None          # pad_teach.PadPanel: clickable bot controller (menu P)
+        self._pad_origin = (0, 0)
 
     PANEL_W = 260
     MIN_IMG_W = 160
@@ -96,6 +98,13 @@ class DebugOverlay:
             cv2.putText(p, line, (8, 130 + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col, 1)
         return p
 
+    def _on_mouse(self, event, x, y, flags, param) -> None:
+        if event != cv2.EVENT_LBUTTONDOWN or self.pad_panel is None:
+            return
+        name = self.pad_panel.hit(x - self._pad_origin[0], y - self._pad_origin[1])
+        if name:
+            self.pad_panel.click(name)
+
     def _draw_thoughts(self, area, width) -> None:
         """Running commentary feed (Session.narrate). In M1 it only states what the scripted
         routine is doing; later milestones feed it from measured state and the policy's outputs."""
@@ -117,6 +126,7 @@ class DebugOverlay:
         self._next_diag = clock.now() + 0.5
         try:
             cv2.namedWindow(TITLE, cv2.WINDOW_AUTOSIZE)
+            cv2.setMouseCallback(TITLE, self._on_mouse)
             next_t = clock.now()
             while not self.stop_event.is_set():
                 fr = self.g.latest()
@@ -134,11 +144,15 @@ class DebugOverlay:
                 iw = img.shape[1] if self.width > 0 else 0
                 tw = self.PANEL_W + iw
                 th = 150
-                canvas = np.zeros((ph + th, tw, 3), np.uint8)
+                pad_h = 150 if self.pad_panel is not None else 0
+                canvas = np.zeros((ph + th + pad_h, tw, 3), np.uint8)
                 canvas[:ph, :self.PANEL_W] = self._panel(ph)
                 if iw:
                     canvas[:img.shape[0], self.PANEL_W:] = img
-                self._draw_thoughts(canvas[ph:], tw)
+                self._draw_thoughts(canvas[ph:ph + th], tw)
+                if pad_h:
+                    self._pad_origin = (0, ph + th)
+                    self.pad_panel.draw(canvas[ph + th:])
                 cv2.imshow(TITLE, canvas)
                 cv2.waitKey(1)
                 if not made_noactivate:

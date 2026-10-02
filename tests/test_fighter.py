@@ -1,8 +1,6 @@
 """MOCK: scripted fighter decisions on synthetic states (not the game), plus the opponent-catalog
 loader on the user's REAL 0.3.2 Ryu catalog (frame meter values)."""
 import gzip
-import json
-import shutil
 from pathlib import Path
 
 from sf6bot.fighter import ScriptedFighter, load_fighter_config, load_opponent_catalog

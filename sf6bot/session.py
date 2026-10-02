@@ -20,6 +20,13 @@ from .recorder import SessionRecorder
 from .safety import Watchdog
 
 
+def bindings_for(cfg: dict, backend_name: str) -> dict:
+    """Logical input -> key/button names for the active input backend."""
+    if backend_name == "virtual_pad":
+        return cfg["input"]["pad_bindings"]
+    return cfg["input"]["bindings"]
+
+
 class Session:
     def __init__(self, cfg: dict, name: str, side: str = "left", mock: bool = False,
                  overlay: bool | None = None, extra_meta: dict | None = None) -> None:
@@ -119,7 +126,7 @@ class Session:
         rc = cfg["recording"]
         self.recorder = SessionRecorder(rc["root"], self.name + ("_MOCK" if self.mock else ""), meta,
                                         video_width=int(rc["video_width"]), record_video=bool(rc["record_video"]))
-        self.controller = Controller(inp, cfg["input"]["bindings"], self.facing, sink=self.recorder.event)
+        self.controller = Controller(inp, bindings_for(cfg, inp.name), self.facing, sink=self.recorder.event)
         self.grabber = FrameGrabber(capture, region, on_frame=self.recorder.frame).start()
         s = cfg["safety"]
         self.watchdog = Watchdog(self.controller, self.stop_event, kill_pressed=kill, pause_pressed=pause,

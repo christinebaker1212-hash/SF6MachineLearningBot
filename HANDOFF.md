@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.5.0**, REFramework exporter script **v6**, branch
-`claude/admiring-mccarthy-uyyay4`, 48 tests passing.*
+*State as of 2026-10-02: code version **0.6.0**, REFramework exporter script **v7**, branch
+`claude/admiring-mccarthy-uyyay4`, 58 tests passing.*
 
 ---
 
@@ -38,6 +38,21 @@ controls**.
   disables it by renaming `dinput8.dll`.
 - **Ranked deployment is a separate, later milestone,** gated on checking Capcom/Steam rules.
   The user makes the call.
+  - **2026-10-02: written authorisation from Capcom Support, pasted by the user.** Ranked testing
+    is allowed on the CFN account the user discloses to Capcom beforehand. Capcom may use data
+    from the bot and testing for internal research and its SIM SIM bot.
+    - It applies only to the disclosed account and testing conditions. Significant scope changes
+      must go back to Capcom first.
+    - **Confirmed in a follow-up email (2026-10-02):** REFramework and reading game/process memory
+      are part of the disclosed method and need no separate authorisation. Functionality
+      materially beyond what was described must be cleared with Capcom before it is used in
+      ranked.
+    - The CFN stays outside the public repo (Capcom agreed). No data transfer happens until the
+      data and the transfer method are agreed.
+    - **Before sharing any data with Capcom:** agree the package with the user. Replays contain
+      opponents' CFNs, which could be stripped.
+  - The offline Diamond-level evidence gate still applies before ranked.
+  - Keep the CFN in `configs/local.yaml`, never in the repo.
 - **Scraping Capcom's website is allowed:** the user explicitly authorised it on 2026-10-02,
   replacing an earlier "no scraping" rule. But the site returns 403 to scripts (from the user's
   PC too), and we never evade blocks. So the user saves pages from their browser and menu F
@@ -147,25 +162,18 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-1. **0.3.2 catalog: done and verified.** 111/121 values match Capcom (CLAUDE.md, Milestone 3).
-   - **Pending:** re-run only the fixed moves on 0.3.3 (6HP, 6HK, throw, SA_236236K) with C
-     and B.
-   - **Pending:** check why the dummy takes no damage (Training Mode HP setting?).
-2. **8× replay test:** exporter v6 (0.4.1) should fix this; it needs the user's 1× vs 8× D run. **Earlier result (watch run 20261001_203652, Chun-Li vs Akuma replay at 8×):**
-   round 0 reached stage_timer 5834 about 21 s after the first ready line, i.e. roughly
-   **280 game frames/s**, while the exporter wrote about **57 lines/s**. So at 8× roughly
-   **4 of every 5 game frames are never exported**, including their input masks.
-   - Consequence: record demonstrations at **1×** for now. 8× data is not usable for per-frame
-     inputs.
-   - A 1× comparison of the same replay was not in the paste.
-   - Fix to research: export on a per-game-tick hook instead of `re.on_frame`.
-3. **Capcom's official frame data: DONE for all 31 characters** (user-saved pages, 2026-10-02).
-   The pages live in the user's `framedata_pages\` folder. Re-running menu F re-parses them, so
-   parser fixes need no new saves.
-   - The parsed JSON is not in git (`datasets/` is ignored). To work on it in a new session,
-     ask the user to upload `datasets\framedata\all_characters.json` (or the pages zip).
-   - Next: drive the catalog from each character's real move list (`input` notation) instead of
-     generic inputs; use the cancel column for combos.
+1. **0.6.0 setup:**
+   - `update.bat`, which also installs vgamepad. Accept the ViGEmBus driver prompt if it appears.
+   - Menu R as admin, then restart SF6 (exporter v7).
+2. **8× discovery:** record one replay at 8× with D. Then record the same replay again at 8×.
+   - The meta's `exporter.tick_hook.result` should say "chosen …".
+   - The second recording should show `skipped_during_fight` near 0.
+3. **Re-record** important replays: pre-0.6.0 files miss the first ~264 frames of round 1.
+4. **The first fight** (menu V vs CPU Ryu, still the keyboard is fine) and the user's impressions.
+5. **Bot controller:** K, then input-map (I), which verifies the pad layout. Then fight with the
+   bot on P2 (N) while the user plays P1. Then teach a routine with L, e.g. picking Ryu in
+   Versus.
+6. Catalog re-run (C/B) to confirm the 0.4.1 fixes.
 
 ## 7. Recommended next steps (in order) — the road to fights
 
@@ -204,12 +212,12 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 
 | Area | Files |
 |---|---|
-| I/O and safety | `win32.py` (ctypes: SendInput, windows, XInput kill combo, overlay window styles), `keys.py`, `input_backend.py`, `controller.py` (held keys, facing mirroring, release_all), `safety.py` (watchdog: F8 kill, F7 pause, F6 flip, focus loss) |
+| I/O and safety | `input_backend.py` (keyboard SendInput, or the bot's virtual Xbox pad), `win32.py` (ctypes: SendInput, windows, XInput kill combo, overlay window styles), `keys.py`, `controller.py` (held keys, facing mirroring, release_all), `safety.py` (watchdog: F8 kill, F7 pause, F6 flip, focus loss) |
 | Capture/record/report | `capture.py` (dxcam, FrameGrabber), `recorder.py`, `report.py`, `share.py` (menu S), `overlay.py` (debug window + THOUGHTS) |
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
+| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 

@@ -107,8 +107,11 @@ def test_dataset_builder_on_real_match(tmp_path):
     m = b.meta("test")
     assert [r["winner"] for r in m["rounds"]] == [0, 1, 0] and m["match"]["score"] == (2, 1)
     assert m["frames"] > 7000 and m["player_lines_without_input"] == 2 * m["frames"]  # v3 had no inputs
-    frames = [(r["round"], r["frame"]) for r in b.rows]
+    frames = [(r["round"], r["seg"], r["frame"]) for r in b.rows]
     assert len(frames) == len(set(frames))
+    # The fight frames that share clock values with the intro are kept (0.5.0 dropped ~259 of them).
+    assert len(frames) - len({(r["round"], r["frame"]) for r in b.rows}) > 200
+    assert any(r["fight"] for r in b.rows) and not b.rows[0]["fight"]
     out = b.save(tmp_path, "replays", "test")
     with _gz.open(out, "rt") as f:
         assert sum(1 for _ in f) == m["frames"]
@@ -126,3 +129,15 @@ def test_dataset_decodes_inputs_relative():
     assert (r["p1"]["dir"], r["p1"]["buttons"]) == (6, ["LP"])   # forward + LP
     assert r["p2"]["dir"] == 4                                    # screen-right while facing left = back
     assert b.meta("t")["characters"] == ["Ryu", "Ken"]
+
+
+def test_finish_window_uses_game_time_at_8x():
+    """REAL match 2 with wall-clock squeezed 8x (as in an 8x replay recording): R2's super 29 game-s
+    before the KO must still not count as the finisher (0.5.0 read it as SA Lv1 at 8x)."""
+    lines = load_real(DATA2)
+    for l in lines:
+        if isinstance(l.get("t"), (int, float)):
+            l["t"] = l["t"] / 8.0
+    tr, events = replay(lines)
+    f1, f2, f3 = (e["finish"] for e in events if e["event"] == "round_end")
+    assert f2["kind"] == "normal" and f3["kind"] == "super_art_lv3"

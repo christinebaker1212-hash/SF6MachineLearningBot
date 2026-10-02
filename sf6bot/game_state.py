@@ -25,7 +25,7 @@ STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
                     Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
 INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
-EXPECTED_SCRIPT_VERSION = 6  # must match SCRIPT_VERSION in the Lua script
+EXPECTED_SCRIPT_VERSION = 7  # must match SCRIPT_VERSION in the Lua script
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
 
 
@@ -242,6 +242,16 @@ class StateReader:
         with self._cond:
             return self._latest
 
+    def collect(self, seconds: float, stop_event=None) -> list[GameState]:
+        """Every new state for `seconds` (or until stop_event is set)."""
+        out, last, end = [], -1, clock.now() + seconds
+        while clock.now() < end and not (stop_event is not None and stop_event.is_set()):
+            st = self.wait_newer(last, timeout=0.05)
+            if st is not None:
+                last = st.frame
+                out.append(st)
+        return out
+
     def wait_newer(self, frame: int, timeout: float = 0.5) -> GameState | None:
         deadline = clock.now() + timeout
         with self._cond:
@@ -292,3 +302,42 @@ def decode_input_relative(mask: int, bits: dict, facing_right: bool) -> tuple[in
     if not facing_right:
         d = {1: 3, 3: 1, 4: 6, 6: 4, 7: 9, 9: 7}.get(d, d)
     return d, b
+
+
+# ---- small shared helpers (used by watch, catalog, fight, replay-record, input-map, state-check) ----
+
+NO_STATE_HELP = ("No game state from SF6. Check: (1) SF6 is running and you are in a match or Training "
+                 "Mode, (2) the exporter is installed (menu R, run menu.bat as administrator), "
+                 "(3) SF6 was fully restarted after installing.")
+
+
+def open_state_reader(cfg: dict, on_state=None) -> "StateReader | None":
+    """Find the exporter's state file for the running game and start a reader, or explain why not."""
+    game_dir = find_sf6_dir(cfg)
+    path = locate_state_file(game_dir) if game_dir else None
+    if path is None:
+        print(NO_STATE_HELP)
+        return None
+    return StateReader(path, on_state=on_state).start()
+
+
+def num(v):
+    """v if it is a real number (not bool/None/str), else None."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def player_distance(p1: dict, p2: dict) -> float | None:
+    a, b = num((p1 or {}).get("x")), num((p2 or {}).get("x"))
+    return None if a is None or b is None else abs(a - b)
+
+
+def facing_of(p: dict):
+    """The Facing of a player from exported state (facing_right), or None if unknown."""
+    from .actions import Facing
+    fr = (p or {}).get("facing_right")
+    return (Facing.RIGHT if fr else Facing.LEFT) if isinstance(fr, bool) else None
+
+
+def file_stem(name: str) -> str:
+    """Character display name -> file-name part ('M. Bison' -> 'MBison', 'Chun-Li' -> 'Chun-Li')."""
+    return name.replace(" ", "").replace(".", "")

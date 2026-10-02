@@ -24,9 +24,9 @@ from pathlib import Path
 import yaml
 
 from . import clock
-from .actions import Facing, InputState
+from .actions import InputState
 from .episodes import EpisodeTracker
-from .game_state import StateReader, character_name, find_sf6_dir, locate_state_file
+from .game_state import character_name, facing_of, file_stem, num, open_state_reader, player_distance
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 
@@ -50,7 +50,7 @@ def load_fighter_config(root: Path | str = "configs/fighter", name: str = "ryu")
 def load_opponent_catalog(chara_name: str, datasets_root: Path) -> dict:
     """action_id -> {"name", "block_adv", "di"} from the opponent's move catalog, if we have one.
     Every action id of a move maps to it (e.g. 2HK 643 and its follow-through 645)."""
-    base = chara_name.replace(" ", "").replace(".", "")
+    base = file_stem(chara_name)
     for fname in (f"{base}_movelist.json", f"{base}.json"):
         p = datasets_root / "catalog" / fname
         if not p.exists():
@@ -72,8 +72,7 @@ def load_opponent_catalog(chara_name: str, datasets_root: Path) -> dict:
     return {}
 
 
-def _num(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+_num = num
 
 
 class ScriptedFighter:
@@ -105,10 +104,9 @@ class ScriptedFighter:
 
     def decide(self, raw: dict, t: float, me_i: int) -> Decision:
         me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
-        x1, x2 = _num(me.get("x")), _num(op.get("x"))
-        if x1 is None or x2 is None:
+        dist = player_distance(me, op)
+        if dist is None:
             return Decision("release", reason="no positions")
-        dist = abs(x1 - x2)
         op_y, me_y = _num(op.get("y")) or 0.0, _num(me.get("y")) or 0.0
         descending = self.prev_opp_y is not None and op_y < self.prev_opp_y
         if op_y <= 0.05:
@@ -176,14 +174,11 @@ class ScriptedFighter:
 
 
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict:
-    game_dir = find_sf6_dir(cfg)
-    path = locate_state_file(game_dir) if game_dir else None
-    if path is None:
-        print("No REFramework state file found (menu R, restart SF6).")
+    reader = open_state_reader(cfg)
+    if reader is None:
         return {}
     fcfg = load_fighter_config(cfg.get("fighter", {}).get("config_dir", "configs/fighter"))
     ds_root = Path(cfg.get("datasets", {}).get("root", "datasets"))
-    reader = StateReader(path).start()
     c = sess.controller
     runner = SequenceRunner(c, sink=sess.recorder.event)
     tracker = EpisodeTracker(self_index=player)
@@ -254,8 +249,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0) -> dict
             if not active:
                 c.apply(InputState(), tag="fighter_idle")
                 continue
-            if isinstance(me.get("facing_right"), bool):
-                c.set_facing(Facing.RIGHT if me["facing_right"] else Facing.LEFT)
+            if facing_of(me) is not None:
+                c.set_facing(facing_of(me))
             d = fighter.decide(st.raw, t, player)
             if d.kind == "none":
                 continue

@@ -7,11 +7,10 @@ Also measures input -> mask latency in game frames (stage_timer), which is the g
 from __future__ import annotations
 
 import collections
-import json
 
 from . import clock
 from .actions import InputState
-from .game_state import StateReader, find_sf6_dir, locate_state_file
+from .game_state import open_state_reader
 from .session import Session
 
 KEYS = ["UP", "DOWN", "LEFT", "RIGHT", "LP", "MP", "HP", "LK", "MK", "HK"]
@@ -27,12 +26,9 @@ def _press_raw(sess: Session, logical: str, down: bool) -> float:
 
 
 def run_input_map(sess: Session, cfg: dict, hold_frames: int = 12, repeats: int = 3) -> dict:
-    game_dir = find_sf6_dir(cfg)
-    path = locate_state_file(game_dir) if game_dir else None
-    if path is None:
-        print("No REFramework state file found (menu R, restart SF6).")
+    reader = open_state_reader(cfg)
+    if reader is None:
         return {}
-    reader = StateReader(path).start()
     results: dict = {}
     try:
         st = reader.wait_newer(-1, timeout=2.0)
