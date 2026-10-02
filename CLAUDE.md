@@ -1537,6 +1537,26 @@ searched).
 - Results now keep the last 12 attempts step by step (`attempt_details`: ids, sent/start/contact frames,
   `bar_link`), so a timing problem can be traced from S.
 
+## 0.11.11: saved routes are re-parsed; the frame bar ends routes with no link window
+- **User (2026-10-02, 0.11.10 run):** "It ran HP into Hasho, but it did NOT Denjin charge before doing any moves".
+  - Cause: the lab used the moves saved when the Ryu page was imported (old parse: 5HP , L Hashogeki, no DC).
+    The 0.11.10 parser fix and the Denjin setup applied only to a fresh import.
+  - 0.11.10's "impossible link → cancel" rule turned the old 5HP , L Hashogeki into a cancel, which is
+    what the user saw.
+  - Now `combos.load` re-parses every saved route from its text with the current parser and the character's
+    Capcom data, so parser fixes reach the lab and the generator at once. The lab prints "setup before every
+    attempt: Denjin Charge".
+- **The run's attempt details** (new in 0.11.10) showed the rest:
+  - **No link window:** L Hashogeki , L Shoryuken (+2 on hit vs 5F) was blocked 7 times.
+    - The bar shows the Shoryuken starting on the bot's first free frame (`gap` 0) each time, so no timing
+      can work. The route needs the Denjin Hashogeki, as the user said.
+    - Now a `gap` 0 miss is repeated once at the same timing; a second one ends the route with
+      `no_link_window` (move, free frame, dummy's stun end), shown in the report.
+  - **Misread motion:** 623LP came out as 2LP (id 622) in 3 of 7 attempts; that jab was what got blocked.
+    - A blocked or dropped move that is not the planned one is now `wrong_move` with `came_out`, not a gap.
+    - The cause of the misread is unknown (motion pressed during the Hashogeki's recovery?). The details will
+      show whether it repeats with the Denjin route.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

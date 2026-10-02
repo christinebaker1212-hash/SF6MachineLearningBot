@@ -520,7 +520,15 @@ class ComboRun:
             # TRUE combo. A block after the first hit = a gap before the move that was blocked.
             self.blocked = {"tick": tick, "step": self._active(), "before_first_hit": not self.hits}
             self.last = raw
-            self._finish("first_blocked" if not self.hits else "blocked", self._active())
+            act = self._active()
+            unexpected = self.rt[act].get("unexpected") if act is not None else None
+            if unexpected is not None and self.hits:
+                # what was blocked is not the planned move (0.11.10 run: 623LP read as 2LP, id 622): a
+                # misread input, not a gap in the combo
+                self._finish("wrong_move", act)
+                self.fail["came_out"] = unexpected
+            else:
+                self._finish("first_blocked" if not self.hits else "blocked", act)
             return None
         hit = (hs > 0 and hs0 == 0 and not (p2.get("blockstun") or 0)) or (hp is not None and hp0 is not None and hp < hp0)
         if hit and prev is not None and self.hits and self.escape is None \
@@ -1160,6 +1168,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     kept_n = 0
     kept_lead = None
     prefix_misses = 0
+    no_window: dict = {}      # step -> how often the bar showed it started on the first free frame and missed
+    no_window_proof = None
     while not sess.stop_event.is_set():
         how = set_position(sess, reader, reset, _position(combo), state)
         if plan.get("jump_in"):
@@ -1253,6 +1263,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 jump_variant += 1        # the jump-in missed: start from another distance first
                 continue
             k = f.get("step")
+            bl = ((res.get("steps") or [{}] * ((k or 0) + 1))[k] or {}).get("bar_link") if isinstance(k, int) \
+                and k < len(res.get("steps") or []) else None
             if isinstance(k, int) and kept_n and k < kept_n:
                 # the kept moves failed this time (execution noise): replay them again before searching
                 prefix_misses += 1
@@ -1269,6 +1281,21 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                           f"{move_no(steps, k)}'s timing")
             else:
                 prefix_misses = 0
+            if f.get("kind") in ("blocked", "dropped") and bl and bl.get("gap") == 0:
+                # the frame bar: the move began on the bot's FIRST free frame and the dummy still recovered
+                # first. No earlier press can help (it would be eaten), a later one is worse: there is no link
+                # window here (0.11.11; the 0.11.10 run spent 7 tries on L Hashogeki , L Shoryuken this way)
+                no_window[k] = no_window.get(k, 0) + 1
+                if no_window[k] >= 2:
+                    no_window_proof = {"step": k, "move_no": move_no(steps, k), "move": steps[k].get("name"),
+                                       "free_at": bl.get("free_at"), "stun_end": bl.get("stun_end"),
+                                       "late_by": bl.get("late_by")}
+                    print(f"    frame bar: move {move_no(steps, k)} started on the first free frame and still "
+                          f"missed twice: no link window here, stopping this route")
+                    break
+                print(f"    frame bar: move {move_no(steps, k)} started on the first free frame and missed: "
+                      f"same timing once more to confirm")
+                continue                     # same offsets: a second identical miss proves it
             nxt = bar_offsets(steps, offsets, f, res, tried)
             if nxt is not None:
                 print(f"    frame bar: move {move_no(steps, f['step'])} began "
@@ -1287,6 +1314,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         summ["success_rate_final_timing"] = round((1 + sum(a["success"] for a in replays)) / (1 + len(replays)), 2)
     summ["guard"] = guard
     summ["attempt_details"] = details[-12:]
+    if no_window_proof:
+        summ["no_link_window"] = no_window_proof
     summ["sf6bot_version"] = __import__("sf6bot").__version__
     summ["true_combo"] = True if (summ["verified"] and guard == "after_first_hit") else (
         False if (summ.get("failed_at") or {}).get("kind") == "blocked" else None)
@@ -1401,6 +1430,8 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                         break
                     print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
                           f"damage listed {combo.get('damage') or combo.get('est_damage')})")
+                    if plan.get("setup"):
+                        print(f"    setup before every attempt: {plan['setup']['name']} ({plan['setup']['sequence']})")
                     if combo.get("page_hit_type", combo.get("hit_type")) != combo.get("hit_type") or combo.get("situation"):
                         print(f"    needs: {PASS_TEXT.get(combo.get('hit_type') or 'normal')}"
                               f"{', only as a punish' if combo.get('situation') == 'punish' else ''} "
@@ -1561,6 +1592,10 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
                          f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}")
         else:
             kept = f" | moves 1-{v['moves_kept']} worked (kept exactly)" if v.get("moves_kept") else ""
+            nw = v.get("no_link_window")
+            if nw:
+                kept += (f" | NO LINK WINDOW at move {nw['move_no']} ({nw['move']}): it started on the first free "
+                         f"frame and the dummy still recovered first (frame bar)")
             lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}")
     if skipped:
         from collections import Counter

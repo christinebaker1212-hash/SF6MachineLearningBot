@@ -480,7 +480,23 @@ def import_all(datasets_root: Path, pages_dir: Path | None = None, fetch: bool =
 
 
 def load(slug_or_name: str, datasets_root: Path) -> dict | None:
+    """A character's imported routes, RE-PARSED from their route text with the current parser and the
+    character's Capcom data. The saved file holds the moves as parsed at import time; before 0.11.11 those
+    were used as they were, so a parser fix (0.11.10: 'HP /DC Hasho') never reached the lab until the user
+    imported the pages again (user, 2026-10-02: "it did NOT Denjin charge")."""
     slug = slug_or_name if slug_or_name in fd.SLUGS else next(
         (s for s, n in fd.SLUGS.items() if n.lower() == slug_or_name.lower()), None)
     p = Path(datasets_root) / "combos" / f"{slug}.json"
-    return json.loads(p.read_text(encoding="utf-8")) if slug and p.exists() else None
+    if not (slug and p.exists()):
+        return None
+    data = json.loads(p.read_text(encoding="utf-8"))
+    capcom = fd.load(slug, Path(datasets_root) / "framedata")
+    moves = (capcom or {}).get("moves") or []
+    if moves:
+        from . import __version__
+        for c in data.get("combos") or []:
+            if c.get("controls") == "modern":
+                continue
+            c.update(resolve(c["route"], moves))
+        data["parsed_by"] = __version__
+    return data

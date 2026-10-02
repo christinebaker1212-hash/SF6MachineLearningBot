@@ -718,3 +718,73 @@ def test_frame_bar_types_measured_on_ryu_match_the_meter():
                          ("7x11 13x1 7x5 8x18", 12, 35), ("11x25 13x2 8x35", 26, 62), ("14x1 8x19", None, None)):
         chk = framebar.meter_check(cells(bar), su, tot)
         assert chk["startup_ok"] in (True, None) and chk["total_ok"] in (True, None), (bar, chk)
+
+
+def test_saved_routes_are_reparsed_so_parser_fixes_reach_the_lab(tmp_path):
+    """User, 2026-10-02 (0.11.10 run): 'It ran HP into Hasho, but it did NOT Denjin charge'. The lab used the
+    moves saved at import time (old parse: 5HP , L Hashogeki), so the 0.11.10 parser fix and the Denjin setup
+    never applied. Loading now re-parses every route from its text."""
+    from sf6bot import combos
+    cap = _capcom("ryu")
+    data = _combos("ryu", cap)
+    route = next(c for c in data["combos"] if c["route"].startswith("HP /DC Hasho , 214LP"))
+    route["steps"] = [{"token": "HP", "connector": "", "name": "Standing Heavy Punch"},
+                      {"token": "214LP", "connector": ",", "name": "L Hashogeki"},
+                      {"token": "623LP", "connector": ",", "name": "L Shoryuken"}]   # as saved by 0.11.9
+    (tmp_path / "combos").mkdir()
+    (tmp_path / "framedata").mkdir()
+    (tmp_path / "combos" / "ryu.json").write_text(json.dumps(data), encoding="utf-8")
+    (tmp_path / "framedata" / "ryu.json").write_text(json.dumps(cap), encoding="utf-8")
+    loaded = combos.load("Ryu", tmp_path)
+    again = next(c for c in loaded["combos"] if c["route"] == route["route"])
+    assert [(s["connector"], s["name"]) for s in again["steps"]][:2] == [
+        ("", "Standing Heavy Punch"), (">", "[Denjin Charge]Hashogeki")]
+    assert cl.plan_route(again, cap, None)["setup"]["name"] == "Denjin Charge"
+
+
+def test_bar_proof_of_no_link_window_stops_the_route(monkeypatch):
+    """0.11.10 run: L Hashogeki , L Shoryuken (+2 on hit vs a 5F start-up) was blocked 7 times while the
+    search tried other timings; the bar showed the Shoryuken starting on the first free frame each time.
+    Two such misses now end the route with that proof."""
+    import threading
+    from sf6bot import catalog
+    moves = [{"id": 618, "su": 4, "tot": 14, "adv": 5, "conn": ""},
+             {"id": 930, "su": 7, "tot": 40, "adv": 30, "conn": ","}]     # +5 vs 7F: no window
+    steps = _steps(moves)
+    monkeypatch.setattr(cl, "set_position", lambda *a, **k: "midscreen")
+    monkeypatch.setattr(catalog, "walk_to_contact", lambda *a, **k: None)
+    monkeypatch.setattr(catalog, "_wait_settled", lambda *a, **k: None)
+
+    def attempt(sess, reader, runner, steps, offsets, na, nd, mv, lead=cl.LEAD, gravity=None, fixed=None):
+        sim = Sim(moves, lead=4)
+        sim.bar_on = True
+        return _run(sim, steps, offsets)
+    monkeypatch.setattr(cl, "_attempt", attempt)
+
+    class Reader:
+        last_fm = None
+
+        def latest(self):
+            return None
+    sess = type("S", (), {"stop_event": threading.Event()})()
+    summ = cl._test_route(sess, Reader(), None, None, {"route": "2LP , 623LP"}, {"steps": steps},
+                          40, 2, ({NEUTRAL}, {DUMMY_IDLE}, set()), "none", state={})
+    assert not summ["verified"] and summ["no_link_window"]["move_no"] == 2 and summ["attempts"] == 2
+
+
+def test_a_misread_motion_that_gets_blocked_is_a_wrong_move_not_a_gap():
+    """0.11.10 run: L Shoryuken (930) came out as 2LP (622) 3 times out of 7 and was blocked; that is a
+    misread input, reported as the move that came out."""
+    steps = _steps(MOVES[:2])
+    steps[1]["expect_id"], steps[1]["known_ids"] = 930, [930, 938]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    assert run.feed(_line(1, NEUTRAL, 0)) == 0
+    run.sent(0)
+    run.feed(_line(2, 618, 0))
+    run.feed(_line(5, 618, 3, d=REACT, hs=8, stun=10, hp=9700))
+    run.rt[1].update(sent=20, at_send=(618, 13)); run.pending = 1
+    for t in range(22, 28):
+        run.feed(_line(t, 622, t - 22, d=REACT, stun=2, hp=9700))
+    run.feed(_line(28, 622, 6, d=160, hs=6, block=12, hp=9700))
+    res = run.result()
+    assert res["fail"]["kind"] == "wrong_move" and res["fail"]["came_out"] == 622
