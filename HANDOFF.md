@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.7.0**, REFramework exporter script **v8**, branch
+*State as of 2026-10-02: code version **0.8.0**, REFramework exporter script **v8**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -178,7 +178,15 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    bot on P2 (N) while the user plays P1. Then teach a routine with L, e.g. picking Ryu in
    Versus.
 6. Catalog re-run (C/B) to confirm the 0.4.1 fixes.
-7. **Move-id inference (0.7.0, menu X):** the user will record a replay at 8× (D) and a CPU
+7. **0.8.0 fighter fixes** (facing from positions, anti-air on real jumps only, standing block vs
+   jump-ins, throw tech, interruptible combos): fight CPU Ken level 4 and 7 again with V. Send S
+   plus the `datasets/fights` files. Check `throws_against` (seen vs thrown) to see whether the
+   reaction tech works.
+8. **Bot vs the user (menu H):** K first (bot pad), then H. The user drives menus with the overlay
+   buttons, and the bot takes over at "Fight!". Untested in game: ViGEmBus, the panel lock, rematch
+   flow.
+9. **Re-record the 8× replay with 0.8.0** (the recorder kept ~1 in 7 lines; fixed).
+10. **Move-id inference (0.7.0, menu X):** the user will record a replay at 8× (D) and a CPU
    fight with the same characters (V), then run X and send S. Check how many ids the map gets per
    character, how they compare with the Ryu catalog, and whether the fighter's punishes on
    inferred ids land. 1× replays give far more votes than 8×.

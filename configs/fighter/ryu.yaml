@@ -11,9 +11,21 @@ ranges:
   close: 1.00
   poke: 1.45           # 2MK / 5HP reach: guess, to be measured
   fireball_min: 2.30   # beyond this, throw Hadokens
+  side_deadzone: 0.15  # |x difference| below this: keep the previous side (players overlapping)
 anti_air:
-  max_dist: 1.80       # opponent within this horizontal distance...
-  max_height: 1.70     # ...descending below this height -> Shoryuken (startup 7 + ~4F input latency)
+  # MEASURED (fights 2026-10-02): Shoryukens that hit started at distance 0.60-1.24; those started at
+  # 1.7-3.0 whiffed. The opponent's position is predicted lead_frames ahead (decision + input latency
+  # + startup), and only real jumps count (ids.jump), not falling from a juggle or knockdown.
+  lead_frames: 12
+  min_dist: 0.25       # predicted closer than this, or on the other side = cross-up -> block instead
+  max_dist: 1.30
+  max_height: 1.70
+  block_lead_frames: 6 # blocking an airborne attack: hold back from where they will be in ~our input latency
+throw_tech:
+  # MEASURED: Ken's throw start-up (715 forward, 717 back) is visible for 5 frames before it connects
+  # (720 / 724). Whether pressing LP+LK on seeing it is fast enough to tech is NOT known yet: our
+  # input reaches the game 3-5 frames later. fight_summary counts the outcome.
+  max_dist: 1.20
 punish:
   latency_frames: 4    # measured: input -> game sees it, 3-5 frames (usually 4)
   # on-block advantage (attacker) at or below the threshold -> that punish. Needs a catalog of the
@@ -33,6 +45,12 @@ inferred:
 # opponent has no move catalog, so DI reactions work against any opponent seen so far.
 common_moves:
   855: {name: "Drive Impact", di: true}
+# Action ids by kind, MEASURED in the user's Ryu vs Ken fights and replays (2026-10-02). "a-b" = range.
+ids:
+  jump: ["34-40", "650-659"]          # Ken jump 36/37, jump normals 651-655 (Ryu's are 651-656)
+  throw_startup: [715, 716, 717]      # Ryu forward 715 / back 716 (catalog); Ken 715 / 717
+  thrown: [721, 725]                  # the bot being thrown by Ken's forward / back throw
+  hit_reaction: ["200-399"]           # hit, juggle, knockdown and wake-up (2xx/3xx in the fights)
 attack_id_min: 450     # heuristic: opponent action ids >= this are attacks (Ryu: normals 600+, specials 900+, DI 855, parry 480)
 moves:
   hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}
@@ -41,6 +59,7 @@ moves:
   light_chain: {name: "2LK ~ 2LP ~ 5LP", seq: "2+LK@3 2@7 2+LP@3 5@7 5+LP@3"}
   standing_hp: {name: "5HP", seq: "5+HP@3"}
   throw: {name: "Throw", seq: "5+LP+LK@3"}
+  throw_tech: {name: "Throw tech", seq: "5+LP+LK@3"}
   shoryuken: {name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
   drive_impact: {name: "Drive Impact", seq: "5+HP+HK@3"}
   walk_forward: {name: "walk forward", seq: "6@12"}

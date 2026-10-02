@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import dataclass
 
 from . import clock
@@ -78,11 +79,15 @@ class SequenceRunner:
         self.controller = controller
         self.frame_s = frame_s
         self.sink = sink or (lambda e: None)
+        self.aborted: str | None = None
 
     def run(self, seq: Sequence, stop_event: threading.Event | None = None,
-            end_neutral: bool = True, start_at: float | None = None) -> tuple[list[StepTiming], bool]:
-        """Execute blocking. Returns (step timings, completed)."""
+            end_neutral: bool = True, start_at: float | None = None,
+            abort=None) -> tuple[list[StepTiming], bool]:
+        """Execute blocking. Returns (step timings, completed). `abort`: optional callable polled
+        while waiting (~1 ms); a truthy return stops the sequence and is kept in `self.aborted`."""
         t0 = start_at if start_at is not None else clock.now()
+        self.aborted = None
         timings: list[StepTiming] = []
         cum = 0
         completed = True
@@ -91,6 +96,16 @@ class SequenceRunner:
         plan = list(seq.steps) + ([Step(NEUTRAL, 0)] if end_neutral else [])
         for i, step in enumerate(plan):
             scheduled = t0 + cum * self.frame_s
+            if abort is not None:
+                while clock.now() < scheduled - 0.0015 and not (stop_event is not None and stop_event.is_set()):
+                    why = abort()
+                    if why:
+                        self.aborted = why
+                        break
+                    time.sleep(0.001)
+                if self.aborted:
+                    completed = False
+                    break
             if not clock.precise_sleep_until(scheduled, stop_event=stop_event):
                 completed = False
                 break
@@ -101,7 +116,9 @@ class SequenceRunner:
             timings.append(StepTiming(i, step.state.label(), scheduled, t_sent, t_sent - t_call))
             cum += step.frames
         if not completed:
-            self.controller.release_all(f"sequence {seq.name} interrupted")
+            self.controller.release_all(f"sequence {seq.name} interrupted"
+                                        + (f": {self.aborted}" if self.aborted else ""))
         self.sink({"type": "sequence_end", "t": clock.now(), "name": seq.name, "completed": completed,
+                   "aborted": self.aborted,
                    "steps": [t.__dict__ | {"error_s": t.error_s} for t in timings]})
         return timings, completed

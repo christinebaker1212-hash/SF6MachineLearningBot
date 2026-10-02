@@ -16,8 +16,10 @@ echo ================= sf6bot =================
 echo  Safety while the bot runs: F8 or click BOTH thumbsticks = STOP   F7 = pause   F6 = flip facing
 echo.
 echo  --- Play and record ---
-echo  V. FIGHT: scripted Ryu vs CPU, bot on the LEFT (P1). Start the match first
+echo  V. FIGHT vs CPU, bot on the LEFT (P1). Plays every match until F8; start it from any menu
 echo  N. FIGHT: same, bot on the RIGHT (P2)
+echo  H. Bot vs YOU: bot = P2 on its own controller. Overlay buttons drive menus between
+echo     matches (character select, rematch); the bot takes over at "Fight!" and records every match
 echo  D. Record a replay into training data (start the replay, the bot presses nothing)
 echo  Y. Training data summary: merges repeat recordings of the same replay (no game needed)
 echo  X. Learn move ids from recordings: which action id is which move, for every character seen
@@ -81,6 +83,7 @@ if /i "%CH%"=="b" (%BOT% catalog --guard all & goto done)
 if /i "%CH%"=="f" (%BOT% framedata-import & goto done)
 if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
+if /i "%CH%"=="h" (%BOT% fight --player p2 --pad & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="y" (%BOT% dataset-summary & goto done)

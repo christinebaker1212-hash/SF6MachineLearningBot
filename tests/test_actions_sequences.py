@@ -92,3 +92,16 @@ def test_runner_timing_error_small():
     # game PC reports (measured there: p99 about 6 ms). This only guards against gross scheduling bugs.
     assert sorted(abs(t.error_s) for t in timings)[len(timings) // 2] < 0.010
     assert max(abs(t.error_s) for t in timings) < 0.050
+
+
+def test_abort_stops_between_steps_and_stays_armed():
+    """Fighter 0.8.0: a neutral combo stops when abort() reports a throw/DI/jump-in."""
+    import time
+    b, c = make()
+    t0 = time.perf_counter()
+    runner = SequenceRunner(c, frame_s=0.01)
+    _, completed = runner.run(parse_sequence("2+LK@3 2@30 2+LP@3"),
+                              abort=lambda: "opponent throw" if time.perf_counter() - t0 > 0.05 else None)
+    assert not completed and runner.aborted == "opponent throw"
+    assert b.down == set() and c.armed
+    assert time.perf_counter() - t0 < 0.2          # did not wait out the 30-frame step

@@ -914,6 +914,60 @@ The safety tests are part of acceptance. During a run:
   characters, and whether the action id starts the same tick as the press.
 - **User test:** record a replay at 8× (D, v8) and a CPU fight with the same characters (V), then X.
 
+## 0.8.0: fights vs CPU level 4 and 7 analysed, fighter fixes, one session for bot vs human
+### Results (user, 2026-10-02, exporter v8, both fights recorded with 0 skipped frames)
+- **CPU level 4 Ken: WON 2–0. CPU level 7 Ken: LOST 0–2, "easily defeated"** (user).
+- Fight recordings: 4,722 and 4,578 frames, **0 skipped, all from the per-tick hook** (`src: tick`).
+  v8 chose and confirmed `nBattle.sGame.PreUpdateShell`; **per-tick export works at 1×.**
+- User's diagnosis, all confirmed in the data:
+  1. **"Side switches turn Hadokens into Hashogekis."** The exported `facing_right` flag keeps the
+     old direction through a knockdown, and while a cross-up passes over. The bot mirrored by that
+     flag; the game reads motions for the side the opponent is on. Examples: L4 round 2 frame 1622
+     and L7 round 2 frame 589 (getting up with the opponent on the right, flag still left: 2-1-4+LP
+     = L Hashogeki). The flag disagreed with the positions in 305 (L4) and 783 (L7) frames.
+  2. **"The spacing is not correct for a shoryu."** Shoryukens that hit started at distance
+     0.60–1.24. Ones at 1.7–3.0 whiffed, and the rule fired on Ken **falling from a juggle or
+     knockdown** (ids 239, 280, 330), not just on jumps. One against an air Tatsu cross-up came out as
+     H Hashogeki (L4 round 1, frame 1285).
+  3. **"Cannot tech grabs."** Throws did **62% (L4) and 42% (L7)** of the bot's damage. Ken's throw
+     start-up is visible for 5 frames: forward **715 → 720** (victim 721), back **717 → 724** (victim
+     725). The bot pressed LP+LK on none of them. It was holding down-back (rule 5 counted 715/717 as
+     attacks) or in the middle of a neutral combo.
+- Other measured ids: Ken jump 36/37, jump normals 651–655 (Ryu 651–656), air hit, juggle and
+  knockdown 2xx/3xx. Ken specials are seen airborne as 955–959, 982 and 1009 (OD air Tatsu).
+### Fighter changes (`configs/fighter/ryu.yaml`, `sf6bot/fighter.py`)
+- **Facing from positions** (`ScriptedFighter.facing`, dead zone 0.15), not from the flag.
+- **Anti-air only on jump ids**, never on hit-reaction ids. The opponent's x is predicted 12 frames
+  ahead and must be 0.25–1.30 away on the same side. A predicted cross-up → standing block toward
+  the landing side (`block_crossup`).
+- **Jump attacks are blocked standing (4), not down-back.** Blocking an airborne opponent faces
+  where they will be 6 frames later.
+- **Throw tech:** opponent throw start-up (715/716/717) within 1.2 → LP+LK, before any block rule.
+  Whether reacting to start-up is fast enough is **unknown**: the input reaches the game 3–5
+  frames later. `fight_summary.throws_against` counts seen vs thrown.
+- **Interruptible sequences:** `SequenceRunner.run(abort=...)` polls between steps (~1 ms). Neutral
+  pokes and combos stop for a throw start-up, a DI or a jump-in (`fight_summary.interrupted`).
+- Motion moves are not started while the players overlap (side unclear).
+- Replaying the real fights through `decide()` (not the same as live play): throw techs 4/4 (L4) and
+  9/9 (L7) of the start-ups near the bot; no Shoryuken on a non-jump.
+### Replay-record 8× bug (Python side)
+- The 8× replay showed the Lua writing every tick (`tick_lines` 2,811). But `replay-record` used
+  `wait_newer()`, which keeps only the newest line per render counter `f`. At ~5.5 ticks per render
+  it kept 1 line in ~7. **Fixed:** it takes every line through `on_state`. Test:
+  `tests/test_replay_record.py`. **Re-record 8× replays with 0.8.0.**
+### One session for bot vs human (user request)
+- Before: the overlay buttons (P) and the fight (V/N) were separate runs, so the user had to time
+  "stop buttons, start fight" by hand.
+- `fight` now waits for a battle, plays every match from "Fight!" to the KO, saves each match to
+  `datasets/fights/`, and goes back to waiting. `--matches N` (default 0 = until F8 / 1 h).
+- `--pad` (menu **H**, bot = P2 on its own controller): the overlay buttons drive menus,
+  character select and rematch between matches, and are **locked while the bot fights**.
+- Every state line goes in order through the match tracker and the recording; decisions use the
+  newest. A match closes 3 s after the KO, or when the game leaves the battle.
+- `fight_summary.json`: one match as before; several give `{"matches": [...], "record": ...}`.
+- MOCK test `tests/test_fight_session.py`: the two real fights with menu gaps → record 1–1, two
+  datasets, buttons locked while fighting.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

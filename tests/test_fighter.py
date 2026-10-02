@@ -1,27 +1,111 @@
 """MOCK: scripted fighter decisions on synthetic states (not the game), plus the opponent-catalog
 loader on the user's REAL 0.3.2 Ryu catalog (frame meter values)."""
 import gzip
+import json
 from pathlib import Path
 
+from sf6bot.actions import Facing
 from sf6bot.fighter import ScriptedFighter, load_fighter_config, load_opponent_catalog
 
 DATA = Path(__file__).parent / "data"
 FCFG = load_fighter_config(Path(__file__).parent.parent / "configs" / "fighter")
 
 
-def state(me=None, op=None):
+def state(me=None, op=None, timer=500):
     base = {"x": 0.0, "y": 0.0, "hp": 10000, "facing_right": True, "action_id": 1, "hitstun": 0, "blockstun": 0}
     p1 = {**base, **(me or {})}
     p2 = {**base, "x": 2.0, "facing_right": False, **(op or {})}
-    return {"ready": True, "p1": p1, "p2": p2}
+    return {"ready": True, "stage_timer": timer, "p1": p1, "p2": p2}
 
 
-def test_anti_air_on_descending_jump():
+def test_anti_air_where_the_jump_lands():
     f = ScriptedFighter(FCFG, seed=1)
-    assert f.decide(state(op={"x": 1.5, "y": 1.9}), 0.0, 0).rule != "anti_air"   # rising/too high
-    d = f.decide(state(op={"x": 1.4, "y": 1.5}), 0.02, 0)                         # descending, in range
-    assert d.rule == "anti_air" and "623" not in d.seq and d.seq.endswith("3+HP@3")
-    assert f.decide(state(op={"x": 1.3, "y": 1.2}), 0.04, 0).rule != "anti_air"   # once per jump
+    # forward jump (id 37) coming in at 0.06/frame: predicted 12 frames ahead
+    assert f.decide(state(op={"x": 2.6, "y": 1.5, "action_id": 37}, timer=500), 0.0, 0).rule != "anti_air"
+    d = f.decide(state(op={"x": 2.54, "y": 1.45, "action_id": 37}, timer=501), 0.02, 0)   # lands at 1.82: too far
+    assert d.rule != "anti_air"
+    f.decide(state(op={"x": 1.96, "y": 1.25, "action_id": 37}, timer=511), 0.18, 0)
+    d = f.decide(state(op={"x": 1.90, "y": 1.2, "action_id": 37}, timer=512), 0.2, 0)     # lands at ~1.18
+    assert d.rule == "anti_air" and d.seq.endswith("3+HP@3")
+    assert f.decide(state(op={"x": 1.84, "y": 1.1, "action_id": 37}, timer=513), 0.22, 0).rule != "anti_air"
+
+
+def test_no_anti_air_on_juggled_opponent():
+    f = ScriptedFighter(FCFG, seed=1)
+    f.decide(state(op={"x": 1.3, "y": 1.0, "action_id": 239}, timer=500), 0.0, 0)
+    d = f.decide(state(op={"x": 1.25, "y": 0.9, "action_id": 239}, timer=501), 0.02, 0)
+    assert d.rule != "anti_air"
+
+
+def test_cross_up_is_blocked_toward_the_landing_side():
+    f = ScriptedFighter(FCFG, seed=1)
+    f.decide(state(op={"x": 0.40, "y": 1.6, "action_id": 37}, timer=500), 0.0, 0)
+    d = f.decide(state(op={"x": 0.34, "y": 1.5, "action_id": 37}, timer=501), 0.02, 0)
+    assert d.rule == "block_crossup" and d.direction == 4 and d.facing is Facing.LEFT
+
+
+def test_throw_startup_is_teched_not_blocked():
+    f = ScriptedFighter(FCFG, seed=1)
+    d = f.decide(state(op={"x": 0.8, "action_id": 717}), 0.0, 0)
+    assert d.rule == "throw_tech" and "LP+LK" in d.seq
+    assert f.decide(state(op={"x": 0.8, "action_id": 717}, timer=501), 0.02, 0).rule != "throw_tech"  # once
+
+
+def test_jump_attack_blocked_standing():
+    f = ScriptedFighter(FCFG, seed=1)
+    d = f.decide(state(me={"blockstun": 10}, op={"x": 0.8, "y": 0.6, "action_id": 654}), 0.0, 0)
+    assert d.kind == "hold" and d.direction == 4
+
+
+def test_side_from_positions_not_the_facing_flag():
+    f = ScriptedFighter(FCFG, seed=1)
+    # knocked down on the left, flag still says facing left (measured), opponent to the right
+    assert f.facing({"x": 0.27, "facing_right": False}, {"x": 3.6}) is Facing.RIGHT
+    assert f.facing({"x": 0.27}, {"x": 0.30}) is Facing.RIGHT          # inside the dead zone: kept
+    assert f.facing({"x": 0.27}, {"x": -1.0}) is Facing.LEFT
+
+
+def _fight(name):
+    """Dataset rows call the clock "frame"; live state calls it stage_timer."""
+    return [dict(r, stage_timer=r["frame"]) for r in
+            (json.loads(l) for l in gzip.open(DATA / name, "rt", encoding="utf-8"))]
+
+
+def test_real_fights_reactions():
+    """The user's real fights vs CPU Ken (2026-10-02, levels 4 and 7) replayed through decide():
+    every Hadoken that came out as Hashogeki had the bot's flag facing away from the opponent; every
+    throw start-up near the bot now gets a tech; no Shoryuken on juggled or knocked-down opponents."""
+    for name in ("fight_2026-10-02_cpu4_ken.jsonl.gz", "fight_2026-10-02_cpu7_ken.jsonl.gz"):
+        rows = _fight(name)
+        f = ScriptedFighter(FCFG, seed=1)
+        throws = techs = aa_bad = 0
+        prev_op = None
+        for r in rows:
+            if not r.get("fight"):
+                continue
+            d = f.decide(r, r["t"], 0)
+            op = r["p2"]
+            if op["action_id"] in f.throw_ids and op["action_id"] != prev_op and abs(op["x"] - r["p1"]["x"]) <= 1.2 \
+                    and not r["p1"]["hitstun"]:
+                throws += 1
+                techs += d.rule == "throw_tech"
+            if d.rule == "anti_air" and op["action_id"] not in f.jump_ids:
+                aa_bad += 1
+            prev_op = op["action_id"]
+        assert throws >= 4 and techs == throws, (name, throws, techs)
+        assert aa_bad == 0
+
+
+def test_real_cross_up_gives_block_not_shoryuken():
+    """Level 4 fight, round 1, frames 1265-1285: Ken's OD air Tatsu (1009) passes over the bot at
+    frame 1275; 0.7.0 input 623 facing the old side and got H Hashogeki. Now: no Shoryuken, a
+    standing block, switched to the new side before Ken is past (0.7.0 would switch at ~1283)."""
+    rows = [r for r in _fight("fight_2026-10-02_cpu4_ken.jsonl.gz") if r["round"] == 0 and 1265 <= r["frame"] <= 1285]
+    f = ScriptedFighter(FCFG, seed=1)
+    ds = {r["frame"]: f.decide(r, r["t"], 0) for r in rows}
+    assert all(d.rule != "anti_air" for d in ds.values())
+    assert all(d.kind == "hold" and d.direction == 4 for fr, d in ds.items() if fr >= 1266)
+    assert ds[1272].facing is Facing.RIGHT          # Ken still left of the bot, landing right of it
 
 
 def _ryu_catalog(tmp_path):

@@ -139,9 +139,14 @@ def from_events_file(events_path: str | Path) -> DatasetBuilder:
 def run_replay_record(sess, cfg: dict, seconds: float, notes: str = "") -> Path | None:
     """Live: record a replay (or any match) the user plays back in SF6 into a dataset file.
     Stops at F8, after `seconds`, or 5 s after the match ends. The bot sends no inputs."""
+    import queue
     from . import clock
     from .game_state import open_state_reader
-    reader = open_state_reader(cfg)
+    # Every line, not just the newest: at 8x the exporter writes several game ticks per render, all
+    # with the same render counter "f", and wait_newer() would keep only the last of them (0.7.0 bug:
+    # the Lua wrote every tick, the recording kept ~1 line per render).
+    lines: queue.Queue = queue.Queue()
+    reader = open_state_reader(cfg, on_state=lines.put)
     if reader is None:
         return None
     b = DatasetBuilder()
@@ -149,13 +154,13 @@ def run_replay_record(sess, cfg: dict, seconds: float, notes: str = "") -> Path 
     print(f"Recording up to {seconds:.0f} s. Start the replay now. F8 stops early; it also stops ~5 s after "
           "the match ends.")
     t_end = clock.now() + seconds
-    last, ended_at, n_events = -1, None, 0
+    ended_at, n_events = None, 0
     try:
         while clock.now() < t_end and not sess.stop_event.is_set():
-            st = reader.wait_newer(last, timeout=0.25)
-            if st is None:
+            try:
+                st = lines.get(timeout=0.25)
+            except queue.Empty:
                 continue
-            last = st.frame
             b.add(st.raw, st.t_recv)
             for e in b.events[n_events:]:
                 if e["event"] == "round_end":
@@ -171,6 +176,9 @@ def run_replay_record(sess, cfg: dict, seconds: float, notes: str = "") -> Path 
                 break
     finally:
         reader.stop()
+    while not lines.empty():          # lines that arrived after the loop's last check
+        st = lines.get_nowait()
+        b.add(st.raw, st.t_recv)
     if not b.rows:
         print("Nothing recorded (no battle state seen).")
         return None

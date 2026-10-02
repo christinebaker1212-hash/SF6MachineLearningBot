@@ -233,9 +233,19 @@ def cmd_framedata_import(args, cfg):
 
 
 def cmd_fight(args, cfg):
+    """The bot plays matches as p1/p2. With --pad it uses its own virtual controller and the overlay
+    buttons drive menus between matches (vs a human); --matches 0 = until F8 / --seconds."""
     from .fighter import run_fight
+    if args.pad:
+        cfg = _with_pad(cfg)
     with _session(args, cfg, f"fight_{args.player}") as s:
-        run_fight(s, cfg, args.seconds, player=0 if args.player == "p1" else 1)
+        panel = None
+        if args.pad and s.overlay is not None:
+            from .pad_teach import PadPanel
+            panel = PadPanel(s.controller.backend, grabber=s.grabber, sink=s.recorder.event)
+            s.overlay.pad_panel = panel
+        run_fight(s, cfg, args.seconds, player=0 if args.player == "p1" else 1,
+                  matches=args.matches or None, panel=panel)
     _print_report(s)
 
 
@@ -460,7 +470,10 @@ def main(argv=None):
 
     p = sub.add_parser("fight", help="scripted Ryu fights (vs CPU); hand-written rules, not learned")
     p.add_argument("--player", choices=("p1", "p2"), default="p1", help="which side the bot plays")
-    p.add_argument("--seconds", type=float, default=300.0)
+    p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h)")
+    p.add_argument("--matches", type=int, default=0, help="stop after N matches (0 = until F8 / --seconds)")
+    p.add_argument("--pad", action="store_true", help="bot on its own virtual controller; overlay buttons "
+                   "drive menus between matches (locked while it fights)")
     p.set_defaults(fn=cmd_fight)
 
     p = sub.add_parser("controller", help="the bot uses the keyboard or its own virtual Xbox controller")

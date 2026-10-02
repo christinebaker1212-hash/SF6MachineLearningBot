@@ -51,6 +51,7 @@ class PadPanel:
         self.recording = routine is not None
         self.steps: list[dict] = []
         self.lit: set[str] = set()
+        self.locked = False            # set by the fighter while it plays (fight --pad): clicks ignored
         self._last_t: float | None = None
         self._lock = threading.Lock()
 
@@ -62,6 +63,8 @@ class PadPanel:
         return None
 
     def click(self, name: str) -> None:
+        if self.locked:
+            return
         if name == "REC":
             if self.routine is None:
                 return  # no name given at start: nothing to record into
@@ -79,7 +82,8 @@ class PadPanel:
             cv2.rectangle(area, (x, y), (x + w, y + h), col, -1)
             label = ("REC*" if self.recording else "REC") if name == "REC" else LABELS.get(name, name)
             cv2.putText(area, label, (x + 3, y + h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (255, 255, 255), 1)
-        txt = (f"teaching '{self.routine}': {len(self.steps)} steps" if self.routine
+        txt = ("BOT FIGHTING: buttons locked until the match ends" if self.locked
+               else f"teaching '{self.routine}': {len(self.steps)} steps" if self.routine
                else "bot controller (click to press)")
         cv2.putText(area, txt, (80, 142), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 200, 255), 1)
 
