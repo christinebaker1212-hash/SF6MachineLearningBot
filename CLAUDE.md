@@ -677,6 +677,47 @@ The safety tests are part of acceptance. During a run:
   - charge timing, 360/720 execution, air-charge setup
   - whether 2F motion steps are reliable for every special
 
+### Move-list catalog VERIFIED in game (0.4.0, Ryu, guard All + None, 2026-10-01)
+- 53 moves × 2 guard modes; **149/159 values equal Capcom's.** Supers, OD moves, command normals,
+  both throws, DI and Denjin Charge all came out.
+- New ids: M Hadoken 902, OD Hadoken 906, M SRK 932, OD SRK 936, M Tatsu 1002, OD Tatsu 1009,
+  air Tatsu 1011, OD air Tatsu 1013, M/OD High Blade 1027/1031, M/OD Hashogeki 1037/1040, Denjin
+  1051, back throw 716.
+- **Bot-side problems, all fixed in 0.4.1:**
+  - SA1 (guard All) came out as H Shoryuken: id 934 and H SRK's meter values (7/62/−36). A dropped
+    direction turned 236236 into 623 (user confirmed "SA1 incorrectly tagged"). Fixes:
+    - supers now use 3F per direction
+    - a row that comes out as an already-catalogued move is retried, up to 3 attempts in total
+      (`attempts` is recorded)
+  - OD Shoryuken (guard None) came out as 2MP once. Retried now as well.
+  - SA3 on hit "timed out" (user): the meter was still mid-cinematic (Total "--"). Supers now wait
+    up to 8 s more for a numeric Total.
+  - Aerial Tatsu got move_id 37, the forward-jump id. The catalog now learns neutral, forward and
+    back jump ids as movement.
+- **Data differences, not bugs:**
+  - 2HP 34 vs 36, 4HP 35 vs 36, 4HK 43 vs 44, OD Hashogeki 43 vs 42: the meter wins.
+  - Throws total 96/100 vs 30, and parry: different definitions.
+- Damage is still 0 on hits; the dummy's HP setting is unconfirmed.
+
+## Exporter v6: one line per game tick (0.4.1)
+- The 8× test showed the v5 exporter writes once per render: about 4 of 5 game frames were missing
+  at 8×.
+- **v6** writes from the existing READ-ONLY hook on `app.FBattleMediator.UpdateGameInfo`
+  (post-call, `"src":"tick"`), deduplicated on (round, stage_timer). The render callback writes
+  (`"src":"frame"`) only when the clock moved without a tick line, plus a pause heartbeat every
+  30 renders.
+- **UNVERIFIED:** whether UpdateGameInfo runs once per game tick. The heartbeat counters
+  (`hook_calls`, `tick_lines`, `frame_lines`), the REFramework UI and the dataset meta
+  `frames_by_source` show it.
+  - If it isn't per tick, v6 behaves like v5, with fewer duplicate lines.
+- MOCK test: `tests/lua/stub_run.lua` + `tests/test_exporter_lua.py`. They run the real script
+  under a stubbed REFramework API with lua5.4 and check three things:
+  - 8 ticks per render → all 400 frames, once each
+  - without the hook → 1 in 4, as before
+  - pause heartbeat
+- **User test:** record the SAME replay with D at 1× and at 8×. Compare `skipped_game_frames` and
+  `frames_by_source`.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

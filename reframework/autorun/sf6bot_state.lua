@@ -1,5 +1,10 @@
 -- sf6bot game-state exporter for REFramework (Street Fighter 6).
--- Writes one JSON line per rendered frame to reframework/data/sf6bot_state.jsonl.
+-- Writes one JSON line per GAME frame (stage_timer tick) to reframework/data/sf6bot_state.jsonl.
+-- v6: lines are written from a hook on app.FBattleMediator.UpdateGameInfo ("src":"tick") when that
+-- runs once per game tick, so fast replays (8x) no longer skip frames; the per-render callback
+-- ("src":"frame") writes only when stage_timer moved without a tick line, plus a heartbeat every
+-- 30 renders when the clock is stopped (pause). Whether UpdateGameInfo is per tick is UNVERIFIED:
+-- the counters in the heartbeat file (hook_calls, tick_lines, frame_lines) show it.
 -- Read-only: it reads battle state and never changes the game.
 -- Field names come from community scripts (rkaganda/SF6_replay_capture, haruno-ku/SF6_Tools);
 -- every read is protected so a renamed field shows up in "missing" instead of crashing.
@@ -9,11 +14,12 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 5          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 6          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
 local IDLE_EVERY = 30             -- outside battle, write a heartbeat every N frames
+local STILL_EVERY = 30            -- in battle with the clock stopped (pause), repeat a line every N renders
 
 local enabled = true
 local fh = nil
@@ -21,6 +27,10 @@ local lines = 0
 local frame_no = 0
 local last_error = ""
 local last_missing = ""
+local hook_calls, tick_lines, frame_lines = 0, 0, 0
+local last_key = nil              -- "round:stage_timer" of the last battle line written
+local renders_since_write = 0
+local export_battle = nil         -- defined below; called from the hook and from re.on_frame
 
 local open_errors = {}
 
@@ -45,6 +55,7 @@ local function write_info(in_battle)
     pcall(function()
         json.dump_file("sf6bot_exporter_info.json", {
             version = SCRIPT_VERSION, frame = frame_no, path = OUT_PATH, lines = lines, enabled = enabled,
+            hook_calls = hook_calls, tick_lines = tick_lines, frame_lines = frame_lines,
             in_battle = in_battle, last_error = last_error, missing = last_missing,
             open_errors = table.concat(open_errors, " | "),
         })
@@ -93,7 +104,14 @@ pcall(function()
                 end
             end
         end)
-    end, function(retval) return retval end)
+    end, function(retval)
+        hook_calls = hook_calls + 1
+        if enabled and export_battle then
+            local ok, err = pcall(export_battle, "tick")
+            if not ok then last_error = "tick: " .. tostring(err) end
+        end
+        return retval
+    end)
 end)
 
 -- Training Mode frame meter (the game's own Startup / Total / Advantage). READ only. Field names are
@@ -204,49 +222,62 @@ local function write_line(s)
     if lines >= MAX_LINES then open_file() end
 end
 
+-- One battle line. src = "tick" (UpdateGameInfo hook) or "frame" (render callback).
+-- Returns false if not in battle. Dedupes on (round, stage_timer) so each game frame is written once.
+export_battle = function(src)
+    local gb = sdk.find_type_definition("gBattle")
+    local players = gb and try(function() return gb:get_field("Player"):get_data(nil).mcPlayer end)
+    local teams = gb and try(function() return gb:get_field("Team"):get_data(nil).mcTeam end)
+    local p1 = players and try(function() return players[0] end)
+    local p2 = players and try(function() return players[1] end)
+    if not (p1 ~= nil and p2 ~= nil and teams ~= nil) then return false end
+    local stage_timer = try(function() return gb:get_field("Game"):get_data(nil).stage_timer end)
+    local round_no = try(function() return gb:get_field("Round"):get_data(nil).RoundNo end)
+    local key = tostring(round_no) .. ":" .. tostring(stage_timer)
+    if stage_timer ~= nil and key == last_key then
+        -- this game frame is already written; the render path repeats it only as a pause heartbeat
+        if src == "tick" or renders_since_write < STILL_EVERY then return true end
+    end
+    local missing = {}
+    local r1 = read_player(p1, teams[0], 0)
+    local r2 = read_player(p2, teams[1], 1)
+    -- During loading/intros the player objects exist but are zeroed: not usable state.
+    local ready = (r1.hp_max or 0) > 0 and (r2.hp_max or 0) > 0 and r1.action_id ~= nil and r2.action_id ~= nil
+    local s1 = encode_player(r1, "p1", missing)
+    local s2 = encode_player(r2, "p2", missing)
+    if stage_timer == nil then missing[#missing + 1] = "stage_timer" end
+    if round_no == nil then missing[#missing + 1] = "round" end
+    local m = {}
+    for i, k in ipairs(missing) do m[i] = '"' .. k .. '"' end
+    local fm_part = ""
+    local okfm, fm = pcall(read_frame_meter)
+    if okfm and fm then
+        if fm ~= fm_last or frame_no - fm_last_frame >= 60 then
+            fm_part = ',"fm":' .. fm
+            fm_last, fm_last_frame = fm, frame_no
+        end
+    end
+    last_missing = table.concat(missing, ", ")
+    write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"src":"' .. src .. '","in_battle":true,"ready":' ..
+               enc(ready) .. ',"stage_timer":' .. enc(stage_timer) ..
+               ',"round":' .. enc(round_no) .. fm_part .. ',"p1":' .. s1 .. ',"p2":' .. s2 ..
+               ',"missing":[' .. table.concat(m, ",") .. ']}')
+    last_key = key
+    renders_since_write = 0
+    if src == "tick" then tick_lines = tick_lines + 1 else frame_lines = frame_lines + 1 end
+    return true
+end
+
 re.on_frame(function()
     if not enabled then return end
     frame_no = frame_no + 1
+    renders_since_write = renders_since_write + 1
     local ok, err = pcall(function()
-        local gb = sdk.find_type_definition("gBattle")
-        local players = gb and try(function() return gb:get_field("Player"):get_data(nil).mcPlayer end)
-        local teams = gb and try(function() return gb:get_field("Team"):get_data(nil).mcTeam end)
-        local p1 = players and try(function() return players[0] end)
-        local p2 = players and try(function() return players[1] end)
-        local in_battle = p1 ~= nil and p2 ~= nil and teams ~= nil
+        local in_battle = export_battle("frame")
         if frame_no % INFO_EVERY == 1 then write_info(in_battle) end
-        if not in_battle then
-            if frame_no % IDLE_EVERY == 0 then
-                write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":false,"ready":false}')
-            end
-            return
+        if not in_battle and frame_no % IDLE_EVERY == 0 then
+            write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":false,"ready":false}')
         end
-        local stage_timer = try(function() return gb:get_field("Game"):get_data(nil).stage_timer end)
-        local round_no = try(function() return gb:get_field("Round"):get_data(nil).RoundNo end)
-        local missing = {}
-        local r1 = read_player(p1, teams[0], 0)
-        local r2 = read_player(p2, teams[1], 1)
-        -- During loading/intros the player objects exist but are zeroed: not usable state.
-        local ready = (r1.hp_max or 0) > 0 and (r2.hp_max or 0) > 0 and r1.action_id ~= nil and r2.action_id ~= nil
-        local s1 = encode_player(r1, "p1", missing)
-        local s2 = encode_player(r2, "p2", missing)
-        if stage_timer == nil then missing[#missing + 1] = "stage_timer" end
-        if round_no == nil then missing[#missing + 1] = "round" end
-        local m = {}
-        for i, k in ipairs(missing) do m[i] = '"' .. k .. '"' end
-        local fm_part = ""
-        local okfm, fm = pcall(read_frame_meter)
-        if okfm and fm then
-            if fm ~= fm_last or frame_no - fm_last_frame >= 60 then
-                fm_part = ',"fm":' .. fm
-                fm_last, fm_last_frame = fm, frame_no
-            end
-        end
-        last_missing = table.concat(missing, ", ")
-        write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"in_battle":true,"ready":' .. enc(ready) ..
-                   ',"stage_timer":' .. enc(stage_timer) ..
-                   ',"round":' .. enc(round_no) .. fm_part .. ',"p1":' .. s1 .. ',"p2":' .. s2 ..
-                   ',"missing":[' .. table.concat(m, ",") .. ']}')
     end)
     if not ok then last_error = tostring(err) end
 end)
@@ -256,6 +287,8 @@ re.on_draw_ui(function()
         local changed, v = imgui.checkbox("Export enabled", enabled)
         if changed then enabled = v end
         imgui.text("Script version " .. SCRIPT_VERSION .. ". Lines written: " .. tostring(lines) .. "  file: " .. OUT_PATH)
+        imgui.text("Game-tick hook calls: " .. hook_calls .. ", lines from hook: " .. tick_lines ..
+                   ", from render: " .. frame_lines)
         if last_missing ~= "" then imgui.text("Missing fields: " .. last_missing) end
         if last_error ~= "" then imgui.text("Last error: " .. last_error) end
         imgui.tree_pop()

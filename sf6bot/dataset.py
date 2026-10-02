@@ -34,6 +34,7 @@ class DatasetBuilder:
         self.lines_without_input = 0
         self.characters = [None, None]
         self._last_key = None
+        self.src_counts: dict = {}   # exporter v6: lines written per game tick ("tick") vs per render ("frame")
 
     def add(self, raw: dict, t: float) -> None:
         for e in self.tracker.update(raw, t):
@@ -50,6 +51,8 @@ class DatasetBuilder:
             self.skipped_frames += key[1] - self._last_key[1] - 1
         self._seen.add(key)
         self._last_key = key
+        src = raw.get("src", "v5 (per render)")
+        self.src_counts[src] = self.src_counts.get(src, 0) + 1
         row = {"t": round(t, 4), "round": key[0], "frame": key[1]}
         for i, pk in enumerate(("p1", "p2")):
             p = raw.get(pk) or {}
@@ -74,6 +77,7 @@ class DatasetBuilder:
             "characters": [character_name(c) for c in self.characters], "character_ids": self.characters,
             "frames": len(self.rows), "duplicate_lines_dropped": self.duplicates,
             "skipped_game_frames": self.skipped_frames,
+            "frames_by_source": self.src_counts,
             "player_lines_without_input": self.lines_without_input,
             "rounds": [{k: e.get(k) for k in ("round", "winner", "reason", "confidence", "finish")} for e in rounds],
             "match": ({"winner": match[-1]["winner"], "score": match[-1]["score"]} if match else None),

@@ -235,7 +235,8 @@ def test_catalog_uses_capcom_move_list(cfg, tmp_path, monkeypatch):
     sim.start()
     try:
         with Session(cfg, "catalog_movelist_test", mock=True) as s:
-            out = cat.run_catalog(s, cfg, "none", only=["Standing Light Punch", "Crouching Medium Kick"])
+            out = cat.run_catalog(s, cfg, "none", only=["Standing Light Punch", "Crouching Medium Kick",
+                                                         "Crouching Light Punch"])
     finally:
         sim.stop.set()
     assert out.name == "Ryu_movelist.json"
@@ -245,3 +246,6 @@ def test_catalog_uses_capcom_move_list(cfg, tmp_path, monkeypatch):
     mk = data["moves"]["Crouching Medium Kick"]["guard_none"]
     assert lp["input"] == "LP" and lp["move_id"] == 101
     assert mk["sequence"] == "2@2 2+MK@3" and mk["result"] == "hit"
+    # The simulator gives 2LP the same id as 5LP: a misread input, retried up to 3 attempts total.
+    clp = data["moves"]["Crouching Light Punch"]["guard_none"]
+    assert clp["same_as"] == "Standing Light Punch" and clp["attempts"] == 3 and lp["attempts"] == 1

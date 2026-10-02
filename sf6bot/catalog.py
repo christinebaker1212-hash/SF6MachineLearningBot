@@ -254,11 +254,13 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             movement |= {s["p1"].get("action_id") for s in col.collect(0.5)}
             c.apply(InputState(), tag="learn_walk_end")
             movement |= {s["p1"].get("action_id") for s in col.collect(0.5)}
-        reset()
-        c.apply(InputState(8), tag="learn_jump")
-        sess.stop_event.wait(0.05)
-        c.apply(InputState(), tag="learn_jump_end")
-        movement |= {s["p1"].get("action_id") for s in col.collect(1.2)}
+        # Neutral, forward and back jump: 0.4.0 tagged the forward-jump id (37) as Aerial Tatsumaki.
+        for d in (8, 9, 7):
+            reset()
+            c.apply(InputState(d), tag="learn_jump")
+            sess.stop_event.wait(0.05)
+            c.apply(InputState(), tag="learn_jump_end")
+            movement |= {s["p1"].get("action_id") for s in col.collect(1.2)}
         movement -= neutral_a
         movement.discard(None)
         print(f"  neutral ids: bot {sorted(x for x in neutral_a if x is not None)}, "
@@ -270,74 +272,96 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 continue
             if sess.stop_event.is_set():
                 break
-            reset()
-            if approach:
-                c.apply(InputState(6), tag="approach")
-                best, still, last_d = None, 0, None
-                end = clock.now() + 2.5
-                while clock.now() < end and still < 8 and not sess.stop_event.is_set():
-                    s2 = reader.wait_newer(-1 if last_d is None else last_d, 0.1)
-                    if s2 is None:
-                        continue
-                    last_d = s2.frame
-                    x1, x2 = _n(s2.p1.get("x")), _n(s2.p2.get("x"))
-                    d = abs(x1 - x2) if x1 is not None and x2 is not None else None
-                    if d is not None and (best is None or d < best - 1e-3):
-                        best, still = d, 0
-                    else:
-                        still += 1
-                c.apply(InputState(), tag="approach_end")
-                sess.stop_event.wait(0.4)   # let the walk-stop transition finish
-            fm_before = reader.last_fm
-            pre = col.collect(0.15)
-            seq = parse_sequence(seq_text, mname)
-            import threading
-            post: list = []
-            # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
-            window = 9.0 if mv["long"] else 2.6
-            th = threading.Thread(target=lambda: post.extend(col.collect(window)))
-            th.start()
-            timings, ok = runner.run(seq, stop_event=sess.stop_event)
-            th.join()
-            if not ok:
+            # Capcom lists every row as a distinct move, so coming out as an already-catalogued move
+            # means our input was misread (0.4.0: SA1 came out as H Shoryuken). Retry up to twice.
+            attempts = 3 if source == "capcom_movelist" else 1
+            stopped = False
+            for attempt in range(attempts):
+                reset()
+                if approach:
+                    c.apply(InputState(6), tag="approach")
+                    best, still, last_d = None, 0, None
+                    end = clock.now() + 2.5
+                    while clock.now() < end and still < 8 and not sess.stop_event.is_set():
+                        s2 = reader.wait_newer(-1 if last_d is None else last_d, 0.1)
+                        if s2 is None:
+                            continue
+                        last_d = s2.frame
+                        x1, x2 = _n(s2.p1.get("x")), _n(s2.p2.get("x"))
+                        d = abs(x1 - x2) if x1 is not None and x2 is not None else None
+                        if d is not None and (best is None or d < best - 1e-3):
+                            best, still = d, 0
+                        else:
+                            still += 1
+                    c.apply(InputState(), tag="approach_end")
+                    sess.stop_event.wait(0.4)   # let the walk-stop transition finish
+                fm_before = reader.last_fm
+                pre = col.collect(0.15)
+                seq = parse_sequence(seq_text, mname)
+                import threading
+                post: list = []
+                # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
+                window = 9.0 if mv["long"] else 2.6
+                th = threading.Thread(target=lambda: post.extend(col.collect(window)))
+                th.start()
+                timings, ok = runner.run(seq, stop_event=sess.stop_event)
+                th.join()
+                if not ok:
+                    stopped = True
+                    break
+                t_last_press = timings[-2].sent if len(timings) >= 2 else timings[0].sent  # final input step
+                if mv["long"]:
+                    # Supers on hit: the meter only shows Total after the cinematic. 0.4.0 read SA3 too
+                    # early (total "--"). Wait up to 8 s more for a numeric Total.
+                    end_wait = clock.now() + 8.0
+                    while clock.now() < end_wait and not sess.stop_event.is_set():
+                        fm_now = reader.last_fm if (reader.last_fm_t or 0) >= t_last_press else None
+                        if _frames(((fm_now or {}).get("p1") or {}).get("MeatyFrame")) is not None:
+                            break
+                        sess.stop_event.wait(0.1)
+                own = analyze_move(pre + post, t_last_press, neutral_a | movement, neutral_d)
+                ids = own.get("action_ids") or []
+                move_ids = [a for a in ids if a not in movement and a not in neutral_a]
+                fm_raw = reader.last_fm if (reader.last_fm_t or 0) >= t_last_press else None
+                fmp = parse_frame_meter(fm_raw)
+                updated = fm_raw is not None and fm_raw != fm_before
+                first = move_ids[0] if move_ids else None
+                if mv["throw"]:
+                    # The LK of LP+LK can register a frame early: ids [611 (5LK), 715 (throw), ...].
+                    # Use the first id that is not an already-catalogued normal.
+                    first = next((a for a in move_ids if a not in first_ids), first)
+                r: dict = {"move_id": first, "action_ids": move_ids,
+                           "frame_meter_updated": updated}
+                if updated:
+                    r.update(startup=fmp.get("startup"), total=fmp.get("total"), advantage=fmp.get("advantage"),
+                             opponent_advantage=fmp.get("opponent_advantage"),
+                             main_gauge_raw=fmp.get("main_gauge_raw"))
+                    is_throw = mv["throw"]  # throws and command grabs connect on a guarding dummy too
+                    r["result"] = ("whiff" if not fmp.get("connected") else
+                                   "hit" if (guard == "none" or is_throw) else "block")
+                else:
+                    r["result"] = "unknown (frame meter did not update)"
+                r["damage"] = own.get("damage")
+                r["frame_meter_raw"] = fm_raw
+                r["own_measure"] = {k: own.get(k) for k in ("result", "startup", "advantage", "total_observed",
+                                                            "game_total", "note")}
+                r["own_measure"]["reliability"] = "low: wall-clock/stage_timer heuristics; use frame meter values"
+                if mv["input"]:
+                    r["input"], r["sequence"] = mv["input"], seq_text
+                fid = r["move_id"]
+                if fid is None:
+                    r["note"] = "no new action id: input not recognised as a move for this character"
+                elif fid in first_ids:
+                    r["same_as"] = first_ids[fid]
+                else:
+                    first_ids[fid] = mname
+                if r.get("same_as") and attempt + 1 < attempts:
+                    print(f"  {mname}: came out as {r['same_as']} - retrying ({attempt + 2}/{attempts})")
+                    continue
                 break
-            t_last_press = timings[-2].sent if len(timings) >= 2 else timings[0].sent  # final input step
-            own = analyze_move(pre + post, t_last_press, neutral_a | movement, neutral_d)
-            ids = own.get("action_ids") or []
-            move_ids = [a for a in ids if a not in movement and a not in neutral_a]
-            fm_raw = reader.last_fm if (reader.last_fm_t or 0) >= t_last_press else None
-            fmp = parse_frame_meter(fm_raw)
-            updated = fm_raw is not None and fm_raw != fm_before
-            first = move_ids[0] if move_ids else None
-            if mv["throw"]:
-                # The LK of LP+LK can register a frame early: ids [611 (5LK), 715 (throw), ...].
-                # Use the first id that is not an already-catalogued normal.
-                first = next((a for a in move_ids if a not in first_ids), first)
-            r: dict = {"move_id": first, "action_ids": move_ids,
-                       "frame_meter_updated": updated}
-            if updated:
-                r.update(startup=fmp.get("startup"), total=fmp.get("total"), advantage=fmp.get("advantage"),
-                         opponent_advantage=fmp.get("opponent_advantage"),
-                         main_gauge_raw=fmp.get("main_gauge_raw"))
-                is_throw = mv["throw"]  # throws and command grabs connect on a guarding dummy too
-                r["result"] = ("whiff" if not fmp.get("connected") else
-                               "hit" if (guard == "none" or is_throw) else "block")
-            else:
-                r["result"] = "unknown (frame meter did not update)"
-            r["damage"] = own.get("damage")
-            r["frame_meter_raw"] = fm_raw
-            r["own_measure"] = {k: own.get(k) for k in ("result", "startup", "advantage", "total_observed",
-                                                        "game_total", "note")}
-            r["own_measure"]["reliability"] = "low: wall-clock/stage_timer heuristics; use frame meter values"
-            if mv["input"]:
-                r["input"], r["sequence"] = mv["input"], seq_text
-            fid = r["move_id"]
-            if fid is None:
-                r["note"] = "no new action id: input not recognised as a move for this character"
-            elif fid in first_ids:
-                r["same_as"] = first_ids[fid]
-            else:
-                first_ids[fid] = mname
+            if stopped:
+                break
+            r["attempts"] = attempt + 1
             results[mname] = r
             msg = f"{mname}: id {fid}"
             if updated:

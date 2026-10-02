@@ -458,13 +458,14 @@ def to_sequence(move: dict) -> tuple[str | None, str]:
     dirs, btns = m.group(1), _buttons(m.group(2).split("+"))
     if move["section"] == "Common Moves" and "Parry" in name:
         return ("5+MP+MK@20", "") if name == "Drive Parry" else (None, "parry variant")
-    super_art = move["section"] == "Super Arts"
     if jump and dirs.startswith("["):
         # Air charge move (Blanka): charge on the ground, back-jump keeps the charge, release in air.
         c = dirs[1]
         back_jump = {"4": "7", "2": "1"}.get(c, "8")
         return f"{c}@50 {back_jump}@3 {c}@11 " + _motion(dirs[3:], btns, 3), ""
-    seq = _motion(dirs, btns, 2 if super_art else 3)
+    # Supers use 3F per direction too: with 2F, a dropped direction turned 236236+P into 623+P
+    # (0.4.0, SA1 came out as H Shoryuken).
+    seq = _motion(dirs, btns, 3)
     if jump:
         seq = f"{jump}@3 5@14 " + (seq if dirs else f"5+{btns}@3")
     return seq, ""

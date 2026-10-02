@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.4.0**, REFramework exporter script **v5**, branch
-`claude/admiring-mccarthy-uyyay4`, 39 tests passing.*
+*State as of 2026-10-02: code version **0.4.1**, REFramework exporter script **v6**, branch
+`claude/admiring-mccarthy-uyyay4`, 42 tests passing.*
 
 ---
 
@@ -151,7 +151,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
    - **Pending:** re-run only the fixed moves on 0.3.3 (6HP, 6HK, throw, SA_236236K) with C
      and B.
    - **Pending:** check why the dummy takes no damage (Training Mode HP setting?).
-2. **8× replay test — result (watch run 20261001_203652, Chun-Li vs Akuma replay at 8×):**
+2. **8× replay test:** exporter v6 (0.4.1) should fix this; it needs the user's 1× vs 8× D run. **Earlier result (watch run 20261001_203652, Chun-Li vs Akuma replay at 8×):**
    round 0 reached stage_timer 5834 about 21 s after the first ready line, i.e. roughly
    **280 game frames/s**, while the exporter wrote about **57 lines/s**. So at 8× roughly
    **4 of every 5 game frames are never exported**, including their input masks.
@@ -172,7 +172,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 The user asked (2026-10-02) how many more tests remain before the fights and "Amiibo" training.
 The agreed answer: three in-game checks before the bot fights the CPU, then data and training.
 
-1. **Move-list catalog, in game** (0.4.0, menus C then B). Check that charge, 360 and supers
+1. **Move-list catalog, in game:** 0.4.0 verified 149/159 vs Capcom; the 0.4.1 fixes need a re-run (menus C then B). Check that charge, 360 and supers
    come out. It also yields the action ids the fighting bot needs.
 2. **Controlled-player identification:** a tiny input probe at round start, then see which
    player's state responds. The bot isn't always p1; the user played as p2 vs CPU. One short
