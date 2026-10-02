@@ -67,6 +67,10 @@ controls**.
 
 ## 3. The user and how to work with them
 
+- **Rank: Master, 1450 MR** (user, 2026-10-02). The user is the bot's Master-level benchmark: bot vs user
+  (menu H) so far 0–2, one round a Perfect. Controlled experiments are possible with the user playing a
+  restricted game (e.g. no throws, or no overheads) to measure one weakness at a time.
+
 - **Hardware:** ROG Xbox Ally X (Ryzen AI Z2 Extreme, Radeon 890M iGPU, **no CUDA**, about
   11.6 GB RAM), Windows 11, a 1080p/60 Hz screen, and a keyboard attached.
   - SF6 runs **windowed 1280×720**.

@@ -94,6 +94,7 @@ experimental outcome we're working toward, not a promised capability.
 | Python | 3.14.5 | `sysinfo` |
 | SF6 window | `StreetFighter6.exe`, title "Street Fighter 6", **windowed 1280x720** client at (479,192) | `list-windows` |
 | Character / controls | Ryu, Classic | user |
+| User's own rank | **Master, 1450 MR** (2026-10-02). The bot lost 0–2 to the user (Ken), one round a Perfect (0.9.0): the first Master-level data point | user |
 | Input method | keyboard via SendInput (scancodes) | user |
 | REFramework | available | user |
 
