@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-01: code version **0.3.2**, REFramework exporter script **v5**, branch
-`claude/admiring-mccarthy-uyyay4`, 31 tests passing.*
+*State as of 2026-10-02: code version **0.3.3**, REFramework exporter script **v5**, branch
+`claude/admiring-mccarthy-uyyay4`, 35 tests passing.*
 
 ---
 
@@ -38,7 +38,9 @@ controls**.
   disables it by renaming `dinput8.dll`.
 - **Ranked deployment is a separate, later milestone,** gated on checking Capcom/Steam rules.
   The user makes the call.
-- **No scraping Capcom's website.** Data the user copies themselves is fine.
+- **Scraping Capcom's website is allowed:** the user explicitly authorised it on 2026-10-02,
+  replacing an earlier "no scraping" rule. Keep it polite (2 s between requests) and never
+  evade blocks.
 - **The engineering spec:**
   - Never invent APIs, results or tests.
   - Label mocks explicitly.
@@ -144,11 +146,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-1. **Catalog re-run on 0.3.2:** menu **C** with dummy guard None, then **B** with guard All,
-   Super gauge full/infinite, then **S**.
-   - Check that move_ids are no longer the walk id 11.
-   - Check that frame-meter values look right: `5LK: id 611 | startup 5F, total 18F, …`.
-   - Check that throw/DI/parry/supers connect.
+1. **0.3.2 catalog: done and verified.** 111/121 values match Capcom (CLAUDE.md, Milestone 3).
+   - **Pending:** re-run only the fixed moves on 0.3.3 (6HP, 6HK, throw, SA_236236K) with C
+     and B.
+   - **Pending:** check why the dummy takes no damage (Training Mode HP setting?).
 2. **8× replay test — result (watch run 20261001_203652, Chun-Li vs Akuma replay at 8×):**
    round 0 reached stage_timer 5834 about 21 s after the first ready line, i.e. roughly
    **280 game frames/s**, while the exporter wrote about **57 lines/s**. So at 8× roughly
@@ -157,13 +158,11 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
      inputs.
    - A 1× comparison of the same replay was not in the paste.
    - Fix to research: export on a per-game-tick hook instead of `re.on_frame`.
-3. **Capcom's official frame data:** the user offered to send it. It includes inputs and cancel
-   routes. Ask for **Ryu first**, plus the **patch version/date**.
-   - Plan: parse it into `datasets/framedata/<char>.json`.
-   - Drive the catalog from each character's real move list instead of generic inputs.
-   - Use cancel routes for combos.
-   - Cross-check against the in-game frame meter, which is authoritative for the installed
-     patch.
+3. **Capcom's official frame data:** the parser works on Ryu (75 moves). The site blocked the
+   Claude container after 2 requests, so the user runs **menu F** on their PC and uploads
+   `datasets\framedata\all_characters.json`.
+   - Next: drive the catalog from each character's real move list (`input` notation) instead of
+     generic inputs; use the cancel column for combos.
 
 ## 7. Recommended next steps (in order)
 
@@ -200,7 +199,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Episodes and data | `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing) |
+| Episodes and data | `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F, Capcom frame data + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 

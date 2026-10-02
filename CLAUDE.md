@@ -591,16 +591,45 @@ The safety tests are part of acceptance. During a run:
       giving `move_id`.
     - Own measurements go under `own_measure`, flagged low reliability.
     - Supers added: 236236P/K and 214214P/K, with a 6 s window.
-  - **0.3.2 catalog run, guard All (2026-10-01, partial paste: drive_parry onward).**
-    - Walk id 11 is gone: every move has its own `move_id` (j.LP 651 … j.HK 656, 236P 900/904,
-      236K 1025/1029, 214P 1036/1039, 214K 1000/1005, 623P 930/934).
-    - Supers connect on block: 236236P → 1200 (7F, -24), 214214P → 1212 (12F, -20),
-      236236K → 1233 (5F, -52).
-    - `same_as` works: 41236x/63214x equal the 236x/214x moves, 623K gives 2LK/2HK,
-      214214K gives 214HK (Ryu has no 214214K super), [4]6 and [2]8 give normals/jumps.
-    - Parry whiffs against a blocking dummy, which is expected (nothing hits it).
-    - Not seen in the paste: the normals, throw and DI, and the guard None run.
-    - Values were not yet cross-checked against Capcom's published frame data.
+  - **0.3.2 catalog VERIFIED in game (Ryu, guard None + All, user upload `Ryu.json`, 2026-10-01).**
+    - Walk id 11 is gone: every move has its own `move_id` (5LP 600 … 2HK 643, 6MP 660, 6HP 666,
+      6HK 670, 4HP 663, 4HK 668, throw 715, DI 855, parry 480, j.LP-HK 651-656, 236P 900/904,
+      236K 1025/1029, 214P 1036/1039, 214K 1000/1005, 623P 930/934, SA1 1200, SA2 1212, SA3 1233).
+    - Throw and DI now connect; supers connect. Parry whiffs vs a non-attacking dummy (expected).
+    - `same_as` works (41236x = 236x, 623K → 2LK/2HK, 214214K → 214HK; Ryu has no such moves).
+    - `damage` is 0 on every hit: the dummy's HP never dropped in these runs (training HP setting
+      suspected). Damage now comes from Capcom's data instead.
+    - Hit advantage on knockdowns is a number (+35…+61) where Capcom writes "D".
+  - **Cross-check vs Capcom's official data (0.3.3): 111/121 values identical** (startup, total,
+    on block, on hit). The differences:
+    - catalog input failures (fixed in 0.3.3): 6HP (guard All) → 5HP, 6HK (guard None) → 5HK.
+      Command normals now hold the direction 2 frames before the button.
+    - SA3 on hit: meter read mid-cinematic (total 5F). The super window is now 9 s.
+    - throw total 96 vs 30, parry total 52 vs 45 (catalog holds parry 20 frames): different
+      definitions, not errors.
+    - 2HP total 34 vs 36, 4HP 35 vs 36, 4HK 43 vs 44: real 1–2F differences between Capcom's
+      page and the installed game's meter. **The meter wins** for the installed patch.
+    - Throw guard None picked 5LK (611) as move_id; the throw's LK registered a frame early.
+      0.3.3 picks the first id that isn't an already-catalogued normal.
+
+## Capcom official frame data (0.3.3)
+- **The user explicitly authorised scraping Capcom's website (2026-10-02),** replacing the
+  earlier "no scraping" rule. Source: `streetfighter.com/6/en-us/character/<slug>/frame`.
+- The page is server-rendered (Next.js): one `<table>` with section rows and 15 cells per move.
+  Classic inputs are controller icons, converted to our notation: `236+LP`, `236+P+P` (OD),
+  `HP>HK` (target combo), `(During a jump) LP`, `(When near opponent) 5|6+LP+LK`.
+- `sf6bot/framedata.py`: parser, `fetch_all`, `catalog_key`, `compare_catalog`.
+  - total = last active frame + recovery + landing frames. Ryu 5LP 4-6 + 7 = 13 and L Shoryuken
+    14 + 21 + 12 = 47 both equal the in-game meter.
+  - No patch date on the page: the fetch time and site build id are stored.
+- `sf6bot framedata-fetch` (menu **F**): fetches all 31 characters 2 s apart into
+  `datasets/framedata/<slug>.json` plus `raw/<slug>.html` and `all_characters.json`. It stops
+  after 2 failures in a row and writes a run report (with catalog cross-checks) for S.
+- **From the Claude container the site blocks requests:** the first 2 fetches succeeded, then
+  CloudFront returned 403 for everything, including robots.txt. No evasion was attempted; the
+  user runs menu F on their PC.
+- Test fixtures: `tests/data/capcom_ryu_frame_table.html.gz` (the real table) and
+  `tests/data/catalog_ryu_0.3.2.json.gz` (the user's catalog, raw meter fields stripped).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

@@ -1,2 +1,2 @@
 """sf6bot: experimental ML agent for Street Fighter 6."""
-__version__ = "0.3.2"  # bump on every pushed change the user should install
+__version__ = "0.3.3"  # bump on every pushed change the user should install

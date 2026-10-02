@@ -189,6 +189,33 @@ def cmd_catalog(args, cfg):
     _print_report(s)
 
 
+def cmd_framedata_fetch(args, cfg):
+    """Download Capcom's official frame data (no game needed) and cross-check our catalogs."""
+    import json as _json
+    import time as _time
+    from pathlib import Path
+    from . import framedata as fd
+    ds = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    out = ds / "framedata"
+    slugs = args.chars.split(",") if args.chars else None
+    print(f"Downloading frame data for {len(slugs or fd.SLUGS)} characters into {out} (2 s apart)...")
+    summary = fd.fetch_all(out, slugs)
+    ok = [k for k, v in summary.items() if "moves" in v]
+    lines = [f"# Capcom frame data fetch", f"- characters saved: {len(ok)}/{len(summary)}",
+             f"- folder: {out} (upload all_characters.json to Claude)"]
+    lines += [f"- {k}: {v.get('moves', v.get('error'))}" for k, v in summary.items()]
+    for cat in sorted((ds / "catalog").glob("*.json")) if (ds / "catalog").exists() else []:
+        c = _json.loads(cat.read_text(encoding="utf-8"))
+        f = fd.load(c.get("character", cat.stem), out)
+        if f:
+            lines += ["", fd.compare_report(fd.compare_catalog(f, c), c.get("character", cat.stem))]
+    run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_framedata")
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "meta.json").write_text(_json.dumps({"kind": "framedata_fetch", "summary": summary}, indent=1))
+    (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -287,6 +314,10 @@ def main(argv=None):
                    help="what the Training Mode dummy is set to: none = gets hit, all = blocks everything")
     p.add_argument("--only", default="", help="comma-separated move names, e.g. 5LP,2MK")
     p.set_defaults(fn=cmd_catalog)
+
+    p = sub.add_parser("framedata-fetch", help="download Capcom's official frame data (all characters)")
+    p.add_argument("--chars", default=None, help="comma-separated page slugs, e.g. ryu,ken (default all)")
+    p.set_defaults(fn=cmd_framedata_fetch)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

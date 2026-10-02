@@ -1,0 +1,348 @@
+"""Capcom's official SF6 frame data (streetfighter.com/6/<locale>/character/<slug>/frame).
+
+The page is server-rendered: one <table> with section heading rows ("Normal Moves", "Special
+Moves", ...) and one row per move with 15 cells. Each move's Classic input is drawn with
+controller icons, which are converted to our numpad + button notation (facing right).
+
+Fetched with the user's permission (2026-10-02). The page shows no patch date, so the fetch date
+and the site's Next.js build id are stored as provenance. The in-game frame meter stays
+authoritative for the patch installed on the user's PC.
+"""
+from __future__ import annotations
+
+import json
+import re
+import time
+import urllib.request
+from datetime import datetime, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+
+BASE_URL = "https://www.streetfighter.com/6/{locale}/character/{slug}/frame"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) sf6bot-framedata"
+
+# Page slug -> name used in game_state.CHARACTERS (ESF ids).
+SLUGS = {
+    "ryu": "Ryu", "luke": "Luke", "jamie": "Jamie", "chunli": "Chun-Li", "guile": "Guile",
+    "kimberly": "Kimberly", "juri": "Juri", "ken": "Ken", "blanka": "Blanka", "dhalsim": "Dhalsim",
+    "ehonda": "E. Honda", "deejay": "Dee Jay", "manon": "Manon", "marisa": "Marisa", "jp": "JP",
+    "zangief": "Zangief", "lily": "Lily", "cammy": "Cammy", "rashid": "Rashid", "aki": "A.K.I.",
+    "ed": "Ed", "gouki_akuma": "Akuma", "vega_mbison": "M. Bison", "terry": "Terry", "mai": "Mai",
+    "elena": "Elena", "sagat": "Sagat", "cviper": "Viper", "alex": "Alex", "ingrid": "Ingrid",
+    "yasmine": "Yasmine",
+}
+
+# Controller icon file name -> token in our notation. Directions are numpad, facing right.
+ICONS = {
+    "key-d": "2", "key-dr": "3", "key-r": "6", "key-ur": "9", "key-u": "8", "key-ul": "7",
+    "key-l": "4", "key-dl": "1", "key-nutral": "5",
+    "icon_punch_l": "LP", "icon_punch_m": "MP", "icon_punch_h": "HP", "icon_punch": "P",
+    "icon_kick_l": "LK", "icon_kick_m": "MK", "icon_kick_h": "HK", "icon_kick": "K",
+    "key-plus": "+", "key-or": "|", "arrow_3": ">",
+}
+_BUTTONS = {"LP", "MP", "HP", "P", "LK", "MK", "HK", "K"}
+
+# Cell order of every move row (matches the table header).
+COLUMNS = ["name", "startup", "active", "recovery", "on_hit", "on_block", "cancel", "damage",
+           "scaling", "drive_gain_hit", "drive_lose_block", "drive_lose_punish", "sa_gain",
+           "properties", "notes"]
+
+
+class _TableParser(HTMLParser):
+    """Collects the frame table as rows of cells; each cell is a list of ('text'|'img'|'br', v)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.in_table = self.in_thead = False
+        self.rows: list[dict] = []
+        self.row = None
+        self.cell = None
+        self.cell_class = ""
+        self.span_class = []  # class stack for spans inside a cell
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        cls = a.get("class") or ""
+        if tag == "table":
+            self.in_table = True
+        elif not self.in_table:
+            return
+        elif tag == "thead":
+            self.in_thead = True
+        elif tag == "tr" and not self.in_thead:
+            self.row = {"heading": "frame_heading" in cls, "cells": []}
+        elif tag == "td" and self.row is not None:
+            self.cell = []
+            self.cell_class = cls
+            self.row["cells"].append({"class": cls, "tokens": self.cell})
+        elif self.cell is not None:
+            if tag == "img":
+                m = re.search(r"/([\w\-]+)\.png", a.get("src") or "")
+                if m:
+                    self.cell.append(("img", m.group(1)))
+            elif tag in ("br", "li"):
+                self.cell.append(("br", ""))
+            elif tag == "span":
+                self.cell.append(("span", cls))
+            elif tag == "p":
+                self.cell.append(("p", cls))
+
+    def handle_endtag(self, tag):
+        if tag == "table":
+            self.in_table = False
+        elif tag == "thead":
+            self.in_thead = False
+        elif tag == "td":
+            self.cell = None
+        elif tag == "tr" and self.row is not None:
+            self.rows.append(self.row)
+            self.row = None
+
+    def handle_data(self, data):
+        if self.cell is not None and data.strip():
+            self.cell.append(("text", data))
+
+
+def _text(tokens, sep=" ") -> str:
+    out, line = [], []
+    for kind, v in tokens:
+        if kind == "text":
+            line.append(v.strip())
+        elif kind == "br" and line:
+            out.append(" ".join(line))
+            line = []
+    if line:
+        out.append(" ".join(line))
+    return sep.join(s for s in out if s).strip()
+
+
+def classic_input(tokens) -> tuple[str, str]:
+    """Return (notation, raw) for the Classic input <p> of the name cell.
+
+    notation joins icons: directions become numpad digits, buttons LP/MP/.../P/K, '+' joins.
+    E.g. down, down-right, right, +, LP -> '236+LP'. Unknown icons are kept as [name].
+    The raw text (e.g. 'L', '(during jump)') is returned separately.
+    """
+    in_input = False
+    parts, raw = [], []
+    for kind, v in tokens:
+        if kind == "p":
+            in_input = "frame_classic" in v
+            continue
+        if not in_input:
+            continue
+        if kind == "img":
+            parts.append(ICONS.get(v, f"[{v}]"))
+        elif kind == "text":
+            raw.append(v.strip())
+            t = v.strip()
+            # Button letters after icons ('L', 'M', 'H') are labels, not input. Free-text
+            # qualifiers ("(During a jump)", "(Block Direction)") are kept, in parentheses.
+            if not t or re.fullmatch(r"[LMH]{1,3}|[PK]", t):
+                continue
+            if re.fullmatch(r"[()]+", t):
+                parts.append(t)
+            else:
+                parts.append(t if t.startswith("(") else f"({t})")
+    s, prev = "", None
+    for p in parts:
+        if p in ("+", "|", ">"):
+            s = s.rstrip() + p
+        elif prev in _BUTTONS and p in _BUTTONS:
+            s += "+" + p  # simultaneous buttons, e.g. OD '236+P+P', throw 'LP+LK'
+        elif s and s[-1] not in "+|>(" and p != ")" and not (p.isdigit() and s[-1].isdigit()):
+            s += " " + p
+        else:
+            s += p
+        prev = p
+    return s.strip(), " ".join(r for r in raw if r)
+
+
+def _num(s: str):
+    """First integer of a cell ('16', '-5', '47 total frames', '*1100'); None for 'D', ''."""
+    m = re.match(r"^\s*\**\s*([+-]?\d+)", s or "")
+    return int(m.group(1)) if m else None
+
+
+def parse_frame_page(html: str) -> list[dict]:
+    p = _TableParser()
+    p.feed(html)
+    moves, section = [], None
+    for row in p.rows:
+        cells = row["cells"]
+        if row["heading"]:
+            section = _text(cells[0]["tokens"]) if cells else None
+            continue
+        if len(cells) != len(COLUMNS):
+            continue
+        name_tokens = cells[0]["tokens"]
+        name = ""
+        for i, (kind, v) in enumerate(name_tokens):
+            if kind == "span" and "frame_arts" in v:
+                name = _text([t for t in name_tokens[i + 1:i + 2] if t[0] == "text"])
+                break
+        notation, raw_in = classic_input(name_tokens)
+        m = {"section": section, "name": name, "input": notation, "input_raw": raw_in}
+        for col, c in zip(COLUMNS[1:], cells[1:]):
+            m[col] = _text(c["tokens"], sep=" / ")
+        for col in ("startup", "on_hit", "on_block", "damage"):
+            m[col + "_n"] = _num(m[col])
+        m["on_hit_knockdown"] = m["on_hit"].strip().startswith("D")
+        rec = m["recovery"]
+        m["recovery_n"] = None if "total" in rec else _num(rec)
+        land = re.search(r"\+\s*(\d+)\s*frame\(s\) after landing", rec)
+        m["landing_n"] = int(land.group(1)) if land else None
+        m["total_n"] = _num(rec) if "total" in rec else None
+        # Total = last active frame + recovery (5LP: active 4-6, recovery 7 -> 13, which is what
+        # the in-game frame meter shows as Total).
+        act = re.findall(r"\d+", m["active"])
+        if m["total_n"] is None and act and m["recovery_n"] is not None:
+            m["total_n"] = int(act[-1]) + m["recovery_n"] + (m["landing_n"] or 0)
+        moves.append(m)
+    return moves
+
+
+def build_id(html: str):
+    m = re.search(r'"buildId":"([^"]+)"', html)
+    return m.group(1) if m else None
+
+
+def fetch(slug: str, locale: str = "en-us", timeout: float = 30.0) -> str:
+    req = urllib.request.Request(BASE_URL.format(locale=locale, slug=slug),
+                                 headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode("utf-8")
+
+
+def fetch_all(out_dir: Path, slugs=None, delay_s: float = 2.0, locale: str = "en-us",
+              log=print) -> dict:
+    """Fetch, parse and write datasets/framedata/<slug>.json. Polite: one request per delay_s."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "raw").mkdir(exist_ok=True)
+    summary, fails = {}, 0
+    for i, slug in enumerate(slugs or SLUGS):
+        if fails >= 2:  # blocked or offline: stop instead of hammering the site
+            summary[slug] = {"error": "skipped after 2 failures in a row"}
+            continue
+        if i:
+            time.sleep(delay_s)
+        url = BASE_URL.format(locale=locale, slug=slug)
+        try:
+            html = fetch(slug, locale)
+            moves = parse_frame_page(html)
+        except Exception as e:  # keep going; report per character
+            log(f"  {slug}: FAILED {type(e).__name__}: {e}")
+            summary[slug] = {"error": f"{type(e).__name__}: {e}"}
+            fails += 1
+            continue
+        fails = 0
+        (out_dir / "raw" / f"{slug}.html").write_text(html, encoding="utf-8")  # re-parse offline
+        doc = {
+            "character": SLUGS.get(slug, slug), "slug": slug, "source": url,
+            "fetched_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "site_build_id": build_id(html), "controls": "classic",
+            "notes": "Capcom official frame data. No patch date on the page; the in-game frame "
+                     "meter is authoritative for the installed patch.",
+            "moves": moves,
+        }
+        (out_dir / f"{slug}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False),
+                                             encoding="utf-8")
+        log(f"  {slug}: {len(moves)} moves")
+        summary[slug] = {"moves": len(moves)}
+    # One combined file, easy to upload to Claude in one go.
+    combined = {}
+    for f in sorted(out_dir.glob("*.json")):
+        if f.name != "all_characters.json":
+            d = json.loads(f.read_text(encoding="utf-8"))
+            combined[d["slug"]] = d
+    (out_dir / "all_characters.json").write_text(json.dumps(combined, ensure_ascii=False),
+                                                encoding="utf-8")
+    return summary
+
+
+def load(slug_or_name: str, data_dir: Path) -> dict | None:
+    """Load one character by page slug or display name (e.g. 'Akuma' or 'gouki_akuma')."""
+    slug = slug_or_name if slug_or_name in SLUGS else next(
+        (s for s, n in SLUGS.items() if n.lower() == slug_or_name.lower()), None)
+    p = data_dir / f"{slug}.json" if slug else None
+    return json.loads(p.read_text(encoding="utf-8")) if p and p.exists() else None
+
+
+# --- Cross-check against our in-game catalog (datasets/catalog/<Character>.json) -------------
+
+def catalog_key(move: dict) -> str | None:
+    """Our catalog's move name for a Capcom row, or None if the catalog doesn't test it.
+
+    Variants (Denjin '[...]', CA, SA levels 2/3) are skipped: the first plain row wins.
+    """
+    name, inp = move["name"], move["input"]
+    if name.startswith("[") or name.startswith("CA ") or re.search(r"Lv[23]", name):
+        return None
+    if move["section"] == "Throws":
+        return "throw" if "4+" not in inp else None
+    if name.startswith("Drive Impact"):
+        return "drive_impact"
+    if name == "Drive Parry":
+        return "drive_parry"
+    m = re.fullmatch(r"\(During a jump\) (LP|MP|HP|LK|MK|HK)", inp)
+    if m:
+        return "j." + m.group(1)
+    if "(" in inp:
+        return None
+    m = re.fullmatch(r"(?:(\d+)\+)?(LP|MP|HP|LK|MK|HK|P|K)", inp)
+    if not m:
+        return None
+    dirs, btn = m.group(1) or "5", m.group(2)
+    if dirs in ("236236", "214214"):
+        return f"SA_{dirs}{btn}"
+    return dirs + btn if len(btn) == 2 else None
+
+
+def compare_catalog(framedata: dict, catalog: dict) -> list[dict]:
+    """Capcom value vs the in-game frame meter value, per move and field.
+
+    Fields: startup, total, on_block (catalog guard_all advantage), on_hit (guard_none
+    advantage; skipped for knockdowns, which Capcom lists as 'D'). Jump normals compare startup
+    only (the meter's total includes the whole jump).
+    """
+    rows, seen = [], set()
+    cmoves = catalog.get("moves", {})
+    for mv in framedata["moves"]:
+        key = catalog_key(mv)
+        if not key or key in seen or key not in cmoves:
+            continue
+        seen.add(key)
+        c = cmoves[key]
+        gn, ga = c.get("guard_none") or {}, c.get("guard_all") or {}
+        game = {
+            "startup": ga.get("startup") or gn.get("startup"),
+            # Prefer the un-blocked run: blocked heavies sometimes show a different meter total.
+            "total": gn.get("total") or ga.get("total"),
+            "on_block": ga.get("advantage") if ga.get("result") == "block" else None,
+            "on_hit": gn.get("advantage") if gn.get("result") == "hit" else None,
+        }
+        capcom = {"startup": mv["startup_n"], "total": mv["total_n"], "on_block": mv["on_block_n"],
+                  "on_hit": None if mv["on_hit_knockdown"] else mv["on_hit_n"]}
+        fields = ("startup",) if key.startswith("j.") else ("startup", "total", "on_block", "on_hit")
+        for f in fields:
+            a, b = capcom[f], game[f]
+            if a is None or b is None:
+                continue
+            same_as = gn.get("same_as") or ga.get("same_as")
+            rows.append({"move": key, "capcom_name": mv["name"], "field": f, "capcom": a,
+                         "game": b, "match": a == b, "same_as": same_as,
+                         # Capcom lists the move but the catalog recorded another move: our input
+                         # failed in that run, not a frame data disagreement.
+                         "catalog_input_failed": bool(same_as) and key[0] in "46"})
+    return rows
+
+
+def compare_report(rows: list[dict], character: str) -> str:
+    n, ok = len(rows), sum(r["match"] for r in rows)
+    out = [f"### {character}: Capcom vs in-game frame meter", f"- {ok}/{n} values match"]
+    for r in rows:
+        if r["match"]:
+            continue
+        why = " (catalog input came out as " + r["same_as"] + ")" if r["catalog_input_failed"] else ""
+        out.append(f"- {r['move']} {r['field']}: Capcom {r['capcom']}, game {r['game']}{why}")
+    return "\n".join(out)

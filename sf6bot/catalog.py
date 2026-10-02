@@ -39,8 +39,10 @@ MOVES: list[tuple[str, str, bool]] = [
     # name, sequence (relative numpad), approach to contact first
     *[(f"5{b}", f"5+{b}@3", True) for b in ("LP", "MP", "HP", "LK", "MK", "HK")],
     *[(f"2{b}", f"2+{b}@3", True) for b in ("LP", "MP", "HP", "LK", "MK", "HK")],
-    *[(f"6{b}", f"6+{b}@3", True) for b in ("MP", "HP", "MK", "HK")],
-    *[(f"4{b}", f"4+{b}@3", True) for b in ("MP", "HP", "MK", "HK")],
+    # Command normals: hold the direction 2 frames before the button. With direction and button
+    # in the same frame, 6HP/6HK came out as 5HP/5HK in one of the two 0.3.2 runs.
+    *[(f"6{b}", f"6@2 6+{b}@3", True) for b in ("MP", "HP", "MK", "HK")],
+    *[(f"4{b}", f"4@2 4+{b}@3", True) for b in ("MP", "HP", "MK", "HK")],
     ("throw", "5+LP+LK@3", True),
     ("drive_impact", "5+HP+HK@3", True),
     ("drive_parry", "5+MP+MK@20", True),
@@ -264,7 +266,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             seq = parse_sequence(seq_text, mname)
             import threading
             post: list = []
-            window = 6.0 if mname.startswith(LONG_WINDOW_PREFIXES) else 2.6
+            # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
+            window = 9.0 if mname.startswith(LONG_WINDOW_PREFIXES) else 2.6
             th = threading.Thread(target=lambda: post.extend(col.collect(window)))
             th.start()
             timings, ok = runner.run(seq, stop_event=sess.stop_event)
@@ -278,7 +281,12 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             fm_raw = reader.last_fm if (reader.last_fm_t or 0) >= t_last_press else None
             fmp = parse_frame_meter(fm_raw)
             updated = fm_raw is not None and fm_raw != fm_before
-            r: dict = {"move_id": move_ids[0] if move_ids else None, "action_ids": move_ids,
+            first = move_ids[0] if move_ids else None
+            if mname == "throw":
+                # The LK of LP+LK can register a frame early: ids [611 (5LK), 715 (throw), ...].
+                # Use the first id that is not an already-catalogued normal.
+                first = next((a for a in move_ids if a not in first_ids), first)
+            r: dict = {"move_id": first, "action_ids": move_ids,
                        "frame_meter_updated": updated}
             if updated:
                 r.update(startup=fmp.get("startup"), total=fmp.get("total"), advantage=fmp.get("advantage"),
