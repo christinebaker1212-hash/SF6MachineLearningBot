@@ -77,7 +77,7 @@ def erase(what: str, cfg: dict) -> tuple[int, list[str]]:
 # KEPT whatever the version, because the game data does not change between versions: move catalogs
 # (until a game patch: the fighter warns), Capcom frame data, community combo pages, recorded replays and
 # merged replays (raw game state), taught routines, configs; and the combo lab's measured corner position.
-VALID_SINCE = {"fights": "0.11.5", "combo_lab": "0.11.6", "move_maps": "0.11.7"}
+VALID_SINCE = {"fights": "0.11.5", "combo_lab": "0.11.8", "move_maps": "0.11.7"}
 KEPT_TEXT = ("Kept: move catalogs, Capcom frame data, community combo pages, recorded replays (raw game "
              "data), taught routines, configs.")
 

@@ -1386,13 +1386,36 @@ that don't cause a cinematic"; position resets by holding a direction.
 - `sf6bot erase old` (menu E → 4) shows what it would remove and needs a typed YES:
   - runs: every run not made by the current version
   - fights: recorded before 0.11.5 (the bot's combo timing changed)
-  - combo lab: route results before 0.11.6 (hit-type passes; 0.11.4 move variants, cancel rules); the
+  - combo lab: route results before 0.11.8 (0.11.8 false successes; 0.11.6 hit-type passes; 0.11.4 move variants, cancel rules); the
     file's measured corner position stays
   - move maps: before 0.11.7 (rebuilt by Tools → X)
   - `erase.VALID_SINCE` holds these versions: bump an entry when a change makes older data wrong.
 - Kept whatever the version: move catalogs (game data; a game patch is caught by the build stamp),
   Capcom frame data, community combo pages, recorded and merged replays (raw game state), routines,
   configs.
+
+## 0.11.8: a move counts as hit only by its own hit; the moves that worked are kept exactly
+- **User (2026-10-02):** "When the bot reports a success on a seven move combo, it got all of the moves except
+  for the last hit. It should repeat the exact sequence but change up the timing of the last hit."
+- **False success, cause:** every dummy hit was credited to the newest move that had started. A late hit of
+  the previous move (a multi-hit special's last kick, a fireball, a multi-hit super) landing just after the
+  last move appeared counted as the last move's hit, so a route whose last move whiffed passed.
+  - Now a hit counts for a move only once that move can be active: its own frame (or ticks since it started)
+    ≥ start-up − 1 − 3 (`HIT_EARLY`). Earlier hits go to the previous hitting move.
+  - Test: a tatsu's late kick 1 frame after a Hadoken appears no longer counts for the Hadoken (it whiffed:
+    failure at move 2). The old code passed it.
+  - Planned steps that never hit (Quick Dash, Emergency Stop, the jump) were checked on all Ken routes; they
+    really don't hit.
+- **Timing search keeps the moves that worked:** when an attempt gets moves 1..k right and fails at move k+1,
+  the send points of moves 1..k are recorded (as for a full success, 0.11.5) and replayed unchanged. The
+  input-delay estimate is frozen too. Only move k+1's timing is searched (earlier, then later, within its
+  floor). A later attempt that gets further keeps the longer prefix.
+  - If the kept moves fail twice in a row (execution noise is possible), that move is searched again.
+  - Console: "keeping moves 1-6 exactly; searching move 7's timing". The report shows "moves 1-k worked
+    (kept exactly)" for routes that still failed.
+  - Test (frame simulator, NOT the game): a 4-move route whose last link is planned 4 frames early, with a
+    noisy input-delay estimate. Moves 1-3 go out on exactly the same frames in every attempt; move 4 is
+    shifted until it hits. The old search moved moves 1-3 with each new estimate and lost them.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

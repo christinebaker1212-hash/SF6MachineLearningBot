@@ -49,6 +49,9 @@ LANDING_REC = 3        # Capcom: jump attacks "3 frame(s) after landing" (row la
 NO_FLOOR = -5          # no data for the earliest frame: the search may go 5 frames earlier
 SEARCH_EARLIER = [-1, -2, -3, -4, -5]
 SEARCH_LATER = [1, 2, 3, 4, 5]
+HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up - 1 - this); earlier = the
+                       # previous move's late hit (multi-hit special, projectile), not this move's
+PREFIX_MISSES = 2      # a kept (frozen) prefix that fails this many times in a row is searched again
 FIGHT_IDLE_MAX = 33    # MEASURED (fights 2026-10-02): idle / walk / crouch ids of Ryu and Ken are < 33
 DASH_TOTAL = 19        # Ken forward dash, catalog-measured; used when the catalog has none
 
@@ -385,6 +388,22 @@ class ComboRun:
         started = [k for k, r in enumerate(self.rt) if r["start"] is not None]
         return started[-1] if started else None
 
+    def _hit_step(self, tick: int) -> int | None:
+        """The step a dummy hit belongs to: the newest started move that can already be hitting (its own
+        frame has reached start-up - 1, with HIT_EARLY frames of slack). Before 0.11.8 every hit went to
+        the newest started move, so the previous move's late hit (a Tatsu's last kick, a fireball, a
+        multi-hit special) landing just after the last move appeared counted as the last move's hit,
+        and a route whose last move whiffed was reported as a success (user, 2026-10-02)."""
+        for k in range(len(self.rt) - 1, -1, -1):
+            r, st = self.rt[k], self.steps[k]
+            if r["start"] is None or not st.get("hitting"):
+                continue
+            su = st.get("startup")
+            if isinstance(su, (int, float)) and max(tick - r["start"], r["moving"]) < su - 1 - HIT_EARLY:
+                continue
+            return k
+        return self._active()
+
     def feed(self, raw: dict):
         if self.done:
             return None
@@ -447,7 +466,7 @@ class ComboRun:
             # against a non-guarding dummy still hits, as a fresh hit)
             self.escape = {"tick": tick, "active": self._active(), "pending": self.pending, "fresh_hit": True}
         if hit and prev is not None:
-            src = self._active()
+            src = self._hit_step(tick)
             self.hits.append({"tick": tick, "step": src, "damage": (hp0 - hp) if hp is not None and hp0 is not None else None})
             if src is not None and self.rt[src]["contact"] is None:
                 self.rt[src]["contact"] = tick
@@ -768,6 +787,7 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
                                     f"{sorted(set(kinds))}: set Training Mode's counter-hit setting")
     leads = [s["lead_measured"] for a in attempts for s in a["steps"] if s.get("lead_measured") is not None]
     out["lead_measured"] = leads
+    out["moves_kept"] = max((a.get("kept_steps") or 0 for a in attempts), default=0)
     return out
 
 
@@ -895,6 +915,13 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     recorded = None         # exact send points of the first success, replayed unchanged
     confirms_left = confirm
     jump_variant = 0
+    # the moves that already worked, kept EXACTLY (user, 0.11.8: "repeat the exact sequence but change
+    # up the timing of the last hit"): when an attempt gets moves 1..k right and fails at move k+1, the
+    # send points of moves 1..k are recorded and replayed unchanged; only move k+1's timing is searched
+    kept: list = []           # recorded_timing of the best attempt, for its first `kept_n` steps
+    kept_n = 0
+    kept_lead = None
+    prefix_misses = 0
     while not sess.stop_event.is_set():
         how = set_position(sess, reader, reset, _position(combo), state)
         if plan.get("jump_in"):
@@ -917,12 +944,14 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             break
         fm_before = reader.last_fm
         jump = state.get(f"jump_{steps[0]['sequence'][0]}") if plan.get("jump_in") else None
-        lead_now = found_lead if found is not None else _lead(state)
+        lead_now = found_lead if found is not None else kept_lead if kept_n else _lead(state)
+        fixed = recorded if recorded is not None else (kept[:kept_n] + [{}] * (len(steps) - kept_n)) if kept_n else None
         res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead_now,
-                       gravity=(jump or {}).get("gravity"), fixed=recorded)
+                       gravity=(jump or {}).get("gravity"), fixed=fixed)
         res["position_setup"] = how
         res["lead_used"] = lead_now
         res["replayed_recorded_timing"] = recorded is not None
+        res["kept_steps"] = kept_n if recorded is None else None
         # calibrate only on presses whose move can start as soon as the input arrives (the first move, and
         # links). A cancel is sent before contact and waits for it: its 17-22 frames (0.11.3 run) are not
         # input delay.
@@ -943,6 +972,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                                            if f.get("step") is not None else f"failed ({f.get('kind')})")
         dmg = f", {res['damage']} dmg" if res.get("damage") else ""
         print(f"  try {len(attempts)}: {tag}, {res['hits']} hits{dmg}, offsets {offsets or '{}'}")
+        if kept_n and recorded is None:
+            print(f"    (moves 1-{kept_n} replayed exactly as they worked)")
         if f.get("kind") == "first_blocked":
             break                    # the dummy blocked the very first hit: the setup is wrong
         if found is not None:
@@ -963,6 +994,21 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                     and jump_variant + 1 < len(JUMP_DISTANCES):
                 jump_variant += 1        # the jump-in missed: start from another distance first
                 continue
+            k = f.get("step")
+            if isinstance(k, int) and kept_n and k < kept_n:
+                # the kept moves failed this time (execution noise): replay them again before searching
+                prefix_misses += 1
+                if prefix_misses < PREFIX_MISSES:
+                    continue
+                kept_n, prefix_misses = k, 0         # it keeps failing there: search that move again
+                print(f"    moves 1-{kept_n + 1} no longer work as recorded: searching move {k + 1} again")
+            elif isinstance(k, int) and k > kept_n and f.get("kind") != "first_blocked":
+                # a new best: moves 1..k came out (and hit where they should): keep them exactly
+                kept, kept_n, prefix_misses = recorded_timing(res), k, 0
+                kept_lead = lead_now
+                print(f"    keeping moves 1-{k} exactly; searching move {k + 1}'s timing")
+            else:
+                prefix_misses = 0
             nxt = next_offsets(steps, offsets, f, tried)
             if nxt is None:
                 break
@@ -1240,7 +1286,8 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
                          f"super {v.get('super_spent')} | carry {v.get('carry')} | side switch {v.get('side_switch')} "
                          f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}")
         else:
-            lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}")
+            kept = f" | moves 1-{v['moves_kept']} worked (kept exactly)" if v.get("moves_kept") else ""
+            lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}")
     if skipped:
         from collections import Counter
         why = Counter(re.sub(r"'.*?'|\[.*?\]", "...", s) for s in skipped.values())

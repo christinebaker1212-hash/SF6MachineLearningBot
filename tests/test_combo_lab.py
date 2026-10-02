@@ -484,3 +484,80 @@ def test_wrong_counter_setting_is_detected_and_not_kept():
         "H Shoryuken"], "connectors": ["", ">"], "failed_at": {"step": 1, "kind": "dropped"}}}}
     true, bad, hard, tested = combo_gen.lab_knowledge(lab)
     assert not bad
+
+
+def test_late_hit_of_the_previous_move_is_not_the_last_moves_hit():
+    """User, 2026-10-02: a seven-move route was reported a success although its last move whiffed. Every
+    dummy hit went to the newest started move, so the previous move's late hit (a multi-hit special's
+    last kick) landing just after the last move appeared counted for it. A hit now counts for a move only
+    once its own frame can be active (start-up - 1)."""
+    steps = [{"name": "M Tatsu", "sequence": "2@3 1@3 4+MK@3", "prefix": 6, "trigger": "first", "startup": 9,
+              "total": 50, "expect_id": 1002, "hitting": True, "min_offset": 0},
+             {"name": "H Hadoken", "sequence": "2@3 3@3 6+HP@3", "prefix": 6, "trigger": "contact", "startup": 12,
+              "total": 40, "expect_id": 904, "hitting": True, "min_offset": -cl.CONTACT_PLUS - cl.JITTER}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    assert run.feed(_line(1, NEUTRAL, 0)) == 0
+    run.sent(0)
+    run.feed(_line(2, 1002, 0))
+    run.feed(_line(10, 1002, 8, d=REACT, hs=8, stun=30, hp=9500))       # the tatsu's first kick
+    run.rt[1].update(sent=11, at_send=(1002, 8)); run.pending = 1
+    run.feed(_line(20, 904, 0, d=REACT, stun=20, hp=9500))               # the Hadoken starts ...
+    run.feed(_line(21, 904, 1, d=REACT, hs=8, stun=20, hp=9300))         # ... the tatsu's LAST kick lands
+    for t in range(22, 60):                                              # the Hadoken never hits
+        run.feed(_line(t, 904, t - 20, d=REACT if t < 40 else DUMMY_IDLE, stun=max(0, 40 - t), hp=9300))
+        if run.done:
+            break
+    res = run.result()
+    assert [h["step"] for h in run.hits] == [0, 0]
+    assert not res["success"] and res["fail"]["step"] == 1
+
+
+def test_moves_that_worked_are_replayed_exactly_while_the_failing_move_is_searched(monkeypatch):
+    """User, 2026-10-02: 'repeat the exact sequence but change up the timing of the last hit'. Moves 1-3
+    work; move 4 (a link planned 4 frames too early) does not. From then on moves 1-3 are sent on exactly
+    the recorded frames, even though the input-delay estimate keeps moving (as live recalibration can),
+    and only move 4's timing is searched until it hits."""
+    import threading
+    from sf6bot import catalog
+    moves = MOVES + [{"id": 605, "su": 5, "tot": 20, "adv": 3, "conn": ","}]
+    steps = _steps(moves)
+    steps[3]["at"] = moves[2]["tot"] - 4                      # plan wrong by 4 frames: pressed during recovery
+    noisy = iter([4] + [6, 3, 5] * 20)
+    monkeypatch.setattr(cl, "_lead", lambda state: next(noisy))
+    monkeypatch.setattr(cl, "set_position", lambda *a, **k: "midscreen")
+    monkeypatch.setattr(catalog, "walk_to_contact", lambda *a, **k: None)
+    monkeypatch.setattr(catalog, "_wait_settled", lambda *a, **k: None)
+    sends = []
+
+    def attempt(sess, reader, runner, steps, offsets, na, nd, mv, lead=cl.LEAD, gravity=None, fixed=None):
+        sim = Sim(moves, lead=4)
+        run = cl.ComboRun(steps, offsets, na, nd, mv, lead=lead, fixed=fixed)
+        out = {}
+        for _ in range(400):
+            line = sim.tick()
+            k = run.feed(line)
+            if k is not None:
+                run.sent(k)
+                out[k] = sim.t
+                sim.send(k, steps[k]["prefix"])
+            if run.done:
+                break
+        sends.append(out)
+        return run.result()
+    monkeypatch.setattr(cl, "_attempt", attempt)
+
+    class Reader:
+        last_fm = None
+
+        def latest(self):
+            return None
+    sess = type("S", (), {"stop_event": threading.Event()})()
+    summ = cl._test_route(sess, Reader(), None, None, {"route": "2LP , 5MP > 236MK , 5MP"}, {"steps": steps},
+                          40, 2, ({NEUTRAL}, {DUMMY_IDLE}, set()), "after_first_hit", state={})
+    assert summ["verified"] and summ["true_combo"], summ
+    first_fail = sends[0]
+    assert 3 in first_fail                                    # move 4 was pressed, and missed
+    for s in sends[1:]:
+        assert [s[k] for k in range(3)] == [first_fail[k] for k in range(3)]   # moves 1-3: exactly as before
+    assert len({s[3] for s in sends}) > 1                     # move 4: its timing was searched
+    assert summ["offsets"] == {"3": summ["offsets"]["3"]} and summ["offsets"]["3"] > 0

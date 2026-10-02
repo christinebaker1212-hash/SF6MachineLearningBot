@@ -220,6 +220,10 @@ catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's 
 **0.11.4 (first Ken combo lab run: 6 true combos, damage = community):** the previous move changes what an
 input does (Quick Dash → [QD] Shoryuken / Tatsu), '>' that Capcom doesn't allow is timed after recovery,
 jump-in landing fixed. Re-run K → 1 (`--again` not needed: only failed routes are retried).
+**0.11.8 (user: a 7-move "success" whose last move whiffed):** a hit now counts for a move only once that
+move can be active, so the previous move's late hit no longer passes a whiffed last move. In the timing
+search, moves that worked are replayed exactly (send points and input delay frozen) and only the failing
+move is searched. Purge old combo-lab results (E → 4) and re-run K → 1: earlier "successes" may be false.
 **0.11.3:** recovery floors in every suite (no input before the move can come out), failing moves
 searched 5 frames earlier then 5 later, jump-in starters and target combos tested, supers pass on connect
 (cinematic or not), positions by hold-direction resets. The fighter's combos run on the game clock too.
