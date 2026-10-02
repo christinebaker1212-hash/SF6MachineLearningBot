@@ -4,8 +4,8 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.4.1**, REFramework exporter script **v6**, branch
-`claude/admiring-mccarthy-uyyay4`, 42 tests passing.*
+*State as of 2026-10-02: code version **0.5.0**, REFramework exporter script **v6**, branch
+`claude/admiring-mccarthy-uyyay4`, 48 tests passing.*
 
 ---
 
@@ -184,7 +184,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
    - match restarts via the rematch menu (screen reading or REFramework)
 
    One user test: the bot plays a whole match vs CPU.
-4. **First fighter: a scripted, clearly labelled baseline.** It uses catalog/frame data for
+4. **First fighter: a scripted, clearly labelled baseline. BUILT in 0.5.0 (menu V/N), untested in game.** It uses catalog/frame data for
    punish-on-block, anti-air and DI reaction. This is the first real fights vs CPU, and it
    doubles as the hybrid layer.
 5. **Behaviour cloning** from replays recorded at **1×** (8× drops frames), with splits by
@@ -209,7 +209,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Episodes and data | `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
+| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 

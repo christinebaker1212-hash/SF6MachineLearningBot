@@ -1,0 +1,42 @@
+# Scripted Ryu (Classic) for the first fights vs CPU. Hand-written rules, NOT learned.
+# Every distance and timing below is PROVISIONAL (not yet measured in game) unless marked.
+# Distances are game units, the same as the state exporter's x (pos / 6553600):
+#   SuperCombo Ryu page: throw range 0.8, forward dash 1.252, jump 4+38+3 frames, apex 2.115.
+#   Our catalog: walking into contact stops at ~0.70.
+# Sequences use the bot notation (numpad relative to facing, @frames). Combo routes are the
+# "Very Easy" ones from wiki.supercombo.gg/w/Street_Fighter_6/Ryu/Combos (user-provided link).
+
+ranges:
+  throw: 0.80          # SuperCombo
+  close: 1.00
+  poke: 1.45           # 2MK / 5HP reach: guess, to be measured
+  fireball_min: 2.30   # beyond this, throw Hadokens
+anti_air:
+  max_dist: 1.80       # opponent within this horizontal distance...
+  max_height: 1.70     # ...descending below this height -> Shoryuken (startup 7 + ~4F input latency)
+punish:
+  latency_frames: 4    # measured: input -> game sees it, 3-5 frames (usually 4)
+  # on-block advantage (attacker) at or below the threshold -> that punish. Needs a catalog of the
+  # OPPONENT's moves (datasets/catalog/<Opponent>_movelist.json); without one, no punishes.
+  options:
+    - {max_adv: -10, name: "5HP > 623HP", seq: "5+HP@3 5@8 6@2 2@2 3+HP@3"}
+    - {max_adv: -7,  name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
+    - {max_adv: -4,  name: "5LP ~ 2LP ~ 5LP", seq: "5+LP@3 5@7 2+LP@3 5@7 5+LP@3"}
+attack_id_min: 450     # heuristic: opponent action ids >= this are attacks (Ryu: normals 600+, specials 900+, DI 855, parry 480)
+moves:
+  hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}
+  hadoken_hp: {name: "H Hadoken", seq: "2@3 3@3 6+HP@3"}
+  low_forward_fireball: {name: "2MK > 236MP", seq: "2+MK@3 2@6 3@3 6+MP@3"}   # SuperCombo: true blockstring, DI-safe
+  light_chain: {name: "2LK ~ 2LP ~ 5LP", seq: "2+LK@3 2@7 2+LP@3 5@7 5+LP@3"}
+  standing_hp: {name: "5HP", seq: "5+HP@3"}
+  throw: {name: "Throw", seq: "5+LP+LK@3"}
+  shoryuken: {name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
+  drive_impact: {name: "Drive Impact", seq: "5+HP+HK@3"}
+  walk_forward: {name: "walk forward", seq: "6@12"}
+neutral:
+  far:   {hadoken_lp: 3, hadoken_hp: 2, walk_forward: 3, wait: 2}
+  mid:   {walk_forward: 5, low_forward_fireball: 1, wait: 2}
+  poke:  {low_forward_fireball: 4, standing_hp: 2, walk_forward: 1, block: 2}
+  close: {light_chain: 3, throw: 2, low_forward_fireball: 2, block: 2}
+  decision_every_s: 0.35   # one neutral decision every N seconds
+  block_s: 0.4             # "block" = hold down-back this long

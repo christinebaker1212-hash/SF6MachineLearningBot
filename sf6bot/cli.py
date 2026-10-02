@@ -232,6 +232,13 @@ def cmd_framedata_import(args, cfg):
     print("\n".join(lines))
 
 
+def cmd_fight(args, cfg):
+    from .fighter import run_fight
+    with _session(args, cfg, f"fight_{args.player}") as s:
+        run_fight(s, cfg, args.seconds, player=0 if args.player == "p1" else 1)
+    _print_report(s)
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -337,6 +344,11 @@ def main(argv=None):
                        help="import Capcom frame data pages saved from your browser (no game needed)")
     p.add_argument("--dir", default="framedata_pages", help="folder with the saved pages")
     p.set_defaults(fn=cmd_framedata_import)
+
+    p = sub.add_parser("fight", help="scripted Ryu fights (vs CPU); hand-written rules, not learned")
+    p.add_argument("--player", choices=("p1", "p2"), default="p1", help="which side the bot plays")
+    p.add_argument("--seconds", type=float, default=300.0)
+    p.set_defaults(fn=cmd_fight)
 
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")

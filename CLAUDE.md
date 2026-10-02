@@ -718,6 +718,42 @@ The safety tests are part of acceptance. During a run:
 - **User test:** record the SAME replay with D at 1× and at 8×. Compare `skipped_game_frames` and
   `frames_by_source`.
 
+## Scripted fighter (0.5.0) — the first fights
+- `sf6bot fight --player p1|p2` (menu **V** = bot on the left, **N** = right). Start a match vs CPU
+  first. The bot plays Ryu from REFramework state until the match ends (+3 s) or 5 min.
+- **Hand-written rules, NOT learned** (`sf6bot/fighter.py`, `configs/fighter/ryu.yaml`). Every
+  THOUGHTS line is `[scripted]` or `[measured]`. Rules in priority order:
+  1. in hitstun → release
+  2. opponent Drive Impact (id from the opponent's catalog) → DI back
+  3. opponent descending from a jump within 1.8 and below height 1.7 → 623HP
+  4. blocking → hold down-back. When blockstun ≤ 4 frames (our input latency) and the blocked
+     move's on-block value from the opponent's catalog is ≤ −10, −7 or −4, punish with
+     5HP > 623HP, 623HP or 5LP~2LP~5LP respectively.
+  5. opponent action id ≥ 450 nearby → block. A heuristic: Ryu's attacks are ≥ 480.
+  6. neutral every 0.35 s: weighted choice by zone (close ≤1.0 < poke ≤1.45 < mid < far ≥2.3):
+     - Hadoken L/H
+     - walk in
+     - 2MK > 236MP
+     - 5HP
+     - 2LK~2LP~5LP
+     - throw
+     - block
+     - wait
+- **Sources:**
+  - combo routes: the "Very Easy" ones from the SuperCombo Ryu combos page the user linked. 2MK >
+    236MP is noted there as a true blockstring and DI-safe.
+  - throw range 0.8 and jump 4+38+3: the SuperCombo Ryu page
+  - latency: measured
+  - the zone distances and chain/cancel timings are **guesses, untested in game**
+- Punishes and DI reactions only work against characters with a catalog (now: Ryu). **First
+  fights: Ryu vs CPU Ryu.**
+- Output `fight_summary.json` (included in S):
+  - decisions per rule
+  - "landed": opponent hp dropped within 1 s
+  - rounds and match result
+- MOCK-tested only: decision unit tests on synthetic states with the real Ryu catalog, and a 3 s
+  run against the simulated exporter.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

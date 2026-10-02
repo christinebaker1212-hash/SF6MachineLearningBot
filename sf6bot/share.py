@@ -22,7 +22,7 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
         out += ["", "--- sysinfo ---", si.read_text(encoding="utf-8", errors="replace").strip()]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
-        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json"):
+        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json"):
             f = d / name
             if f.exists():
                 out += [f.read_text(encoding="utf-8", errors="replace").strip(), ""]

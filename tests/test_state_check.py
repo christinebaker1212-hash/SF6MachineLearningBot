@@ -249,3 +249,29 @@ def test_catalog_uses_capcom_move_list(cfg, tmp_path, monkeypatch):
     # The simulator gives 2LP the same id as 5LP: a misread input, retried up to 3 attempts total.
     clp = data["moves"]["Crouching Light Punch"]["guard_none"]
     assert clp["same_as"] == "Standing Light Punch" and clp["attempts"] == 3 and lp["attempts"] == 1
+
+
+def test_fight_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
+    """MOCK: the scripted fighter runs 3 s against the simulated exporter (the bot is p1) and
+    writes fight_summary.json. Checks the loop end to end, not fighting quality."""
+    import sf6bot.fighter as fi
+    import sf6bot.session as sm
+    from sf6bot.game_state import STATE_FILE
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(fi, "find_sf6_dir", lambda cfg: game)
+    cfg["datasets"] = {"root": str(tmp_path / "datasets")}
+    cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
+    sim = SimExporter(game / STATE_FILE, inp)
+    sim.start()
+    try:
+        with Session(cfg, "fight_test", mock=True) as s:
+            out = fi.run_fight(s, cfg, 3.0, player=0)
+            summary = json.loads((s.recorder.dir / "fight_summary.json").read_text())
+    finally:
+        sim.stop.set()
+    assert out["player"] == "p1" and sum(summary["decisions"].values()) > 0
+    assert any(d for _, k, d in inp.log if d)   # it pressed keys

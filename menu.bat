@@ -35,6 +35,9 @@ echo  D. Record a replay into training data (start the replay, bot presses nothi
 echo  C. Move catalog, dummy guard NONE (Training Mode, about 4 min)
 echo  B. Move catalog, dummy guard ALL  (Training Mode, about 4 min)
 echo  F. Capcom frame data: import pages you saved from your browser (no game needed)
+echo  --- Fights ---
+echo  V. FIGHT: scripted Ryu vs CPU, bot on the LEFT (P1). Start the match first, up to 5 min
+echo  N. FIGHT: same, bot on the RIGHT (P2)
 echo  T. Install PyTorch (CPU) and run the 60 s inference-timing loop
 echo  S. SEND RESULTS: copy a small summary of recent runs to the clipboard
 echo  0. Open the results folder
@@ -61,6 +64,8 @@ if /i "%CH%"=="d" (%BOT% replay-record & goto done)
 if /i "%CH%"=="c" (%BOT% catalog --guard none & goto done)
 if /i "%CH%"=="b" (%BOT% catalog --guard all & goto done)
 if /i "%CH%"=="f" (%BOT% framedata-import & goto done)
+if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
+if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
 if /i "%CH%"=="s" goto share
 if /i "%CH%"=="0" (start "" explorer runs & goto menu)
 if /i "%CH%"=="q" exit /b 0
