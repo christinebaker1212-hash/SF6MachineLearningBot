@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.6.0**, REFramework exporter script **v7**, branch
+*State as of 2026-10-02: code version **0.6.1**, REFramework exporter script **v8**, branch
 `claude/admiring-mccarthy-uyyay4`, 58 tests passing.*
 
 ---
@@ -165,9 +165,11 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 1. **0.6.0 setup:**
    - `update.bat`, which also installs vgamepad. Accept the ViGEmBus driver prompt if it appears.
    - Menu R as admin, then restart SF6 (exporter v7).
-2. **8× discovery:** record one replay at 8× with D. Then record the same replay again at 8×.
-   - The meta's `exporter.tick_hook.result` should say "chosen …".
-   - The second recording should show `skipped_during_fight` near 0.
+2. **8× discovery, round 2 (v8):** v7 found per-tick methods on the real game, but its first
+   choice wrote nothing. Run menu R (admin), restart SF6, then record a replay at 8× with D.
+   - The meta's `exporter.tick_hook` shows `failed` (with the reason) and `result`, which should
+     read "confirmed …".
+   - A second 8× recording should then show `skipped_during_fight` near 0.
 3. **Re-record** important replays: pre-0.6.0 files miss the first ~264 frames of round 1.
 4. **The first fight** (menu V vs CPU Ryu, still the keyboard is fine) and the user's impressions.
 5. **Bot controller:** K, then input-map (I), which verifies the pad layout. Then fight with the

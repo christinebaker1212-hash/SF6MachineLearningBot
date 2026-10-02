@@ -182,7 +182,7 @@ def run_replay_record(sess, cfg: dict, seconds: float, notes: str = "") -> Path 
         info = read_exporter_info(gd) if gd else None
         if info:
             m["exporter"] = {k: info.get(k) for k in ("version", "tick_lines", "ugi_lines", "frame_lines",
-                                                      "tick_hook")}
+                                                      "tick_hook", "last_error")}
     except Exception as e:  # never lose a recording over diagnostics
         m["exporter"] = {"error": repr(e)}
     sess.recorder.write_json("dataset_meta.json", m | {"file": str(out)})

@@ -52,3 +52,16 @@ def test_summary_merges_files(tmp_path):
     assert rep["recordings"] == 2 and rep["unique_matches"] == 1
     m = rep["matches"][0]
     assert m["coverage_pct"] == coverage(rows)["coverage_pct"] and Path(m["file"]).exists()
+
+
+def test_real_8x_recordings_of_one_replay_merge(tmp_path):
+    """REAL: the user's two 8x recordings (0.6.0, exporter v7, per-tick lines not yet working) of
+    the same Ryu vs Ken replay. They are recognised as one match and merged: 13.5% + 12.7% -> 22.6%."""
+    import shutil
+    (tmp_path / "replays").mkdir()
+    for n in ("a", "b"):
+        shutil.copy(DATA / f"replay8x_{n}_2026-10-02_Ryu_vs_Ken.jsonl.gz", tmp_path / "replays" / f"{n}.jsonl.gz")
+    rep = summarize(tmp_path, write=False)
+    assert rep["unique_matches"] == 1 and rep["samples_by_character"] == {"Ryu": 823, "Ken": 823}
+    m = rep["matches"][0]
+    assert m["coverage_each_pct"] == [13.5, 12.7] and m["coverage_pct"] == 22.6

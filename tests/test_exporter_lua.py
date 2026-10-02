@@ -14,10 +14,10 @@ LUA = shutil.which("lua5.4")
 pytestmark = pytest.mark.skipif(LUA is None, reason="lua5.4 not installed")
 
 
-def _run(tmp_path, tpr, renders, per_tick=True, pause_at=-1, saved=False):
+def _run(tmp_path, tpr, renders, per_tick=True, pause_at=-1, saved=False, fail_first=False):
     out = subprocess.run([LUA, str(ROOT / "tests/lua/stub_run.lua"), str(ROOT / "reframework/autorun/sf6bot_state.lua"),
                           str(tmp_path), str(tpr), str(renders), "1" if per_tick else "0", str(pause_at),
-                          "1" if saved else "0"], check=True, timeout=120, capture_output=True, text=True).stdout
+                          "1" if saved else "0", "1" if fail_first else "0"], check=True, timeout=120, capture_output=True, text=True).stdout
     lines = [json.loads(l) for l in (tmp_path / "sf6bot_state.jsonl").read_text().splitlines()]
     rows = [(l.get("src"), l.get("stage_timer")) for l in lines if l.get("in_battle")]
     chosen = out.strip().splitlines()[-1].split("=", 1)[1]
@@ -50,3 +50,15 @@ def test_pause_heartbeat(tmp_path):
     rows, _ = _run(tmp_path, tpr=1, renders=100, pause_at=20)
     timers = [t for _, t in rows]
     assert timers[:20] == list(range(1, 21)) and timers[20:] == [20, 20]
+
+
+def test_chosen_method_that_writes_nothing_is_replaced(tmp_path):
+    """As seen in game (v7): the chosen per-tick method ran every frame but wrote no lines.
+    v8 drops it after 300 calls, tries the next qualified method, saves only a confirmed one."""
+    rows, chosen = _run(tmp_path, tpr=8, renders=760, fail_first=True)
+    out = subprocess.run([LUA, str(ROOT / "tests/lua/stub_run.lua"), str(ROOT / "reframework/autorun/sf6bot_state.lua"),
+                          str(tmp_path), "8", "760", "1", "-1", "0", "1"], check=True, timeout=120,
+                         capture_output=True, text=True).stdout
+    assert "CHOSEN=nBattle.cPlayer.move_player" in out and "FAILED=nBattle.sGame.UpdateTick" in out
+    tick = [t for s, t in rows if s == "tick"]
+    assert tick and tick == list(range(tick[0], 8 * 760 + 1))     # every frame once the good one is in

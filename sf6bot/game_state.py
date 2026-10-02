@@ -25,7 +25,7 @@ STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
                     Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
 INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
-EXPECTED_SCRIPT_VERSION = 7  # must match SCRIPT_VERSION in the Lua script
+EXPECTED_SCRIPT_VERSION = 8  # must match SCRIPT_VERSION in the Lua script
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
 
 

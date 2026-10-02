@@ -4,10 +4,13 @@
 -- app.FBattleMediator.UpdateGameInfo (measured 2026-10-02: once per RENDER, so it misses frames at
 -- 8x), "frame" = the render callback (fallback + pause heartbeat). Lines are deduplicated on
 -- (round, stage_timer), so each game frame is written once.
--- v7 DISCOVERY: when the game runs faster than it renders (fast replay), READ-ONLY counting hooks
+-- v7/v8 DISCOVERY: when the game runs faster than it renders (fast replay), READ-ONLY counting hooks
 -- on update-like methods of the battle objects we already read find the method that runs once
 -- per game tick; it is then used to write lines and saved to reframework/data/sf6bot_tickhook.json
 -- for the next start. The heartbeat file reports the candidates and the choice.
+-- v8 (2026-10-02, after the first real 8x run): v7 chose app.FBattleMediator.PostUpdate, which ran
+-- once per tick but wrote NO lines. v8 confirms a choice only after it writes 100 lines, drops a
+-- method that wrote nothing after 300 calls (recording why) and tries the next qualified one.
 -- Read-only: it reads battle state and never changes the game.
 -- Field names come from community scripts (rkaganda/SF6_replay_capture, haruno-ku/SF6_Tools);
 -- every read is protected so a renamed field shows up in "missing" instead of crashing.
@@ -17,7 +20,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 7          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 8          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -128,7 +131,12 @@ local MAX_CANDIDATES = 40
 local MAX_CALLS_PER_RENDER = 200  -- stop counting methods called more often than this (cost)
 local NAME_HINTS = { "update", "step", "tick", "exec", "proc", "frame", "move" }
 local tick = { chosen = nil, candidates = {}, started = false, done = false, renders = 0, advance = 0,
-               last_timer = nil, result = "not started", writes = 0 }
+               last_timer = nil, result = "not started", writes = 0,
+               -- v8 self-check: a chosen method must actually produce lines, else the next one is tried
+               qualified = {}, failed = {}, calls_since = 0, lines_at = 0, confirmed = false, saved = false,
+               status = {}, last_tick_error = "" }
+local CONFIRM_LINES = 100         -- save the choice once it has written this many lines
+local GIVE_UP_CALLS = 300         -- a chosen method that wrote nothing after this many calls is dropped
 
 local function battle_timer()
     local gb = sdk.find_type_definition("gBattle")
@@ -141,8 +149,11 @@ local function hook_counter(td, m, label)
         if tick.chosen == label then
             if enabled and export_battle then
                 tick.writes = tick.writes + 1
-                local okx, err = pcall(export_battle, "tick")
-                if not okx then last_error = "tick: " .. tostring(err) end
+                tick.calls_since = tick.calls_since + 1
+                local okx, res = pcall(export_battle, "tick")
+                local st = okx and tostring(res) or "error"
+                tick.status[st] = (tick.status[st] or 0) + 1
+                if not okx then tick.last_tick_error = tostring(res); last_error = "tick: " .. tostring(res) end
             end
         elseif not tick.done and not c.off then
             c.calls = c.calls + 1
@@ -163,21 +174,23 @@ end
 
 local function load_chosen()
     local saved = try(function() return json.load_file(TICK_FILE) end)
-    if type(saved) ~= "table" or type(saved.method) ~= "string" then return false end
+    -- only a CONFIRMED choice (v8: it wrote lines) is trusted; v7 saved unconfirmed ones
+    if type(saved) ~= "table" or type(saved.method) ~= "string" or saved.confirmed ~= true then return false end
     local tn, mn = saved.method:match("^(.*)%.([^%.]+)$")
     local td = tn and sdk.find_type_definition(tn)
     local m = td and try(function() return td:get_method(mn) end)
     if not m then tick.result = "saved method not found: " .. saved.method; return false end
     if hook_counter(td, m, saved.method) then
         tick.chosen, tick.done, tick.result = saved.method, true, "loaded " .. TICK_FILE
+        tick.saved, tick.lines_at = true, tick_lines
         return true
     end
     return false
 end
 
-local function start_discovery(p1)
+local function start_discovery(p1, skip_saved)
     tick.started = true
-    if load_chosen() then return end
+    if not skip_saved and load_chosen() then return end
     local seen, tds = {}, {}
     local function add(td)
         local n = td and try(function() return td:get_full_name() end)
@@ -206,6 +219,12 @@ local function start_discovery(p1)
     tick.result = "discovering (" .. #tick.candidates .. " candidates); play a replay at 8x"
 end
 
+function json_status()
+    local parts = {}
+    for k, v in pairs(tick.status) do parts[#parts + 1] = k .. "=" .. v end
+    return table.concat(parts, ",")
+end
+
 -- A per-tick method found earlier is hooked at script start, so no frame is missed.
 if pcall(load_chosen) and tick.chosen then tick.started = true end
 
@@ -229,22 +248,60 @@ local function discovery_step()
         tick.result = "waiting for a fast replay (8x) to tell per-tick from per-render methods"
         return
     end
-    local best = nil
+    local q = {}
     for _, c in ipairs(tick.candidates) do
-        if not c.off and c.changes >= 0.95 * tick.advance and c.calls <= 4 * tick.advance then
-            if best == nil or math.abs(c.calls - tick.advance) < math.abs(best.calls - tick.advance) then
-                best = c
-            end
-        end
+        if not c.off and c.changes >= 0.95 * tick.advance and c.calls <= 4 * tick.advance then q[#q + 1] = c end
     end
+    table.sort(q, function(a, b) return math.abs(a.calls - tick.advance) < math.abs(b.calls - tick.advance) end)
+    tick.qualified = {}
+    for i, c in ipairs(q) do tick.qualified[i] = c.name end
     tick.done = true
-    if best then
-        tick.chosen = best.name
-        tick.result = "chosen " .. best.name
-        pcall(json.dump_file, TICK_FILE, { method = best.name, calls = best.calls, changes = best.changes,
-                                           advance = tick.advance, renders = tick.renders })
-    else
+    if #q == 0 then
         tick.result = "no per-tick method among " .. #tick.candidates .. " candidates"
+        return
+    end
+    tick.chosen, tick.calls_since, tick.lines_at = q[1].name, 0, tick_lines
+    tick.result = "trying " .. q[1].name .. " (" .. #q .. " qualified)"
+end
+
+-- once per render after a choice: confirm it writes lines (then save it), or drop it and try the next
+local function verify_choice()
+    if not tick.chosen or tick.confirmed then return end
+    local made = tick_lines - tick.lines_at
+    if made >= CONFIRM_LINES then
+        tick.confirmed = true
+        tick.result = "confirmed " .. tick.chosen .. " (" .. made .. " lines)"
+        if not tick.saved then
+            tick.saved = true
+            pcall(json.dump_file, TICK_FILE, { method = tick.chosen, confirmed = true, advance = tick.advance,
+                                               renders = tick.renders, failed_before = tick.failed })
+        end
+        return
+    end
+    if tick.calls_since < GIVE_UP_CALLS then return end
+    local why = tick.last_tick_error ~= "" and tick.last_tick_error or ("no lines; status " .. json_status())
+    tick.failed[#tick.failed + 1] = { method = tick.chosen, reason = why }
+    tick.last_tick_error, tick.status = "", {}
+    if tick.saved then
+        -- a saved choice that no longer works: forget it and discover again
+        pcall(json.dump_file, TICK_FILE, { method = false, failed = tick.failed })
+        tick.saved, tick.chosen, tick.done, tick.renders, tick.advance = false, nil, false, 0, 0
+        tick.result = "saved method failed; discovering again"
+        if #tick.candidates <= 1 then start_discovery(nil, true) end
+        return
+    end
+    local nxt = nil
+    for _, name in ipairs(tick.qualified) do
+        local tried = false
+        for _, f in ipairs(tick.failed) do if f.method == name then tried = true end end
+        if not tried then nxt = name; break end
+    end
+    if nxt then
+        tick.chosen, tick.calls_since, tick.lines_at = nxt, 0, tick_lines
+        tick.result = "trying " .. nxt .. " (previous produced no lines)"
+    else
+        tick.chosen = nil
+        tick.result = "all " .. #tick.qualified .. " qualified methods failed to write; see failed"
     end
 end
 
@@ -257,7 +314,9 @@ tick_report = function()
         out[i] = { name = top[i].name, calls = top[i].calls, changes = top[i].changes, off = top[i].off }
     end
     return { chosen = tick.chosen, result = tick.result, renders = tick.renders, advance = tick.advance,
-             writes = tick.writes, candidates = #tick.candidates, top = out }
+             writes = tick.writes, candidates = #tick.candidates, top = out, confirmed = tick.confirmed,
+             qualified = tick.qualified, failed = tick.failed, status = json_status(),
+             last_tick_error = tick.last_tick_error }
 end
 
 -- Training Mode frame meter (the game's own Startup / Total / Advantage). READ only. Field names are
@@ -376,13 +435,13 @@ export_battle = function(src)
     local teams = gb and try(function() return gb:get_field("Team"):get_data(nil).mcTeam end)
     local p1 = players and try(function() return players[0] end)
     local p2 = players and try(function() return players[1] end)
-    if not (p1 ~= nil and p2 ~= nil and teams ~= nil) then return false end
+    if not (p1 ~= nil and p2 ~= nil and teams ~= nil) then return false end  -- "false" = not in battle
     local stage_timer = try(function() return gb:get_field("Game"):get_data(nil).stage_timer end)
     local round_no = try(function() return gb:get_field("Round"):get_data(nil).RoundNo end)
     local key = tostring(round_no) .. ":" .. tostring(stage_timer)
     if stage_timer ~= nil and key == last_key then
         -- this game frame is already written; the render path repeats it only as a pause heartbeat
-        if src == "tick" or renders_since_write < STILL_EVERY then return true end
+        if src == "tick" or renders_since_write < STILL_EVERY then return "dup" end
     end
     local missing = {}
     local r1 = read_player(p1, teams[0], 0)
@@ -413,7 +472,7 @@ export_battle = function(src)
     if src == "tick" then tick_lines = tick_lines + 1
     elseif src == "ugi" then ugi_lines = ugi_lines + 1
     else frame_lines = frame_lines + 1 end
-    return true
+    return "written"
 end
 
 re.on_frame(function()
@@ -429,6 +488,7 @@ re.on_frame(function()
                 start_discovery(pl and try(function() return pl[0] end))
             end
             discovery_step()
+            verify_choice()
         end
         if frame_no % INFO_EVERY == 1 then write_info(in_battle) end
         if not in_battle and frame_no % IDLE_EVERY == 0 then

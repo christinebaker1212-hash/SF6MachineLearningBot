@@ -793,6 +793,28 @@ The safety tests are part of acceptance. During a run:
   fallbacks are covered.
 - **UNVERIFIED in game:** whether any candidate method is per tick, and whether hooking them is
   safe and cheap.
+### First real 8× run with exporter v7 (0.6.0, 2026-10-02, a Ryu vs Ken replay recorded twice)
+- **Discovery worked on the real game.** 40 candidates were hooked, and over 600 renders the clock
+  advanced 1,847 frames (≈3× the renders). Several methods run exactly once per game tick:
+  - `nBattle.sGame.updateRunAction` (1,850 calls / 1,849 changes)
+  - `nBattle.sPlayer.move_player` and `nBattle.sPlayer.move_check_after` (1,849 / 1,848)
+  - `nBattle.sGame.update_rule_2nd` (1,849 / 1,848)
+  - `app.FBattleMediator.UpdateTeamInfo` and `UpdatePlayerInfo` are called 2× per tick.
+- **But the chosen `app.FBattleMediator.PostUpdate` wrote 0 lines** (`tick_lines: 0`, while its
+  hook ran 2,794 and then 7,619 times). The error text wasn't in the meta. Lines came only from
+  UpdateGameInfo (once per render).
+- Coverage of the fight: **13.5% and 12.7%** per recording. They were merged as the same match
+  into 22.6% (real-data test `test_real_8x_recordings_of_one_replay_merge`).
+- Fight flag and segments check out on real data: intro seg 0, fight from frame 190, KO.
+- **v8 (0.6.1):**
+  - A chosen method must write 100 lines before it is saved (`confirmed`). One that wrote nothing
+    after 300 calls is dropped, with the reason (`failed`: error text or status counts), and the
+    next qualified method is tried.
+  - Unconfirmed v7 choices are ignored.
+  - The meta now carries `tick_hook.failed/qualified/status/last_tick_error` and `last_error`.
+  - MOCK test: the first per-tick method can't read state (as in game); v8 replaces it and then
+    writes every frame.
+
 ### Bot controller (virtual Xbox pad) and taught routines
 - `input.backend: virtual_pad` uses vgamepad + the ViGEmBus driver. SF6 sees a separate
   controller, so the user can fight the bot.
