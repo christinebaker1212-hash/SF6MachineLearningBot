@@ -214,7 +214,19 @@ Then the combo lab.
 3. Fight Ken again (V, H). Check `hits_by_bot`, and whether Gorai / Thunder Kick are now blocked
    standing.
 4. Ask which keyboard keys SF6 uses for menu MENU/VIEW/LB/LT (`input.menu_keys`).
-**Next build steps:** combo lab (verify routes and cancel timings — SA / Drive Rush / DI — in Training
+**0.11.0 open items for the user:**
+1. Combo lab, Ken: Training Mode, Ken vs a standing dummy with guard NONE, gauges max. Run menu K → 1
+   (community routes), then K → 2 (the bot's own routes). Send S. Look at: verified count, the failing
+   step and kind per route, `lead_measured` (is 4 right?), damage vs the community's numbers.
+2. If the dummy's health never drops (catalog damage was 0), set the dummy's health so it goes down;
+   the lab's damage and the lethal check need it.
+3. Counter / punish-counter routes (K → 5 / 6) need Training Mode's counter-hit setting; the lab warns
+   when the first hit was the wrong type.
+4. Ryu: re-run the catalog (C → 3) so Ryu's routes are checked by id and timed with measured totals.
+**Next build steps after the lab results:** punish table from verified routes (by the opponent move's
+on-block value, position, resources, hit type) → fighter uses verified routes and `lethal_route` for
+the burnout rule → projectile perfect parry → decision layer with the opponent model.
+**Previous next build steps (0.10.x):** combo lab (verify routes and cancel timings — SA / Drive Rush / DI — in Training
 Mode) → punish table from verified routes by start-up, position, resources and hit type → lethal check
 (burnout only when lethal) → projectile perfect parry (export projectile positions, calibrate timing)
 → decision layer with the opponent model.
@@ -261,7 +273,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
+| Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 

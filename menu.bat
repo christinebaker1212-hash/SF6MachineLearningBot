@@ -25,6 +25,7 @@ echo.
 echo  RECORD
 echo    D  Record a replay you play back (training data)
 echo    C  Move catalog in Training Mode
+echo    K  Combo lab: try combo routes in Training Mode, keep what works
 echo.
 echo  OVERLAY BUTTONS  (press P1's keys)
 echo    P  Use the buttons      L  Teach a routine      U  Run a routine
@@ -93,6 +94,32 @@ if "%GC%"=="3" (
 )
 goto menu
 
+:combolab
+echo.
+echo  Combo lab: Training Mode, the bot as P1, the dummy standing with guard NONE, Super and Drive
+echo  gauges on max/infinite. Corner routes push the dummy to the corner by themselves.
+echo    1  Community routes (imported with T then A)   2  Routes the bot works out from Capcom data
+echo    3  Both                                       4  Only routes containing some text (e.g. DRC)
+echo    5  Counter-hit routes      6  Punish-counter routes  (set Training Mode's counter setting first)
+set "LC="
+set /p LC=Choose: 
+if "%LC%"=="1" (%BOT% combo-lab & goto done)
+if "%LC%"=="2" (%BOT% combo-lab --source generated & goto done)
+if "%LC%"=="3" (%BOT% combo-lab --source both & goto done)
+if "%LC%"=="5" (%BOT% combo-lab --hit-type counter_hit & goto done)
+if "%LC%"=="6" (%BOT% combo-lab --hit-type punish_counter & goto done)
+if "%LC%"=="4" (
+    set "LT="
+    set /p LT=Text: 
+    goto combolab_only
+)
+goto menu
+
+:combolab_only
+if "%LT%"=="" goto menu
+%BOT% combo-lab --source both --only "%LT%"
+goto done
+
 :catalog_some
 echo  Type the move names exactly as in the catalog, separated by commas, e.g.
 echo  SA3 Shinryu Reppa,Parry Drive Rush,Kasai Thrust Kick (after OD Gorai Axe Kick)
@@ -129,7 +156,7 @@ if /i "%CH%"=="g" (%BOT% state-check & goto done)
 if /i "%CH%"=="i" (%BOT% input-map & goto done)
 if /i "%CH%"=="w" (%BOT% watch & goto done)
 if /i "%CH%"=="o" (%BOT% overlay-test & goto done)
-if /i "%CH%"=="k" (%BOT% controller pad & goto done)
+if /i "%CH%"=="k" goto combolab
 if /i "%CH%"=="j" (%BOT% controller keyboard & goto done)
 if /i "%CH%"=="1" (%BOT% sysinfo > runs\sysinfo.txt 2>&1 & type runs\sysinfo.txt & goto done)
 if /i "%CH%"=="2" (%BOT% list-windows & goto done)

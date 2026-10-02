@@ -1149,6 +1149,75 @@ The safety tests are part of acceptance. During a run:
 - Flaky test fixed: the mock fight smoke ran 3 s, but the fighter acts from frame 190 (~3.2 s);
   now 6 s.
 
+## 0.11.0: Ken catalog complete; combo lab; combos the bot works out itself
+### Ken catalog after 0.10.1 (user, 2026-10-02: C2 = guard All, all 71 moves; C4 = re-test, guard None)
+- **Every row has an id (71/71).** Guard All vs Capcom: **172/179 values identical** (startup, total,
+  on block). The rest are known definitions or meter differences: 2HK total 35 vs 34, [QD] Shoryuken
+  66 vs 65, OD Dragonlash 47 vs 48, Forward Step Kick 31 vs 35, throws 123 vs 30 (whole throw),
+  Drive Parry 53 vs 45 (held 20F). The meter wins for the installed patch.
+- **The 0.10.1 fixes work:**
+  - SA3 Shinryu Reppa: block −40 / total 100 (= Capcom); on hit now `hit`, not a whiff. The meter
+    reads total 36 / +15 on hit after both are neutral: the part before the cinematic (unconfirmed
+    against the screen).
+  - Parry Drive Rush 500 (ids [480, 500]); Kasai Thrust Kick ×3 = 936 / 937 / 938, startup and on
+    block all equal Capcom's (−12 / −12 / −20).
+  - OD Tatsu 1005: block −61, hit +28 (`hit`).
+  - Gorai Axe Kick needed timing 3 (−3 on block); Triple Flash Kicks (3) too.
+- Capture's "est. missed 2664" in the guard-All run is the video grabber only (long run, settle
+  waits). The catalog uses the per-tick state (0 skipped), not the video.
+### Combo lab (`sf6bot/combo_lab.py`, `sf6bot combo-lab`, menu **K**)
+- Performs community routes (menu T → A) and/or generated ones in Training Mode. Setup: bot = P1,
+  dummy standing, guard NONE, gauges max. Corner routes push the dummy into the corner first; jump-in
+  starters are skipped (the route starts from the next move).
+- **Timing from the game's own clock, not wall-clock.** MEASURED in the fight data: `action_frame`
+  freezes during hitstop (Ryu 5HP hit at its frame 9 and stayed 9 for 12 ticks while `hitstop`
+  counted down). So a move's own frame is hitstop-free. The trigger types:
+  - link `,`: the button should reach the game on the previous move's frame `total` (catalog meter
+    value). It is sent LEAD = 4 frames early (measured 3–5), plus the motion's own frames.
+  - cancel `>` / chain / target combo `~`: should reach the game 2 frames after contact (inside
+    hitstop). Contact is predicted from start-up until it is seen.
+  - follow-ups with a Capcom notes window (Jinrai, Quick Dash): the catalog's window.
+  - after a Drive Rush: the next normal on rush frame 11 — a **guess**, searched.
+  - Parry Drive Rush from neutral: parry held, dash on parry frame ~13 (the catalog's verified PDR).
+- **Measured per attempt:** which ids came out and when; dummy hits (hitstop rising edge or hp
+  drop); whether the dummy recovered (idle id, or a "fresh" hit on a dummy not in hit reaction =
+  the combo already ended); damage, Drive and Super spent; carry; side switch; end advantage (frame
+  meter after both are neutral = oki); first-hit type (hits.py); the real input delay per press
+  (`lead_measured`, calibrates LEAD).
+- **Timing search:** a failed step gets shifted. Nothing came out → later (a link pressed during
+  recovery is eaten). Dummy recovered first → earlier. Wrong move → same timing once. The first
+  working timing is repeated (`--confirm`, default 2) for a success rate.
+- Output `datasets/combo_lab/<Character>.json` (merged over runs; verified routes are skipped next
+  time unless `--again`), and the run's `combo_lab.md` (in S).
+- `lethal_route()`: the cheapest verified route whose lowest measured damage kills with the resources
+  available. It is for the burnout rule; the fighter does not call it yet.
+- **Tests:** a frame-level simulator (NOT the game) encodes the link/cancel/hitstop model. It checks
+  that Ken-like 2LP , 5MP > 236MK lands at the measured lead; that a 1-frame link one frame late
+  (lead 5) and one 2 frames early (lead 2) are found by the search (offsets −1 / +2); plans for all
+  53 Ken community routes; a mock end-to-end run on the simulated exporter.
+- **Unverified in game:** everything above. The questions are: does `action_frame` start at 0 on the
+  first line of a move; is LEAD 4 right for links; does a cancel input 2 frames after contact always
+  land; the Drive Rush frame; does the dummy show an idle frame when a link is late.
+### Combo importer fixes
+- One table cell can hold several routes, one per line, with one damage each ("1490 1510 1590").
+  Each is now its own route (Ryu 136 → 175 rows, Ken 50 → 53).
+- `( … )x2` is written out (it was performed once). "PDR 5HP" = rush then 5HP; "Drive Impact" was
+  read as Drive Rush; DRC is always a cancel; `jHP` = `j.HP`. Hit type falls back to the section
+  heading ("Normal Hit Meterless", "Punish Counter Combos").
+- Plannable now: **Ken 53/53, Ryu 55/97** Classic routes. The rest are prose ("Any Medium starter"),
+  air juggles and Denjin holds.
+### Combos the bot works out itself (`sf6bot/combo_gen.py`, menu K → 2)
+- From Capcom's data only:
+  - link A , B when on-hit(A) ≥ start-up(B); window = on_hit − startup + 1 frames
+  - cancel A > S by the cancel column: C → specials and supers; SA → supers; SA2/SA3 → that level
+    and up (assumption about the icon)
+  - chains between lights that Capcom notes as "rapid cancel"
+- 2–3 moves ending in a special or super. Ranked by an estimated damage (community scaling table,
+  unverified) only to decide what to try first. Up to 15 per group (meterless / Drive / Super), at
+  most 2 enders per starter. Routes the community already lists are left out.
+- Example (Ken): 2MP , 5LP > 623HP — 2MP is +5, 5LP starts on frame 4: a 2-frame link.
+- These are proposals; only the lab's verified ones count.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

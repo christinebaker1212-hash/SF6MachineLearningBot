@@ -276,3 +276,47 @@ def test_fight_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
         sim.stop.set()
     assert out["player"] == "p1" and sum(summary["decisions"].values()) > 0
     assert any(d for _, k, d in inp.log if d)   # it pressed keys
+
+
+def test_combo_lab_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
+    """MOCK: the combo lab end to end (reset, approach, executor, settle, files) on the simulated
+    exporter: '2MK' lands; '2MK , 2MK' drops (the simulator's hitstun ends before the link)."""
+    import gzip
+    import sf6bot.session as sm
+    from sf6bot import combo_lab
+    from sf6bot.framedata import parse_frame_page
+    from sf6bot.game_state import STATE_FILE
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    ds = tmp_path / "datasets"
+    (ds / "framedata").mkdir(parents=True)
+    (ds / "combos").mkdir(parents=True)
+    html = gzip.open(Path(__file__).parent / "data" / "capcom_ryu_frame_table.html.gz", "rt",
+                     encoding="utf-8").read()
+    (ds / "framedata" / "ryu.json").write_text(json.dumps({"slug": "ryu", "character": "Ryu",
+                                                          "moves": parse_frame_page(html)}))
+    step = {"token": "2MK", "name": "Crouching Medium Kick", "mods": []}
+    routes = [{"route": "2MK", "steps": [dict(step, connector="")]},
+              {"route": "2MK , 2MK", "steps": [dict(step, connector=""), dict(step, connector=",")]}]
+    (ds / "combos" / "ryu.json").write_text(json.dumps({"combos": [
+        dict(r, unresolved=[], controls="classic", position="Anywhere", hit_type="normal", difficulty=1)
+        for r in routes]}))
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
+    cfg["datasets"] = {"root": str(ds)}
+    sim = SimExporter(game / STATE_FILE, inp)
+    sim.chara = 1  # Ryu
+    sim.start()
+    try:
+        with Session(cfg, "combo_lab_test", mock=True) as s:
+            out = combo_lab.run_combo_lab(s, cfg, tries=2, confirm=1)
+            run_dir = s.recorder.dir
+    finally:
+        sim.stop.set()
+    data = json.loads(out.read_text())
+    one, two = data["routes"]["midscreen | 2MK"], data["routes"]["midscreen | 2MK , 2MK"]
+    assert one["verified"] and one["successes"] == 2 and one["damage"] == 600
+    assert not two["verified"] and two["failed_at"]["step"] == 1
+    assert (run_dir / "combo_lab.md").exists() and (run_dir / "combo_lab_result.json").exists()

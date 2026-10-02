@@ -221,6 +221,86 @@ def _run_triggered(runner, reader, sess, mv: dict, parent_id: int, attempt: int)
     return timings + more, ok
 
 
+def make_reset(sess, cfg: dict, reader):
+    """Training Mode position reset ("/", a KEYBOARD key, user-reported). With the virtual pad backend
+    the bot's controller has no such key, so the reset goes through the keyboard. Returns
+    (reset(), backend, key)."""
+    c = sess.controller
+    reset_key = cfg.get("training", {}).get("reset_key", "SLASH")
+    reset_backend = c.backend
+    if c.backend.name == "virtual_pad":
+        from .input_backend import SendInputKeyboard
+        reset_backend = SendInputKeyboard()
+
+    def reset():
+        if not c.armed:  # never send the reset key to another window (focus lost / paused)
+            if not sess.wait_armed(timeout=10):
+                raise InterruptedError("not armed")
+        reset_backend.send([(reset_key, True)])
+        time.sleep(0.08)
+        reset_backend.send([(reset_key, False)])
+        sess.stop_event.wait(1.3)
+        s2 = reader.latest()
+        if s2 is not None and facing_of(s2.p1) is not None:
+            c.set_facing(facing_of(s2.p1))
+    return reset, reset_backend, reset_key
+
+
+def learn_ids(sess, reader, reset) -> tuple[set, set, set]:
+    """Neutral action ids (standing/crouching idle) of bot and dummy, and the bot's MOVEMENT ids (walk
+    forward/back incl. the stop transition, neutral/forward/back jump), so a move's own id is never
+    confused with the approach walk (0.3.1 bug: every move's id list started with walk id 11)."""
+    c = sess.controller
+    reset()
+    idle = _ready_dicts(reader.collect(1.0))
+    c.apply(InputState(2), tag="learn_crouch")
+    crouch = _ready_dicts(reader.collect(1.0))
+    c.apply(InputState(), tag="learn_end")
+    neutral_a = {s["p1"].get("action_id") for s in idle + crouch[20:]}
+    neutral_d = {s["p2"].get("action_id") for s in idle}
+    movement = set()
+    for d in (6, 4):
+        reset()
+        c.apply(InputState(d), tag="learn_walk")
+        movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(0.5))}
+        c.apply(InputState(), tag="learn_walk_end")
+        movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(0.5))}
+    # Neutral, forward and back jump: 0.4.0 tagged the forward-jump id (37) as Aerial Tatsumaki.
+    for d in (8, 9, 7):
+        reset()
+        c.apply(InputState(d), tag="learn_jump")
+        sess.stop_event.wait(0.05)
+        c.apply(InputState(), tag="learn_jump_end")
+        movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(1.2))}
+    movement -= neutral_a
+    movement.discard(None)
+    print(f"  neutral ids: bot {sorted(x for x in neutral_a if x is not None)}, "
+          f"dummy {sorted(x for x in neutral_d if x is not None)}; movement ids {sorted(movement)}")
+    return neutral_a, neutral_d, movement
+
+
+def walk_to_contact(sess, reader, max_s: float = 2.5) -> float | None:
+    """Walk forward until the distance stops shrinking (contact), then let the walk-stop transition
+    finish. Returns the closest distance seen."""
+    c = sess.controller
+    c.apply(InputState(6), tag="approach")
+    best, still, last_d = None, 0, None
+    end = clock.now() + max_s
+    while clock.now() < end and still < 8 and not sess.stop_event.is_set():
+        s2 = reader.wait_newer(-1 if last_d is None else last_d, 0.1)
+        if s2 is None:
+            continue
+        last_d = s2.frame
+        d = player_distance(s2.p1, s2.p2)
+        if d is not None and (best is None or d < best - 1e-3):
+            best, still = d, 0
+        else:
+            still += 1
+    c.apply(InputState(), tag="approach_end")
+    sess.stop_event.wait(0.4)
+    return best
+
+
 def _move_plan(name: str, cfg: dict, generic: bool):
     """(moves, skipped, source). Moves are dicts: name, sequence, approach, long, throw, input.
 
@@ -250,13 +330,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
     if reader is None:
         return None
     c = sess.controller
-    reset_key = cfg.get("training", {}).get("reset_key", "SLASH")
-    # Training Mode reset is a KEYBOARD key ("/", user-reported). With the virtual pad backend the
-    # bot's controller has no such key, so the reset goes through the keyboard.
-    reset_backend = c.backend
-    if c.backend.name == "virtual_pad":
-        from .input_backend import SendInputKeyboard
-        reset_backend = SendInputKeyboard()
+    reset, reset_backend, reset_key = make_reset(sess, cfg, reader)
     runner = SequenceRunner(c, sink=sess.recorder.event)
     results: dict = {}
     plan, skipped, source = [], [], "generic"
@@ -280,46 +354,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         if not sess.start_inputs():
             return None
 
-        def reset():
-            if not c.armed:  # never send the reset key to another window (focus lost / paused)
-                if not sess.wait_armed(timeout=10):
-                    raise InterruptedError("not armed")
-            reset_backend.send([(reset_key, True)])
-            time.sleep(0.08)
-            reset_backend.send([(reset_key, False)])
-            sess.stop_event.wait(1.3)
-            s2 = reader.latest()
-            if s2 is not None and facing_of(s2.p1) is not None:
-                c.set_facing(facing_of(s2.p1))
-
-        # Learn neutral action ids (standing/crouching idle) and MOVEMENT ids (walk forward/back incl.
-        # the stop transition, neutral jump), so a move's own id is never confused with the approach
-        # walk (0.3.1 bug: every move's id list started with walk id 11).
-        reset()
-        idle = _ready_dicts(reader.collect(1.0))
-        c.apply(InputState(2), tag="learn_crouch")
-        crouch = _ready_dicts(reader.collect(1.0))
-        c.apply(InputState(), tag="learn_end")
-        neutral_a = {s["p1"].get("action_id") for s in idle + crouch[20:]}
-        neutral_d = {s["p2"].get("action_id") for s in idle}
-        movement = set()
-        for d in (6, 4):
-            reset()
-            c.apply(InputState(d), tag="learn_walk")
-            movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(0.5))}
-            c.apply(InputState(), tag="learn_walk_end")
-            movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(0.5))}
-        # Neutral, forward and back jump: 0.4.0 tagged the forward-jump id (37) as Aerial Tatsumaki.
-        for d in (8, 9, 7):
-            reset()
-            c.apply(InputState(d), tag="learn_jump")
-            sess.stop_event.wait(0.05)
-            c.apply(InputState(), tag="learn_jump_end")
-            movement |= {s["p1"].get("action_id") for s in _ready_dicts(reader.collect(1.2))}
-        movement -= neutral_a
-        movement.discard(None)
-        print(f"  neutral ids: bot {sorted(x for x in neutral_a if x is not None)}, "
-              f"dummy {sorted(x for x in neutral_d if x is not None)}; movement ids {sorted(movement)}")
+        neutral_a, neutral_d, movement = learn_ids(sess, reader, reset)
         first_ids: dict = {}
         for mv in plan:
             mname, seq_text, approach = mv["name"], mv["sequence"], mv["approach"]
@@ -338,21 +373,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             for attempt in range(attempts):
                 reset()
                 if approach:
-                    c.apply(InputState(6), tag="approach")
-                    best, still, last_d = None, 0, None
-                    end = clock.now() + 2.5
-                    while clock.now() < end and still < 8 and not sess.stop_event.is_set():
-                        s2 = reader.wait_newer(-1 if last_d is None else last_d, 0.1)
-                        if s2 is None:
-                            continue
-                        last_d = s2.frame
-                        d = player_distance(s2.p1, s2.p2)
-                        if d is not None and (best is None or d < best - 1e-3):
-                            best, still = d, 0
-                        else:
-                            still += 1
-                    c.apply(InputState(), tag="approach_end")
-                    sess.stop_event.wait(0.4)   # let the walk-stop transition finish
+                    walk_to_contact(sess, reader)
                 fm_before = reader.last_fm
                 pre = _ready_dicts(reader.collect(0.15))
                 seq_text = variants[attempt % len(variants)]

@@ -21,16 +21,17 @@ def _capcom(ch):
 def test_every_tab_is_read():
     rows = cb.parse_combo_page(_page("ryu"))
     tabs = {t for r in rows for t in r["tabs"]}
-    assert len(rows) == 136
+    # 136 table rows; cells holding several routes (one per line, one damage each) are split: 175 routes
+    assert len(rows) == 175 and sum("variant" in r for r in rows) > 0
     assert {"Light Starter", "Medium Starter", "Heavy Starter", "Parry Drive Rush", "Drive Rush Cancel",
             "Wall Splat", "Stun", "Drive Impact crumple"} <= tabs
     assert {r["hit_type"] for r in rows} >= {"normal", "counter_hit", "punish_counter"}
-    assert sum(r["controls"] == "classic" for r in rows) == 87         # the "... 2" tabs are Modern routes
+    assert sum(r["controls"] == "classic" for r in rows) == 97         # the "... 2" tabs are Modern routes
 
 
 def test_ken_routes_resolve_to_capcom_rows():
     d = cb.import_character("Ken", _page("ken"), _capcom("ken"))
-    assert len(d["combos"]) == 50 and d["moves_resolved"] >= 0.98 * d["moves_total"]
+    assert len(d["combos"]) == 53 and d["moves_resolved"] >= 0.98 * d["moves_total"]
     di = next(c for c in d["combos"] if c["route"].startswith("DI , 5HP > KK ~ HK"))
     assert [s.get("name") or s.get("system") for s in di["steps"]] == [
         "drive_impact", "Standing Heavy Punch", "Quick Dash", "Forward Step Kick", "SA3 Shinryu Reppa"]

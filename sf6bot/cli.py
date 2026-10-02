@@ -191,6 +191,16 @@ def cmd_catalog(args, cfg):
     _print_report(s)
 
 
+def cmd_combo_lab(args, cfg):
+    from .combo_lab import run_combo_lab
+    with _session(args, cfg, "combo_lab") as s:
+        run_combo_lab(s, cfg, position=args.position, hit_type=args.hit_type,
+                      max_difficulty=args.max_difficulty, only=[o for o in args.only.split(",") if o] or None,
+                      tries=args.tries, confirm=args.confirm, limit=args.limit, source=args.source,
+                      again=args.again)
+    _print_report(s)
+
+
 def cmd_framedata_import(args, cfg):
     """Import Capcom frame data pages saved from the browser, and cross-check our catalogs.
 
@@ -537,6 +547,22 @@ def main(argv=None):
     p.add_argument("--generic", action="store_true",
                    help="use the generic inputs even if Capcom frame data was imported (menu F)")
     p.set_defaults(fn=cmd_catalog)
+
+    p = sub.add_parser("combo-lab", help="try combo routes in Training Mode and keep what works (bot = P1, "
+                                         "dummy guard NONE)")
+    p.add_argument("--source", choices=["community", "generated", "both"], default="community",
+                   help="community routes (menu T, A), routes worked out from Capcom data, or both")
+    p.add_argument("--position", choices=["any", "midscreen", "corner"], default="any")
+    p.add_argument("--hit-type", dest="hit_type", default="normal",
+                   choices=["normal", "counter_hit", "punish_counter", "any"],
+                   help="routes for this starting hit (counter routes need Training Mode's counter-hit setting)")
+    p.add_argument("--max-difficulty", dest="max_difficulty", type=int, default=None)
+    p.add_argument("--only", default="", help="comma-separated text the route must contain, e.g. '2MK,DRC'")
+    p.add_argument("--tries", type=int, default=5, help="attempts to find a timing that works")
+    p.add_argument("--confirm", type=int, default=2, help="repeats at the timing that worked")
+    p.add_argument("--limit", type=int, default=None, help="at most this many routes")
+    p.add_argument("--again", action="store_true", help="also re-test routes already verified")
+    p.set_defaults(fn=cmd_combo_lab)
 
     p = sub.add_parser("framedata-import",
                        help="import Capcom frame data pages saved from your browser (no game needed)")

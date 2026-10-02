@@ -101,30 +101,52 @@ def _rows(table: str, headings: list, tabs: list) -> list[dict]:
             title = _text(re.findall(r"<th\b[^>]*>(.*?)</th>", tr, re.S)[0])
     if header is None:
         return []
-    hit = (title or "").lower()
-    hit_type = "punish_counter" if "punish counter" in hit else "counter_hit" if "counter hit" in hit else \
-        "normal" if "normal hit" in hit else None
+    hit_type = _hit_type(title or "")
+    if hit_type is None:
+        # no title row: the section heading or tab says it ('Normal Hit Meterless', 'Punish Counter')
+        hit_type = next((h for h in (_hit_type(t) for t in reversed(headings + tabs)) if h), None)
     rows = []
     for tr in trs[start:]:
-        cells = [_text(c) for c in re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", tr, re.S)]
+        raw = re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", tr, re.S)
+        cells = [_text(c) for c in raw]
         if len(cells) < 2 or not cells[0]:
             continue
         r = dict(zip(header, cells))
-        route = r.get("combo", cells[0])
-        row = {"route": route, "headings": headings, "tabs": tabs, "table": title, "hit_type": hit_type,
-               "position": r.get("position") or "Anywhere",
-               "damage": _int(r.get("damage", "")), "damage_text": r.get("damage"),
-               "drive_bars": _float(r.get("drive gauge", r.get("drive", ""))),
-               "super_bars": _int(r.get("super gauge", r.get("super", ""))),
-               "difficulty": _int(r.get("difficulty", "")), "difficulty_text": r.get("difficulty"),
-               "notes": r.get("notes", "")}
-        # Modern-controls routes (L/M/H/S buttons, A[...] assist) are kept but tagged: the bot plays Classic
-        row["controls"] = "modern" if re.search(r"A\[|\b\d*[LMHS]\b|\b\d+X+\b", route) else "classic"
-        if route.upper().startswith("PC ") and not hit_type:
-            row["hit_type"] = "punish_counter"
-        row["flags"] = sorted(k for k, pat in FLAGS.items() if re.search(pat, f"{row['notes']} {route}", re.I))
-        rows.append(row)
+        # One cell can hold several routes separated by line breaks, with one damage each
+        # ('1490 1510 1590'): each becomes its own row.
+        ci = header.index("combo") if "combo" in header else 0
+        variants = [v for v in (_text(x) for x in re.split(r"<br\s*/?>", raw[ci])) if v] if ci < len(raw) else []
+        dmgs = re.findall(r"-?\d[\d,]*", r.get("damage", "") or "")
+        if len(variants) < 2:
+            variants = [r.get("combo", cells[0])]
+        for k, route in enumerate(variants):
+            dmg = _int(dmgs[k]) if len(variants) > 1 and len(dmgs) == len(variants) else _int(r.get("damage", ""))
+            rows.append(_row(route, r, headings, tabs, title, hit_type, dmg, k if len(variants) > 1 else None))
     return rows
+
+
+def _hit_type(text: str):
+    t = text.lower()
+    return "punish_counter" if "punish counter" in t else "counter_hit" if "counter hit" in t else \
+        "normal" if "normal hit" in t else None
+
+
+def _row(route: str, r: dict, headings: list, tabs: list, title, hit_type, damage, variant) -> dict:
+    row = {"route": route, "headings": headings, "tabs": tabs, "table": title, "hit_type": hit_type,
+           "position": r.get("position") or "Anywhere",
+           "damage": damage, "damage_text": r.get("damage"),
+           "drive_bars": _float(r.get("drive gauge", r.get("drive", ""))),
+           "super_bars": _int(r.get("super gauge", r.get("super", ""))),
+           "difficulty": _int(r.get("difficulty", "")), "difficulty_text": r.get("difficulty"),
+           "notes": r.get("notes", "")}
+    # Modern-controls routes (L/M/H/S buttons, A[...] assist) are kept but tagged: the bot plays Classic
+    row["controls"] = "modern" if re.search(r"A\[|\b\d*[LMHS]\b|\b\d+X+\b", route) else "classic"
+    if route.upper().startswith("PC ") and not hit_type:
+        row["hit_type"] = "punish_counter"
+    row["flags"] = sorted(k for k, pat in FLAGS.items() if re.search(pat, f"{row['notes']} {route}", re.I))
+    if variant is not None:
+        row["variant"] = variant
+    return row
 
 
 # ---- routes -> moves -----------------------------------------------------------------------------
@@ -132,13 +154,30 @@ def _rows(table: str, headings: list, tabs: list) -> list[dict]:
 _BTN = r"(?:LP|MP|HP|LK|MK|HK|PP|KK|P|K)"
 
 
+def _expand_repeats(r: str) -> str:
+    """'( 5HP > 623MK , 5MP > DRC )x2, 5HP' -> '5HP > 623MK , 5MP > DRC , 5HP > 623MK , 5MP > DRC , 5HP'.
+    A group that starts with its own connector ('( > DRC , 5HK )x2') is joined as is."""
+    def rep(m):
+        body, n = m.group(1).strip(), min(int(m.group(2)), 4)
+        follow = re.match(r"\s*([>~,])", r[m.end():])
+        joiner = " " if body[:1] in ">~," else f" {follow.group(1) if follow else ','} "
+        return joiner.join([body] * n)
+    for _ in range(3):
+        r2 = re.sub(r"\(([^()]*)\)\s*[xX]\s*(\d+)", rep, r)
+        if r2 == r:
+            break
+        r = r2
+    return r
+
+
 def split_route(route: str) -> list[tuple[str, str]]:
     """'5MP , 2HP > 236HK ~ 6HK , 623LP' -> [('', '5MP'), (',', '2HP'), ('>', '236HK'), ('~', '6HK'),
     (',', '623LP')]. Connector of the first move is ''."""
     r = route.strip()
     r = re.sub(r"\b(f\s*[~,]\s*f|ff)\b", "66", r)                     # 'f~f' = forward dash
-    r = re.sub(r"[()]\s*[xX]\s*\d+|\)\s*[xX]\d+", "", r)                # '( ... )x2' repeats: once
+    r = _expand_repeats(r)                                           # '( ... )x2' -> written out twice
     r = r.replace("(", " ").replace(")", " ")
+    r = re.sub(r"\b(PDR|DRC|DR)\s+(?=[\dj]|[LMH][PK]\b)", r"\1 ~ ", r)   # 'PDR 5HP' = rush, then 5HP
     r = re.sub(r"\s*/\s*[^>~,]+", "", r)                             # 'A / B' alternatives: first
     parts = re.split(r"\s*(>|~|,|xx)\s*", r)
     out, conn = [], ""
@@ -194,7 +233,7 @@ def _norm_token(tok: str) -> tuple[str, list[str]]:
             t = t[len(pre):].strip()
     t = re.sub(r"^(cr\.|c\.)", "2", t)
     t = re.sub(r"^(st\.|s\.)", "5", t)
-    t = re.sub(r"^(nj\.|fj\.|bj\.)", "j.", t)
+    t = re.sub(r"^(nj\.|fj\.|bj\.|j(?=[LMH][PK]))", "j.", t)
     t = t.replace("P+P", "PP").replace("K+K", "KK").replace("+", "")
     t = re.sub(r"\s*\(.*?\)\s*$", "", t)
     if re.fullmatch(_BTN + r"+", t):
@@ -214,10 +253,12 @@ def resolve(route: str, capcom_moves: list[dict]) -> dict:
             key = _key_of(hit) if hit else key
         step = {"token": tok, "connector": conn, "key": key, "mods": mods}
         row = None
-        if key.upper() in ("DR", "DRC", "PDR", "MPMK66") or key.upper().startswith("DR"):
-            step["system"] = "drive_rush"
-        elif key.upper() in ("DI", "HPHK", "5HPHK"):
+        if key.upper() in ("DI", "HPHK", "5HPHK", "DRIVEIMPACT", "DRIVE IMPACT"):
             step["system"] = "drive_impact"
+        elif key.upper() in ("DR", "DRC", "PDR", "MPMK66") or re.fullmatch(r"DR\w{0,2}", key.upper()):
+            step["system"] = "drive_rush"
+            # DRC is always a cancel; PDR / DR on its own is a Parry Drive Rush from neutral
+            step["rush"] = "cancel" if key.upper().startswith("DRC") else "parry" if key.upper() == "PDR" else None
         elif key in ("66", "dash"):
             step["system"] = "dash"
         elif key.upper() == "DC":
