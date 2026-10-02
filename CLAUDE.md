@@ -1378,6 +1378,22 @@ that don't cause a cinematic"; position resets by holding a direction.
 - Unlabelled routes run with the normal hits; a failure is not a verdict (`true_combo: None`, note) and
   never prunes the generator. Results record `tested_as`; only normal-hit results steer the generator.
 
+## 0.11.7: purge data from old bot versions; every output carries its version
+- User (2026-10-02): "an option to purge data recorded from old versions, except for data that doesn't
+  change between versions."
+- Every output now records `sf6bot_version`: run meta.json, replay / fight dataset metas, combo lab routes
+  and files, move maps, catalog runs. Data saved before 0.11.7 has no stamp and counts as old.
+- `sf6bot erase old` (menu E → 4) shows what it would remove and needs a typed YES:
+  - runs: every run not made by the current version
+  - fights: recorded before 0.11.5 (the bot's combo timing changed)
+  - combo lab: route results before 0.11.6 (hit-type passes; 0.11.4 move variants, cancel rules); the
+    file's measured corner position stays
+  - move maps: before 0.11.7 (rebuilt by Tools → X)
+  - `erase.VALID_SINCE` holds these versions: bump an entry when a change makes older data wrong.
+- Kept whatever the version: move catalogs (game data; a game patch is caught by the build stamp),
+  Capcom frame data, community combo pages, recorded and merged replays (raw game state), routines,
+  configs.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

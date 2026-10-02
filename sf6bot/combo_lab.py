@@ -975,6 +975,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                                    "replays": len(replays), "replay_successes": sum(a["success"] for a in replays)}
         summ["success_rate_final_timing"] = round((1 + sum(a["success"] for a in replays)) / (1 + len(replays)), 2)
     summ["guard"] = guard
+    summ["sf6bot_version"] = __import__("sf6bot").__version__
     summ["true_combo"] = True if (summ["verified"] and guard == "after_first_hit") else (
         False if (summ.get("failed_at") or {}).get("kind") == "blocked" else None)
     return summ
@@ -1131,6 +1132,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     out.parent.mkdir(parents=True, exist_ok=True)
     lab["skipped"] = {**lab.get("skipped", {}), **skipped}
     lab["lead_constant"] = LEAD
+    lab["sf6bot_version"] = __import__("sf6bot").__version__
     if lab_state.get("corner_hold"):
         lab["corner_hold"] = lab_state["corner_hold"]
     if lab_state.get("leads"):

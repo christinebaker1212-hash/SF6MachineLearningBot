@@ -377,6 +377,23 @@ def cmd_erase(args, cfg):
     """Delete recorded data after a typed confirmation. Catalogs, Capcom frame data and routines are
     never touched."""
     from .erase import TARGETS, erase, describe
+    if args.what == "old":
+        from .erase import describe_old, purge_old
+        info = describe_old(cfg)
+        print(info["text"])
+        if not info["total"]:
+            return
+        if not args.yes:
+            try:
+                ans = input("Type YES to delete them for good (anything else cancels): ")
+            except EOFError:
+                ans = ""
+            if ans.strip() != "YES":
+                print("Cancelled. Nothing was deleted.")
+                return
+        n, errors = purge_old(cfg)
+        print(f"Removed {n} items." + (f" Could not remove {len(errors)}: {errors[:3]}" if errors else ""))
+        return
     if args.what not in TARGETS:
         print(f"Choose one of: {', '.join(TARGETS)}")
         return
@@ -604,8 +621,9 @@ def main(argv=None):
     p.add_argument("--no-fetch", action="store_true", help="only use pages saved in combo_pages/")
     p.set_defaults(fn=cmd_combos_import)
 
-    p = sub.add_parser("erase", help="delete recorded data: runs, training (replays) or fights; asks for YES")
-    p.add_argument("what", choices=("runs", "training", "fights"))
+    p = sub.add_parser("erase", help="delete recorded data: runs, training (replays), fights, or old = "
+                                     "everything recorded by older bot versions that depends on the version")
+    p.add_argument("what", choices=("runs", "training", "fights", "old"))
     p.add_argument("--yes", action="store_true", help="do not ask")
     p.set_defaults(fn=cmd_erase)
 

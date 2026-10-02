@@ -39,6 +39,7 @@ def compute() -> dict:
             b.add(l, l.get("t", 0.0))
         meta = b.meta("regression")
         meta.pop("created", None)
+        meta.pop("sf6bot_version", None)     # changes with every release by design
         out[f"dataset_meta:{name}"] = _h(meta)
         out[f"dataset_rows:{name}"] = _h(b.rows)
     pages = {}

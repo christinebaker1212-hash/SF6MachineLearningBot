@@ -502,7 +502,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         data["moves"].setdefault(k, {})[f"guard_{guard}"] = v
     data["caveats"] = __doc__.split("Caveats (stated in the output too):")[1].strip()
     data.setdefault("runs", []).append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "guard": guard,
-                                        "moves": len(results)})
+                                        "moves": len(results), "sf6bot_version": __import__("sf6bot").__version__})
     try:
         from .game_state import game_build
         build = game_build(cfg)

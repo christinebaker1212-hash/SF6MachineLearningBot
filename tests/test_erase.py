@@ -50,3 +50,36 @@ def test_cli_asks_for_yes(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda prompt="": "YES")
     cli.cmd_erase(type("A", (), {"what": "fights", "yes": False})(), cfg)
     assert not (tmp_path / "datasets/fights/f.jsonl.gz").exists()
+
+
+def test_purge_old_versions_keeps_version_independent_data(tmp_path):
+    """User, 0.11.7: purge data recorded by old versions, except data that doesn't change between versions."""
+    import json
+    from sf6bot import __version__
+    from sf6bot.erase import describe_old, purge_old
+    runs, ds = tmp_path / "runs", tmp_path / "datasets"
+    cfg = {"recording": {"root": str(runs)}, "datasets": {"root": str(ds)}}
+    for name, ver in (("20261001_old", None), ("20261002_old2", "0.11.4"), ("20261002_new", __version__)):
+        (runs / name).mkdir(parents=True)
+        meta = {"name": name} | ({"sf6bot_version": ver} if ver else {})
+        (runs / name / "meta.json").write_text(json.dumps(meta))
+    (ds / "fights").mkdir(parents=True)
+    for stem, ver in (("f_old", None), ("f_new", __version__)):
+        (ds / "fights" / f"{stem}.jsonl.gz").write_bytes(b"x")
+        (ds / "fights" / f"{stem}.meta.json").write_text(json.dumps({"sf6bot_version": ver} if ver else {}))
+    (ds / "combo_lab").mkdir()
+    (ds / "combo_lab" / "Ken.json").write_text(json.dumps({"corner_hold": 6, "routes": {
+        "midscreen | old": {"verified": True}, "midscreen | new": {"verified": True, "sf6bot_version": __version__}}}))
+    for keep in ("catalog/Ken_movelist.json", "framedata/ken.json", "combos/ken.json", "replays/r.jsonl.gz"):
+        (ds / keep).parent.mkdir(parents=True, exist_ok=True)
+        (ds / keep).write_text("{}")
+    info = describe_old(cfg)
+    assert info["total"] == 2 + 2 + 1 and "Kept" in info["text"]
+    n, errors = purge_old(cfg)
+    assert not errors and n == 5
+    assert sorted(p.name for p in runs.iterdir()) == ["20261002_new"]
+    assert sorted(p.name for p in (ds / "fights").iterdir()) == ["f_new.jsonl.gz", "f_new.meta.json"]
+    lab = json.loads((ds / "combo_lab" / "Ken.json").read_text())
+    assert list(lab["routes"]) == ["midscreen | new"] and lab["corner_hold"] == 6
+    for keep in ("catalog/Ken_movelist.json", "framedata/ken.json", "combos/ken.json", "replays/r.jsonl.gz"):
+        assert (ds / keep).exists()

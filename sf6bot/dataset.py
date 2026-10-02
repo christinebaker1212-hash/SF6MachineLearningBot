@@ -98,6 +98,7 @@ class DatasetBuilder:
         match = [e for e in self.events if e["event"] == "match_end"]
         return {
             "source": source, "notes": notes, "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "sf6bot_version": __import__("sf6bot").__version__,
             "characters": [character_name(c) for c in self.characters], "character_ids": self.characters,
             "frames": len(self.rows), "duplicate_lines_dropped": self.duplicates,
             "skipped_game_frames": self.skipped_frames,

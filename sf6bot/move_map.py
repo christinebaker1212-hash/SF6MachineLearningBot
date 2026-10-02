@@ -192,6 +192,7 @@ def build_maps(datasets_root: Path, recordings: list[Path] | None = None, write:
         if write:
             d = root / "move_maps"
             d.mkdir(parents=True, exist_ok=True)
+            out[name]["sf6bot_version"] = __import__("sf6bot").__version__
             (d / f"{file_stem(name)}.json").write_text(json.dumps(out[name], indent=1))
     return out
 

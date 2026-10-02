@@ -27,6 +27,11 @@ def bindings_for(cfg: dict, backend_name: str) -> dict:
     return cfg["input"]["bindings"]
 
 
+
+def _version() -> str:
+    from . import __version__
+    return __version__
+
 class Session:
     def __init__(self, cfg: dict, name: str, side: str = "left", mock: bool = False,
                  overlay: bool | None = None, extra_meta: dict | None = None) -> None:
@@ -115,7 +120,7 @@ class Session:
                 return win32.client_rect_screen(hwnd) != rect0
         self.region = region
         meta = {
-            "name": self.name, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "name": self.name, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "sf6bot_version": _version(),
             "MOCK": self.mock, "side": self.side, "facing": self.facing.value,
             "capture_backend": capture.name, "input_backend": inp.name, "region": region,
             "window": None if self.window is None else self.window.__dict__,

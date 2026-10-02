@@ -63,6 +63,8 @@ echo ================ sf6bot: erase data ================
 echo    1  Clear runs           (reports, videos and logs in the runs folder)
 echo    2  Clear training data  (recorded replays, merged replays, learned move ids)
 echo    3  Clear fight data     (the bot's recorded matches)
+echo    4  Purge data from OLD bot versions (old runs, old fights, old combo lab results, learned
+echo       move ids). Keeps catalogs, Capcom data, combo pages, recorded replays and routines.
 echo  Move catalogs, Capcom frame data and taught routines are never erased.
 echo  Each one shows what it would delete and asks you to type YES.
 echo  Enter on its own: back
@@ -72,6 +74,7 @@ set /p EC=Choose:
 if "%EC%"=="1" (%BOT% erase runs & goto done)
 if "%EC%"=="2" (%BOT% erase training & goto done)
 if "%EC%"=="3" (%BOT% erase fights & goto done)
+if "%EC%"=="4" (%BOT% erase old & goto done)
 goto menu
 
 :catalog
