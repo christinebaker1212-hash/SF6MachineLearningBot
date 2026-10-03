@@ -512,5 +512,10 @@ def load(slug_or_name: str, datasets_root: Path) -> dict | None:
             if c.get("controls") == "modern":
                 continue
             c.update(resolve(c["route"], moves))
+            if c.get("hit_type") is None:
+                # imports older than the route / notes rule (0.11.6) left these unlabelled
+                ht = required_hit_type(c["route"], c.get("notes") or "")
+                if ht:
+                    c["hit_type"], c["hit_type_source"] = ht, "route/notes"
         data["parsed_by"] = __version__
     return data

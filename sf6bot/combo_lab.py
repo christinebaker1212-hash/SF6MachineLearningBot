@@ -472,7 +472,11 @@ class ComboRun:
                 self.rt[a].update(exp_seen=tick, start_id=exp)
             # the move's own frame: action_frame while the move's id is on screen (it freezes in hitstop,
             # measured), else counted ticks outside hitstop
-            if aid == self.rt[a]["start_id"] and isinstance(afr, (int, float)):
+            if self.steps[a].get("system") == "drive_rush" and self.rt[a].get("exp_seen") is not None:
+                # a rush: frames since the rush id appeared. Its action_frame does not start at 0 (0.11.12
+                # run: Ryu's rush 740 had the 2MP pressed one frame after it appeared, and nothing came out)
+                self.rt[a]["moving"] = tick - self.rt[a]["exp_seen"]
+            elif aid == self.rt[a]["start_id"] and isinstance(afr, (int, float)):
                 self.rt[a]["moving"] = int(afr)
             elif dt > 0 and not (p1.get("hitstop") or 0):
                 self.rt[a]["moving"] += dt
@@ -506,6 +510,8 @@ class ComboRun:
                          lead_measured=s_tick - r["sent"] - st["prefix"])
                 if s_tick != tick and s_aid != aid:
                     r["moving"] += max(0, tick - s_tick)
+                if st.get("system") == "drive_rush" and s_aid == exp:
+                    r["exp_seen"] = s_tick
                 self.pending = None
             elif tick - r["sent"] > st["prefix"] + self.lead + 15:
                 self._finish("not_out", k)
@@ -715,7 +721,8 @@ class ComboRun:
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
                           "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
                           "bar_link": self._bar_link(k)
-                          if k and st.get("trigger") in ("own_frame", "prev_neutral") and self.bar else None}
+                          if k and st.get("trigger") in ("own_frame", "prev_neutral") and self.bar
+                          and not self.steps[k - 1].get("system") else None}
                          for k, (st, r) in enumerate(zip(steps, self.rt))]}
         out["frame_bar"] = bool(self.bar)
         s0, s1 = side(b0, d0), side(b1, d1)
@@ -957,6 +964,14 @@ def route_requirements(combo: dict, capcom: dict, rules: dict, character: str | 
         if (sec and sec in text) or (rt and rt in (combo.get("route") or "").lower()):
             return {"hit_type": r["hit_type"], "situation": "punish" if r["hit_type"] == "punish_counter" else None,
                     "source": f"rule: {r.get('source') or r.get('section') or r.get('route')}"}
+    # the route's own text is the most specific: 'CH 5MP , ...' needs a counter hit and 'PC 5HK , ...' a
+    # punish counter, whatever the section's label or an older import says (user, 2026-10-03: "CH = counter
+    # hit. It's trying to run a counter hit route when it's set to normal hit. PC = punish counter.")
+    from .combos import required_hit_type
+    own = required_hit_type(combo.get("route") or "", "")
+    if own:
+        return {"hit_type": own, "situation": "punish" if own == "punish_counter" else None,
+                "source": f"route starts with '{(combo.get('route') or '').split()[0]}'"}
     ht, src = combo.get("hit_type"), combo.get("hit_type_source")
     labelled = ht is not None and combo.get("source") != "generated"
     starter = _starter(combo, capcom)

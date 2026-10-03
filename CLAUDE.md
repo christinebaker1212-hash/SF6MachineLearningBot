@@ -1593,6 +1593,26 @@ searched).
    - The press moves later by exactly that much.
    - Simulator test: 4 frames early → retried 4 later → success.
 
+## 0.11.13: CH / PC routes in their own pass; Drive Rush frames
+- **User (2026-10-03):** "CH = counter hit. It's trying to run a counter hit route when it's set to normal hit.
+  PC = punish counter."
+  - The run tried "CH LP / MP Hasho , PDR , 2MP > Denjin 214HP ," in the normal-hit pass.
+  - Cause: the user's `datasets/combos/ryu.json` was imported before 0.11.6, so the route was saved
+    unlabelled. 0.11.11 re-parses the moves on load but kept the saved hit type.
+  - Now:
+    - a route's own prefix ("CH …", "PC …") decides its pass first, over section labels and saved data
+      (`route_requirements`)
+    - `combos.load` also fills a missing hit type from the route text / notes
+- **Same run, the 2MP after Ryu's Parry Drive Rush came out nothing.**
+  - The rush is id 740 for Ryu (Ken's 500). The 2MP was pressed one frame after the rush appeared, because
+    the rush's `action_frame` does not start at 0.
+  - Now a Drive Rush step counts its frames from the tick its id appeared.
+  - The frame bar's link reading and correction are not used after a system step: a rush is cancelled into
+    the next move before the bar shows it as free.
+  - `RUSH_AT` (rush frame 11) is still a guess; the search and the attempt details will show the real frame.
+- The same run's Training Mode check read OK, and "( 214HP OR Denjin 214P OR … ), 236236P" was a TRUE combo
+  (3/3, 2800 dmg).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

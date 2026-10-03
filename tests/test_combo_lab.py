@@ -851,3 +851,38 @@ def test_training_mode_check_catches_wrong_settings_before_a_run():
     assert "health did not go down" in w and "Super gauge" in w and "frame bar" in w and "exporter v8" in w
     counter = [line(1), line(2, hp=9640, stun=10, hs=8)]               # 1.2x damage = counter hit
     assert "counter hit" in cl.evaluate_preflight(counter, 300, "normal", expected_v=9)["stop"]
+
+
+def test_ch_and_pc_routes_never_run_in_the_normal_hit_pass():
+    """User, 2026-10-03: "CH = counter hit. It's trying to run a counter hit route when it's set to normal hit.
+    PC = punish counter." The user's routes file was imported before CH/PC prefixes were read, so the route
+    was saved unlabelled; the route's own prefix now decides, whatever the saved label says."""
+    cap = _capcom("ryu")
+    stale = {"route": "CH LP / MP Hasho , PDR , 2MP > Denjin 214HP ,", "hit_type": None, "source": "community",
+             "steps": [{"name": "L Hashogeki"}]}
+    assert cl.route_requirements(stale, cap, {}, "Ryu")["hit_type"] == "counter_hit"
+    pc = dict(stale, route="PC 5HK , 4HP > 236HK , 623MP", hit_type="normal", hit_type_source="label")
+    assert cl.route_requirements(pc, cap, {}, "Ryu")["hit_type"] == "punish_counter"
+    got = cl.apply_requirements([stale], cap, {}, "Ryu")
+    assert not cl.select_routes(got, hit_type="normal") and cl.select_routes(got, hit_type="counter_hit")
+
+
+def test_rush_frames_count_from_the_rush_even_when_its_action_frame_does_not_start_at_zero():
+    """0.11.12 run: Ryu's Parry Drive Rush (740) — the 2MP after it was pressed one frame after the rush
+    appeared and came out nothing. The rush's action_frame does not start at 0."""
+    steps = [{"name": "parry_drive_rush", "system": "drive_rush", "sequence": "5+MP+MK@8", "prefix": 8,
+              "trigger": "first", "expect_id": 740, "hitting": False, "min_offset": 0},
+             {"name": "2MP", "sequence": "2@2 2+MP@3", "prefix": 2, "trigger": "own_frame", "at": 11, "startup": 6,
+              "expect_id": 622, "hitting": True, "min_offset": cl.NO_FLOOR}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), lead=4)
+    assert run.feed(_line(1, NEUTRAL, 0)) == 0
+    run.sent(0)
+    t, sent_at = 1, None
+    for a, f0, n in ((480, 0, 14), (740, 14, 20)):       # the rush's action_frame continues from the parry
+        for i in range(n):
+            t += 1
+            if run.feed(_line(t, a, f0 + i)) == 1 and sent_at is None:
+                sent_at = t
+                run.sent(1)
+    rush_start = 2 + 14
+    assert sent_at == rush_start + 11 - 4 - 2              # rush frame 5: not one frame after it appeared
