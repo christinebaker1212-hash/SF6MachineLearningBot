@@ -316,6 +316,14 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if pp.get("tries"):
         out.append(("measured", f"Perfect Parry tries on projectiles (timed from learned arrival times): {pp['tries']}."))
     out += defense_thoughts(summary.get("defense") or {}, opp, exp)
+    su = summary.get("supers") or {}
+    cr = su.get("crumple_followups") or {}
+    if cr or su.get("confirms") or su.get("punishes"):
+        out.append(("scripted", "Big-damage chances I went for: "
+                                + (("after a Drive Impact crumple " + ", ".join(f"{k} x{v}" for k, v in cr.items()) + "; ")
+                                   if cr else "")
+                                + f"2MK confirmed into a super x{su.get('confirms', 0)}; Super Art punishes "
+                                  f"x{su.get('punishes', 0)}."))
     oi = summary.get("opponent_inputs_seen") or {}
     if oi.get("lines"):
         out.append(("measured", f"{opp}'s input bits in game memory: set on {oi['with_input']:,} of {oi['lines']:,} lines"

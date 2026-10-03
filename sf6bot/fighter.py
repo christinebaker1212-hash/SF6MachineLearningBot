@@ -207,6 +207,8 @@ class ScriptedFighter:
         self._my_act, self._my_act_t0, self._hit_by, self._prev_hs = None, None, None, 0
         self._approach_fired = False
         self._their_wake_fired = None
+        self._crumple_t0, self._crumple_done = None, False
+        self.super_stats: dict = {"crumple": {}, "confirm": 0, "punish": 0}
         # 0.18.0 round review: what opened up the damage the bot took this round, and what to change next round
         self.round_taken: dict = {}
         self._rr = {"hp": None, "free": True, "cat": "other"}
@@ -442,6 +444,10 @@ class ScriptedFighter:
         if (_num(me.get("hitstun")) or 0) > 0:
             self.blocked_id = None
             return Decision("release", reason="in hitstun", rule="hitstun")
+        # 1b. the opponent crumpled (the bot's Drive Impact connected): cash out (0.18.1)
+        cf = self._crumple_followup(raw, me, op, dist)
+        if cf is not None:
+            return cf
         # 2. throw tech: the opponent's throw start-up (forward 715 / back 717 measured for Ken) is
         #    visible for ~5 frames before it connects; press throw at once. Before 0.8.0 the bot held
         #    down-back here (rule 5 counted the throw as an attack): throws were 42-62% of its damage.
@@ -502,8 +508,16 @@ class ScriptedFighter:
             if adv is not None and adv <= -4 and self._chance_for != self.blocked_id:
                 self._chance_for = self.blocked_id
                 self.punish_stats["chances"] += 1
+            # 0.18.1: a punish only where it reaches (0.18.0 ranked: 5MP punishes connected up to ~1.7 and were thrown
+            # from as far as 3.65 after pushback; 13 of 17 whiffed)
+            in_range = dist <= float(self.c["punish"].get("max_dist", 1.6))
+            sp = self._super_punish(me, op, dist, adv, bs) if (not self.punished and in_range and adv is not None) else None
+            if sp is not None:
+                self.punished = True
+                self.punish_stats["taken"] += 1
+                return sp
             if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"]
-                    and adv <= -4 and self.book):
+                    and adv <= -4 and self.book and in_range):
                 # the best TRUE combo whose first move starts in time (combo lab; punish = punish counter)
                 from .route_book import choose
                 e = choose(self.book, me, op, frames=-adv, hit_types=("punish_counter", "normal"),
@@ -517,7 +531,7 @@ class ScriptedFighter:
                     return Decision("route", e["route"], route=e, rule="punish",
                                     reason=f"blocked {name} ({adv:+d}): combo lab true combo, "
                                            f"{e.get('damage')} dmg{kill}")
-            if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"]):
+            if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"] and in_range):
                 for opt in self.c["punish"]["options"]:
                     if adv <= opt["max_adv"]:
                         self.punished = True
@@ -639,6 +653,81 @@ class ScriptedFighter:
             return None
         self._approach_fired = True
         return self._commit_defense("approach", raw, me, op, dist, t)
+
+    def _super(self, key: str) -> dict | None:
+        m = (self.c.get("moves") or {}).get(key)
+        return m if m and m.get("seq") else None
+
+    def _super_confirm(self, me: dict, op: dict, ch: dict) -> dict | None:
+        """0.18.1: a 2MK chosen in neutral (alone or as a route starter) is confirmed into SA3 with a full meter, or into
+        SA1 when that kills. The route runs with hit confirm: a blocked or whiffed 2MK spends nothing."""
+        if not (self.c.get("supers") or {}).get("confirm", True):
+            return None
+        starter = (ch.get("route") or {}).get("starter")
+        if ch.get("move") != "Crouching Medium Kick" and starter not in ("2MK", "Crouching Medium Kick"):
+            return None
+        meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+        for key in ("confirm_sa3", "confirm_sa1"):
+            m = (self.c.get("moves") or {}).get(key)
+            if not m or meter < int(m.get("super", 30000)):
+                continue
+            if key == "confirm_sa1" and (m.get("damage") or 0) < hp:
+                continue
+            self.super_stats["confirm"] += 1
+            return m
+        return None
+
+    def _crumple_followup(self, raw: dict, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.18.1 (user: "Hasn't used a Super Art one time ... big damage opportunities being missed by punishing DI with
+        grabs, or HP"). MEASURED in 18 recordings: after the bot's Drive Impact connects the opponent crumples (action
+        276) for 90-139 frames at ~0.72, then falls into a juggle; the bot's own DI animation runs 85 of those frames;
+        the bot then threw, jabbed, did one special or parried. Now the follow-up is input during the DI animation so
+        its last button lands on the bot's first free frame: SA3 with 3 bars, SA1 when it kills, else H Shoryuken."""
+        sc = self.c.get("supers") or {}
+        oa, tmr = op.get("action_id"), raw.get("stage_timer")
+        if oa not in set(sc.get("crumple_ids") or [276]) or not isinstance(tmr, int):
+            self._crumple_t0 = None
+            return None
+        if self._crumple_t0 is None:
+            self._crumple_t0, self._crumple_done = tmr, False
+        if self._crumple_done or dist > float(sc.get("crumple_max_dist", 1.1)):
+            return None
+        meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+        pick = None
+        for key in ("sa3", "sa1"):
+            m = self._super(key)
+            if m and meter >= int(m.get("super", 0)) and (key == "sa3" or (m.get("damage") or 0) >= hp):
+                pick = m
+                break
+        pick = pick or self._super("crumple_srk") or self._super("shoryuken")
+        if pick is None:
+            return None
+        aid = me.get("action_id")
+        if aid in (855, 856, 857):                       # still in the bot's own Drive Impact
+            rem = int(sc.get("di_recovery_frames", 85)) - (tmr - self._crumple_t0)
+        elif self.busy(me) is None:
+            rem = 0
+        else:
+            return None
+        if rem > seq_prefix(pick["seq"]) + self.lead + self.stale:
+            return None
+        self._crumple_done = True
+        self.super_stats["crumple"][pick["name"]] = self.super_stats["crumple"].get(pick["name"], 0) + 1
+        return Decision("seq", pick["name"], pick["seq"], rule="crumple_followup",
+                        reason=f"opponent crumpled at {dist:.2f} (super meter {int(meter)}): {pick['name']}")
+
+    def _super_punish(self, me: dict, op: dict, dist: float, adv, bs) -> Decision | None:
+        """A blocked move that leaves time for SA3 (start-up 5): with 3 bars, SA3 instead of a small punish. Its motion
+        (15 frames) is input during blockstun so the button lands on the first free frame."""
+        m = self._super("sa3")
+        if m is None or not isinstance(adv, int) or (_num(me.get("super")) or 0) < int(m.get("super", 30000)):
+            return None
+        if bs > seq_prefix(m["seq"]) + self.lead + self.stale:
+            return None
+        if -adv < int(m.get("startup", 5)) + 1 or dist > float((self.c.get("supers") or {}).get("sa3_max_dist", 1.3)):
+            return None
+        self.super_stats["punish"] = self.super_stats.get("punish", 0) + 1
+        return Decision("seq", m["name"], m["seq"], rule="punish", reason=f"blocked a {adv:+d} move with 3 bars: SA3")
 
     def _their_wakeup(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
         """0.18.0: the opponent getting up close to the bot (0.17.5 ranked: the bot dashed or landed a jump next to a
@@ -926,6 +1015,10 @@ class ScriptedFighter:
         reason = f"{ch['zone']} {ch['dist']:.2f}: {probs} ({ch['source']})"
         rule = f"policy:{intent}"
         dist = ch["dist"]
+        sc = self._super_confirm(me, op, ch)
+        if sc is not None:
+            return Decision("seq", sc["name"], "2+MK@3", rule=rule, intent=intent,
+                            reason=reason + f" -> {sc['name']} (only if 2MK hits; super meter {int(_num(me.get('super')) or 0)})")
         if ch.get("route"):
             e = ch["route"]
             return Decision("route", e["route"], route=e, rule=rule, intent=intent,
@@ -1242,6 +1335,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if fighter.busy_stats:
                     summary["held_while_busy"] = {k: dict(v) for k, v in fighter.busy_stats.items()}
                 summary["defense"] = fighter.defense_stats
+                summary["supers"] = {"crumple_followups": dict(fighter.super_stats["crumple"]),
+                                     "confirms": fighter.super_stats["confirm"],
+                                     "punishes": fighter.super_stats["punish"]}
                 summary["input_delay_used"] = fighter.lead
             if learner is not None:
                 try:
@@ -1503,6 +1599,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 sess.narrate(f"I am {me_key.upper()} ({side['how']}).", source="measured")
             me_key, op_key = keys()
             me, op = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
+            if (fighter is not None and isinstance(op.get("chara"), int) and not summary["rounds"]
+                    and not summary["decisions"] and character_name(op["chara"]) != summary.get("opponent")):
+                # 0.18.1: the character id read at a match's start can still be the previous opponent's (0.18.0 ranked:
+                # an Ed match was set up, learned and reported as Zangief): set up again for the real opponent
+                sess.narrate(f"Opponent is {character_name(op['chara'])}, not {summary.get('opponent')}: setting up again.",
+                             source="measured")
+                fighter = None
             if fighter is None and isinstance(op.get("chara"), int):
                 summary["character"] = character_name(me.get("chara"))
                 summary["opponent"] = character_name(op["chara"])

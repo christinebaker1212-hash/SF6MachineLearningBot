@@ -44,6 +44,17 @@ FIGHTS_MAX = 800            # newest fight recordings used (older ones are summe
 RECENCY_HALF = 300          # a fight this many matches older counts half
 W_BOT, W_OPP, W_REPLAY = 1.0, 0.5, 0.5
 SHRINK_N = 200              # a choice with this many training samples keeps half its advantage
+# 0.18.1: fights recorded before 0.18.0 show a bot with input bugs (Hadokens turning into Shoryukens, inputs lost while
+# busy, state up to ~50 ms late, random supers and parries): what followed its choices there is worth less
+CURRENT_SINCE = (0, 18, 0)
+OLD_FIGHT_WEIGHT = 0.3
+
+
+def _version(v) -> tuple:
+    try:
+        return tuple(int(x) for x in str(v).split(".")[:3])
+    except ValueError:
+        return (0, 0, 0)
 TRUST_FULL = 0.10           # a 10% better held-out loss than the per-choice average = full trust
 
 
@@ -58,14 +69,16 @@ def recordings(ds_root: Path) -> list[dict]:
             out.append({"path": r["path"], "weights": {0: W_REPLAY, 1: W_REPLAY}, "source": "replay"})
     fights = []
     for p in sorted((ds_root / "fights").glob("*.jsonl.gz")):
-        notes = (_meta(p).get("notes") or "").lower()
+        meta = _meta(p)
+        notes = (meta.get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
         if bot is not None:
-            fights.append((p, bot, "ranked" if "ranked" in notes else "human" if "vs human" in notes else "cpu"))
+            old = _version(meta.get("sf6bot_version")) < CURRENT_SINCE
+            fights.append((p, bot, "ranked" if "ranked" in notes else "human" if "vs human" in notes else "cpu", old))
     fights = fights[-FIGHTS_MAX:]
     n = len(fights)
-    for k, (p, bot, src) in enumerate(fights):
-        rec = 0.5 ** ((n - 1 - k) / RECENCY_HALF)
+    for k, (p, bot, src, old) in enumerate(fights):
+        rec = 0.5 ** ((n - 1 - k) / RECENCY_HALF) * (OLD_FIGHT_WEIGHT if old else 1.0)
         out.append({"path": p, "weights": {bot: W_BOT * rec, 1 - bot: W_OPP * rec}, "source": f"fight ({src})",
                     "bot": bot})
     return out

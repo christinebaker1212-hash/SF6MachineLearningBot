@@ -169,3 +169,57 @@ def test_round_review_names_what_hurt_and_adapts(tmp_path):
     exp.d["neutral"]["mid|poke"] = {"n": 10, "sum": 5.0}
     exp.end_round()
     assert exp.d["neutral"]["mid|poke"]["n"] == round(10 * ROUND_DECAY, 3)
+
+
+# ---- 0.18.1: supers (user: "Hasn't used a Super Art one time, or confirmed into SA3") ----------------------------------
+
+def _crumple(f, meter, op_hp=10000, frames=90):
+    """The bot's Drive Impact (855) connected; the opponent crumples (276) at 0.72. First decision that isn't waiting."""
+    for k in range(frames):
+        d = f.decide(state(me={"action_id": 855, "super": meter}, op={"x": 0.72, "action_id": 276, "hp": op_hp},
+                           timer=1000 + k), k / 60, 0)
+        if d.rule == "crumple_followup":
+            return k, d
+    return None, None
+
+
+def test_a_drive_impact_crumple_is_cashed_out_on_the_first_free_frame():
+    f = _fighter()
+    k, d = _crumple(f, 30000)
+    # SA3's motion (15 frames) + input delay (5) before the DI animation (85) ends: its button lands on frame 85
+    assert d.name == "SA3 Shin Shoryuken" and k == 85 - 15 - 5
+    assert f.super_stats["crumple"] == {"SA3 Shin Shoryuken": 1}
+    assert _crumple(f, 30000, frames=5) == (None, None)                    # once per crumple
+    assert _crumple(_fighter(), 10000, op_hp=1500)[1].name == "SA1 Shinku Hadoken"   # SA1 only when it kills
+    assert _crumple(_fighter(), 10000)[1].name == "H Shoryuken (crumple)"
+    far = _fighter()
+    for k in range(90):
+        d = far.decide(state(me={"action_id": 855, "super": 30000}, op={"x": 2.0, "action_id": 276}, timer=1000 + k),
+                       k / 60, 0)
+        assert d.rule != "crumple_followup"
+
+
+def test_a_blocked_unsafe_move_is_punished_with_sa3_with_three_bars_and_only_in_range():
+    opp = {905: {"name": "Big Unsafe Special", "block_adv": -20}}
+    f = _fighter(opp_moves=opp)
+    d = f.decide(state(me={"blockstun": 12, "action_id": 155, "super": 30000}, op={"x": 1.0, "action_id": 905}), 0.0, 0)
+    assert d.name == "SA3 Shin Shoryuken" and d.rule == "punish" and f.super_stats["punish"] == 1
+    g = _fighter(opp_moves=opp)                     # no meter: the normal punish options
+    d = g.decide(state(me={"blockstun": 3, "action_id": 155, "super": 0}, op={"x": 1.0, "action_id": 905}), 0.0, 0)
+    assert d.rule == "punish" and d.name != "SA3 Shin Shoryuken"
+    h = _fighter(opp_moves=opp)                     # pushed out to 2.5: no punish at all
+    d = h.decide(state(me={"blockstun": 3, "action_id": 155, "super": 30000}, op={"x": 2.5, "action_id": 905}), 0.0, 0)
+    assert d.rule != "punish"
+    s = _fighter(opp_moves={905: {"name": "Slightly Unsafe", "block_adv": -5}})   # SA3 (5F) can't fit in 5 frames
+    d = s.decide(state(me={"blockstun": 3, "action_id": 155, "super": 30000}, op={"x": 1.0, "action_id": 905}), 0.0, 0)
+    assert d.name != "SA3 Shin Shoryuken"
+
+
+def test_a_2mk_from_neutral_is_confirmed_into_a_super():
+    f = _fighter()
+    two_mk = {"move": "Crouching Medium Kick", "intent": "poke"}
+    assert f._super_confirm({"super": 30000}, {"hp": 10000}, two_mk)["name"] == "2MK > SA3"
+    assert f._super_confirm({"super": 10000}, {"hp": 2000}, two_mk)["name"] == "2MK > SA1"     # SA1 kills
+    assert f._super_confirm({"super": 10000}, {"hp": 9000}, two_mk) is None
+    assert f._super_confirm({"super": 30000}, {"hp": 9000}, {"move": "Standing Light Punch"}) is None
+    assert f._super_confirm({"super": 30000}, {"hp": 9000}, {"route": {"starter": "2MK"}})["name"] == "2MK > SA3"

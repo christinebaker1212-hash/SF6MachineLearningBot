@@ -49,11 +49,20 @@ throw_tech:
 # 0.18.0 input handling (MEASURED 0.17.5 ranked: Hadokens after walking forward came out as Shoryukens; ~27 of
 # ~70 Shoryuken motions were sent while the bot could not act; "6@2 2@2 3+HP" came out as 2HP when the down step
 # was missed, so motion steps are 3 frames)
+# 0.18.1 (user: "Hasn't used a Super Art one time, or confirmed into SA3 - big damage opportunities being missed by
+# punishing DI with grabs, or HP")
+supers:
+  crumple_ids: [276]        # MEASURED: the opponent after the bot's Drive Impact connects (18 of 18), 90-139 frames
+  di_recovery_frames: 85    # MEASURED: the bot's own DI animation after the crumple starts (16 of 18)
+  crumple_max_dist: 1.1     # MEASURED: the crumpled opponent is ~0.72 away
+  sa3_max_dist: 1.3         # SA3 as a punish only this close (estimate)
+  confirm: true             # a 2MK chosen in neutral is confirmed into SA3 with full meter, or into a super that kills
 inputs:
   motion_clear_frames: 12   # ESTIMATE of SF6's motion leniency: a 236 waits until forward was held this long ago
   dash_frames: 20           # a dash cannot be canceled: busy this long (estimate; Capcom has no dash total)
   unknown_move_frames: 30   # an own move with no catalogued total counts as busy this long
 punish:
+  max_dist: 1.6        # 0.18.1 MEASURED: punishes after blocking connected up to ~1.7; 5MP was thrown from up to 3.65
   latency_frames: 4    # measured: input -> game sees it, 3-5 frames (usually 4)
   # on-block advantage (attacker) at or below the threshold -> that punish. Needs a catalog of the
   # OPPONENT's moves (datasets/catalog/<Opponent>_movelist.json); without one, no punishes.
@@ -108,6 +117,14 @@ moves:
   # 0.18.0 anti-air: L Shoryuken (Capcom: start-up 5, active 5-14, air-invincible), crouching HP (start-up 9)
   anti_air_srk: {name: "L Shoryuken (anti-air)", seq: "6@3 2@3 3+LP@3", startup: 5}
   anti_air_normal: {name: "2HP (anti-air)", seq: "2+HP@4", startup: 9}
+  # 0.18.1 Super Arts (Capcom: SA3 Shin Shoryuken 236236K start-up 5, 4000 dmg; SA1 Shinku Hadoken 236236P start-up 7,
+  # 2000 dmg); 3-frame motion steps (0.4.1: 2-frame steps turned 236236 into 623)
+  sa3: {name: "SA3 Shin Shoryuken", seq: "2@3 3@3 6@3 2@3 3@3 6+LK@3", startup: 5, super: 30000, damage: 4000}
+  sa1: {name: "SA1 Shinku Hadoken", seq: "2@3 3@3 6@3 2@3 3@3 6+LP@3", startup: 7, super: 10000, damage: 2000}
+  crumple_srk: {name: "H Shoryuken (crumple)", seq: "6@3 2@3 3+HP@3", startup: 7}
+  # a 2MK that HIT, cancelled into a super (performed on the game clock with hit confirm: no hit, no super)
+  confirm_sa3: {name: "2MK > SA3", route: "2MK > 236236K", seq: "2+MK@3", super: 30000}
+  confirm_sa1: {name: "2MK > SA1", route: "2MK > 236236P", seq: "2+MK@3", super: 10000, damage: 2600}
   drive_impact: {name: "Drive Impact", seq: "5+HP+HK@3"}
   walk_forward: {name: "walk forward", seq: "6@12"}
 neutral:

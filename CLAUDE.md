@@ -2305,6 +2305,35 @@ nothing here is verified in game yet. The next ranked session is measured agains
    agreeing sightings (share >= 2/3); a Drive Impact confirmed by a full Drive bar dropping is used at once. Moves
    waiting for a second sighting: `live_moves.waiting_for_second_sighting`. Next match loads ids with 2+ votes.
 
+## 0.18.0 session (user, 2026-10-03): 9 ranked matches, 4-5
+- Record 4-5 (baseline 0-6); damage dealt / taken ~1.02 (baseline 0.64). State arrival 1.0 lines per arrival, 16.7 ms
+  (baseline 3 per 53 ms): the lag is gone. Input delay median 3.
+- Still weak: thrown 9 of 19 pressure situations; anti-air 3 hits of 26 jump-ins; the opponents' ground normals were
+  69% of the damage taken; 5LP whiffed from ~2.0 (13 times from neutral); 5MP "punishes" after blocking started from up
+  to 3.65 (pushback); 5HP after a whiffed 5MP.
+- **User: "Hasn't used a Super Art one time, or confirmed into SA3 - big damage opportunities being missed by punishing
+  DI with grabs, or HP."** MEASURED in 18 recordings: after the bot's Drive Impact connects the opponent crumples
+  (action 276) for 90-139 frames at ~0.72 and then falls; the bot's own DI animation lasts 85 of those frames; the bot
+  then threw, jabbed or did one special. No super was ever used (0.18.0 allows them from neutral only when lethal).
+- The Ed match was labelled Zangief: the opponent's character id from the previous match was still set at setup.
+- Some matches recorded `skipped_during_fight` 155-470 (not investigated yet).
+
+## 0.18.1: supers where they pay; punishes only in range
+All MOCK-tested (`tests/test_ranked_baseline_fixes.py`); not verified in game.
+- **Drive Impact crumple cash-out** (`fighter._crumple_followup`, rule 1b, `configs/fighter/ryu.yaml: supers`): while
+  the opponent is in crumple id 276 within 1.1, the follow-up's motion is input during the bot's DI animation (85
+  frames, measured) so its button lands on the first free frame: SA3 with 3 bars, SA1 when its damage kills, else
+  H Shoryuken. Once per crumple.
+- **SA3 punish** (rule 5): a blocked move at -6 or worse within 1.3, with 3 bars: SA3, its motion input during
+  blockstun. Damage/startup values in the config are Capcom's.
+- **2MK confirmed into a super** (`_super_confirm`): a 2MK chosen in neutral runs as the route 2MK > SA3 (3 bars) or
+  2MK > SA1 (when it kills) with hit confirm, so a blocked or whiffed 2MK spends nothing.
+- **Punish range:** every punish (SA3, combo lab route, option) needs the opponent within `punish.max_dist` 1.6.
+- **Opponent re-setup:** a new opponent character id before the first decision of a match sets the fighter up again.
+- `fight_summary.supers` {crumple_followups, confirms, punishes} and a thoughts line.
+- **Older fights count less in the win model:** recordings made before 0.18.0 weigh 0.3 (`win_model.OLD_FIGHT_WEIGHT`):
+  they show a bot with input bugs and late state.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -241,7 +241,13 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.0 (latest):** all eight fixes from the 0.17.5 ranked baseline (CLAUDE.md "BASELINE" and "0.18.0"). Next
+**0.18.1 (latest):** supers and range from the 0.18.0 session (CLAUDE.md "0.18.0 session" and "0.18.1"). Next ranked
+session: compare with 0.18.0 (4-5, dealt/taken ~1.02) and the baseline; check in S `supers` (crumple follow-ups,
+confirms, SA3 punishes), whether a confirmed 2MK > SA3 completes online (`routes_completed`), and that no punish
+starts from beyond 1.6. The user restored the fights folder from uploads (35 recordings); `datasets/learning` and
+`datasets/ladder` were never deleted.
+
+**0.18.0:** all eight fixes from the 0.17.5 ranked baseline (CLAUDE.md "BASELINE" and "0.18.0"). Next
 ranked session: compare with the baseline (0-6, 3 rounds; dealt/taken 0.64; anti-air 2 of 42; thrown 26; combos 4 of
 ~110), and check in S: `state_arrival` (lines per arrival near 1?), `held_while_busy`, `round_reviews`, `live_reach`,
 `motion_guard`, `live_moves.waiting_for_second_sighting`.
