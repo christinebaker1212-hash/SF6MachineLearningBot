@@ -2235,6 +2235,38 @@ All MOCK / offline tested (`tests/test_winning.py`, `tests/test_assess.py`); not
 - Tests: `tests/test_online_frames.py` (synthetic frozen / healthy exports, hitstop, reaction restart, the feature,
   after-hit and wake-up moments). Not verified in game.
 
+## BASELINE: 6 ranked matches on 0.17.5 (user, 2026-10-03) — the yardstick for every later version
+- **Result: 0-6 in matches, 3 rounds won (all round 1s), every round 2 and 3 lost.** Opponents A.K.I. (3), Terry (2),
+  Jamie (1). Damage dealt 93,320, taken 146,294 (0.64). Per round no.: R1 dealt 35.9k / took 54.7k, R2 29.5k / 59.3k,
+  R3 22.0k / 28.5k. Bot = P1 every match (side by character), human limits OFF, input delay median 5-6 frames.
+- User's observations, all confirmed in the data: anti-airs failed, thrown often, parries at nothing, nonsensical
+  normals, random OD DPs, random supers, no combo completed, rounds won but never a match.
+- **What hurt the bot (openings, by the opponent's move):** ground normals 47 openings / 57.6k, jump-ins 21 / 31.3k,
+  throws 26 / 19.7k, specials 18 / 23.8k, DI 6 / 2.4k. **What worked for the bot:** throws 31 landed / 26.6k (of 118
+  tried), ground normals 31 / 29.8k, specials 15 / 15.8k, Drive Impact 8 / 12.0k.
+- **Anti-air:** of 42 jump-ins that landed within 1.6 toward the bot, 2 met a Shoryuken in time (1 hit), 21 hit the
+  bot, 9 blocked, 6 nothing. The anti-air rule fired 28 times; Shoryuken motions overall came out right 23 of ~70:
+  ~27 were sent while the bot was busy (blockstun, hitstun, its own move, a parry, a super) and the inputs were lost;
+  "6@2 2@2 3+HP@3" came out as 2HP (630) when the 2-frame down step was missed (SendInput p50 2.4 ms, max 29 ms).
+- **Random Shoryukens = a motion bug:** a Hadoken started while walking forward (holding 6) reads 6-2-3-6+P, which SF6
+  takes as a Shoryuken: H Hadoken -> H SRK 934, M Hadoken -> M SRK 932 (also 2HK, j.LP from dash / jump leftovers).
+- **Random supers / DI / parries / OD = the neutral policy's sampling:** 8% uniform exploration + temperature 0.8 over
+  17 intents, with resource intents allowed whenever affordable. SA1 8 times (8 whiffs, often not even in the top 3),
+  SA2 2 (whiffs), DI 11 (6 whiffs), Drive Parry 47 (23 with nothing to parry; the network rates "parry" highest at FAR
+  range), OD Hadoken 18.
+- **Normals from out of range:** 5MP 14 of 17 whiffed (mean start distance 2.09), 5HP 14 of 14 (2.34), Axe Kick 11 of
+  13 (2.45), 2HK 9 of 26; the measured reach (33 own ids) did not stop them.
+- **Combos:** 61 bot openings, 43 single hits, 13 two-hit, 5 of 3+. Routes: 4 completed of ~110 started (most stopped
+  as whiff / first_blocked from neutral range, or not_out after a hit).
+- **Throws on the bot by context:** neutral 8 thrown / 2 escaped, right after blocking 8 / 0, during or after its own
+  attack 5 / 2, right after being hit 2 / 5 (the 0.17.5 after-hit defence escaped 5 of 7), wake-up 1 / 0.
+- **State lag (new problem):** in this session state lines reached the bot ~17 times a second in batches of 3 (gap
+  p50 53 ms) while the game rendered 46-50 fps (screen capture, same session) and ticked ~55/s. Earlier sessions:
+  16 ms (0.14.0 offline, 0.17.4 online), 37 ms (0.12.3). Cause on the bot side not known (no background training ran).
+- **Live move naming online is unreliable:** A.K.I. ids 600 and 601 named "L Serpent Lash", 740 "Standing Medium Kick",
+  994 "Crouching Light Punch" (single sightings from online input masks).
+- Win model trust 0.21 on 42,402 decisions; it pushed toward specials / pokes, away from jumps and parries.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
