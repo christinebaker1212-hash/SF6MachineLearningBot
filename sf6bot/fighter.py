@@ -586,7 +586,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 exp.end_match({"result": summary.get("match"), "rounds": summary.get("rounds"),
                                "opponent_kind": summary.get("opponent_kind"),
                                "nickname": (summary.get("opponent_human") or {}).get("nickname")})
-            lines_ = thoughts(summary, exp, record if first_to else None)
+            lines_ = thoughts(summary, exp, record if (first_to or versus == "ranked") else None)
             summary["thoughts"] = [f"[{s}] {t}" for s, t in lines_]
             title = f"Match {len(done) + 1}: {summary.get('character')} vs {summary.get('opponent')}"
             with open(thoughts_path, "a", encoding="utf-8") as fh:
@@ -746,6 +746,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["opponent_kind"] = "human" if versus else "cpu"
                 if versus:
                     summary["opponent_human"] = {"mode": versus, "nickname": opponent_name}
+                if versus == "ranked":
+                    summary["ranked"] = True
+                    summary["cfn_configured"] = bool((cfg.get("ranked") or {}).get("cfn"))
                 opp_moves, label = opponent_moves(summary["opponent"], ds_root, fcfg)
                 summary["opponent_catalog"] = label or False
                 book = build_book(summary["character"], ds_root)

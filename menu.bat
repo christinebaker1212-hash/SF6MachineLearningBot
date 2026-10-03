@@ -18,7 +18,7 @@ echo.
 echo  FIGHT
 echo    V  Bot vs CPU, bot on the LEFT  (bot presses P1's keys)
 echo    N  Bot vs CPU, bot on the RIGHT
-echo    H  Versus Human: a volunteer plays the bot (offline at this PC, or online)
+echo    H  Versus Human: offline at this PC, an online set (first to 2), or RANKED back to back
 echo       The bot finds its side, waits for "Fight!", records every match, and after
 echo       EVERY match writes what it thinks (thoughts.md, in S) and what it learned.
 echo    B  Train the bot's brain from all recordings (replays + matches; no game needed)
@@ -183,26 +183,23 @@ goto menu
 
 :versus
 echo.
-echo  Versus Human (a volunteer). Pick the characters and sides as you like: the bot finds its side.
-echo    1  Offline, at this PC: Versus mode, the bot gets its own controller (the volunteer plays
-echo       here or joins over Parsec)
-echo    2  Online: the bot plays as this PC's player with the keyboard
+echo  Versus Human. Pick characters and sides as you like: the bot finds its side each match.
+echo    1  Offline at this PC: Versus mode, the bot gets its own controller
+echo       (the opponent plays here or joins over Parsec). A set is first to 2.
+echo    2  Online room / casual set: the bot plays as this PC's player. First to 2.
+echo    3  RANKED: start this once, then queue. The bot plays every ranked match as this PC's
+echo       player, back to back, until F8. (Also: double-click ranked.bat.)
 set "VM="
 set /p VM=Choose: 
+if "%VM%"=="3" (%BOT% fight --versus-human ranked & goto done)
 set "VMODE="
 if "%VM%"=="1" set "VMODE=offline"
 if "%VM%"=="2" set "VMODE=online"
 if "%VMODE%"=="" goto menu
 set "FT="
-set /p FT=First to how many wins? (e.g. 20; Enter = no limit): 
-if "%FT%"=="" set "FT=0"
-set "OPN="
-set /p OPN=Opponent nickname (optional, Enter = skip): 
-if "%OPN%"=="" (
-    %BOT% fight --versus-human %VMODE% --first-to %FT%
-) else (
-    %BOT% fight --versus-human %VMODE% --first-to %FT% --opponent "%OPN%"
-)
+set /p FT=First to how many wins? (Enter = 2): 
+if "%FT%"=="" set "FT=2"
+%BOT% fight --versus-human %VMODE% --first-to %FT%
 goto done
 
 :teach

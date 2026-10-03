@@ -137,6 +137,8 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if set_record and set_record.get("first_to"):
         out.append(("measured", f"Set score (first to {set_record['first_to']}): me {set_record['won']} - "
                                 f"{set_record['lost']} {vol or opp}."))
+    elif set_record and summary.get("ranked"):
+        out.append(("measured", f"Ranked session so far: {set_record['won']} won, {set_record['lost']} lost."))
     dmg = summary.get("damage") or {}
     if dmg:
         out.append(("measured", f"Damage: I dealt {dmg.get('dealt', 0):,}, I took {dmg.get('taken', 0):,}."))

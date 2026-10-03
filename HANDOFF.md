@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.12.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.12.1**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -118,6 +118,8 @@ controls**.
   recording), learning from its own matches per opponent, the combo lab's TRUE combos for punishes, hit
   confirms and lethal, a Versus Human mode (offline and online, auto side, no countdown, first-to N), and
   plain-language thoughts after EVERY match (thoughts.md, in S).
+- **0.12.1:** Versus Human is FT2 by default; ranked = menu H → 3 or `ranked.bat`, started once, back-to-back
+  matches.
 - **Next with the user:** record replays (D, at 1x) → B (train) → the user's FT20 in Versus Human (H) →
   send S. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the

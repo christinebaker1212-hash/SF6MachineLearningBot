@@ -1733,6 +1733,21 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
 - Menu: **B** = train (it was an old alias for catalog guard All; C → 2 does that). Erase: training also
   clears the trained brain; fights also clears what was learned per opponent.
 
+## 0.12.1: FT2 by default; ranked back to back
+- User (2026-10-03): "Versus human should default to a FT2 format unless otherwise specified in the setup. It
+  should be easy to [play] back to back to back ranked matches with easy human operator setup, so the human
+  operator isn't too slow to start the bot in a ranked match."
+- `fight --versus-human offline|online` = a set, **first to 2** unless `--first-to N` (0 = no limit). Menu H → 1 / 2
+  asks "First to how many? (Enter = 2)". No nickname prompt (still `--opponent NAME`).
+- `fight --versus-human ranked` (menu H → 3, or double-click **`ranked.bat`**): the bot plays as this PC's player
+  (keyboard), every ranked match back to back until F8 / `--matches` / 6 h. The operator starts it ONCE before
+  queueing; between matches the menus are the operator's, and the bot takes over at "Fight!", finds its side
+  (by character, else the crouch probe), and writes its thoughts after every match ("Ranked session so far:
+  W won, L lost").
+- Capcom's approval covers the disclosed CFN: `ranked: {cfn: ...}` in `configs/local.yaml` (never the repo). Without
+  it the ranked mode prints a one-line reminder (not blocking); summaries record only `cfn_configured`.
+- Test: CLI defaults (FT2, explicit FT20, ranked = no set limit, `--first-to 0`), the ranked thoughts line.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

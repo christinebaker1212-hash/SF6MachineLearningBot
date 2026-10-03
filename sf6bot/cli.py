@@ -271,11 +271,21 @@ def cmd_fight(args, cfg):
         cfg = _with_pad(cfg)
     player = None if (vh or args.player == "auto") else (0 if args.player == "p1" else 1)
     seconds = args.seconds if not vh or args.seconds != 3600.0 else 6 * 3600.0
+    # Versus Human: a set is first to 2 unless the setup says otherwise (--first-to N; 0 = no limit).
+    # Ranked: back-to-back single matches, no set, until F8 / --matches / 6 h.
+    first_to = args.first_to
+    if first_to is None:
+        first_to = 2 if vh in ("offline", "online") else 0
+    if vh == "ranked":
+        first_to = 0
+        if not (cfg.get("ranked") or {}).get("cfn"):
+            print("Reminder: Capcom's approval covers the CFN account you disclosed to them. Put it in "
+                  "configs\\local.yaml as  ranked: {cfn: YOUR_CFN}  (kept off the repo); this note goes away.")
     name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
     with _session(args, cfg, name) as s:
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
-                  first_to=args.first_to or None, versus=vh, opponent_name=args.opponent)
+                  first_to=first_to or None, versus=vh, opponent_name=args.opponent)
     _print_report(s)
 
 
@@ -629,10 +639,13 @@ def main(argv=None):
     p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h; "
                    "6 h with --versus-human)")
     p.add_argument("--matches", type=int, default=0, help="stop after N matches (0 = until F8 / --seconds)")
-    p.add_argument("--first-to", type=int, default=0, help="stop when the bot or its opponent wins N matches")
-    p.add_argument("--versus-human", choices=("offline", "online"), default=None,
-                   help="a volunteer: offline = Versus at this PC (bot on its own controller), online = the "
-                        "bot plays as this PC's player; side found automatically, no countdown")
+    p.add_argument("--first-to", type=int, default=None, help="stop when the bot or its opponent wins N "
+                   "matches (Versus Human default 2 = FT2; 0 = no limit)")
+    p.add_argument("--versus-human", choices=("offline", "online", "ranked"), default=None,
+                   help="a human opponent: offline = Versus at this PC (bot on its own controller), online = "
+                        "a room / casual set as this PC's player, ranked = back-to-back ranked matches as this "
+                        "PC's player (start once, queue as often as you like); side found automatically, no "
+                        "countdown")
     p.add_argument("--opponent", default=None, help="optional nickname for the opponent (stored with the matches)")
     p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "
                    "controller and the overlay buttons press that controller (default: P1's keys)")

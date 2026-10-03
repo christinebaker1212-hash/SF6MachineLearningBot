@@ -195,3 +195,32 @@ def test_punish_uses_the_best_true_combo_that_starts_in_time(tmp_path):
     d2 = f2.decide(raw(926, 3), 1.1, 0)
     assert d2.kind == "route" and d2.route["route"] == "2LP ~ 2LP > 236LK"  # -5: only the 4F jab fits
     assert f2.punish_stats == {"chances": 1, "taken": 1}
+
+
+def test_versus_human_defaults_to_first_to_2_and_ranked_runs_back_to_back(cfg, monkeypatch):
+    """User, 2026-10-03: Versus Human is FT2 unless the setup says otherwise; ranked is back-to-back matches
+    with no set limit, started once by the operator."""
+    import sf6bot.cli as cli
+    import sf6bot.fighter as fi
+    seen = []
+
+    class _S:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(cli, "_session", lambda *a, **k: _S())
+    monkeypatch.setattr(cli, "_panel", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_print_report", lambda s: None)
+    monkeypatch.setattr(fi, "run_fight", lambda s, c, sec, **k: seen.append((sec, k)))
+    monkeypatch.setattr(cli, "load_config", lambda *a, **k: cfg, raising=False)
+    for argv in (["fight", "--versus-human", "online"], ["fight", "--versus-human", "offline", "--first-to", "20"],
+                 ["fight", "--versus-human", "ranked"], ["fight", "--versus-human", "online", "--first-to", "0"]):
+        cli.main(["--mock", "--no-overlay"] + argv)
+    ft = [k["first_to"] for _, k in seen]
+    assert ft == [2, 20, None, None]
+    assert all(k["player"] is None for _, k in seen) and seen[2][1]["versus"] == "ranked"
+    lines = thoughts({"opponent": "Ken", "ranked": True, "match": {"bot_won": True}, "rounds": [{"bot_won": True}] * 2},
+                     None, {"won": 3, "lost": 1, "first_to": None})
+    assert ("measured", "Ranked session so far: 3 won, 1 lost.") in lines
