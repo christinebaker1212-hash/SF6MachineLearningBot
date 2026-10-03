@@ -1748,6 +1748,14 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
   it the ranked mode prints a one-line reminder (not blocking); summaries record only `cfn_configured`.
 - Test: CLI defaults (FT2, explicit FT20, ranked = no set limit, `--first-to 0`), the ranked thoughts line.
 
+## 0.12.2: erase / purge accept "yes" in any case
+- User (2026-10-03): "deleting old data is NOT currently working. It remains entirely." Cause (user confirmed): they
+  typed "yes"; only "YES" was accepted, and the cancel message was easy to miss.
+- `erase.confirmed`: yes / YES / y. A cancel now shows what was typed. After deleting, it checks again and says
+  "Nothing old is left" / "The folders are now empty" or "STILL THERE: N" with the first errors.
+- Deletes also clear read-only files and retry once (Windows: an Explorer window, the indexer or antivirus can hold
+  a file for a moment). The purge prints the folders it looked in.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

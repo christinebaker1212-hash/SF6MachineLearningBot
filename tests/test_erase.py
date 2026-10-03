@@ -44,10 +44,11 @@ def test_cli_asks_for_yes(tmp_path, monkeypatch, capsys):
     import sf6bot.cli as cli
     _make(tmp_path)
     cfg = _cfg(tmp_path)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "yes")      # not exactly YES
+    monkeypatch.setattr("builtins.input", lambda prompt="": "no")
     cli.cmd_erase(type("A", (), {"what": "fights", "yes": False})(), cfg)
-    assert (tmp_path / "datasets/fights/f.jsonl.gz").exists() and "Cancelled" in capsys.readouterr().out
-    monkeypatch.setattr("builtins.input", lambda prompt="": "YES")
+    out = capsys.readouterr().out
+    assert (tmp_path / "datasets/fights/f.jsonl.gz").exists() and "Cancelled (you typed 'no')" in out
+    monkeypatch.setattr("builtins.input", lambda prompt="": "yes")      # 0.12.2: any case confirms
     cli.cmd_erase(type("A", (), {"what": "fights", "yes": False})(), cfg)
     assert not (tmp_path / "datasets/fights/f.jsonl.gz").exists()
 
@@ -83,3 +84,9 @@ def test_purge_old_versions_keeps_version_independent_data(tmp_path):
     assert list(lab["routes"]) == ["midscreen | new"] and lab["corner_hold"] == 6
     for keep in ("catalog/Ken_movelist.json", "framedata/ken.json", "combos/ken.json", "replays/r.jsonl.gz"):
         assert (ds / keep).exists()
+
+
+def test_yes_in_any_case_confirms():
+    """User, 2026-10-03: the purge 'remains entirely' — they typed 'yes', and only 'YES' was accepted."""
+    assert all(erase.confirmed(a) for a in ("YES", "yes", "Yes", " yes ", "y"))
+    assert not any(erase.confirmed(a) for a in ("", "no", "yess", None))

@@ -395,42 +395,49 @@ def cmd_combos_import(args, cfg):
 
 def cmd_erase(args, cfg):
     """Delete recorded data after a typed confirmation. Catalogs, Capcom frame data and routines are
-    never touched."""
-    from .erase import TARGETS, erase, describe
+    never touched. Afterwards it checks what is still there and says so (0.12.2)."""
+    from .erase import TARGETS, confirmed, describe, erase
+
+    def ask() -> bool:
+        if args.yes:
+            return True
+        try:
+            ans = input("Type YES to delete them for good (anything else cancels): ")
+        except EOFError:
+            ans = ""
+        if not confirmed(ans):
+            print(f"Cancelled (you typed {ans.strip()!r}). Nothing was deleted.")
+            return False
+        return True
     if args.what == "old":
         from .erase import describe_old, purge_old
         info = describe_old(cfg)
         print(info["text"])
-        if not info["total"]:
+        if not info["total"] or not ask():
             return
-        if not args.yes:
-            try:
-                ans = input("Type YES to delete them for good (anything else cancels): ")
-            except EOFError:
-                ans = ""
-            if ans.strip() != "YES":
-                print("Cancelled. Nothing was deleted.")
-                return
         n, errors = purge_old(cfg)
-        print(f"Removed {n} items." + (f" Could not remove {len(errors)}: {errors[:3]}" if errors else ""))
+        left = describe_old(cfg)["total"]
+        print(f"Removed {n} items. " + ("Nothing old is left." if not left else f"STILL THERE: {left} items."))
+        for e in errors[:10]:
+            print(f"  could not remove {e}")
+        if left and errors:
+            print("  Close any Explorer window showing the runs or datasets folder (and the video player), "
+                  "then run this again.")
         return
     if args.what not in TARGETS:
         print(f"Choose one of: {', '.join(TARGETS)}")
         return
     info = describe(args.what, cfg)
     print(info["text"])
-    if not info["files"]:
+    if not info["files"] or not ask():
         return
-    if not args.yes:
-        try:
-            ans = input("Type YES to delete them for good (anything else cancels): ")
-        except EOFError:
-            ans = ""
-        if ans.strip() != "YES":
-            print("Cancelled. Nothing was deleted.")
-            return
     n, errors = erase(args.what, cfg)
-    print(f"Deleted {n} files." + (f" Could not delete {len(errors)} (in use?): {errors[:3]}" if errors else ""))
+    left = len(describe(args.what, cfg)["files"])
+    print(f"Deleted {n} files. " + ("The folders are now empty." if not left else f"STILL THERE: {left} files."))
+    for e in errors[:10]:
+        print(f"  could not delete {e}")
+    if left and errors:
+        print("  Close any Explorer window showing that folder (and the video player), then run this again.")
 
 
 def cmd_dataset_summary(args, cfg):

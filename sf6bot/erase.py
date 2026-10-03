@@ -33,6 +33,49 @@ def _dirs(what: str, cfg: dict) -> list[Path]:
     return out
 
 
+def confirmed(answer: str | None) -> bool:
+    """YES in any case (0.12.2: the user's purge 'did nothing'; a lower-case 'yes' used to cancel)."""
+    return (answer or "").strip().lower() in ("yes", "y")
+
+
+def _rmtree(p: Path) -> None:
+    """shutil.rmtree that also removes read-only files and retries once (Windows: a file the indexer,
+    antivirus or an Explorer window held a moment ago)."""
+    import os
+    import stat
+    import sys
+    import time
+
+    def fix(func, path, *_):
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except OSError:
+            time.sleep(0.2)
+            func(path)
+    for attempt in range(2):
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(p, onexc=fix)
+            else:
+                shutil.rmtree(p, onerror=fix)
+            return
+        except OSError:
+            if attempt:
+                raise
+            time.sleep(0.5)
+
+
+def _unlink(f: Path) -> None:
+    import os
+    import stat
+    try:
+        f.unlink()
+    except PermissionError:
+        os.chmod(f, stat.S_IWRITE)
+        f.unlink()
+
+
 def _files(dirs: list[Path]) -> list[Path]:
     return [f for d in dirs if d.exists() for f in d.rglob("*") if f.is_file()]
 
@@ -59,9 +102,9 @@ def erase(what: str, cfg: dict) -> tuple[int, list[str]]:
             k = sum(1 for f in child.rglob("*") if f.is_file()) if child.is_dir() else 1
             try:
                 if child.is_dir():
-                    shutil.rmtree(child)
+                    _rmtree(child)
                 else:
-                    child.unlink()
+                    _unlink(child)
                 n += k
             except OSError as e:
                 errors.append(f"{child.name}: {e.strerror or e}")
@@ -136,7 +179,10 @@ def describe_old(cfg: dict) -> dict:
     from . import __version__
     o = old_data(cfg)
     n_routes = sum(len(v) for v in o["combo_lab"].values())
+    ds = Path(cfg.get("datasets", {}).get("root", "datasets")).resolve()
+    runs = Path(cfg["recording"]["root"]).resolve()
     lines = [f"Purge data recorded by old versions of the bot (you are running {__version__}):",
+             f"  looking in {runs} and {ds}",
              f"  runs folder: {len(o['runs'])} old runs (reports, videos, logs)",
              f"  fight data: {len(o['fights'])} files from before {VALID_SINCE['fights']}",
              f"  combo lab results: {n_routes} routes tested before {VALID_SINCE['combo_lab']} "
@@ -145,7 +191,7 @@ def describe_old(cfg: dict) -> dict:
              "  " + KEPT_TEXT]
     total = len(o["runs"]) + len(o["fights"]) + n_routes + len(o["move_maps"])
     return {"old": o, "total": total, "text": "\n".join(lines) if total else
-            f"Nothing recorded by an older version. {KEPT_TEXT}"}
+            f"Nothing recorded by an older version (looked in {runs} and {ds}). {KEPT_TEXT}"}
 
 
 def purge_old(cfg: dict) -> tuple[int, list[str]]:
@@ -160,13 +206,13 @@ def purge_old(cfg: dict) -> tuple[int, list[str]]:
             errors.append(f"{d.name}: not inside the runs folder")
             continue
         try:
-            shutil.rmtree(d)
+            _rmtree(d)
             n += 1
         except OSError as e:
             errors.append(f"{d.name}: {e.strerror or e}")
     for f in o["fights"] + o["move_maps"]:
         try:
-            f.unlink()
+            _unlink(f)
             n += 1
         except OSError as e:
             errors.append(f"{f.name}: {e.strerror or e}")
