@@ -35,6 +35,8 @@ echo  RESULTS
 echo    S  Send results to Claude (copies a summary)     0  Open the results folder
 echo.
 echo    T  Tools and setup      E  Erase data           Q  Quit
+%BOT% video
+echo    VID  Turn video recording on / off (video.mp4 in each run; uses CPU and disk)
 echo.
 goto ask
 
@@ -104,6 +106,8 @@ echo  Combo lab: Training Mode, the bot as P1. Dummy: standing, Guard = AFTER FI
 echo  (it blocks anything that is not a true combo). Super and Drive gauges on max/infinite.
 echo  Positions are set with the hold-direction resets (down + reset = midscreen, a corner direction
 echo  + reset = corner); jump-in routes walk to a jump distance first. Nothing to set by hand.
+echo  While it runs: F9 = the try it called a failure actually WORKED (press before the next try)
+echo                 F10 = skip this route (keeps failing); F8 = stop
 echo    1  Community routes (imported with T then A): normal-hit routes first, then it asks you to
 echo       set the dummy's counter hit to COUNTER HIT, then to PUNISH COUNTER (S skips a step)
 echo    2  The bot's own routes: built from every catalogued move (run C first)
@@ -145,6 +149,7 @@ set "CH="
 set /p CH=Choose: 
 if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
+if /i "%CH%"=="vid" (%BOT% video toggle & goto menu)
 if /i "%CH%"=="h" goto versus
 if /i "%CH%"=="b" (%BOT% train & goto done)
 if /i "%CH%"=="d" goto record

@@ -84,6 +84,49 @@ class PadPanel:
         self.locked = False            # set by the fighter while it plays (fight --pad): clicks ignored
         self._last_t: float | None = None
         self._lock = threading.Lock()
+        self.injecting: set[str] = set()   # keyboard keys the panel itself is pressing (not the user's)
+
+    # ---- the real keyboard while teaching (0.12.5) -------------------------------------------------
+    def watch_keyboard(self, stop_event, key_down=None, poll_s: float = 0.01) -> threading.Thread:
+        """While teaching, also record keys the user presses on the KEYBOARD (user, 2026-10-03: SF6's menus
+        confirm with F, which no overlay button pressed, so routines could not be taught). Each key becomes a
+        step {key, after_s, hold_s}, replayed as that key. Keys the panel itself presses are ignored."""
+        from .keys import TEACH_VK
+        if key_down is None:
+            from . import win32
+            key_down = lambda vk: win32.is_vk_down(vk)  # noqa: E731
+        held: dict = {}
+
+        def run():
+            while not stop_event.is_set():
+                if self.recording and not self.locked:
+                    now = clock.now()
+                    for name, vk in TEACH_VK.items():
+                        down = key_down(vk)
+                        if down and name not in held and name not in self.injecting:
+                            held[name] = now
+                            self._key_step_start(name, now)
+                        elif not down and name in held:
+                            self._key_step_end(name, now - held.pop(name))
+                stop_event.wait(poll_s)
+        th = threading.Thread(target=run, name="TeachKeyboard", daemon=True)
+        th.start()
+        return th
+
+    def _key_step_start(self, key: str, t: float) -> None:
+        with self._lock:
+            after = 0.0 if self._last_t is None else round(t - self._last_t, 3)
+            self.steps.append({"key": key, "after_s": after, "hold_s": 0.1})
+            self._last_t = t
+            self._snapshot(len(self.steps))
+        self.sink({"type": "teach_key", "t": t, "key": key})
+
+    def _key_step_end(self, key: str, held_s: float) -> None:
+        with self._lock:
+            for st in reversed(self.steps):
+                if st.get("key") == key:
+                    st["hold_s"] = round(max(0.05, min(held_s, 2.0)), 3)
+                    break
 
     # ---- overlay hooks --------------------------------------------------------------------------
     def hit(self, x: int, y: int) -> str | None:
@@ -133,11 +176,16 @@ class PadPanel:
                 self._snapshot(len(self.steps))
             self._last_t = t
             self.lit.add(name)
+            if self.keys is not None and name in self.keys:
+                self.injecting.add(str(self.keys[name]).upper())
             self.backend.send([(name, True)])
         time.sleep(hold)
         with self._lock:
             self.backend.send([(name, False)])
             self.lit.discard(name)
+        time.sleep(0.05)
+        if self.keys is not None and name in self.keys:
+            self.injecting.discard(str(self.keys[name]).upper())
         self.sink({"type": "pad_press", "t": t, "button": name, "hold_s": hold, "recorded": self.recording})
 
     def _snapshot(self, n: int) -> None:
@@ -176,6 +224,11 @@ def routine_uses_pad(name: str, root: Path = ROUTINES_DIR) -> bool:
     return "pad" in dev or "P2" in dev
 
 
+def _keyboard():
+    from .input_backend import SendInputKeyboard
+    return SendInputKeyboard()
+
+
 def play_routine(backend, name: str, stop_event=None, root: Path = ROUTINES_DIR, sink=None,
                  min_wait_s: float = 0.15) -> int:
     """Replay a taught routine with the recorded waits (backend: KeyboardPad or the bot's pad).
@@ -189,10 +242,17 @@ def play_routine(backend, name: str, stop_event=None, root: Path = ROUTINES_DIR,
                 break
         else:
             time.sleep(wait)
-        backend.send([(step["button"], True)])
-        time.sleep(float(step.get("hold_s", 0.1)))
-        backend.send([(step["button"], False)])
+        if step.get("key"):
+            # a key the user pressed on the keyboard while teaching: replayed as that key
+            kb = backend.backend if isinstance(backend, KeyboardPad) else _keyboard()
+            kb.send([(step["key"], True)])
+            time.sleep(float(step.get("hold_s", 0.1)))
+            kb.send([(step["key"], False)])
+        else:
+            backend.send([(step["button"], True)])
+            time.sleep(float(step.get("hold_s", 0.1)))
+            backend.send([(step["button"], False)])
         sink({"type": "routine_step", "t": clock.now(), "routine": name, "step": done + 1,
-              "button": step["button"]})
+              "button": step.get("button"), "key": step.get("key")})
         done += 1
     return done

@@ -19,6 +19,8 @@ class Watchdog:
     def __init__(self, controller: Controller, stop_event: threading.Event, *,
                  kill_pressed: Callable[[], bool], pause_pressed: Callable[[], bool] | None = None,
                  flip_pressed: Callable[[], bool] | None = None,
+                 mark_pressed: Callable[[], bool] | None = None,
+                 skip_pressed: Callable[[], bool] | None = None,
                  game_focused: Callable[[], bool], window_alive: Callable[[], bool] = lambda: True,
                  window_moved: Callable[[], bool] = lambda: False,
                  poll_s: float = 0.005, refocus_grace_s: float = 0.5, sink=None) -> None:
@@ -27,6 +29,10 @@ class Watchdog:
         self.kill_pressed = kill_pressed
         self.pause_pressed = pause_pressed or (lambda: False)
         self.flip_pressed = flip_pressed or (lambda: False)
+        self.mark_pressed = mark_pressed or (lambda: False)
+        self.marks: list[float] = []     # operator "it actually worked" presses (combo lab), clock times
+        self.skip_pressed = skip_pressed or (lambda: False)
+        self.skips: list[float] = []     # operator "skip this combo" presses (combo lab)
         self.game_focused = game_focused
         self.window_alive = window_alive
         self.window_moved = window_moved
@@ -82,6 +88,12 @@ class Watchdog:
                     self.sink({"type": "pause" if self.paused else "resume", "t": clock.now()})
                 if self._edge(self.flip_pressed, edges, "flip"):
                     self.c.set_facing(self.c.facing.flipped())
+                if self._edge(self.mark_pressed, edges, "mark"):
+                    self.marks.append(clock.now())
+                    self.sink({"type": "operator_mark", "t": clock.now()})
+                if self._edge(self.skip_pressed, edges, "skip"):
+                    self.skips.append(clock.now())
+                    self.sink({"type": "operator_skip", "t": clock.now()})
                 focused = self.game_focused()
                 t = clock.now()
                 if not focused:

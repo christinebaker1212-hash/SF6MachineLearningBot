@@ -331,8 +331,11 @@ def cmd_pad(args, cfg):
         if panel is None:
             print("The clickable buttons live in the debug overlay; run without --no-overlay.")
             return
-        what = f"Teaching routine '{args.teach}': every button you click is recorded." if args.teach \
-            else "Click the buttons in the debug overlay."
+        what = (f"Teaching routine '{args.teach}': every button you click AND every key you press on the "
+                f"keyboard (e.g. F = menu confirm) is recorded. REC in the overlay pauses / resumes recording."
+                if args.teach else "Click the buttons in the debug overlay.")
+        if args.teach and not s.mock:
+            panel.watch_keyboard(s.stop_event)
         print(f"{what} They press: {panel.device}. F8 (or {args.minutes:.0f} min) ends it.")
         s.stop_event.wait(args.minutes * 60)
         p = panel.save()
@@ -516,6 +519,21 @@ def cmd_train(args, cfg):
     print("The fighter uses the brain from the next match on (menus V, N, H).")
 
 
+def cmd_video(args, cfg):
+    """Video recording on / off, saved in configs/local.yaml (user, 2026-10-03). Replay recording never records
+    video. The state recordings, reports and datasets are kept either way."""
+    from .config import set_local
+    if args.mode in ("on", "off"):
+        p = set_local(["recording", "record_video"], args.mode == "on")
+        print(f"Video recording is now {args.mode.upper()} (saved in {p}).")
+    elif args.mode == "toggle":
+        new = not bool(cfg["recording"].get("record_video", True))
+        p = set_local(["recording", "record_video"], new)
+        print(f"Video recording is now {'ON' if new else 'OFF'} (saved in {p}).")
+    else:
+        print(f"Video recording: {'ON' if cfg['recording'].get('record_video', True) else 'OFF'}")
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -534,6 +552,11 @@ def main(argv=None):
     ap.add_argument("--mock", action="store_true",
                     help="MOCK mode: synthetic frames + no real inputs (pipeline testing only, not the game)")
     ap.add_argument("--no-overlay", action="store_true")
+    vg = ap.add_mutually_exclusive_group()
+    vg.add_argument("--video", dest="video", action="store_true", default=None,
+                    help="record video.mp4 for this run (overrides the saved setting)")
+    vg.add_argument("--no-video", dest="video", action="store_false",
+                    help="no video for this run (overrides the saved setting)")
     from . import __version__
     ap.add_argument("--version", action="version", version=f"sf6bot {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -670,6 +693,10 @@ def main(argv=None):
                    "controller and the overlay buttons press that controller (default: P1's keys)")
     p.set_defaults(fn=cmd_fight)
 
+    p = sub.add_parser("video", help="video recording on / off / toggle (saved); no argument: show it")
+    p.add_argument("mode", nargs="?", choices=("on", "off", "toggle"), default=None)
+    p.set_defaults(fn=cmd_video)
+
     sub.add_parser("train", help="train the bot's brain (network + counts) from every recording; no game "
                    "needed").set_defaults(fn=cmd_train)
 
@@ -718,6 +745,8 @@ def main(argv=None):
         cfg["input"]["backend"] = "sendinput_keyboard"
     if args.mock:
         cfg["input"]["backend"] = "mock"
+    if args.video is not None:
+        cfg["recording"]["record_video"] = bool(args.video)
     args.fn(args, cfg)
 
 

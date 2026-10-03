@@ -29,6 +29,19 @@ SCANCODES: dict[str, tuple[int, bool]] = {
     "F9": (0x43, False), "F10": (0x44, False),
 }
 
+# Keys a taught routine may record from the real keyboard (0.12.5): name -> virtual-key code for polling.
+# F6-F10 are left out: they are the bot's own hotkeys (flip, pause, kill, F9 "it worked", F10 skip).
+TEACH_VK: dict[str, int] = {
+    **{c: ord(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+    **{str(d): ord(str(d)) for d in range(10)},
+    "ESC": 0x1B, "ENTER": 0x0D, "SPACE": 0x20, "TAB": 0x09, "BACKSPACE": 0x08,
+    "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28,
+    "SLASH": 0xBF, "COMMA": 0xBC, "PERIOD": 0xBE, "SEMICOLON": 0xBA, "APOSTROPHE": 0xDE,
+    "MINUS": 0xBD, "EQUALS": 0xBB, "LBRACKET": 0xDB, "RBRACKET": 0xDD,
+    "LSHIFT": 0xA0, "RSHIFT": 0xA1, "LCTRL": 0xA2, "LALT": 0xA4,
+    "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73, "F5": 0x74,
+}
+
 VK: dict[str, int] = {
     **{f"F{i}": 0x6F + i for i in range(1, 13)},
     "PAUSE": 0x13, "END": 0x23, "HOME": 0x24, "INSERT": 0x2D, "DELETE": 0x2E,

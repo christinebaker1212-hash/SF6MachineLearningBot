@@ -1028,3 +1028,65 @@ def test_special_cancel_and_multi_hit_cancel_from_capcom_and_user_rules():
 def test_a_success_is_repeated_from_the_same_start_distance():
     res = {"bot_x": [-0.35, 1.2], "dummy_x": [0.4, 3.0]}
     assert cl._start_distance(res) == 0.75
+
+
+def test_reset_is_checked_and_facing_comes_from_positions():
+    """User, 2026-10-03: "it no longer seems to reset on every combo attempt ... the opponent will often side
+    switch, and the bot will get confused". The reset is now read back, and the facing taken from positions
+    (the facing flag lags behind a side switch)."""
+    import types
+    from sf6bot import catalog
+    from sf6bot.actions import Facing
+
+    def st(bx, dx, by=0.0, dy=0.0, flag=True, d_aid=1):
+        return types.SimpleNamespace(p1={"x": bx, "y": by, "facing_right": flag, "action_id": 1},
+                                     p2={"x": dx, "y": dy, "action_id": d_aid})
+    assert catalog.reset_ok(st(-1.5, 1.5), 2)
+    assert not catalog.reset_ok(st(2.9, 1.4), 2)          # still where the side-switching combo left them
+    assert not catalog.reset_ok(st(-1.5, 1.5, dy=0.8), 2)  # the dummy still in the air
+    assert not catalog.reset_ok(st(1.5, -1.5), 2) and catalog.reset_ok(st(1.5, -1.5), 8)
+    faced = []
+    sess = types.SimpleNamespace(controller=types.SimpleNamespace(set_facing=faced.append))
+    reader = types.SimpleNamespace(latest=lambda: st(2.0, -1.0, flag=True))   # flag still says right
+    catalog.face_opponent(sess, reader)
+    assert faced == [Facing.LEFT]                          # the dummy is on the left: forward = left
+
+
+def test_dl_means_delay_in_any_spelling_and_searches_late():
+    """User, 2026-10-03: "any note marked DL requires a delay, sometimes a significant delay". Only 'dl.' was
+    read; 'DL 5HP' got no delay. A delay step starts DELAY_START late and searches later first, far."""
+    cap = dict(_capcom("ryu"), character="Ryu")
+    for route in ("5HP > DRC , DL 5HP > 214MP", "5HP > DRC , dl 5HP > 214MP", "5HP > DRC , DL. 5HP > 214MP",
+                  "5HP > DRC , dl. 5HP > 214MP"):
+        p = cl.plan_route({"route": route, **combos.resolve(route, cap["moves"])}, cap, None)
+        st = p["steps"][2]
+        assert st["name"] == "Standing Heavy Punch" and st["delay"] and st["base_offset"] == cl.DELAY_START, route
+    steps = [{"min_offset": -5}, {"min_offset": -5, "delay": True}]
+    tried, seen, o = {}, [], {}
+    while (o := cl.next_offsets(steps, o, {"step": 1, "kind": "dropped"}, tried)) is not None:
+        seen.append(o[1])
+    assert seen == cl.SEARCH_DELAY and max(seen) >= 20
+
+
+def test_operator_f9_turns_the_last_failure_into_the_recorded_success():
+    """User, 2026-10-03: the operator can say a try marked as a failure actually worked."""
+    import types
+    res = {"success": False, "fail": {"kind": "dropped", "step": 2}, "t_end": 100.0, "offsets": {"2": -1},
+           "lead_used": 4, "bot_x": [-0.35, 1.0], "dummy_x": [0.4, 2.0],
+           "steps": [{"prev_frame": None, "after_prev_start": None, "land": None, "lead_measured": 4},
+                     {"prev_frame": 22, "after_prev_start": None, "land": None, "lead_measured": 4}]}
+    sess = types.SimpleNamespace(watchdog=types.SimpleNamespace(marks=[99.0]))
+    assert not cl.operator_marked(sess, res)                 # pressed before that try ended: not for it
+    sess.watchdog.marks.append(101.2)
+    assert cl.operator_marked(sess, res)
+    found, lead, recorded, dist, leads = cl._override(res, 3)
+    assert res["success"] and res["operator_override"] and res["fail_was"]["kind"] == "dropped"
+    assert found == {"2": -1} and lead == 4 and dist == 0.75 and recorded[1]["prev_frame"] == 22
+
+
+def test_operator_f10_skips_only_presses_made_during_this_route():
+    import types
+    sess = types.SimpleNamespace(watchdog=types.SimpleNamespace(skips=[50.0]))
+    assert not cl.operator_skipped(sess, 60.0)      # an F10 for an earlier route does not skip this one
+    sess.watchdog.skips.append(75.0)
+    assert cl.operator_skipped(sess, 60.0)

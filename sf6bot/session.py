@@ -92,7 +92,7 @@ class Session:
             inp = MockInputBackend()
             focused = lambda: True  # noqa: E731
             kill = lambda: False  # noqa: E731
-            pause = flip = None
+            pause = flip = mark = skip = None
             alive = lambda: True  # noqa: E731
             moved = lambda: False  # noqa: E731
         else:
@@ -109,6 +109,10 @@ class Session:
             kill = lambda: win32.is_vk_down(k_kill) or pad.pressed()  # noqa: E731
             pause = lambda: win32.is_vk_down(k_pause)  # noqa: E731
             flip = lambda: win32.is_vk_down(k_flip)  # noqa: E731
+            k_mark = vk(s.get("success_key") or "F9")
+            mark = lambda: win32.is_vk_down(k_mark)  # noqa: E731
+            k_skip = vk(s.get("skip_key") or "F10")
+            skip = lambda: win32.is_vk_down(k_skip)  # noqa: E731
             alive = lambda: win32.is_window(hwnd)  # noqa: E731
             last = [0.0]
 
@@ -135,7 +139,7 @@ class Session:
         self.grabber = FrameGrabber(capture, region, on_frame=self.recorder.frame).start()
         s = cfg["safety"]
         self.watchdog = Watchdog(self.controller, self.stop_event, kill_pressed=kill, pause_pressed=pause,
-                                 flip_pressed=flip, game_focused=focused, window_alive=alive, window_moved=moved,
+                                 flip_pressed=flip, mark_pressed=mark, skip_pressed=skip, game_focused=focused, window_alive=alive, window_moved=moved,
                                  poll_s=float(s["poll_s"]), refocus_grace_s=float(s["refocus_grace_s"]),
                                  sink=self.recorder.event)
         self.watchdog.allow_arm = False

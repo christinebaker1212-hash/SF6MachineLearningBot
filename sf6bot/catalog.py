@@ -250,13 +250,7 @@ def make_reset(sess, cfg: dict, reader):
         from .input_backend import SendInputKeyboard
         reset_backend = SendInputKeyboard()
 
-    def reset(hold: int | None = None):
-        """`hold`: a SCREEN direction (numpad, 4 = left) held while resetting picks the position (user,
-        0.11.3): 2 = midscreen with the player on the left, 8 = midscreen on the right, 4 / 1 = left
-        corner, 6 / 3 = right corner."""
-        if not c.armed:  # never send the reset key to another window (focus lost / paused)
-            if not sess.wait_armed(timeout=10):
-                raise InterruptedError("not armed")
+    def press(hold):
         if hold:
             from .actions import Facing
             c.set_facing(Facing.RIGHT)          # facing right: numpad = screen directions
@@ -269,10 +263,80 @@ def make_reset(sess, cfg: dict, reader):
             time.sleep(0.25)
             c.apply(InputState(), tag="reset_hold_end")
         sess.stop_event.wait(1.3)
-        s2 = reader.latest()
-        if s2 is not None and facing_of(s2.p1) is not None:
-            c.set_facing(facing_of(s2.p1))
+
+    def reset(hold: int | None = None):
+        """`hold`: a SCREEN direction (numpad, 4 = left) held while resetting picks the position (user,
+        0.11.3): 2 = midscreen with the player on the left, 8 = midscreen on the right, 4 / 1 = left
+        corner, 6 / 3 = right corner.
+
+        0.12.5 (user: "it no longer seems to reset on every combo attempt ... the opponent will often side
+        switch, and the bot will get confused"): the reset waits until both players have landed and left hit
+        reaction (a bouncing / knocked-down dummy), the positions are read back and the reset is pressed again
+        if they did not come back, and the facing is set from POSITIONS (the facing flag lags behind a side
+        switch, measured 0.8.0; the walk to the dummy then went the wrong way)."""
+        if not c.armed:  # never send the reset key to another window (focus lost / paused)
+            if not sess.wait_armed(timeout=10):
+                raise InterruptedError("not armed")
+        settle(reader, sess)
+        for attempt in range(3):
+            press(hold)
+            if reset_ok(reader.latest(), hold):
+                break
+            print(f"  the Training Mode reset did not put the players back (try {attempt + 1}): again")
+            settle(reader, sess)
+        face_opponent(sess, reader)
     return reset, reset_backend, reset_key
+
+
+def settle(reader, sess, max_s: float = 3.0) -> None:
+    """Wait until both players are on the ground and out of hit / juggle / knockdown reactions."""
+    end = clock.now() + max_s
+    while clock.now() < end and not sess.stop_event.is_set():
+        st = reader.latest()
+        if st is None:
+            return
+        busy = False
+        for p in (st.p1, st.p2):
+            a = p.get("action_id")
+            if (num(p.get("y")) or 0) > 0.05 or (num(p.get("hitstun")) or 0) > 0 or \
+                    (isinstance(a, int) and 200 <= a < 400):
+                busy = True
+        if not busy:
+            return
+        sess.stop_event.wait(0.1)
+
+
+def reset_ok(st, hold: int | None) -> bool:
+    """Did the reset put the players back? Midscreen resets stand them ~3.0 apart (x -1.5 / +1.5, measured):
+    on the ground, apart, and on the side the hold asked for."""
+    if st is None:
+        return True                       # no state to check: do not loop
+    bx, dx = num(st.p1.get("x")), num(st.p2.get("x"))
+    if bx is None or dx is None:
+        return True
+    if (num(st.p1.get("y")) or 0) > 0.05 or (num(st.p2.get("y")) or 0) > 0.05:
+        return False
+    if hold in (None, 2, 8):
+        if abs(dx - bx) < 2.0:
+            return False
+        if hold == 2 and not bx < dx:
+            return False
+        if hold == 8 and not bx > dx:
+            return False
+    return True
+
+
+def face_opponent(sess, reader) -> None:
+    """Set the input mirroring from positions: forward = toward the opponent."""
+    from .actions import Facing
+    st = reader.latest()
+    if st is None:
+        return
+    bx, dx = num(st.p1.get("x")), num(st.p2.get("x"))
+    if bx is not None and dx is not None and abs(dx - bx) > 0.05:
+        sess.controller.set_facing(Facing.RIGHT if dx > bx else Facing.LEFT)
+    elif facing_of(st.p1) is not None:
+        sess.controller.set_facing(facing_of(st.p1))
 
 
 def learn_ids(sess, reader, reset) -> tuple[set, set, set]:
@@ -312,6 +376,7 @@ def walk_to_contact(sess, reader, max_s: float = 2.5) -> float | None:
     """Walk forward until the distance stops shrinking (contact), then let the walk-stop transition
     finish. Returns the closest distance seen."""
     c = sess.controller
+    face_opponent(sess, reader)
     c.apply(InputState(6), tag="approach")
     best, still, last_d = None, 0, None
     end = clock.now() + max_s

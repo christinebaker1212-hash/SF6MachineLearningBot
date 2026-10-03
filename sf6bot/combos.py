@@ -223,16 +223,16 @@ def _aliases(r: str) -> str:
     return r
 
 
-_MOVE_LIKE = re.compile(r"^\s*(?:CH |PC |dl\.\s*|delay |meaty )?(?:j\.|nj\.|bj\.|fj\.)?"
+_MOVE_LIKE = re.compile(r"^\s*(?:CH |PC |(?i:dl)\.?\s*|(?i:delay) |meaty )?(?:j\.|nj\.|bj\.|fj\.)?"
                         r"(?:\d{1,6}[LMH]?[PK]{1,2}\b|[LMH][PK]\b|DRC\b|PDR\b|DR\b|DI\b|SA ?\d|DC\b|Denjin\b|66\b|"
                         r"dash\b|Drive Impact|[<>~,])", re.I)
-_MODIFIERS = {"pc", "ch", "dl.", "delay", "meaty"}
+_MODIFIERS = {"pc", "ch", "dl.", "dl", "delay", "meaty"}
 
 
 def _kind(tok: str):
     """For '/' between two moves: the same kind (two normals, or one motion in two strengths) is a one-move
     swap; different kinds inside a group separate whole sequences."""
-    t = re.sub(r"^(?:CH|PC|dl\.|delay|meaty|Denjin|DC)\s*", "", tok.strip(), flags=re.I)
+    t = re.sub(r"^(?:CH|PC|dl\.?|delay|meaty|Denjin|DC)\s*", "", tok.strip(), flags=re.I)
     t = re.sub(r"^(?:j|nj|bj|fj)\.", "", t)
     m = re.match(r"^(\d{2,})", t)
     if m:
@@ -442,7 +442,13 @@ def _norm_token(tok: str) -> tuple[str, list[str]]:
     """'dl.6LK' -> ('6LK', ['delay']); 'j.HP' -> ('j.HP', []); '236P+P' -> '236PP'; 'cr.MK' -> '2MK'."""
     mods = []
     t = tok.strip()
-    for pre, name in (("dl.", "delay"), ("delay ", "delay"), ("(whiff)", "whiff"), ("CH ", "counter_hit"),
+    # 'DL' / 'dl.' / 'dl' / 'delay' in any case (user, 2026-10-03: "any note marked DL requires a delay,
+    # sometimes a significant delay"; only a lower-case 'dl.' was read before 0.12.5)
+    m = re.match(r"^(?:dl\.?|delay(?:ed)?)(?=\s|\.|\d|j\.|[LMH][PK])\s*", t, flags=re.I)
+    if m:
+        mods.append("delay")
+        t = t[m.end():].strip()
+    for pre, name in (("(whiff)", "whiff"), ("CH ", "counter_hit"),
                       ("PC ", "punish_counter"), ("meaty ", "meaty")):
         if t.startswith(pre):
             mods.append(name)

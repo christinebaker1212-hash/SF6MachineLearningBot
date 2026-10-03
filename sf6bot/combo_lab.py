@@ -54,7 +54,11 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
                        # previous move's late hit (multi-hit special, projectile), not this move's
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
-LAB_RULES = "0.12.4"      # in plan_fingerprint: a change in how the lab judges attempts retests old failures     # frames an unexpected new action id waits for the step's own (catalogued) id before it
+LAB_RULES = "0.12.5"
+# 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
+# late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
+DELAY_START = 4
+SEARCH_DELAY = [2, 4, 6, 8, 10, 12, 16, 20, -1, -2]      # in plan_fingerprint: a change in how the lab judges attempts retests old failures     # frames an unexpected new action id waits for the step's own (catalogued) id before it
                        # counts as the step's start (a Drive Rush changing to its next id is not the 2MK)
 PREFIX_MISSES = 2      # a kept (frozen) prefix that fails this many times in a row is searched again
 FIGHT_IDLE_MAX = 33    # MEASURED (fights 2026-10-02): idle / walk / crouch ids of Ryu and Ken are < 33
@@ -268,7 +272,8 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
     for i, s in enumerate(steps_in):
         conn = s.get("connector") or ""
         st: dict = {"token": s.get("token"), "connector": conn if i else "", "mods": s.get("mods") or [],
-                    "base_offset": 3 if "delay" in (s.get("mods") or []) else 0}
+                    "base_offset": DELAY_START if "delay" in (s.get("mods") or []) else 0,
+                    "delay": "delay" in (s.get("mods") or [])}
         system = s.get("system")
         if system:
             pdr = system == "drive_rush" and s.get("rush") != "cancel" and (
@@ -924,7 +929,8 @@ def next_offsets(steps: list[dict], offsets: dict, fail: dict, tried: dict) -> d
         tried[("wrong", k)] = True
         return dict(offsets)
     lo = steps[k].get("min_offset", NO_FLOOR)
-    todo = tried.setdefault(("passes", k), [d for d in SEARCH_EARLIER + SEARCH_LATER])
+    passes = SEARCH_DELAY if steps[k].get("delay") else SEARCH_EARLIER + SEARCH_LATER
+    todo = tried.setdefault(("passes", k), list(passes))
     while todo:
         d = todo.pop(0)
         if d < lo:
@@ -1296,8 +1302,10 @@ def set_position(sess, reader, reset, position: str, state: dict) -> str:
 def walk_to_distance(sess, reader, target: float, max_s: float = 3.0) -> float | None:
     """Walk forward / back until the players are `target` apart (jump-in start)."""
     from .actions import InputState
+    from .catalog import face_opponent
     from .game_state import player_distance
     c = sess.controller
+    face_opponent(sess, reader)
     end, d = clock.now() + max_s, None
     while clock.now() < end and not sess.stop_event.is_set():
         st = reader.latest()
@@ -1412,6 +1420,40 @@ def skip_known_failure(entry: dict | None, plan: dict, hit_pass: str) -> bool:
                 and entry.get("tested_as", "normal") == hit_pass)
 
 
+MARK_WINDOW_S = 1.5     # after a failed try, F9 within this long marks it as a success
+
+
+def _override(res: dict, n: int):
+    """Turn a try the lab called a failure into a success (operator F9); returns what a first success records."""
+    res.update(success=True, operator_override=True, fail_was=res.get("fail"), fail=None)
+    print(f"  operator (F9): try {n} actually worked: recorded exactly as it was")
+    return (dict(res.get("offsets") or {}), res.get("lead_used"), recorded_timing(res), _start_distance(res),
+            [s2.get("lead_measured") for s2 in res.get("steps") or []])
+
+
+def operator_skipped(sess, since: float | None) -> bool:
+    """F10 (operator, 0.12.5): "skip this combo" pressed since the route started."""
+    skips = getattr(getattr(sess, "watchdog", None), "skips", None) or []
+    return since is not None and any(t >= since for t in skips)
+
+
+def operator_marked(sess, res: dict) -> bool:
+    """Was F9 pressed after this attempt ended (and before the next one started)?"""
+    marks = getattr(getattr(sess, "watchdog", None), "marks", None) or []
+    t = res.get("t_end")
+    return t is not None and any(m >= t for m in marks)
+
+
+def _wait_for_mark(sess, res: dict) -> bool:
+    """Give the operator MARK_WINDOW_S to press F9 after a failed repeat of a success."""
+    end = clock.now() + MARK_WINDOW_S
+    while clock.now() < end and not sess.stop_event.is_set():
+        if operator_marked(sess, res):
+            return True
+        sess.stop_event.wait(0.05)
+    return operator_marked(sess, res)
+
+
 def _start_distance(res: dict) -> float | None:
     """Distance between the players on the attempt's first line."""
     bx, dx = (res.get("bot_x") or [None])[0], (res.get("dummy_x") or [None])[0]
@@ -1467,7 +1509,13 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     no_window: dict = {}      # step -> how often the bar showed it started on the first free frame and missed
     no_window_proof = None
     exhausted = False         # the timing search ran out (a verdict), as opposed to being stopped
+    route_t0 = clock.now()
+    skipped_by_operator = False
     while not sess.stop_event.is_set():
+        if operator_skipped(sess, route_t0):
+            skipped_by_operator = True
+            print("  operator (F10): skipping this route")
+            break
         how = set_position(sess, reader, reset, _position(combo), state)
         if plan.get("jump_in"):
             jd = steps[0]["sequence"][0]
@@ -1499,6 +1547,15 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 if len(attempts) >= 3 and not any(a["success"] for a in attempts):
                     break
                 continue
+        # F9 (operator, 0.12.5): "the try the lab called a failure actually worked", pressed any time from its
+        # result until now (the reset and walk give 2-3 s): it becomes the success, recorded exactly as it was
+        if attempts and not attempts[-1]["success"] and operator_marked(sess, attempts[-1]):
+            ov = _override(attempts[-1], len(attempts))
+            if found is None:
+                found, found_lead, recorded, found_dist, success_leads = ov
+                offsets, confirms_left = dict(found), confirm
+                if confirm <= 0:
+                    break
         pre = reader.latest()
         need_super = (combo.get("super_bars") or 0) * SUPER_BAR
         if pre is not None and need_super and (num(pre.p1.get("super")) or 0) < need_super:
@@ -1535,6 +1592,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         fm = reader.last_fm if reader.last_fm != fm_before else None
         res["end_advantage"] = parse_frame_meter(fm).get("advantage") if fm else None
         res["offsets"] = dict(offsets)
+        res["t_end"] = clock.now()
         attempts.append(res)
         # every attempt, step by step (0.11.10: the first Ryu run kept only the last failure, so a timing
         # problem could not be traced): what came out when, which step got the hit, the bar's link reading
@@ -1633,12 +1691,20 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 exhausted = True
                 break
             offsets = nxt
+    if attempts and not attempts[-1]["success"] and not sess.stop_event.is_set() and not skipped_by_operator \
+            and _wait_for_mark(sess, attempts[-1]):
+        ov = _override(attempts[-1], len(attempts))      # the route's last try: F9 window before moving on
+        if found is None:
+            found, found_lead, recorded, found_dist, success_leads = ov
     summ = _summary(attempts, plan, combo)
+    summ["operator_overrides"] = sum(1 for a in attempts if a.get("operator_override"))
     summ["plan_fp"] = plan_fingerprint(plan)
     # a verdict worth remembering: the search ran out, or the bar proved there is no link window (not an
     # interrupted run, a setup failure or a wrong Training Mode setting)
-    summ["conclusive"] = bool(not summ["verified"] and (exhausted or no_window_proof)
+    summ["conclusive"] = bool(not summ["verified"] and (exhausted or no_window_proof or skipped_by_operator)
                               and not sess.stop_event.is_set())
+    if skipped_by_operator:
+        summ["skipped_by_operator"] = True       # not tried again unless K -> 7 (--again)
     if recorded is not None:
         replays = [a for a in attempts if a.get("replayed_recorded_timing")]
         summ["recorded_timing"] = {"steps": recorded, "lead": found_lead, "start_distance": found_dist,
@@ -1765,7 +1831,9 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                 print(f"Combo lab: {name}, {PASS_TEXT[hit_pass].upper()} routes, round {rnd + 1}: {len(plans)} to try "
                       f"({len(skipped)} not supported yet), position {position}.\n"
                       f"Dummy: standing, {guard_text}; counter-hit setting: {PASS_SETTING[hit_pass]}; "
-                      f"Super and Drive gauges max.")
+                      f"Super and Drive gauges max.\n"
+                      f"If a try marked as a failure actually worked, press F9 before the next try starts. "
+                      f"F10 skips the current route.")
                 if ids is None:
                     if not sess.start_inputs():
                         return None
@@ -1977,14 +2045,16 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
             lines.append(f"- {tag} {v['successes']}/{v['attempts']} | {k} | {v.get('damage')} dmg (community "
                          f"{v.get('community_damage') if v.get('community_damage') is not None or not v.get('alt_of') else 'n/a: one of the row choices'}) | hits {v.get('hits')} | drive {v.get('drive_spent')} "
                          f"super {v.get('super_spent')} | carry {v.get('carry')} | side switch {v.get('side_switch')} "
-                         f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}")
+                         f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}"
+                         + (f" | operator F9 x{v['operator_overrides']}" if v.get("operator_overrides") else ""))
         else:
             kept = f" | moves 1-{v['moves_kept']} worked (kept exactly)" if v.get("moves_kept") else ""
             nw = v.get("no_link_window")
             if nw:
                 kept += (f" | NO LINK WINDOW at move {nw['move_no']} ({nw['move']}): it started on the first free "
                          f"frame and the dummy still recovered first (frame bar)")
-            lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}")
+            lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}"
+                         + (" | SKIPPED by the operator (F10)" if v.get("skipped_by_operator") else ""))
             if v.get("attempt_details"):
                 lines.append("  - " + trace_line(v["attempt_details"][-1]))
     if skipped:

@@ -224,3 +224,58 @@ def test_versus_human_defaults_to_first_to_2_and_ranked_runs_back_to_back(cfg, m
     lines = thoughts({"opponent": "Ken", "ranked": True, "match": {"bot_won": True}, "rounds": [{"bot_won": True}] * 2},
                      None, {"won": 3, "lost": 1, "first_to": None})
     assert ("measured", "Ranked session so far: 3 won, 1 lost.") in lines
+
+
+def test_video_switch_saves_and_flags_override(cfg, monkeypatch, capsys):
+    """User, 2026-10-03: "give me an option whether or not to record video"."""
+    import sf6bot.cli as cli
+    import sf6bot.config as config
+    saved = {}
+    monkeypatch.setattr(config, "set_local", lambda keys, value, local=None: saved.update({tuple(keys): value}) or "local.yaml")
+    cfg["recording"]["record_video"] = True
+    cli.cmd_video(type("A", (), {"mode": "toggle"})(), cfg)
+    assert saved[("recording", "record_video")] is False and "now OFF" in capsys.readouterr().out
+    cli.cmd_video(type("A", (), {"mode": "on"})(), cfg)
+    assert saved[("recording", "record_video")] is True
+    seen = {}
+    monkeypatch.setattr(cli, "load_config", lambda *a, **k: cfg, raising=False)
+    monkeypatch.setattr(cli, "cmd_video", lambda args, c: seen.update(v=c["recording"]["record_video"]))
+
+
+def test_teaching_records_real_keyboard_keys_and_replays_them(tmp_path):
+    """User, 2026-10-03: "menu controls use the F key - that isn't mapped anywhere, so I can't teach routines".
+    The overlay's A now presses F (menu confirm), and keys typed on the keyboard while teaching are steps too."""
+    import threading
+    import time as _t
+    from sf6bot.config import load_config
+    from sf6bot.pad_teach import KeyboardPad, PadPanel, load_routine, play_routine
+
+    class KB:
+        name = "keyboard"
+
+        def __init__(self):
+            self.sent = []
+
+        def send(self, ev):
+            self.sent += ev
+    cfg = load_config(local="/nonexistent.yaml")
+    kb = KB()
+    pad = KeyboardPad(kb, cfg)
+    assert pad.keys["A"] == "F"
+    panel = PadPanel(pad, routine="replay_play", root=tmp_path)
+    down = {"vk": None}
+    stop = threading.Event()
+    panel.watch_keyboard(stop, key_down=lambda vk: vk == down["vk"], poll_s=0.002)
+    down["vk"] = ord("F")
+    _t.sleep(0.05)
+    down["vk"] = None
+    _t.sleep(0.03)
+    panel.press("DPAD_DOWN", hold_s=0.02)          # an overlay click: its key is not recorded twice
+    stop.set()
+    panel.save()
+    steps = load_routine("replay_play", tmp_path)["steps"]
+    assert steps[0]["key"] == "F" and steps[0]["hold_s"] >= 0.05 and steps[1]["button"] == "DPAD_DOWN"
+    assert len(steps) == 2
+    kb.sent.clear()
+    play_routine(pad, "replay_play", root=tmp_path, min_wait_s=0.0)
+    assert ("F", True) in kb.sent and ("F", False) in kb.sent

@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.12.4**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.12.6**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -126,6 +126,9 @@ controls**.
   success start from the same spacing (input-delay jitter is reported, not mistaken for a regression), cancels wait
   for the cancelable hit of two-hit moves (Ryu Axe Kick: 2nd), '*' special cancels (Whirlwind Kick > Aerial
   Tatsumaki). See CLAUDE.md 0.12.4.
+- **0.12.5:** combo lab resets are checked (settle, read back, retry, facing by position); F9 = "that try worked",
+  F10 = skip the route; DL (any spelling) = a delay searched up to +20 frames.
+- **0.12.6:** video on/off (menu VID, `--no-video`); overlay A = F (menu confirm); teaching records real keyboard keys.
 - **Next with the user:** record replays (D, at 8x) → B (train) → the user's FT20 in Versus Human (H) →
   send S. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the

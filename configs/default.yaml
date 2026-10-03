@@ -56,6 +56,7 @@ input:
   # opens the menu on keyboard). The others are not known yet: set them here (key names as in
   # bindings, e.g. ENTER, BACKSPACE, Q, E). Unset = the button is greyed out.
   menu_keys:
+    A: F                  # menu CONFIRM on the keyboard (user, 2026-10-03: "menu controls use the F key")
     START: ESC
     BACK: null
     LB: null
@@ -69,6 +70,8 @@ safety:
   pause_key: F7           # toggle pause (inputs released while paused)
   pad_kill_combo: [LS, RS] # controller kill: click BOTH thumbsticks (XInput pads; [] disables)
   flip_facing_key: F6     # manual facing flip (M1 has no facing detection yet)
+  success_key: F9         # combo lab: "that try actually worked" (operator override, 0.12.5)
+  skip_key: F10           # combo lab: skip the current route (keeps failing), go to the next one
   refocus_grace_s: 0.5    # wait after the game regains focus before re-arming
   start_countdown_s: 5    # time to click into the game before inputs start
   poll_s: 0.005

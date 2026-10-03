@@ -1808,6 +1808,48 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
      Tatsumaki (KK = OD). Other '*' targets stay after recovery.
 - `LAB_RULES` = 0.12.4, so routes that failed under the old rules are retried when K is next run.
 
+## 0.12.5: combo lab resets checked; F9 = it worked, F10 = skip; DL = delay
+- **User (2026-10-03): "it no longer seems to reset on every combo attempt, leading to position skew on moves that will
+  bounce the opponent ... the opponent will often side switch, and the bot will get confused".**
+  - The reset was pressed every attempt but never checked, and was pressed while the dummy could still be
+    bouncing / knocked down.
+  - After it, the bot's facing came from the exported facing FLAG, which lags behind a side switch (measured 0.8.0),
+    so the walk to the dummy could go the wrong way.
+  - Now (`catalog.make_reset`): wait until both players are grounded and out of hit / juggle / knockdown reactions
+    (`settle`, ≤ 3 s) → reset → read the positions back (`reset_ok`: midscreen ~3.0 apart, on the side the hold
+    asked for) → press again up to 3 times → facing from POSITIONS (`face_opponent`). The walks (to contact, to a
+    distance) also face the opponent by position first.
+- **User: "if the operator notices in a K run that a route that has been labeled a failure is actually a success,
+  [they] can input 'S'".** S is the bot's own DOWN key (W/A/S/D), pressed by the bot constantly, so a watcher would
+  see the bot's crouches as overrides, and the operator's S would also crouch in the game. The key is **F9**
+  (`safety.success_key`):
+  - F9 any time between a try's result and the start of the next try (the reset and walk take 2-3 s): that try
+    becomes the success, recorded exactly as it was (send points, input delay, start spacing), and the repeats
+    replay it. After a route's last try the lab waits 1.5 s for F9 before moving on.
+  - Overridden tries are marked (`operator_override`, `fail_was`; report: "operator F9 xN").
+- **User: a "Skip this combo" button.** **F10** (`safety.skip_key`) stops the current route before its next try; it is
+  recorded as `skipped_by_operator` (conclusive), so later runs don't try it again unless K → 7 (`--again`).
+- **User: "any note marked 'DL' requires a delay, sometimes a significant delay."** Only a lower-case `dl.` was read, so
+  "DL 5HP" / "dl 5HP" / "DL. 5HP" got no delay; and the delay was a fixed 3 frames within the ±5 search. Now `DL`, `dl`,
+  `dl.`, `delay` in any case mark a delay step: it starts `DELAY_START` = 4 frames late and its timing search goes
+  LATER first, far (+2 … +20 on top), then a little earlier (`SEARCH_DELAY`).
+- `LAB_RULES` = 0.12.5: earlier conclusive failures are retried under the new rules on the next K.
+
+## 0.12.6: video on/off; menu confirm F and keyboard keys in taught routines
+- **User (2026-10-03): "give me an option whether or not to record video".** `sf6bot video [on|off|toggle]` (saved in
+  `configs/local.yaml`; the menu shows the setting and **VID** toggles it); `--video` / `--no-video` override one
+  run. State recordings, reports and datasets are kept either way. Replay recording never records video.
+- **User: "for routine recording, menu controls use the F key - that isn't mapped anywhere, so I can't teach
+  routines."**
+  - The overlay's **A** button now presses **F** (`input.menu_keys.A: F`, SF6's keyboard menu confirm, user-reported).
+    Before, A pressed LK's key (J).
+  - While teaching (menu L), keys the user presses on the **real keyboard** are recorded too, as `{key, after_s,
+    hold_s}` steps (polled every 10 ms from `keys.TEACH_VK`: letters, digits, arrows, Enter, Esc, Space, Tab,
+    Backspace, punctuation, shifts, F1-F5; F6-F10 are the bot's hotkeys). Keys the panel itself presses are not
+    recorded twice. Playback presses the same key (`play_routine`). Through Parsec the user's keyboard reaches the
+    Ally as real key events (as for the overlay).
+- Not verified in game: that F confirms in every SF6 menu the routines need; the key polling on the user's PC.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

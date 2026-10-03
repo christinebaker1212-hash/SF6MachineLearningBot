@@ -78,17 +78,18 @@ def test_overlay_buttons_press_p1_keys(cfg, tmp_path):
     from sf6bot.pad_teach import KeyboardPad, routine_uses_pad
     kb = MockInputBackend()
     pad = KeyboardPad(kb, cfg)
-    assert pad.keys["A"] == "J" and pad.keys["DPAD_UP"] == "W" and pad.keys["RT"] == "L"   # LK, UP, HK
+    # A = F: SF6's keyboard menu confirm (user, 0.12.5); the rest press the game input of the same button
+    assert pad.keys["A"] == "F" and pad.keys["DPAD_UP"] == "W" and pad.keys["RT"] == "L"   # confirm, UP, HK
     assert pad.keys["START"] == "ESC"                    # MENU = ESC on keyboard (user)
     assert "BACK" not in pad.keys                        # menu-only button: unset until configured
     panel = PadPanel(pad, routine="pick_ken", root=tmp_path, hold_s=0.01)
     panel.press("A")
     panel.click("BACK")                                  # greyed out: nothing happens
-    assert [(k, d) for _, k, d in kb.log] == [("J", True), ("J", False)]
+    assert [(k, d) for _, k, d in kb.log] == [("F", True), ("F", False)]
     assert panel.save() and not routine_uses_pad("pick_ken", tmp_path)
     kb2 = MockInputBackend()
     assert play_routine(KeyboardPad(kb2, cfg), "pick_ken", root=tmp_path, min_wait_s=0.0) == 1
-    assert [(k, d) for _, k, d in kb2.log] == [("J", True), ("J", False)]
+    assert [(k, d) for _, k, d in kb2.log] == [("F", True), ("F", False)]
     cfg["input"]["menu_keys"]["BACK"] = "BACKSPACE"
     assert KeyboardPad(kb, cfg).keys["BACK"] == "BACKSPACE"
 
