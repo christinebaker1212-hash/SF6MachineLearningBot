@@ -208,6 +208,105 @@ def install_exporter(game_dir: Path) -> Path:
     return dst
 
 
+class FrameClock:
+    """A move's own frame counted from the game clock, for when the exported `action_frame` is unusable.
+
+    MEASURED (0.17.5, the user's three ranked matches with the online REFramework build, 2026-10-03): online the
+    exported `action_frame` and `action_frames_total` read one frozen number (19726.79) for BOTH players for the
+    whole session; in all 10 offline recordings they work. Everything timed on a move's own frame (the combo
+    executor's links and cancels, whiff / Drive Impact punishes, the models' "opponent's move progress") was
+    wrong online. The cause on the game side is not known.
+
+    Replacement, from the same offline recordings: a move's frame is 0 on its first line and counts game ticks,
+    except that it stands still on a line where the player's hitstop is > 0 and on the line after it (the exported
+    frame does exactly that: 88.5% of attack frames equal, 94% within 1). A hit reaction restarts at 0 when a new
+    hit lands (hitstun / blockstun / hitstop rises). NOT seen: a move repeated with the same id (5LP ~ 5LP) does
+    not restart (13 times in 10 offline matches); KO slow motion counts real ticks.
+
+    `feed(raw)` is called for every line in order. While the exported frame is frozen (both players' values equal
+    and unchanged over FROZEN_WINDOW clock ticks, with an action id change or a value no move reaches), each
+    player's `action_frame` is replaced by the count, `action_frames_total` is set to null (it is frozen too) and
+    `action_frame_src` = "ticks". Healthy exports pass through unchanged."""
+
+    FROZEN_WINDOW = 30
+    NO_MOVE_IS_THIS_LONG = 1000      # offline the exported frame never exceeded 500 (10 matches)
+
+    def __init__(self) -> None:
+        self.frozen = False
+        self.frozen_lines = 0
+        self._win: list = []         # (exported p1, exported p2, id changed) per advancing tick
+        self._clock = None
+        self._round = None
+        self._p: dict = {}           # player -> {"id", "n", "hs", "hitstun", "blockstun", "exp"}
+
+    def feed(self, raw: dict) -> dict:
+        tick = raw.get("stage_timer")
+        if not isinstance(tick, int):
+            tick = raw.get("frame")
+        if not isinstance(tick, int):
+            return raw
+        rnd = raw.get("round")
+        restart = self._clock is None or rnd != self._round or tick < self._clock
+        dt = 0 if restart else tick - self._clock
+        self._clock, self._round = tick, rnd
+        changed = False
+        exported = []
+        for pk in ("p1", "p2"):
+            p = raw.get(pk)
+            if not isinstance(p, dict):
+                exported.append(None)
+                continue
+            exported.append(p.get("action_frame"))
+            s = self._p.get(pk)
+            aid = p.get("action_id")
+            hs, hst, bst = (num(p.get(k)) or 0 for k in ("hitstop", "hitstun", "blockstun"))
+            if restart or s is None or aid != s["id"]:
+                changed = changed or (s is not None and not restart)
+                s = self._p[pk] = {"id": aid, "n": 0, "hs": hs, "hitstun": hst, "blockstun": bst}
+            elif dt > 0:
+                if (hst > s["hitstun"] or bst > s["blockstun"] or (hs > 0 and s["hs"] == 0)) \
+                        and isinstance(aid, int) and 200 <= aid < 400:
+                    s["n"] = 0                             # a new hit on the same reaction id
+                elif not (hs > 0 or s["hs"] > 0):
+                    s["n"] += dt
+                s.update(hs=hs, hitstun=hst, blockstun=bst)
+        if dt > 0:
+            self._win.append((exported[0], exported[1], changed))
+            del self._win[:-self.FROZEN_WINDOW]
+            if len(self._win) == self.FROZEN_WINDOW:
+                vals = {v for a, b, _ in self._win for v in (a, b)}
+                one = len(vals) == 1 and isinstance(next(iter(vals)), (int, float))
+                v = next(iter(vals)) if one else None
+                if one and (v >= self.NO_MOVE_IS_THIS_LONG or (v != 0 and any(c for _, _, c in self._win))):
+                    self.frozen = True
+                elif len(vals) >= 3:
+                    self.frozen = False
+        if self.frozen:
+            self.frozen_lines += 1
+            for pk in ("p1", "p2"):
+                p, s = raw.get(pk), self._p.get(pk)
+                if isinstance(p, dict) and s is not None:
+                    p["action_frame"], p["action_frames_total"], p["action_frame_src"] = s["n"], None, "ticks"
+        return raw
+
+
+def fix_action_frames(rows: list[dict]) -> list[dict]:
+    """A recording's rows with frozen exported move frames replaced (FrameClock), in place. Recordings made
+    online before 0.17.5 have the frozen values; the first FROZEN_WINDOW ticks stay as recorded."""
+    fc = FrameClock()
+    for r in rows:
+        if isinstance(r, dict):
+            fc.feed(r)
+    return rows
+
+
+def read_recording(path: str | Path) -> list[dict]:
+    """The rows of a recording (.jsonl.gz), with frozen move frames repaired."""
+    import gzip
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        return fix_action_frames([json.loads(line) for line in f if line.strip()])
+
+
 class StateReader:
     """Background tail of the exporter's JSONL file; keeps the newest state."""
 
@@ -229,6 +328,7 @@ class StateReader:
         self.last_fm_t: float | None = None
         self.truncations = 0
         self.error: BaseException | None = None
+        self.frames = FrameClock()     # replaces the move frames when the export is frozen (online, 0.17.5)
 
     def start(self) -> "StateReader":
         self._thread.start()
@@ -286,6 +386,7 @@ class StateReader:
                     self.lines += 1
                     if isinstance(raw.get("fm"), dict):
                         self.last_fm, self.last_fm_t = raw["fm"], t
+                    self.frames.feed(raw)
                     f_no = raw.get("f")
                     st = GameState(t, int(f_no) if isinstance(f_no, (int, float)) else -1,
                                    bool(raw.get("in_battle")), raw)

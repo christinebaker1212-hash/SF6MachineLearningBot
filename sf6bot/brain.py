@@ -11,7 +11,6 @@ baseline, so the report says honestly how much the network adds.
 """
 from __future__ import annotations
 
-import gzip
 import json
 import time
 from pathlib import Path
@@ -31,8 +30,8 @@ COUNTS = "counts.json"
 
 
 def _load(path: Path) -> list[dict]:
-    with gzip.open(path, "rt", encoding="utf-8") as f:
-        return [json.loads(l) for l in f if l.strip()]
+    from .game_state import read_recording
+    return read_recording(path)
 
 
 def _meta(path: Path) -> dict:
@@ -112,7 +111,7 @@ def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) 
     samples, info = build(ds_root, log)
     report = {"trained": time.strftime("%Y-%m-%d %H:%M:%S"), "sf6bot_version": __import__("sf6bot").__version__,
               "recordings": info, "samples": len(samples), "intents": list(it.INTENTS),
-              "n_features": it.N_FEATURES}
+              "n_features": it.N_FEATURES, "features": it.FEATURES_VERSION}
     counts_all = it.Counts()
     for s in samples:
         counts_all.add(s, s["w"])
@@ -154,7 +153,7 @@ def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) 
                           "always_" + it.INTENTS[maj]: {"top1": round(float((y[va] == maj).mean()), 3)}}
     report["fit"] = fit
     net.save(out_dir / MODEL, {k: report[k] for k in ("trained", "sf6bot_version", "intents", "n_features",
-                                                        "samples", "held_out")})
+                                                        "features", "samples", "held_out")})
     log(f"Saved {out_dir / MODEL}")
     return report
 
@@ -191,6 +190,7 @@ class Brain:
     def __init__(self, ds_root: Path):
         d = Path(ds_root) / "models"
         self.net, self.meta, self.counts, self.problem = None, {}, None, None
+        self.stale = False             # a network from an older feature version: retrain (B, or by itself in matches)
         try:
             self.counts = it.Counts(json.loads((d / COUNTS).read_text(encoding="utf-8")))
         except (OSError, ValueError):
@@ -198,9 +198,11 @@ class Brain:
         if (d / MODEL).exists():
             try:
                 net, meta = MLP.load(d / MODEL)
-                if meta.get("n_features") == it.N_FEATURES and meta.get("intents") == list(it.INTENTS):
+                if meta.get("n_features") == it.N_FEATURES and meta.get("intents") == list(it.INTENTS) \
+                        and meta.get("features", 1) == it.FEATURES_VERSION:
                     self.net, self.meta = net, meta
                 else:
+                    self.stale = True
                     self.problem = "the saved network was trained by another version: run B (train) again"
             except (OSError, ValueError, KeyError) as e:
                 self.problem = f"could not load the network: {e}"

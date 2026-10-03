@@ -2199,6 +2199,42 @@ All MOCK / offline tested (`tests/test_winning.py`, `tests/test_assess.py`); not
   airborne flag, and its length (±3 frames of Capcom's total) to break ties. Combo hits (scaled) are not used. Test:
   an unknown id doing 1400 on a first hit with no inputs = H Shoryuken.
 
+## 0.17.5: first ranked matches analysed: frozen move frames online, the throw after a hit
+- **The run (user, 2026-10-03, 0.17.4, research build, human limits on): the bot played online but poorly.** Ranked vs
+  Jamie (lost 0-2), a second Jamie match and a Viper round (the user took over). Recordings: all 13 fights uploaded.
+- **The bot DID handle Drive Impact (user correction):** Jamie's DI is action **862** (863; 865/866 its continuations),
+  not the 855 measured for Ryu / Ken / Akuma, so system ids are NOT shared by every character. The live move lookup
+  named 862 from Jamie's inputs (HP+HK, Drive -10,000) after the first one, and in match 2 the bot answered both of
+  Jamie's DIs with its own (855 -> 857 / 856; Jamie crumpled, ~1,000 damage each). The 21-24 "opponent Drive Impact"
+  interruptions per match were the bot dropping a sequence to react: not a bug.
+- **MEASURED: online the exported `action_frame` and `action_frames_total` are frozen** at 19726.79 for BOTH players for
+  the whole session (all 3 online recordings; correct in all 10 offline ones). Every other field reads normally. The
+  combo executor times links / cancels on a move's own frame (routes "pressed, nothing came out"); whiff and DI
+  punishes and the models' "opponent's move progress" input were wrong too. Cause on the game side unknown (research
+  build or online mode).
+- **Fix (`game_state.FrameClock`, in StateReader and every recording loader, `read_recording`):** when the exported
+  values are equal for both players and unchanged over 30 clock ticks (with an action id change, or a value >= 1000),
+  each player's `action_frame` = ticks since its action id appeared, standing still on a line with hitstop > 0 and the
+  line after it; a hit reaction restarts on a new hit; `action_frames_total` = null; `action_frame_src: "ticks"`.
+  - Checked on the 10 offline recordings: detection never fires; on the 3 online ones it fires 31-38 frames in, before
+    "Fight!". Attack frames (first 60) = the game's own on 92%, within 1 on 96.4%; hit reactions 70% / 80%.
+  - Not covered: a move repeated with the same id (5LP ~ 5LP) does not restart (13 times in 10 offline matches).
+- **Model input changed (features v2):** "the opponent's move progress" is now frames into its move / 60 (was
+  action_frame / animation length, always 1.0 online). Saved networks from before are not used; a fight session
+  retrains them in the background at its start (counts play meanwhile), or run B. Sample cache v2.
+- **Throws after a hit:** 5 of Jamie's 6 throws in match 1 (3 of 3 in match 2) started while the bot was still in
+  hitstun from the hit before (Jamie action 610) and landed on its first free frame. Pressure moments skipped hitstun.
+  Now `after_hit` is a pressure moment (the defence options and per-opponent odds as after a block), unless the
+  opponent has already started another attack (a combo or frame trap) or the bot is airborne. Replaying the recordings
+  through `decide()` (not live play): a moment comes within 20 frames before 5 of 6 and 3 of 3 of Jamie's throws.
+- **Wake-up moment timing MEASURED:** the last get-up action (340 / 341 / 342 / 344 / 345) lasts **30 frames** in 13
+  recordings and 5 characters (exported length 42-50 = the animation), so the old wake-up moment came ~12 frames late
+  offline and never online. `defense.wakeup_frames` in `configs/fighter/ryu.yaml`; only those ids are wake-up moments.
+- Not changed (offered, not asked): point-blank choices (Viper's quick 610 opened 5 of 8 times while Ryu was in a slower
+  move).
+- Tests: `tests/test_online_frames.py` (synthetic frozen / healthy exports, hitstop, reaction restart, the feature,
+  after-hit and wake-up moments). Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

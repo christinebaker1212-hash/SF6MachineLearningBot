@@ -7,7 +7,6 @@ arrays, keyed by the file's size and time and CACHE_VERSION (bump it when featur
 """
 from __future__ import annotations
 
-import gzip
 import json
 from pathlib import Path
 
@@ -15,7 +14,7 @@ import numpy as np
 
 from . import intents as it
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2          # 2 (0.17.5): features v2, frozen online move frames repaired
 _NONE = -1
 
 
@@ -66,8 +65,8 @@ def file_samples(path: Path, ds_root: Path, stride: int = 2) -> list[dict]:
                 return _to_dicts({k: d[k] for k in d.files})
     except (OSError, ValueError, KeyError):
         pass
-    with gzip.open(path, "rt", encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f if line.strip()]
+    from .game_state import read_recording
+    rows = read_recording(path)
     s = it.samples(rows, players=(0, 1), stride=stride, with_return=True)
     try:
         cf.parent.mkdir(parents=True, exist_ok=True)

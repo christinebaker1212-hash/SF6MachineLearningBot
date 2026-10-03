@@ -17,11 +17,10 @@ into datasets/reach/<Character>.json.
 """
 from __future__ import annotations
 
-import gzip
 import json
 from pathlib import Path
 
-from .game_state import character_name, file_stem, num
+from .game_state import character_name, file_stem, num, read_recording
 
 ATTACK_MIN = 450            # opponent attacks: normals 600+, parry 480, DI 855, specials 900+ (measured)
 RUSH_IDS = {500, 501, 739, 740}
@@ -114,8 +113,7 @@ def build(ds_root: Path, log=print) -> dict:
     st = []
     for p in files:
         try:
-            with gzip.open(p, "rt", encoding="utf-8") as f:
-                rows = [json.loads(l) for l in f if l.strip()]
+            rows = read_recording(p)
         except (OSError, ValueError, EOFError) as e:
             log(f"  reach: skipped {p.name}: {e}")
             continue

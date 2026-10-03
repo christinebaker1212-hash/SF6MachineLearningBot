@@ -241,6 +241,11 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
+**0.17.5 (latest):** online the exported move frame is frozen (CLAUDE.md 0.17.5); the bot now counts it from the
+game clock, and treats the end of a hit's stun (and a 30-frame get-up) as a throw-defence moment. Next ranked run:
+check in S that routes complete online (`routes_completed`), the defence moments `after_hit` and their results, and
+that the background retrain at session start finished (features v2). Jamie's Drive Impact id is 862, not 855.
+
 1. **0.6.0 setup:**
    - `update.bat`, which also installs vgamepad. Accept the ViGEmBus driver prompt if it appears.
    - Menu R as admin, then restart SF6 (exporter v7).

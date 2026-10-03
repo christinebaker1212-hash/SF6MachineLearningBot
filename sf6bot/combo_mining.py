@@ -20,13 +20,12 @@ link); the lab's After-first-hit test decides that.
 """
 from __future__ import annotations
 
-import gzip
 import json
 import time
 from collections import defaultdict
 from pathlib import Path
 
-from .game_state import character_name, file_stem, num
+from .game_state import character_name, file_stem, num, read_recording
 from .intents import CORNER, WALL
 
 MIN_MOVES = 2
@@ -164,8 +163,7 @@ def build(ds_root: Path, log=print, fcfg: dict | None = None) -> dict:
     names: dict = {}
     for p in files:
         try:
-            with gzip.open(p, "rt", encoding="utf-8") as f:
-                rows = [json.loads(line) for line in f if line.strip()]
+            rows = read_recording(p)
         except (OSError, ValueError, EOFError) as e:
             log(f"  skipped {p.name}: {e}")
             continue

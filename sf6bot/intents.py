@@ -109,6 +109,10 @@ def fwd_sign(me: dict, op: dict) -> float:
 
 
 N_FEATURES = 22 + len(OPP_CATS)
+# 1 (0.12.0-0.17.4): the opponent's move progress was action_frame / action_frames_total (the ANIMATION length,
+# and online both are frozen: always 1.0). 2 (0.17.5): frames into the opponent's move, capped at 60, the same
+# online and offline (game_state.FrameClock). Models trained on another version are not used until retrained.
+FEATURES_VERSION = 2
 
 
 def features(me: dict, op: dict, prev_me: dict | None, prev_op: dict | None, frame, dt: int = 1) -> np.ndarray:
@@ -132,7 +136,7 @@ def features(me: dict, op: dict, prev_me: dict | None, prev_op: dict | None, fra
         return 0.0 if v is None or not m else max(0.0, min(1.0, v / m))
     me_hp, op_hp = frac(me.get("hp"), me.get("hp_max") or 10000), frac(op.get("hp"), op.get("hp_max") or 10000)
     me_dr, op_dr = frac(me.get("drive"), 60000), frac(op.get("drive"), 60000)
-    afr, atot = num(op.get("action_frame")), num(op.get("action_frames_total"))
+    afr = num(op.get("action_frame"))
     f = [
         min(dist, 6.0) / 6.0,
         1.0 if dist <= 1.0 else 0.0, 1.0 if dist <= 1.45 else 0.0, 1.0 if dist >= 2.3 else 0.0,
@@ -146,7 +150,7 @@ def features(me: dict, op: dict, prev_me: dict | None, prev_op: dict | None, fra
         me_dr, op_dr, 1.0 if me_dr <= 0 else 0.0, 1.0 if op_dr <= 0 else 0.0,
         frac(me.get("super"), 30000), frac(op.get("super"), 30000),
         max(0.0, min(1.0, (frame or 0) / 5940.0)) if isinstance(frame, (int, float)) else 0.5,
-        max(0.0, min(1.0, afr / atot)) if afr is not None and atot else 0.0,
+        max(0.0, min(1.0, afr / 60.0)) if afr is not None else 0.0,      # frames into the opponent's move
     ]
     cat = category(op)
     f += [1.0 if cat == c else 0.0 for c in OPP_CATS]

@@ -200,6 +200,7 @@ class ScriptedFighter:
         from .defense import Defense
         self.defense = Defense(fcfg["defense"], experience, seed) if fcfg.get("defense") else None
         self._pressure_fired = False
+        self._my_act, self._my_act_t0, self._hit_by, self._prev_hs = None, None, None, 0
         self.watch: dict | None = None
         self.defense_stats: dict = {}
         self.whiff_stats = {"chances": 0, "taken": 0}
@@ -500,14 +501,28 @@ class ScriptedFighter:
             return None
         bs, hs, aid = _num(me.get("blockstun")) or 0, _num(me.get("hitstun")) or 0, me.get("action_id")
         grounded = (_num(me.get("y")) or 0.0) <= 0.05
+        tmr, oa = raw.get("stage_timer"), op.get("action_id")
+        self._track_self(me, op, tmr)
         if bs > 0:
             sit, rem = "after_block", bs
         elif hs > 0:
-            return None    # in a combo the next hit comes before the stun ends: not a moment to choose
+            # 0.17.5: after a hit too (the user's ranked match: 5 of Jamie's 6 throws started while the bot was still
+            # reeling from the same hit and landed on its first free frame; before, hitstun was never a moment). Not
+            # a moment when the opponent has already started another attack: that is a combo or a frame trap
+            if not grounded or (isinstance(oa, int) and oa >= self.c["attack_id_min"] and oa != self._hit_by
+                                and oa not in self.throw_ids):
+                return None
+            sit, rem = "after_hit", hs
         elif isinstance(aid, int) and aid in self.hit_ids and grounded:
-            fr, tot = me.get("action_frame"), me.get("action_frames_total")
             sit = "wakeup"
-            rem = tot - fr if isinstance(fr, (int, float)) and isinstance(tot, (int, float)) and tot > fr else None
+            wf = (dc.get("wakeup_frames") or {}).get(aid)
+            if wf and isinstance(tmr, int) and isinstance(self._my_act_t0, int):
+                rem = int(wf) - (tmr - self._my_act_t0)       # the get-up action's measured length
+            else:
+                fr, tot = me.get("action_frame"), me.get("action_frames_total")
+                # without the table: the exported animation length (fires ~12 frames late, and never online)
+                rem = None if dc.get("wakeup_frames") else (
+                    tot - fr if isinstance(fr, (int, float)) and isinstance(tot, (int, float)) and tot > fr else None)
         else:
             self._pressure_fired = False             # free again: the next stun is a new moment
             return None
@@ -539,6 +554,16 @@ class ScriptedFighter:
         return Decision("seq", f"defence: {NICE.get(opt, opt)}", ch["seq"], rule=f"defense:{opt}",
                         reason=f"{SITUATIONS[sit]} at {dist:.2f}; the opponent's odds: {odds}")
 
+    def _track_self(self, me: dict, op: dict, tmr) -> None:
+        """When the bot's current action began (game clock) and the opponent's action when the latest hit landed.
+        Fed from every line (observe_line) and from decisions; repeated lines change nothing."""
+        aid, hs = me.get("action_id"), _num(me.get("hitstun")) or 0
+        if aid != self._my_act:
+            self._my_act, self._my_act_t0 = aid, tmr
+        if hs > self._prev_hs:
+            self._hit_by = op.get("action_id")
+        self._prev_hs = hs
+
     def observe_line(self, raw: dict, me_i: int) -> None:
         """Every state line (not only the ones decisions are made on): what the opponent answered a pressure
         moment with, whether its current move has touched the bot, and projectile timings."""
@@ -547,6 +572,7 @@ class ScriptedFighter:
         oa = op.get("action_id")
         tmr = raw.get("stage_timer")
         self._note_onset(oa, tmr)
+        self._track_self(me, op, tmr)
         if oa != self.op_move["id"]:
             self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False}
             if (self.opp.get(oa) or {}).get("projectile"):
@@ -860,6 +886,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     retrainer = Retrainer(pc.get("retrain_every", 20) if (versus == "ranked" or pc.get("retrain_in_all_modes"))
                           else 0, sess.recorder.dir, enabled=not sess.mock and brain is not None)
     brain_mtime = [None]
+    if not sess.mock and brain is not None and (brain.stale or (win is not None and win.stale)):
+        # 0.17.5 changed a model input (the opponent's move progress): retrain now, in the background; the new
+        # models are picked up at a match start, and the counts play meanwhile
+        msg_ = retrainer.start()
+        if msg_:
+            print("The saved models are from an older version. " + msg_)
     # 0.17.0 human limits: a disclosed setting (recorded in every summary, the thoughts and progress.md)
     from .human_limits import HumanLimits
     hl_cfg = fcfg.get("human_limits") or {}

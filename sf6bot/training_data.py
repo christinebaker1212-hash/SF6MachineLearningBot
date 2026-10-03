@@ -22,8 +22,8 @@ from .game_state import character_name, file_stem, num
 
 
 def load_rows(path: Path) -> list[dict]:
-    with gzip.open(path, "rt", encoding="utf-8") as f:
-        return [json.loads(l) for l in f if l.strip()]
+    from .game_state import read_recording
+    return read_recording(path)
 
 
 def _hp(row, pk):

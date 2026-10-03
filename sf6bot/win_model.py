@@ -100,7 +100,7 @@ def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) 
     samples, info = build(ds_root, log)
     rep = {"trained": time.strftime("%Y-%m-%d %H:%M:%S"), "sf6bot_version": __import__("sf6bot").__version__,
            "samples": len(samples), "recordings": len(info), "sources": {}, "intents": list(it.INTENTS),
-           "n_features": it.N_FEATURES, "return": {"half_life_frames": it.RETURN_HALF_LIFE,
+           "n_features": it.N_FEATURES, "features": it.FEATURES_VERSION, "return": {"half_life_frames": it.RETURN_HALF_LIFE,
                                                    "round_bonus": it.ROUND_BONUS}}
     for r in info:
         k = r["source"]
@@ -139,7 +139,7 @@ def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) 
         "loss_predict_zero": round(l_zero, 5), "gain_over_average": round(gain, 4)},
         average_return={it.INTENTS[i]: round(float(base[i]), 4) for i in range(k)},
         samples_per_choice={it.INTENTS[i]: int(n_by[i]) for i in range(k)})
-    net.save(out_dir / MODEL, {kk: rep[kk] for kk in ("trained", "sf6bot_version", "intents", "n_features", "samples",
+    net.save(out_dir / MODEL, {kk: rep[kk] for kk in ("trained", "sf6bot_version", "intents", "n_features", "features", "samples",
                                                        "trust", "held_out", "samples_per_choice", "average_return")})
     log(f"Saved {out_dir / MODEL} (trust {trust:.2f}: held-out loss {l_net:.4f} vs {l_base:.4f} for the per-choice "
         "average)")
@@ -177,6 +177,7 @@ class WinModel:
     def __init__(self, ds_root: Path):
         self.path = Path(ds_root) / "models" / MODEL
         self.net, self.meta, self.problem, self.mtime = None, {}, None, None
+        self.stale = False
         self.reload()
 
     def reload(self) -> bool:
@@ -189,10 +190,12 @@ class WinModel:
             return False
         try:
             net, meta = MLP.load(self.path)
-            if meta.get("n_features") != it.N_FEATURES or meta.get("intents") != list(it.INTENTS):
+            if meta.get("n_features") != it.N_FEATURES or meta.get("intents") != list(it.INTENTS) \
+                    or meta.get("features", 1) != it.FEATURES_VERSION:
+                self.stale = True
                 self.problem = "the win model was trained by another version: it retrains by itself, or run B"
                 return False
-            self.net, self.meta, self.mtime = net, meta, mt
+            self.net, self.meta, self.mtime, self.stale, self.problem = net, meta, mt, False, None
             n = np.array([(meta.get("samples_per_choice") or {}).get(i, 0) for i in it.INTENTS], dtype=float)
             self.shrink = n / (n + SHRINK_N)
             return True

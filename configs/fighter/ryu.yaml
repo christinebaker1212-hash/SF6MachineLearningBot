@@ -127,6 +127,9 @@ di_punish:
 defense:
   max_dist: 1.4            # opponent within this (game units; throw range ~0.8 + a step) = a pressure moment
   watch_frames: 30         # nothing within this many frames after it = the opponent "waited"
+  # MEASURED (0.17.5, 13 recordings: Ryu, Ken, Akuma, Jamie, Viper): the last get-up action lasts 30 frames, then the
+  # player is free (the exported action length says 42-50: the animation). Only these ids are wake-up moments.
+  wakeup_frames: {340: 30, 341: 30, 342: 30, 344: 30, 345: 30}
   temperature: 0.35        # lower = lean harder on the best-looking option (still a mix)
   model_weight: 4          # tries of an option before its own measured result outweighs the payoff table
   # starting odds of the opponent's answer (counts are added per opponent, learning.Experience)
