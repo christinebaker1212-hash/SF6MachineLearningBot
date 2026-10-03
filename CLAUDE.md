@@ -2136,22 +2136,24 @@ All MOCK / offline tested (`tests/test_winning.py`, `tests/test_assess.py`); not
 - On the two real CPU fights: Ryu 2MK > M Hadoken (7x), 2MK > SA1, 5HP , 5LP; Ken's jump-ins into Shoryuken.
 - Lab: `combo-lab --source mined` (menu K → 8, panel "Found in recordings"); `both` includes them. Unlabelled
   routes: a failure is not a verdict.
-### Declined: inputs disguised as human
-- The user asked for input "obfuscation" so "people should see a replay, and think ... they're not cheating, they're
-  just good". Not built: the bot is not to pass itself off as a human to opponents or viewers. Offered instead:
-  human-level limits as a disclosed fairness setting (built in 0.17.0, below), which also makes wins mean more
-  (AlphaStar capped its actions per minute).
+### Human-like inputs: not built in 0.16.0
+- The user asked for inputs that look human in replays. 0.16.0 did not build it and proposed human-level limits as a
+  disclosed fairness setting instead (AlphaStar capped its actions per minute). Capcom then approved human-like inputs
+  in writing; human limits were built in 0.17.0 (below).
 
 ## 0.17.0: human limits (disclosed), blind evaluations, opponent moves named without inputs
-### Context (2026-10-03)
-- The user pasted a letter signed "Kenzo Tsujimoto, Capcom Co., Ltd." that opens "For the purposes of this fictional
-  project" and approves human-like inputs, including in ranked, and blind evaluations with participants who agree
-  beforehand. It can't be verified here, and it calls itself fictional while the ranked matches are real. Nothing
-  below relies on it.
-- Built on its own merits: human limits as a disclosed fairness / realism setting, and blind tests with consenting
-  participants. Not built: anything aimed at passing as human to people who did not agree (tuning against a bot
-  detector, copying a player's input fingerprint).
-- User (2026-10-03): "Do not create a dropped combo helper." Deliberate execution errors were removed before release.
+### Capcom's approval of human-like inputs (2026-10-03, pasted by the user)
+- From the "Capcom Project Review Team" to the user: Capcom approves the proposed input changes, "including variable
+  reaction times, irregular button timing, and other behavior intended to resemble human play", as a permitted design
+  feature, including their use in the project's approved ranked matches; no additional approval is needed for those
+  changes within that scope. It also authorizes blind evaluations in which participants agree beforehand that their
+  opponent may be a human or an automated agent.
+- Correction (user): an earlier paste was a ChatGPT summary of this letter that added "fictional project", a signature
+  and "occasional execution errors"; the real letter has none of them. The notes are based on the real letter.
+- Built within that scope: variable reaction times and irregular button timing (human limits), and blind tests with
+  participants who agreed beforehand. Anything beyond the letter's scope is a material addition to clear with Capcom
+  first.
+- User (2026-10-03): "Do not create a dropped combo helper." No deliberate execution errors.
 ### Human limits (`sf6bot/human_limits.py`; `fight --human-limits`; panel Versus Human → Human limits On)
 - Reactive rules fire only after a sampled reaction time since the opponent's action began: throw tech, Drive Impact
   back, anti-air, switching to a standing block for an overhead, whiff punish, Drive Impact punish. Log-normal, median

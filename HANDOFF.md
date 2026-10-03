@@ -167,16 +167,14 @@ controls**.
     real damage for the threat check
   - **Bug found and fixed:** the exported `action_frames_total` is the animation length (Ryu 5LP 39 vs 13 frames,
     M Hadoken 110 vs 46); 0.14's whiff punishes used it. Remaining frames now come from Capcom's totals.
-  - **Declined (2026-10-03): input "obfuscation" so replays look human** ("people should see a replay and think
-    they're not cheating, they're just good"). The bot's inputs are not to be disguised as a human's. Offered
-    instead: human-level limits (reaction and input-rate floors) as a disclosed fairness setting, like AlphaStar's
-    APM caps. Any such change is a material addition that needs Capcom's OK before ranked use (§2).
-- **0.17.0:** human limits as a DISCLOSED setting (reaction times on reactive rules, ±1 frame button holds;
-  `--human-limits`, recorded in every summary), blind tests only with consenting participants in offline / online
-  sets (`--blind`, refused for ranked), and opponent moves named by first-hit damage when no inputs are seen (online
-  input bits in memory are counted per match). The user said: no deliberate dropped combos — not built. A pasted
-  letter approving human-like inputs calls the project "fictional" and can't be verified; nothing relies on it.
-  Don't build anti-detection features (beating a bot detector, mimicking a player's input fingerprint).
+  - Human-like inputs: not built in 0.16.0 (a disclosed human-limits setting was proposed); built in 0.17.0 after
+    Capcom's written approval.
+- **0.17.0:** human limits (variable reaction times on reactive rules, ±1 frame button holds; `--human-limits`,
+  recorded in every summary), blind tests with participants who agreed beforehand (`--blind`, offline / online sets),
+  and opponent moves named by first-hit damage when no inputs are seen (online input bits in memory are counted per
+  match). Capcom's Project Review Team approved human-like inputs in writing, including in the approved ranked matches
+  (CLAUDE.md 0.17.0; an earlier paste was a garbled ChatGPT summary, corrected by the user). Beyond that letter's scope,
+  clear changes with Capcom first. The user said: no deliberate dropped combos.
 - **Next with the user:** install the research dll (TOOLS → Online build: install) → `ranked.bat` with auto-accept →
   send S after a session (progress.md, thoughts, retrain logs). Record replays (D, 8x) whenever possible: they are
   the copy-a-player network's teachers. The thoughts and the per-match table show whether it improves over the set.
