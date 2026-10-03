@@ -1613,6 +1613,48 @@ searched).
 - The same run's Training Mode check read OK, and "( 214HP OR Denjin 214P OR … ), 236236P" was a TRUE combo
   (3/3, 2800 dmg).
 
+## 0.11.14: one route per choice; DI and super lengths; juggle whiffs (8-hour Ryu run)
+- **The run (user, 2026-10-03, 0.11.13, Ryu, all three passes): 21 TRUE combos out of 40 routes.**
+- **User: "Routes that have alternate buttons you can press should have their own, separate entry - it's confusing
+  the bot."**
+  - The run performed 'PC 5MP , 5HP > ( 623HP / 236KK , 4HK > 623HP )' as one mashed route (SRK , 4HK > SRK).
+  - Optional enders ('( > 236236K )') were always performed. That is why measured damage exceeded the page's,
+    e.g. 4930 vs 2380.
+  - `combos.expand_alternatives` gives one route per choice:
+    - '/' between same-kind moves is a one-move swap
+    - inside a group, '/' between different moves separates whole sequences
+    - a group of moves after the start is optional: one route without it, one with it
+    - bracketed notes ('(2nd hit)') stay as text
+    - a route-level CH/PC applies to every variant; 'Counter-Hit 214LP / 214MP' makes both CH
+  - Each variant is its own row (`alt_of`, `alt_index`, `alt_count`) with its own hit type.
+    The page's one damage stays on the first variant only.
+  - Ryu: 62 rows with choices became 168 routes; Ken 53 → 54. Saved files are split on load.
+  - Old results of a merged row are not used by the fighter (`verified_routes`).
+- **User: "The bot doesn't actually know about how long Drive Impact or most Supers are, causing any move with SA3 or
+  DI to fail."**
+  - 'PC Drive Impact, dash': the dash was pressed 50 ticks after the DI hit, inside the punish-counter animation,
+    and nothing came out. That animation is longer than DI's 62F on-block Total.
+  - A link after a DI or a Super Art now uses trigger `prev_free`:
+    - the first attempt presses when the bot is back to neutral
+    - it records the move's own frames until then (`free_at`; hitstop excluded)
+    - later attempts of the route press that much minus the input delay, searched like any link
+  - The frame bar's link reading now also applies after a DI. Only Drive Rush is excluded.
+- **Uncatalogued variant ids:** SA3 Shin Shoryuken is 1233 from neutral but **1234 in a juggle**. It hit, and the
+  route was failed as a wrong move.
+  - Ids up to 5 after a special's or super's own id that no catalogued move uses (`variant_ids`) now count as
+    that move.
+- **Juggle whiffs:** 'H Shoryuken: no hit | SA3: pressed, nothing came out' was reported as the SA3 not coming out.
+  The search then shifted the wrong move.
+  - Now the first move after the last hit that started and never hit is the failure (`whiff`, with `then` = the
+    original report).
+- `LAB_RULES` is part of `plan_fingerprint`, so earlier conclusive failures are retried under the new rules.
+- Still open: jump-in reliability (1/13 in the run), meaty timing after a dash.
+- **The fighter does not use the lab's combos or the replays yet** (user question, 2026-10-03):
+  - It is the 0.5.0 scripted rule set. The lab only supplies timing for the few routes written in
+    `configs/fighter/ryu.yaml`.
+  - `verified_routes` / `lethal_route` have no caller.
+  - Replays feed the move map only; no policy is trained.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

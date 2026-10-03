@@ -31,7 +31,7 @@ def test_every_tab_is_read():
 
 def test_ken_routes_resolve_to_capcom_rows():
     d = cb.import_character("Ken", _page("ken"), _capcom("ken"))
-    assert len(d["combos"]) == 53 and d["moves_resolved"] >= 0.98 * d["moves_total"]
+    assert len(d["combos"]) == 54 and d["moves_resolved"] >= 0.98 * d["moves_total"]
     di = next(c for c in d["combos"] if c["route"].startswith("DI , 5HP > KK ~ HK"))
     assert [s.get("name") or s.get("system") for s in di["steps"]] == [
         "drive_impact", "Standing Heavy Punch", "Quick Dash", "Forward Step Kick", "SA3 Shinryu Reppa"]
@@ -79,3 +79,34 @@ def test_community_wording_dashes_supers_nicknames():
     assert split_route("2MK > MK Tatsu")[-1] == (">", "214MK")
     assert split_route("5HP > OD Hasho")[-1] == (">", "214PP")
     assert split_route("PC  DI or 5HK , 2MK")[0][1].split()[-1] == "DI"
+
+
+def test_alternatives_and_optional_parts_become_separate_routes():
+    """User, 2026-10-03: "Routes that have alternate buttons you can press should have their own, separate entry
+    - it's confusing the bot." The 8-hour run performed 'PC 5MP , 5HP > ( 623HP / 236KK , 4HK > 623HP )' as one
+    mashed route (SRK , 4HK > SRK)."""
+    ex = cb.expand_alternatives
+    assert ex("2MK > 214MK / 236MK /( 236KK , 6HK > 214K)") == [
+        "2MK > 214MK", "2MK > 236MK", "2MK > 236KK , 6HK > 214K"]
+    assert ex("PC 5MP , 5HP > ( 623HP / 236KK , 4HK > 623HP )") == [
+        "PC 5MP , 5HP > 623HP", "PC 5MP , 5HP > 236KK , 4HK > 623HP"]
+    # an optional ender: the page's damage is without it
+    assert ex("HP /DC Hasho , 214LP , 623LP ( > 236236K )") == [
+        "HP > DC 214P , 214LP , 623LP", "HP > DC 214P , 214LP , 623LP > 236236K"]
+    # 'Counter-Hit 214LP / 214MP': the counter hit applies to both strengths
+    assert ex("( 214HP OR Denjin 214P OR Counter-Hit 214LP / 214MP ), 236236P") == [
+        "214HP , 236236P", "Denjin 214P , 236236P", "CH 214LP , 236236P", "CH 214MP , 236236P"]
+    # no choice, and notes in brackets: unchanged
+    assert ex("2LP , 5MP > 214LK , 623MP") == ["2LP , 5MP > 214LK , 623MP"]
+    assert ex("2MK (2nd hit) > 236LP") == ["2MK (2nd hit) > 236LP"]
+
+
+def test_each_choice_is_its_own_row_with_its_own_hit_type():
+    d = cb.import_character("Ryu", _page("ryu"), {"moves": fd.parse_frame_page(gzip.open(
+        DATA / "capcom_ryu_frame_table.html.gz", "rt", encoding="utf-8").read())})
+    rows = [c for c in d["combos"] if (c.get("alt_of") or "").startswith("( 214HP OR Denjin 214P OR Counter")]
+    assert [r["alt_index"] for r in rows] == [0, 1, 2, 3] and all(r["alt_count"] == 4 for r in rows)
+    assert [r.get("hit_type") == "counter_hit" for r in rows] == [False, False, True, True]
+    hasho = [c for c in d["combos"] if (c.get("alt_of") or "").startswith("HP /DC Hasho , 214LP")]
+    assert hasho[0]["damage"] == 2380 and hasho[1]["damage"] is None    # the page's one damage: without the ender
+    assert hasho[1]["damage_note"]

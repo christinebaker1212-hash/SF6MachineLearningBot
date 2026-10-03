@@ -52,7 +52,9 @@ SEARCH_EARLIER = [-1, -2, -3, -4, -5]
 SEARCH_LATER = [1, 2, 3, 4, 5]
 HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up - 1 - this); earlier = the
                        # previous move's late hit (multi-hit special, projectile), not this move's
-CANDIDATE_WAIT = 4     # frames an unexpected new action id waits for the step's own (catalogued) id before it
+CANDIDATE_WAIT = 4
+VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
+LAB_RULES = "0.11.14"      # in plan_fingerprint: a change in how the lab judges attempts retests old failures     # frames an unexpected new action id waits for the step's own (catalogued) id before it
                        # counts as the step's start (a Drive Rush changing to its next id is not the 2MK)
 PREFIX_MISSES = 2      # a kept (frozen) prefix that fails this many times in a row is searched again
 FIGHT_IDLE_MAX = 33    # MEASURED (fights 2026-10-02): idle / walk / crouch ids of Ryu and Ken are < 33
@@ -295,6 +297,15 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
         elif prev.get("system") == "drive_rush":
             st["trigger"], st["at"], st["min_offset"] = "own_frame", RUSH_AT, NO_FLOOR
             st["floor"] = "unknown (Drive Rush frame is a guess)"
+        elif conn == "," and (prev.get("system") == "drive_impact" or prev.get("super_art")):
+            # after a Drive Impact or a Super Art the bot's animation on HIT is not the catalog's Total (user,
+            # 2026-10-03: "The bot doesn't actually know about how long Drive Impact or most Supers are";
+            # 8-hour run: 'PC Drive Impact, dash' pressed the dash 50 ticks after DI hit, inside the
+            # punish-counter animation, and nothing came out). The first attempt presses when the bot is
+            # back to neutral and measures how long that took; later attempts press that much ahead (input
+            # delay), searched like any link.
+            st["trigger"], st["min_offset"] = "prev_free", -JITTER
+            st["floor"] = f"the bot is free after {prev['name']} (its length on hit, measured)"
         elif conn == "," and not system and prev.get("cancel") == "C" and not prev.get("air") \
                 and _is_special(row) and cancel_allowed(prev, row) \
                 and isinstance(prev.get("hit_adv"), int) and isinstance(st.get("startup"), int) \
@@ -349,6 +360,19 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             mid = (v.get(g) or {}).get("move_id")
             if mid is not None and not (v.get(g) or {}).get("same_as"):
                 id_names.setdefault(mid, k)
+    # an uncatalogued id right after a special's or super's own id is that move in another state (8-hour run:
+    # Ryu's SA3 Shin Shoryuken is 1233 from neutral but 1234 in a juggle, and hit; it was failed as a wrong move)
+    cat_ids = set(id_names)
+    for v in ((catalog or {}).get("moves") or {}).values():
+        for g in ("guard_none", "guard_all"):
+            cat_ids.update((v.get(g) or {}).get("action_ids") or [])
+    for st in plan:
+        exp = st.get("expect_id")
+        if isinstance(exp, int) and (st.get("super_art") or exp >= 900) and not st.get("system"):
+            var = [i for i in range(exp + 1, exp + 1 + VARIANT_SPAN) if i not in cat_ids]
+            if var:
+                st["variant_ids"] = var
+                st["known_ids"] = list(st.get("known_ids") or []) + var
     if setup:
         notes.append(f"setup: Denjin Charge ({setup['sequence']}) before the route")
     return {"steps": plan, "notes": notes, "unsupported": None, "jump_in": jump_row is not None,
@@ -363,8 +387,11 @@ class ComboRun:
 
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
                  movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
-                 fixed: list | None = None):
+                 fixed: list | None = None, learned: dict | None = None):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        # `learned`: {step: its own frames until the bot was free} from earlier attempts (DI, supers on hit)
+        self.learned = dict(learned or {})
+        self.free_at: dict = {}
         # `fixed`: the exact send points recorded from this route's first clean success (recorded_timing).
         # They are replayed as they are, with no offsets, floors or input-delay estimate involved.
         self.fixed = fixed
@@ -480,6 +507,9 @@ class ComboRun:
                 self.rt[a]["moving"] = int(afr)
             elif dt > 0 and not (p1.get("hitstop") or 0):
                 self.rt[a]["moving"] += dt
+            if a not in self.free_at and aid in self.neutral_a and self.rt[a]["start"] is not None \
+                    and (self.steps[a].get("system") == "drive_impact" or self.steps[a].get("super_art")):
+                self.free_at[a] = self.rt[a]["moving"]      # the move's real length on this hit
         # a pending step started?
         k = self.pending
         if k is not None:
@@ -600,6 +630,8 @@ class ComboRun:
             return None          # still in the parry of a Parry Drive Rush: the rush itself has not started
         trig, off = st["trigger"], self._off(n)
         fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
+        if fx and trig == "prev_free" and fx.get("prev_frame") is not None:
+            return n if pr["moving"] >= fx["prev_frame"] else None
         if fx:
             # replay the recorded success exactly (user, 0.11.5: "record that exact state and repeat it")
             if trig in ("air", "landing") and fx.get("land") is not None:
@@ -631,6 +663,13 @@ class ComboRun:
             at = st.get("at")
             return n if at is None or pr["moving"] >= at - self.lead - st["prefix"] + off else None
         if trig == "prev_neutral":
+            return n if p1.get("action_id") in self.neutral_a else None
+        if trig == "prev_free":
+            # learned: the previous move's length on hit (its own frames, hitstop excluded) from an earlier
+            # attempt; else press once the bot is free (and measure)
+            free = self.learned.get(n - 1)
+            if free is not None:
+                return n if pr["moving"] >= free - self.lead - st["prefix"] + off else None
             return n if p1.get("action_id") in self.neutral_a else None
         # contact (cancel / chain / target combo)
         base = pr["contact"]
@@ -681,10 +720,24 @@ class ComboRun:
         if kind:
             self.fail = {"kind": kind, "step": step}
 
+    def _earlier_whiff(self, k: int) -> int | None:
+        """The first move before step k that started, should have hit and did not, after the last move that
+        did hit (8-hour run: 'H Shoryuken: no hit | SA3: pressed, nothing came out' was reported as the SA3
+        not coming out, so the search shifted the super while the Shoryuken had whiffed in the juggle)."""
+        last_hit = max((i for i, r in enumerate(self.rt) if r["contact"] is not None), default=-1)
+        for i in range(last_hit + 1, k):
+            if self.steps[i].get("hitting") and self.rt[i]["start"] is not None and self.rt[i]["contact"] is None:
+                return i
+        return None
+
     def result(self) -> dict:
         """success, failing step and why, plus measurements."""
         fail = dict(self.fail) if self.fail else None
         steps = self.steps
+        if fail and fail.get("kind") in ("not_out", "dropped") and isinstance(fail.get("step"), int):
+            w = self._earlier_whiff(fail["step"])
+            if w is not None:
+                fail = {"kind": "whiff", "step": w, "then": {"kind": fail["kind"], "step": fail["step"]}}
         if fail is None:
             for k, (st, r) in enumerate(zip(steps, self.rt)):
                 if r["start"] is None:
@@ -721,10 +774,12 @@ class ComboRun:
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
                           "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
                           "bar_link": self._bar_link(k)
-                          if k and st.get("trigger") in ("own_frame", "prev_neutral") and self.bar
-                          and not self.steps[k - 1].get("system") else None}
+                          if k and st.get("trigger") in ("own_frame", "prev_neutral", "prev_free") and self.bar
+                          and self.steps[k - 1].get("system") != "drive_rush" else None}
                          for k, (st, r) in enumerate(zip(steps, self.rt))]}
         out["frame_bar"] = bool(self.bar)
+        if self.free_at:
+            out["free_at"] = dict(self.free_at)
         s0, s1 = side(b0, d0), side(b1, d1)
         out["side_switch"] = None if s0 is None or s1 is None else s0 != s1
         dx = out["dummy_x"]
@@ -1075,6 +1130,7 @@ def _summary(attempts: list[dict], plan: dict, combo: dict) -> dict:
     out = {"route": combo.get("route"), "position": _position(combo), "source": combo.get("source", "community"),
            "hit_type": combo.get("hit_type") or "normal", "difficulty": combo.get("difficulty"),
            "community_damage": combo.get("damage"), "drive_bars": combo.get("drive_bars"),
+           "alt_of": combo.get("alt_of"),
            "super_bars": combo.get("super_bars"),
            "verified": bool(good), "attempts": len(attempts), "successes": len(good),
            "success_rate_final_timing": round(sum(a["success"] for a in at_final) / len(at_final), 2) if at_final else 0,
@@ -1261,6 +1317,7 @@ def plan_fingerprint(plan: dict) -> str:
     keys = ("name", "connector", "trigger", "at", "expect_id", "sequence", "min_offset", "system", "air")
     body = [[st.get(k) for k in keys] for st in plan.get("steps") or []]
     body.append((plan.get("setup") or {}).get("name"))
+    body.append(LAB_RULES)
     return hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
@@ -1313,6 +1370,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     # send points of moves 1..k are recorded and replayed unchanged; only move k+1's timing is searched
     kept: list = []           # recorded_timing of the best attempt, for its first `kept_n` steps
     kept_n = 0
+    learned: dict = {}         # step -> its own frames until the bot was free (DI / super on hit)
     kept_lead = None
     prefix_misses = 0
     no_window: dict = {}      # step -> how often the bar showed it started on the first free frame and missed
@@ -1352,8 +1410,11 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         jump = state.get(f"jump_{steps[0]['sequence'][0]}") if plan.get("jump_in") else None
         lead_now = found_lead if found is not None else kept_lead if kept_n else _lead(state)
         fixed = recorded if recorded is not None else (kept[:kept_n] + [{}] * (len(steps) - kept_n)) if kept_n else None
+        extra = {"learned": dict(learned)} if learned else {}
         res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead_now,
-                       gravity=(jump or {}).get("gravity"), fixed=fixed)
+                       gravity=(jump or {}).get("gravity"), fixed=fixed, **extra)
+        for k_, v_ in (res.get("free_at") or {}).items():
+            learned.setdefault(int(k_), v_)      # DI / super length on hit, measured once per route
         res["position_setup"] = how
         res["lead_used"] = lead_now
         res["replayed_recorded_timing"] = recorded is not None
@@ -1687,12 +1748,12 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
-                  gravity: float | None = None, fixed: list | None = None) -> dict:
+                  gravity: float | None = None, fixed: list | None = None, learned: dict | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed)
+                   fixed=fixed, learned=learned)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout
@@ -1744,9 +1805,9 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
 
 
 def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
-             gravity: float | None = None, fixed: list | None = None) -> dict:
+             gravity: float | None = None, fixed: list | None = None, **kw) -> dict:
     return perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead,
-                         gravity=gravity, fixed=fixed)
+                         gravity=gravity, fixed=fixed, **kw)
 
 
 def trace_line(detail: dict) -> str:
@@ -1797,7 +1858,7 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
         if v.get("verified"):
             tag = "TRUE" if v.get("true_combo") else "OK (guard none)"
             lines.append(f"- {tag} {v['successes']}/{v['attempts']} | {k} | {v.get('damage')} dmg (community "
-                         f"{v.get('community_damage')}) | hits {v.get('hits')} | drive {v.get('drive_spent')} "
+                         f"{v.get('community_damage') if v.get('community_damage') is not None or not v.get('alt_of') else 'n/a: one of the row choices'}) | hits {v.get('hits')} | drive {v.get('drive_spent')} "
                          f"super {v.get('super_spent')} | carry {v.get('carry')} | side switch {v.get('side_switch')} "
                          f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}")
         else:
@@ -1822,9 +1883,13 @@ def verified_routes(datasets_root: Path, character: str, min_rate: float = 0.5,
                     true_only: bool = True) -> list[dict]:
     """Routes the bot can use: by default only TRUE combos (verified against a dummy blocking after the
     first hit), at the timing that worked at least `min_rate` of the time."""
+    from . import combos as _cb
     lab = load_lab(datasets_root, character)
+    # before 0.11.14 a row with choices ('A / B', an optional '( > SA3 )') was ONE route: its result says
+    # nothing about any single choice (the 8-hour run mashed them together), so it is not used
     return [v for v in lab.get("routes", {}).values()
-            if (is_true(v) if true_only else v.get("verified"))
+            if (v.get("alt_of") or len(_cb.expand_alternatives(v.get("route") or "")) == 1)
+            and (is_true(v) if true_only else v.get("verified"))
             and (v.get("success_rate_final_timing") or 0) >= min_rate]
 
 

@@ -661,14 +661,14 @@ def test_hp_dc_hasho_is_a_cancel_into_the_denjin_hashogeki_after_charging():
     with DC, we need Denjin charge state to be the first thing we activate'. 'HP /DC Hasho' read as 'HP or DC
     Hasho' dropped the Hashogeki: the bot did 5HP , 214LP and the dummy blocked the gap."""
     cap = _capcom("ryu")
-    route = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("HP /DC Hasho , 214LP"))
+    route = next(c for c in _combos("ryu", cap)["combos"] if (c.get("alt_of") or "").startswith("HP /DC Hasho , 214LP"))
     assert [(s["connector"], s["name"]) for s in route["steps"]][:3] == [
         ("", "Standing Heavy Punch"), (">", "[Denjin Charge]Hashogeki"), (",", "L Hashogeki")]
     plan = cl.plan_route(route, cap, None)
     assert plan["setup"]["name"] == "Denjin Charge" and plan["steps"][1]["trigger"] == "contact"
-    lp = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("CH LP / MP Hasho , PDR , 2MP > Denjin"))
+    lp = next(c for c in _combos("ryu", cap)["combos"] if (c.get("alt_of") or c["route"]).startswith("CH LP / MP Hasho , PDR , 2MP > Denjin"))
     assert lp["steps"][0]["name"] == "L Hashogeki" and lp["steps"][-1]["name"] == "[Denjin Charge]Hashogeki"
-    dc = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("DC , j.HP , 5HP"))
+    dc = next(c for c in _combos("ryu", cap)["combos"] if (c.get("alt_of") or c["route"]).startswith("DC , j.HP , 5HP"))
     plan = cl.plan_route(dc, cap, None)
     assert plan["setup"] and plan["jump_in"] and plan["steps"][1]["name"] == "Jumping Heavy Punch"
 
@@ -727,7 +727,11 @@ def test_saved_routes_are_reparsed_so_parser_fixes_reach_the_lab(tmp_path):
     from sf6bot import combos
     cap = _capcom("ryu")
     data = _combos("ryu", cap)
-    route = next(c for c in data["combos"] if c["route"].startswith("HP /DC Hasho , 214LP"))
+    route = next(c for c in data["combos"] if (c.get("alt_of") or "").startswith("HP /DC Hasho , 214LP"))
+    route["route"] = route["alt_of"]            # as saved before 0.11.14: one row, alternatives not split
+    for k in ("alt_of", "alt_index", "alt_count"):
+        route.pop(k, None)
+    data["combos"] = [c for c in data["combos"] if c.get("alt_of") != route["route"]] + [route]
     route["steps"] = [{"token": "HP", "connector": "", "name": "Standing Heavy Punch"},
                       {"token": "214LP", "connector": ",", "name": "L Hashogeki"},
                       {"token": "623LP", "connector": ",", "name": "L Shoryuken"}]   # as saved by 0.11.9
@@ -736,7 +740,7 @@ def test_saved_routes_are_reparsed_so_parser_fixes_reach_the_lab(tmp_path):
     (tmp_path / "combos" / "ryu.json").write_text(json.dumps(data), encoding="utf-8")
     (tmp_path / "framedata" / "ryu.json").write_text(json.dumps(cap), encoding="utf-8")
     loaded = combos.load("Ryu", tmp_path)
-    again = next(c for c in loaded["combos"] if c["route"] == route["route"])
+    again = next(c for c in loaded["combos"] if c.get("alt_of") == route["route"] and c["alt_index"] == 0)
     assert [(s["connector"], s["name"]) for s in again["steps"]][:2] == [
         ("", "Standing Heavy Punch"), (">", "[Denjin Charge]Hashogeki")]
     assert cl.plan_route(again, cap, None)["setup"]["name"] == "Denjin Charge"
@@ -820,7 +824,7 @@ def test_a_conclusive_failure_is_skipped_until_its_plan_changes():
     ran out, or the bar proved no link window) is skipped while the plan the lab would perform is the same;
     a parser or data fix that changes the plan brings it back."""
     cap = _capcom("ryu")
-    route = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("HP /DC Hasho , 214LP"))
+    route = next(c for c in _combos("ryu", cap)["combos"] if (c.get("alt_of") or "").startswith("HP /DC Hasho , 214LP"))
     plan = cl.plan_route(route, cap, None)
     entry = {"verified": False, "conclusive": True, "plan_fp": cl.plan_fingerprint(plan), "tested_as": "normal"}
     assert cl.skip_known_failure(entry, plan, "normal")
@@ -886,3 +890,109 @@ def test_rush_frames_count_from_the_rush_even_when_its_action_frame_does_not_sta
                 run.sent(1)
     rush_start = 2 + 14
     assert sent_at == rush_start + 11 - 4 - 2              # rush frame 5: not one frame after it appeared
+
+
+def test_link_after_drive_impact_waits_until_the_bot_is_free_then_uses_the_measured_length():
+    """User, 2026-10-03: "The bot doesn't actually know about how long Drive Impact or most Supers are,
+    causing any move with SA3 or DI to fail." 8-hour run: 'PC Drive Impact, dash' pressed the dash 50 ticks
+    after the DI hit, inside the punish-counter animation (longer than the 62F of DI on block): nothing came
+    out. A link after a DI or a super now waits until the bot is free; the length measured on the first
+    attempt is then used to press ahead by the input delay."""
+    cap, cat, _ = _ken()
+    p = cl.plan_route({"route": "DI , 5HP", **combos.resolve("DI , 5HP", cap["moves"])}, cap, cat)
+    assert p["steps"][1]["trigger"] == "prev_free"
+    sa = cl.plan_route({"route": "5HP > SA1 , 5LP", **combos.resolve("5HP > SA1 , 5LP", cap["moves"])}, cap, cat)
+    assert sa["steps"][2]["trigger"] == "prev_free"
+    di = {"name": "drive_impact", "system": "drive_impact", "sequence": "5+HP+HK@3", "prefix": 0, "trigger": "first",
+          "startup": 26, "expect_id": 855, "hitting": True, "min_offset": 0}
+    hp = {"name": "5HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "prev_free", "startup": 10, "expect_id": 608,
+          "hitting": True, "min_offset": -cl.JITTER}
+
+    def lines():
+        yield _line(1, NEUTRAL, 0)
+        for f in range(0, 26):
+            yield _line(2 + f, 855, f)
+        yield _line(28, 857, 0, d=REACT, hs=20, stun=90, hp=9000)       # hit: the long PC animation
+        for f in range(1, 80):
+            yield _line(28 + f, 857, f, d=REACT, stun=90, hp=9000)
+        for t in range(108, 130):
+            yield _line(t, NEUTRAL, 0, d=REACT, stun=90, hp=9000)
+
+    def run_once(learned=None):
+        run = cl.ComboRun([di, hp], {}, {NEUTRAL}, {DUMMY_IDLE}, set(), learned=learned)
+        sent = None
+        for ln in lines():
+            k = run.feed(ln)
+            if k is not None:
+                run.sent(k)
+                if k == 1:
+                    sent = ln["stage_timer"]
+        return run, sent
+    run, sent = run_once()
+    assert sent == 108                               # first attempt: once the bot is back to neutral
+    free = run.result()["free_at"][0]
+    assert free == 26 + 80                           # its own frames on this hit: 26 start-up + 80 animation
+    _, sent2 = run_once({0: free})
+    assert sent2 == 108 - cl.LEAD                    # then pressed to arrive on the first free frame
+
+
+def test_an_uncatalogued_id_after_a_supers_own_id_is_that_super():
+    """8-hour run: Ryu's SA3 Shin Shoryuken is 1233 from neutral but 1234 in a juggle; it hit, and the
+    route was failed as a wrong move."""
+    cap = _capcom("ryu")
+    cat = {"moves": {"SA3 Shin Shoryuken": {"guard_none": {"move_id": 1233, "action_ids": [1233]}},
+                     "H Shoryuken": {"guard_none": {"move_id": 934, "action_ids": [934]}},
+                     "SA2 Shin Hashogeki（Lv1）": {"guard_none": {"move_id": 1236, "action_ids": [1236]}}}}
+    route = "623HP > 236236K"
+    p = cl.plan_route({"route": route, **combos.resolve(route, cap["moves"])}, cap, cat)
+    sa3 = p["steps"][1]
+    assert sa3["expect_id"] == 1233 and sa3["variant_ids"] == [1234, 1235, 1237, 1238]   # 1236 is another move
+    first = {"name": "623HP", "sequence": "6+HP@3", "prefix": 0, "trigger": "first", "startup": 7,
+             "expect_id": 934, "hitting": True, "min_offset": 0}
+    run = cl.ComboRun([first, dict(sa3, prefix=0)], {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(2, 934, 0)); run.feed(_line(8, 934, 6, d=REACT, hs=10, stun=40, hp=9000))
+    k = run.feed(_line(9, 934, 6, d=REACT, hs=9, stun=40, hp=9000)); run.sent(k)
+    run.feed(_line(14, 1234, 0, d=REACT, stun=40, hp=9000))
+    run.feed(_line(20, 1234, 6, d=REACT, hs=10, stun=40, hp=8000))
+    res = run.result()
+    assert res["success"], res["fail"]
+
+
+def test_a_juggle_whiff_is_reported_at_the_move_that_whiffed():
+    """8-hour run: 'H Shoryuken: id 934, no hit | SA3: pressed, nothing came out' was reported as the SA3 not
+    coming out, so the search shifted the super's timing while the Shoryuken had whiffed."""
+    steps = [{"name": "5HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "first", "startup": 10, "total": 30,
+              "expect_id": 608, "hitting": True, "min_offset": 0},
+             {"name": "623HP", "sequence": "6+HP@3", "prefix": 0, "trigger": "contact", "startup": 7,
+              "expect_id": 934, "hitting": True, "min_offset": -3},
+             {"name": "SA3", "sequence": "5+HK@3", "prefix": 0, "trigger": "contact", "startup": 9,
+              "expect_id": 1233, "hitting": True, "min_offset": -3, "super_art": True}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    t = 2
+    for f in range(0, 10):
+        k = run.feed(_line(t, 608, f, d=REACT if f >= 9 else DUMMY_IDLE, hs=12 if f == 9 else 0,
+                           stun=30 if f >= 9 else 0, hp=9000 if f >= 9 else 10000))
+        t += 1
+        if k is not None:
+            run.sent(k)
+    while not run.done and t < 120:
+        k = run.feed(_line(t, 934 if t < 60 else NEUTRAL, t, d=REACT, stun=30, hp=9000))   # the SRK never hits
+        if k is not None:
+            run.sent(k)
+        t += 1
+    fail = run.result()["fail"]
+    assert fail["kind"] == "whiff" and fail["step"] == 1 and fail["then"]["step"] == 2
+
+
+def test_old_results_of_a_row_with_choices_are_not_used_by_the_fighter(tmp_path):
+    """Before 0.11.14 a row with choices was performed as one mashed route; its result says nothing about a
+    single choice, so the fighter does not use it. Rows without choices keep their results."""
+    good = {"verified": True, "guard": "after_first_hit", "success_rate_final_timing": 1.0}
+    lab = {"routes": {"midscreen | 5HP > 623HP": dict(good, route="5HP > 623HP"),
+                      "midscreen | 2MK > 214MK / 236MK": dict(good, route="2MK > 214MK / 236MK"),
+                      "midscreen | 2MK > 236MK": dict(good, route="2MK > 236MK", alt_of="2MK > 214MK / 236MK")}}
+    (tmp_path / "combo_lab").mkdir()
+    (tmp_path / "combo_lab" / "Ryu.json").write_text(json.dumps(lab), encoding="utf-8")
+    assert sorted(v["route"] for v in cl.verified_routes(tmp_path, "Ryu")) == ["2MK > 236MK", "5HP > 623HP"]

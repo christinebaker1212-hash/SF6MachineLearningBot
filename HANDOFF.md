@@ -224,6 +224,17 @@ catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's 
 **0.11.4 (first Ken combo lab run: 6 true combos, damage = community):** the previous move changes what an
 input does (Quick Dash → [QD] Shoryuken / Tatsu), '>' that Capcom doesn't allow is timed after recovery,
 jump-in landing fixed. Re-run K → 1 (`--again` not needed: only failed routes are retried).
+**0.11.14 (8-hour Ryu K run: 21 true combos of 40):** rows with choices ('A / B', an optional '( > SA3 )',
+'( X OR Y )') are split into one route each (`alt_of`); a link after a Drive Impact or a Super waits until the bot
+is free and learns that length (DI's punish-counter animation is longer than its 62F on-block total); uncatalogued
+ids next to a special's / super's own id count as that move (SA3 1234 in a juggle); a juggle whiff is reported at
+the move that whiffed. The fighter ignores old merged-row results. Next: K → 1 as Ryu (failed routes are retried:
+the fingerprint includes the lab rules), send S.
+**OPEN (user, 2026-10-03): the fighter never uses the lab's combos or the replay data in matches.** Answered in chat:
+the fighter is the 0.5.0 scripted rule set; the lab only times the few routes written in `configs/fighter/ryu.yaml`,
+and `verified_routes` / `lethal_route` have no caller; replays only feed the move map (opponent ids), no policy has
+been trained on them. Proposed: route selection from verified true combos (punish, hit-confirm, corner, resources),
+then a replay-derived neutral prior.
 **0.11.13:** CH/PC routes always run in the counter-hit / punish-counter pass (the user's routes file was imported
 before those were read); Drive Rush frames counted from the rush's appearance (Ryu's rush id is 740).
 **0.11.12:** Training Mode check before lab passes and on the catalog's first move; conclusive failures are

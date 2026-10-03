@@ -223,6 +223,162 @@ def _aliases(r: str) -> str:
     return r
 
 
+_MOVE_LIKE = re.compile(r"^\s*(?:CH |PC |dl\.\s*|delay |meaty )?(?:j\.|nj\.|bj\.|fj\.)?"
+                        r"(?:\d{1,6}[LMH]?[PK]{1,2}\b|[LMH][PK]\b|DRC\b|PDR\b|DR\b|DI\b|SA ?\d|DC\b|Denjin\b|66\b|"
+                        r"dash\b|Drive Impact|[<>~,])", re.I)
+_MODIFIERS = {"pc", "ch", "dl.", "delay", "meaty"}
+
+
+def _kind(tok: str):
+    """For '/' between two moves: the same kind (two normals, or one motion in two strengths) is a one-move
+    swap; different kinds inside a group separate whole sequences."""
+    t = re.sub(r"^(?:CH|PC|dl\.|delay|meaty|Denjin|DC)\s*", "", tok.strip(), flags=re.I)
+    t = re.sub(r"^(?:j|nj|bj|fj)\.", "", t)
+    m = re.match(r"^(\d{2,})", t)
+    if m:
+        return ("motion", m.group(1))
+    return ("normal",) if re.match(r"^\d?[LMH][PK]$", t) else ("other", t)
+MAX_VARIANTS = 16
+
+
+def _prepare(route: str) -> str:
+    r = route.strip()
+    r = _expand_repeats(r)
+    r = _aliases(r)
+    r = re.sub(r"\s*/\s*(?=(?:DC|Denjin)\b)", " > ", r)
+    r = re.sub(r"\s+or\s+", " / ", r, flags=re.I)
+    r = re.sub(r"~\s*>", "~", r)                                     # '5HP ~> HK' = target combo (chain)
+    r = re.sub(r"\bCounter[- ]Hit\s+", "CH ", r, flags=re.I)
+    return r
+
+
+def expand_alternatives(route: str) -> list[str]:
+    """One route text per choice the page offers (user, 2026-10-03: "Routes that have alternate buttons you
+    can press should have their own, separate entry - it's confusing the bot"). '/' separates alternatives
+    ('214MK / 236MK /( 236KK , 6HK > 214K)' = three enders); a parenthesised group of moves after the route
+    has started is optional ('( > 236236K )', ', ( 623MP )': the page's damage is without it), so it gives a
+    route without and one with it; groups that are notes ('(2nd hit)', '(hold 1)') stay as text. Without
+    choices the route comes back unchanged. At most MAX_VARIANTS per row."""
+    r = _prepare(route)
+    lead = re.match(r"^(CH|PC)\s+(?!\()", r)
+    if lead:
+        r = r[lead.end():]                       # a route-level 'CH' / 'PC' applies to every variant
+    toks = [t for t in re.split(r"(\(|\)|/|>|~|,)", r) if t is not None]
+    toks = [t.strip() for t in toks if t.strip()]
+    pos = [0]
+
+    def peek():
+        return toks[pos[0]] if pos[0] < len(toks) else None
+
+    def take():
+        pos[0] += 1
+        return toks[pos[0] - 1]
+
+    def seq(inside):
+        items, conn = [], ""
+        while peek() is not None:
+            t = peek()
+            if t == ")":
+                take()
+                if inside:
+                    break
+                continue
+            if t in (">", "~", ","):
+                conn = take()
+                continue
+            a, closed = alt(inside)
+            items.append((conn, a))
+            conn = ""
+            if closed:
+                break
+        return items
+
+    def alt(inside):
+        opts = [atom()]
+        while peek() == "/":
+            take()
+            if peek() in (None, ")", ">", "~", ","):
+                break
+            if inside and opts[-1][0] == "text" and peek() != "(" and _kind(opts[-1][1]) != _kind(peek()):
+                # inside a group, '/' between different moves separates whole sequences:
+                # '( 623HP / 236KK , 4HK > 623HP )' = 623HP, or 236KK , 4HK > 623HP
+                opts.append(("group", seq(True)))
+                return opts, True
+            nxt = atom()
+            pm = re.match(r"^(CH|PC)\s+", opts[-1][1]) if opts[-1][0] == "text" else None
+            if pm and nxt[0] == "text" and not re.match(r"^(CH|PC)\s", nxt[1]) \
+                    and _kind(opts[-1][1]) == _kind(nxt[1]):
+                nxt = ("text", pm.group(0) + nxt[1])    # 'Counter-Hit 214LP / 214MP': both need the counter hit
+            opts.append(nxt)
+        return opts, False
+
+    def atom():
+        if peek() == "(":
+            take()
+            start = pos[0]
+            inner = seq(True)
+            text = " ".join(toks[start:pos[0] - 1]) if pos[0] - 1 >= start else ""
+            if not _MOVE_LIKE.match(text or ""):
+                return ("note", text)
+            return ("group", inner)
+        return ("text", take())
+
+    def has_choice(items):
+        return any(len(a) > 1 or any(x[0] == "group" and has_choice(x[1]) for x in a) for _, a in items)
+
+    def join(prefix, conn, part):
+        if not part:
+            return prefix
+        c0, t0 = part[0]
+        c = conn or c0
+        if prefix and not c and prefix[-1][1].strip().lower() in _MODIFIERS:
+            return prefix[:-1] + [(prefix[-1][0], prefix[-1][1] + " " + t0)] + part[1:]
+        if prefix and not c:
+            c = ","
+        return prefix + [(c, t0)] + part[1:]     # a group's own leading connector ('( > SA3 )') is kept
+
+    def expand(items, top):
+        out = [[]]
+        for i, (conn, a) in enumerate(items):
+            opts = []
+            for kind, val in a:
+                if kind == "text":
+                    opts.append([("", val)])
+                elif kind == "note":
+                    opts.append([("note", f"( {val} )")])
+                else:
+                    sub = expand(val, False)
+                    if len(a) == 1 and (top and i > 0) and not has_choice(val):
+                        opts.append([])                    # optional part: without it first
+                    opts.extend(sub)
+            new = []
+            for pre in out:
+                for o in opts:
+                    if o and o[0][0] == "note":
+                        if pre:
+                            new.append(pre[:-1] + [(pre[-1][0], pre[-1][1] + " " + o[0][1])])
+                        continue
+                    new.append(join(pre, conn, o))
+                    if len(new) >= MAX_VARIANTS:
+                        break
+                if len(new) >= MAX_VARIANTS:
+                    break
+            out = new or out
+        return out
+
+    items = seq(False)
+    if not has_choice(items) and not any(x[0] == "group" for _, a in items for x in a):
+        return [route]
+    variants = []
+    for v in expand(items, True):
+        text = " ".join((f"{c} " if c and i else "") + t for i, (c, t) in enumerate(v)).strip()
+        if lead:
+            text = f"{lead.group(1)} {text}"
+        if text and text not in variants:
+            variants.append(text)
+    return variants or [route]
+
+
 def split_route(route: str) -> list[tuple[str, str]]:
     """'5MP , 2HP > 236HK ~ 6HK , 623LP' -> [('', '5MP'), (',', '2HP'), ('>', '236HK'), ('~', '6HK'),
     (',', '623LP')]. Connector of the first move is ''."""
@@ -230,6 +386,8 @@ def split_route(route: str) -> list[tuple[str, str]]:
     r = re.sub(r"\b(f\s*[~,]\s*f|ff)\b", "66", r)                     # 'f~f' = forward dash
     r = _expand_repeats(r)                                           # '( ... )x2' -> written out twice
     r = _aliases(r)                                                  # 'DC Hasho' -> 'DC 214P'
+    r = re.sub(r"~\s*>", "~", r)                                     # '5HP ~> HK' = target combo (chain)
+    r = re.sub(r"\bCounter[- ]Hit\s+", "CH ", r, flags=re.I)
     # 'HP /DC Hasho' is NOT 'HP or DC Hasho': it is 5HP cancelled into the Denjin-charged Hashogeki (user,
     # 2026-10-02). A '/' straight before a Denjin-state move is a cancel.
     r = re.sub(r"\s*/\s*(?=(?:DC|Denjin)\b)", " > ", r)
@@ -369,18 +527,40 @@ def resolve(route: str, capcom_moves: list[dict]) -> dict:
             "starter": next((s.get("name") for s in steps if s.get("name")), None)}
 
 
+def expand_rows(combos: list[dict], moves: list[dict]) -> list[dict]:
+    """Each choice of a route (alternatives, optional parts) as its own row, resolved against the Capcom
+    move list. Rows saved by an import before 0.11.14 are expanded here too; already expanded rows (with
+    `alt_of`) are only re-resolved. The page lists one damage per row: it stays on the first variant (no
+    optional part, first choice), the others get None with a note."""
+    out = []
+    for c in combos:
+        if not moves or c.get("controls") == "modern":
+            out.append(dict(c, steps=[], unresolved=[], starter=None))
+            continue
+        variants = [c["route"]] if c.get("alt_of") else expand_alternatives(c["route"])
+        for i, v in enumerate(variants):
+            row = dict(c)
+            if len(variants) > 1:
+                row.update(route=v, alt_of=c["route"], alt_index=i, alt_count=len(variants))
+                if i:
+                    row.update(damage=None, damage_note="the page lists one damage for all of this row's choices")
+            row.update(resolve(row["route"], moves))
+            if row.get("hit_type") is None:
+                # imports older than the route / notes rule (0.11.6) left these unlabelled
+                ht = required_hit_type(row["route"], row.get("notes") or "")
+                if ht:
+                    row["hit_type"], row["hit_type_source"] = ht, "route/notes"
+            out.append(row)
+    return out
+
+
 def import_character(character: str, page_html: str, capcom: dict | None) -> dict:
-    combos = parse_combo_page(page_html)
     moves = (capcom or {}).get("moves") or []
+    combos = expand_rows(parse_combo_page(page_html), moves)
     n_res = n_tok = 0
     for c in combos:
-        if not moves or c["controls"] == "modern":
-            c.update({"steps": [], "unresolved": [], "starter": None})
-            continue
-        r = resolve(c["route"], moves)
-        c.update(r)
-        n_tok += sum(1 for s in r["steps"] if "system" not in s)
-        n_res += sum(1 for s in r["steps"] if s.get("name"))
+        n_tok += sum(1 for s in c.get("steps") or [] if "system" not in s)
+        n_res += sum(1 for s in c.get("steps") or [] if s.get("name"))
     return {"character": character, "source": "wiki.supercombo.gg (community)", "combos": combos,
             "classic": sum(1 for c in combos if c["controls"] == "classic"),
             "moves_resolved": n_res, "moves_total": n_tok,
@@ -508,14 +688,6 @@ def load(slug_or_name: str, datasets_root: Path) -> dict | None:
     moves = (capcom or {}).get("moves") or []
     if moves:
         from . import __version__
-        for c in data.get("combos") or []:
-            if c.get("controls") == "modern":
-                continue
-            c.update(resolve(c["route"], moves))
-            if c.get("hit_type") is None:
-                # imports older than the route / notes rule (0.11.6) left these unlabelled
-                ht = required_hit_type(c["route"], c.get("notes") or "")
-                if ht:
-                    c["hit_type"], c["hit_type_source"] = ht, "route/notes"
+        data["combos"] = expand_rows(data.get("combos") or [], moves)
         data["parsed_by"] = __version__
     return data
