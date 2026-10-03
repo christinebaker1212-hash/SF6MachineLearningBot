@@ -290,6 +290,45 @@ class FrameClock:
         return raw
 
 
+class ArrivalMeter:
+    """How state lines reach the bot (0.18.0). The exporter writes one line per game frame; lines read in the same
+    poll (within 4 ms) are one arrival. MEASURED 0.17.5 ranked: 17 arrivals a second of ~3 lines (gap p50 53 ms)
+    while the game rendered 46-50 fps, vs ~60 arrivals of 1 line in earlier sessions: the bot saw the game up to
+    ~50 ms late. Per match in fight_summary.state_arrival and the thoughts."""
+
+    def __init__(self) -> None:
+        self.lines = 0
+        self.arrivals = 0
+        self.gaps: list[float] = []
+        self.t0 = self.t_last = None
+
+    def add(self, t_recv: float) -> None:
+        self.lines += 1
+        if self.t_last is None:
+            self.t0 = self.t_last = t_recv
+            self.arrivals = 1
+            return
+        if t_recv - self.t_last > 0.004:
+            self.arrivals += 1
+            self.gaps.append(t_recv - self.t_last)
+        self.t_last = t_recv
+
+    def stale_frames(self) -> int:
+        """How many game frames old the newest line probably is when the bot decides: half the typical gap between
+        arrivals (0 when lines arrive every frame; 2 at the 0.17.5 session's ~53 ms)."""
+        g = sorted(self.gaps[-60:])
+        return int(round(g[len(g) // 2] * 60.0 / 2.0)) if len(g) >= 10 else 0
+
+    def summary(self) -> dict | None:
+        if self.arrivals < 2 or not self.gaps:
+            return None
+        dur = max(1e-6, self.t_last - self.t0)
+        g = sorted(self.gaps)
+        return {"lines_per_s": round(self.lines / dur, 1), "arrivals_per_s": round(self.arrivals / dur, 1),
+                "lines_per_arrival": round(self.lines / self.arrivals, 2),
+                "gap_ms_p50": round(1000 * g[len(g) // 2], 1), "gap_ms_p90": round(1000 * g[int(len(g) * 0.9)], 1)}
+
+
 def fix_action_frames(rows: list[dict]) -> list[dict]:
     """A recording's rows with frozen exported move frames replaced (FrameClock), in place. Recordings made
     online before 0.17.5 have the frozen values; the first FROZEN_WINDOW ticks stay as recorded."""

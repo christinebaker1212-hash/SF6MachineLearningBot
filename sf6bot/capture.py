@@ -144,6 +144,26 @@ class SyntheticBackend(CaptureBackend):
         self._stopped.set()
 
 
+class NullBackend(CaptureBackend):
+    """No screen capture (0.18.0: fights without video). The bot plays from REFramework state; capturing the window
+    at 60+ fps copies ~1 MB frames in Python and competes with the state reader (0.17.5 ranked: state lines reached
+    the bot in bursts of 3, ~53 ms apart, while the game rendered 46-50 fps)."""
+    name = "none"
+
+    def __init__(self) -> None:
+        self._stopped = threading.Event()
+
+    def start(self, region):
+        pass
+
+    def read(self):
+        self._stopped.wait()
+        return None
+
+    def stop(self):
+        self._stopped.set()
+
+
 def make_backend(cfg: dict) -> CaptureBackend:
     name = cfg.get("backend", "dxcam")
     if name == "dxcam":

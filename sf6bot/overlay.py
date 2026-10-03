@@ -139,7 +139,9 @@ class DebugOverlay:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                 else:
                     img = np.zeros((360, self.width, 3), np.uint8)
-                    cv2.putText(img, "no frames yet", (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+                    off = getattr(self.g.backend, "name", "") == "none"
+                    cv2.putText(img, "screen capture off (plays from game state)" if off else "no frames yet", (8, 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5 if off else 0.6, (0, 200, 255) if off else (0, 0, 255), 1)
                 ph = max(img.shape[0], 420)
                 iw = img.shape[1] if self.width > 0 else 0
                 tw = self.PANEL_W + iw

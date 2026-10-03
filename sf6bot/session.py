@@ -10,7 +10,7 @@ import time
 
 from . import clock, win32
 from .actions import Facing
-from .capture import FrameGrabber, SyntheticBackend
+from .capture import FrameGrabber, NullBackend, SyntheticBackend
 from .capture import make_backend as make_capture
 from .controller import Controller
 from .input_backend import MockInputBackend
@@ -35,13 +35,14 @@ def _version() -> str:
 
 class Session:
     def __init__(self, cfg: dict, name: str, side: str = "left", mock: bool = False,
-                 overlay: bool | None = None, extra_meta: dict | None = None) -> None:
+                 overlay: bool | None = None, extra_meta: dict | None = None, capture: bool = True) -> None:
         self.cfg = cfg
         self.name = name
         self.facing = Facing.from_side(side)
         self.side = side
         self.mock = mock
         self.use_overlay = cfg["overlay"]["enabled"] if overlay is None else overlay
+        self.use_capture = capture
         self.extra_meta = extra_meta or {}
         self.stop_event = threading.Event()
         import collections
@@ -100,7 +101,8 @@ class Session:
             self.window, region = self._resolve_game()
             hwnd = self.window.hwnd
             rect0 = self.window.client_rect
-            capture = make_capture(cfg["capture"])
+            capture = make_capture(cfg["capture"]) if self.use_capture else NullBackend()
+            win32.set_timer_resolution(1)
             inp = make_input(cfg["input"]["backend"])
             s = cfg["safety"]
             k_kill, k_pause, k_flip = vk(s["kill_key"]), vk(s["pause_key"]), vk(s["flip_facing_key"])

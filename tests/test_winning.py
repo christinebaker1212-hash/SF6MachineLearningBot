@@ -110,7 +110,7 @@ def _ryu_ds(tmp_path):
     return ds
 
 
-def _press_lines(bits, seq, act_at, act_id, x_op=1.0, x_me=-1.0):
+def _press_lines(bits, seq, act_at, act_id, x_op=1.0, x_me=-1.0, t0=1000, drive=None):
     """The opponent (p2, on the right facing left) inputs `seq` [(dirs absolute, buttons)] one per frame; its action
     id becomes act_id at frame act_at."""
     lines = []
@@ -127,19 +127,24 @@ def _press_lines(bits, seq, act_at, act_id, x_op=1.0, x_me=-1.0):
             mask |= bits["RIGHT"]
         for b in btn:
             mask |= bits[b]
-        lines.append({"stage_timer": 1000 + f, "p1": {"x": x_me, "y": 0.0},
-                      "p2": {"x": x_op, "y": 0.0, "input": mask, "action_id": act_id if f >= act_at else 1}})
+        p2 = {"x": x_op, "y": 0.0, "input": mask, "action_id": act_id if f >= act_at else 1}
+        if drive is not None:
+            p2["drive"] = drive if f < act_at else drive - 10000
+        lines.append({"stage_timer": t0 + f, "p1": {"x": x_me, "y": 0.0}, "p2": p2})
     return lines
 
 
-def test_live_lookup_learns_an_unknown_move_from_one_sighting_and_saves_it(tmp_path):
+def test_live_lookup_learns_an_unknown_move_from_two_agreeing_sightings_and_saves_it(tmp_path):
     ds = _ryu_ds(tmp_path)
     bits = load_input_bits()
     moves = {}
     learner = LiveMoveLearner("Ryu", ds, moves, bits, {"inferred": {"block_adv_margin": 2}})
     # p2 faces LEFT: a Hadoken is 2, 1, 4 on screen (down, down-back... toward the bot = screen left), then HP
     seq = [(2, []), (2, []), (1, []), (1, []), (4, ["HP"]), (4, ["HP"])]
-    got = [learner.on_line(l, "p2", "p1") for l in _press_lines(bits, seq, 7, 904)]
+    # 0.18.0: one sighting is a vote, not yet a name (online single sightings were wrong, 0.17.5 ranked)
+    assert not any(learner.on_line(l, "p2", "p1") for l in _press_lines(bits, seq, 7, 904))
+    assert 904 not in moves and learner.unconfirmed[904] == 1
+    got = [learner.on_line(l, "p2", "p1") for l in _press_lines(bits, seq, 7, 904, t0=1100)]
     hit = [g for g in got if g]
     assert hit and hit[0][:2] == (904, "H Hadoken") and hit[0][2] is True
     assert moves[904]["source"] == "live" and moves[904]["projectile"]
@@ -149,10 +154,20 @@ def test_live_lookup_learns_an_unknown_move_from_one_sighting_and_saves_it(tmp_p
     assert moves[904]["block_adv"] == row["on_block_n"] + 2
     p = learner.save()
     saved = json.loads(p.read_text())["ids"]["904"]
-    assert saved["name"] == "H Hadoken" and saved["live_votes"] == 1
-    # the next match loads it: one unanimous sighting is enough (with the margin)
+    assert saved["name"] == "H Hadoken" and saved["live_votes"] == 2
+    # the next match loads it: two unanimous sightings are enough (with the margin)
     cfg = fi.load_fighter_config(Path(__file__).parent.parent / "configs" / "fighter")
     assert fi.load_inferred_moves("Ryu", ds, cfg)[904]["name"] == "H Hadoken"
+
+
+def test_a_drive_impact_is_named_from_one_sighting_when_its_drive_drop_confirms_it(tmp_path):
+    ds = _ryu_ds(tmp_path)
+    bits = load_input_bits()
+    moves = {}
+    learner = LiveMoveLearner("Ryu", ds, moves, bits, {"inferred": {"block_adv_margin": 2}})
+    seq = [(5, []), (5, []), (5, ["HP", "HK"]), (5, ["HP", "HK"])]
+    got = [g for g in (learner.on_line(l, "p2", "p1") for l in _press_lines(bits, seq, 3, 862, drive=60000)) if g]
+    assert got and got[0][1].startswith("Drive Impact") and moves[862]["di"]
 
 
 def test_progress_file_keeps_the_trend_across_sessions(tmp_path):

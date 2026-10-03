@@ -31,6 +31,10 @@ class Controller:
         # called with (t_sent, newly pressed logical names) after every send: the live input-delay meter
         # (input_delay.DelayMeter) matches them to the game's input mask
         self.on_press: list = []
+        # when a direction toward the opponent (3 / 6 / 9, relative to facing) was last held: SF6 reads a recent
+        # forward + 2-3-6 as a Shoryuken motion (0.18.0, measured: Hadokens after walking forward came out as
+        # Shoryukens), so quarter-circle motions wait until forward is old enough (fighter.motion_guard)
+        self.forward_t: float | None = None
 
     # ---- arming -----------------------------------------------------------
     @property
@@ -72,6 +76,8 @@ class Controller:
         with self._lock:
             target = self.logical_keys(state) if self._armed else set()
             self.current = state if self._armed else NEUTRAL
+            if self._armed and state.direction in (3, 6, 9):
+                self.forward_t = clock.now()
             releases = sorted(self._held - target)
             presses = sorted(target - self._held)
             t0 = clock.now()

@@ -128,6 +128,41 @@ def build(ds_root: Path, log=print) -> dict:
     return {ch: sum(1 for m in moves.values() if m["reach"] is not None) for ch, moves in tab.items()}
 
 
+class LiveReach:
+    """The bot's own reach, learned during a session on top of the measured table (0.18.0, MEASURED 0.17.5 ranked:
+    5MP whiffed 14 of 17 from 2.09 on average, 5HP 14 of 14 from 2.34; 5HP had never connected in any recording, so
+    it had no reach and was allowed from anywhere).
+      - no measurement: UNMEASURED (game units), a cautious default for a ground move
+      - a connect from farther than the current reach raises it to that distance
+      - the last two whiffs both inside the current reach, with nothing connecting from that far, lower it below them
+    `get(id)` is what the neutral policy asks; `add` is fed by the fighter for every own attack that ended."""
+    UNMEASURED = 1.2
+
+    def __init__(self, base: dict | None = None):
+        self.base = dict(base or {})
+        self.hits: dict = {}
+        self.whiffs: dict = {}
+
+    def add(self, aid, dist: float, contact: bool) -> None:
+        (self.hits if contact else self.whiffs).setdefault(aid, []).append(round(float(dist), 3))
+
+    def get(self, aid, default=None):
+        hits, wh = self.hits.get(aid, []), self.whiffs.get(aid, [])
+        r = self.base.get(aid)
+        if hits:
+            r = max(r or 0.0, max(hits))
+        if len(wh) >= 2:
+            m = max(wh[-2:])
+            if (r is None or m < r) and not any(h >= m for h in hits):
+                r = round(m - 0.05, 3)
+        return default if r is None else r
+
+    def changes(self) -> dict:
+        """{id: {base, now, hits, whiffs}} for ids seen this session (fight_summary.live_reach)."""
+        return {str(a): {"base": self.base.get(a), "now": self.get(a), "hits": len(self.hits.get(a, [])),
+                         "whiffs": len(self.whiffs.get(a, []))} for a in set(self.hits) | set(self.whiffs)}
+
+
 def load(ds_root: Path, character: str | None) -> dict:
     """{action id (int) or 'air:<id>': reach} for one character (only moves with a measured reach)."""
     if not character:

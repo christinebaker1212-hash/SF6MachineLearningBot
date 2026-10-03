@@ -24,6 +24,14 @@ from . import framedata as fd
 from .game_state import decode_input_relative, file_stem, num
 from .move_map import MAX_GAP, MIN_ACTION_ID, MOTION_LOOKBACK, PRESS_LOOKBACK, confidence, match, requirement
 
+# 0.18.0: a name from the opponent's inputs is USED only after MIN_VOTES sightings that agree (share >= MIN_SHARE).
+# MEASURED 0.17.5 ranked: single online sightings named A.K.I.'s 600 and 601 both "L Serpent Lash", 740 "Standing
+# Medium Kick", 994 "Crouching Light Punch". Exception: a Drive Impact whose Drive drop (a full bar) confirms it,
+# so the first DI is still answered (Jamie's 862, 0.17.4). Every sighting is still saved as a vote.
+MIN_VOTES = 2
+MIN_SHARE = 2 / 3
+DI_DRIVE_DROP = 9000
+
 
 class LiveMoveLearner:
     def __init__(self, character: str, ds_root: Path, moves: dict, bits: dict, fcfg: dict | None = None):
@@ -46,6 +54,8 @@ class LiveMoveLearner:
         # hit on a free defender does exactly Capcom's listed damage, 32/32; counter / punish counter 1.2x) and, to
         # break ties, how long its action id lasted
         self.pending: dict = {}             # action id -> {"t0", "air", "dmg"}
+        self.unconfirmed: Counter = Counter()   # ids with votes not yet enough to use (fight summary)
+        self.prev_drive = None
         self.prev_me: dict = {}
         self.by_damage: dict = {}
         for m in self.rows.values():
@@ -80,13 +90,16 @@ class LiveMoveLearner:
             while self.hist and fr - self.hist[0][0] > MOTION_LOOKBACK:
                 self.hist.popleft()
         a = op.get("action_id")
+        drive = num(op.get("drive"))
+        drop = (self.prev_drive - drive) if drive is not None and self.prev_drive is not None else 0
+        self.prev_drive = drive
         out = None
         started = a != self.prev_act and self.prev_frame is not None and 0 < fr - self.prev_frame <= MAX_GAP
         if self.prev_act in self.pending and a != self.prev_act:
             out = self._by_damage(self.prev_act, fr)        # the unknown move ended: name it by its damage
         if started and isinstance(a, int) and a >= MIN_ACTION_ID and not self.known(a):
-            got = self._sighting(a, fr, (num(op.get("y")) or 0.0) > 0.05) if len(self.hist) >= 2 else None
-            if got is None and a not in self.votes:
+            got = self._sighting(a, fr, (num(op.get("y")) or 0.0) > 0.05, drop) if len(self.hist) >= 2 else None
+            if got is None and a not in self.moves:            # until a name is in use, every sighting is a vote
                 self.pending[a] = {"t0": fr, "air": (num(op.get("y")) or 0.0) > 0.05, "dmg": None}
             out = got or out
         p = self.pending.get(a)
@@ -116,13 +129,23 @@ class LiveMoveLearner:
         name = names.pop()
         v = self.votes.setdefault(a, Counter())
         v[name] += 1
+        if not self._confirmed(v, name):
+            self.unconfirmed[a] += 1
+            return None
+        self.unconfirmed.pop(a, None)
         new = a not in self.moves or self.moves[a].get("name") != name
         self.moves[a] = dict(self._entry(name, v), how="first-hit damage")
         if new and all(x[0] != a for x in self.learned):
             self.learned.append((a, name))
         return a, name, new
 
-    def _sighting(self, a: int, fr: int, airborne: bool) -> tuple | None:
+    def _confirmed(self, v: Counter, name: str, drive_drop: float = 0) -> bool:
+        total = sum(v.values())
+        if name.startswith("Drive Impact") and drive_drop >= DI_DRIVE_DROP:
+            return True
+        return total >= MIN_VOTES and v[name] / total >= MIN_SHARE
+
+    def _sighting(self, a: int, fr: int, airborne: bool, drive_drop: float = 0) -> tuple | None:
         h = list(self.hist)
         pressed: set = set()
         for i in range(1, len(h)):
@@ -140,6 +163,10 @@ class LiveMoveLearner:
         v = self.votes.setdefault(a, Counter())
         v[m["name"]] += 1
         name = v.most_common(1)[0][0]
+        if not self._confirmed(v, name, drive_drop):
+            self.unconfirmed[a] += 1
+            return None
+        self.unconfirmed.pop(a, None)
         new = a not in self.moves or self.moves[a].get("name") != name
         self.moves[a] = self._entry(name, v)
         if new and all(x[0] != a for x in self.learned):

@@ -2267,6 +2267,44 @@ All MOCK / offline tested (`tests/test_winning.py`, `tests/test_assess.py`); not
   994 "Crouching Light Punch" (single sightings from online input masks).
 - Win model trust 0.21 on 42,402 decisions; it pushed toward specials / pokes, away from jumps and parries.
 
+## 0.18.0: the eight fixes from the baseline (user: "Do every change")
+All MOCK / replay-tested (`tests/test_ranked_baseline_fixes.py`, and `decide()` replayed over the 6 ranked recordings);
+nothing here is verified in game yet. The next ranked session is measured against the BASELINE above.
+1. **Inputs** (`fighter.motion_guard`, `ScriptedFighter.busy`, `configs/fighter/ryu.yaml: inputs`):
+   - a quarter-circle motion ending forward (236, 236236) waits until forward was held >= 12 frames ago
+     (`motion_clear_frames`, an ESTIMATE of SF6's leniency): Hadokens after walking forward read as Shoryukens
+   - Shoryuken motions use 3-frame steps (`6@3 2@3 3+P@3`)
+   - neutral, anti-air, whiff / DI punish, DI reaction and perfect-parry moves are not sent while the bot cannot act
+     (hitstun, blockstun, hit reaction, airborne, a dash (20F estimate), a super, a parry, or its own move with more than
+     the input delay left: catalogued total, else 30F). Counted in `fight_summary.held_while_busy`. Pressure-moment
+     defences and punishes are still sent early on purpose (they must land on the first free frame).
+2. **State lag:** fights capture no screen unless video is recorded (`capture.NullBackend`, `capture.in_fights`); the
+   process asks Windows for 1 ms timers (`win32.set_timer_resolution`); `game_state.ArrivalMeter` records per match how
+   state arrived (`fight_summary.state_arrival`, thoughts line) and how stale the newest line probably is
+   (`fighter.stale`, added to the input delay for defence and anti-air timing).
+3. **No random spending** (`neutral_policy`): exploration only over moves that spend nothing; Super Arts from neutral only
+   when the super's listed damage kills; Drive Parry only against an attack within 2.5; Drive Impact only as a read on
+   a special from 1.5+; OD specials and Shoryukens never as neutral specials (rules and combo routes still use them).
+4. **Range** (`reach.LiveReach`): a move with no measured reach gets 1.2 (it was allowed from anywhere: 5HP had never
+   connected in any recording); during a session a connect from farther raises a move's reach, two whiffs inside it
+   lower it. Session-wide, in `fight_summary.live_reach`.
+5. **Anti-air from the landing** (`fighter.landing_frames`, rule 4): fires when the opponent lands within motion + input
+   delay + stale + start-up + 6 frames (gravity 0.0123 MEASURED: 37-frame jumps, apex 2.11), with L Shoryuken
+   (start-up 5, active 5-14; Capcom); too late for it -> 2HP (start-up 9); a cross-up only when the landing is predicted
+   >= 0.3 past the bot (MEASURED over 99 jump-ins: 54 of 72 cross-ups, no false alarm; closer ones land in front).
+   Replaying the 6 ranked matches: 19 of the 42 jump-ins near the bot get the Shoryuken in time (the live run: 2); the
+   other misses had the bot busy in the recording (parrying, hit, airborne, its own move).
+6. **Throws:** two new pressure moments with the same per-opponent defence game: `approach` (the opponent walking or
+   dashing in to within 1.15) and `their_wakeup` (the opponent's measured 30-frame get-up with the bot within 1.4).
+   Stale state is added to every pressure moment's timing.
+7. **Between rounds:** `Experience.end_round` (older evidence x0.85 each round) and `ScriptedFighter.round_review`: the
+   damage taken this round by opener (throw / jump-in / ground normal / special / super / DI); jump-ins >= 25% -> the
+   anti-air 3 frames earlier for the rest of the match; throws >= 20% -> throws expected at pressure moments. Narrated
+   `[learned]`, in `fight_summary.round_reviews` and the thoughts.
+8. **Online move naming** (`live_moves`): a name from the opponent's inputs (or first-hit damage) is used after 2
+   agreeing sightings (share >= 2/3); a Drive Impact confirmed by a full Drive bar dropping is used at once. Moves
+   waiting for a second sighting: `live_moves.waiting_for_second_sighting`. Next match loads ids with 2+ votes.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

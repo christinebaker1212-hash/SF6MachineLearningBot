@@ -29,7 +29,14 @@ anti_air:
   # MEASURED (fights 2026-10-02): Shoryukens that hit started at distance 0.60-1.24; those started at
   # 1.7-3.0 whiffed. The opponent's position is predicted lead_frames ahead (decision + input latency
   # + startup), and only real jumps count (ids.jump), not falling from a juggle or knockdown.
-  lead_frames: 12
+  lead_frames: 12      # (before 0.18.0: the prediction horizon; now timing comes from the landing)
+  # 0.18.0: fired so the Shoryuken is active as the opponent comes down: landing in <= motion + input delay + start-up +
+  # early_frames. Too late for that -> the anti-air normal; later still -> block.
+  move: anti_air_srk
+  normal: anti_air_normal
+  gravity: 0.0123      # MEASURED: jumps last 37 frames and peak at 2.11 (most characters)
+  early_frames: 6
+  crossup_past: 0.3    # MEASURED: predicted landing this far past the bot = a cross-up (54/72, no false alarms)
   min_dist: 0.25       # predicted closer than this, or on the other side = cross-up -> block instead
   max_dist: 1.30
   max_height: 1.70
@@ -39,6 +46,13 @@ throw_tech:
   # (720 / 724). Whether pressing LP+LK on seeing it is fast enough to tech is NOT known yet: our
   # input reaches the game 3-5 frames later. fight_summary counts the outcome.
   max_dist: 1.20
+# 0.18.0 input handling (MEASURED 0.17.5 ranked: Hadokens after walking forward came out as Shoryukens; ~27 of
+# ~70 Shoryuken motions were sent while the bot could not act; "6@2 2@2 3+HP" came out as 2HP when the down step
+# was missed, so motion steps are 3 frames)
+inputs:
+  motion_clear_frames: 12   # ESTIMATE of SF6's motion leniency: a 236 waits until forward was held this long ago
+  dash_frames: 20           # a dash cannot be canceled: busy this long (estimate; Capcom has no dash total)
+  unknown_move_frames: 30   # an own move with no catalogued total counts as busy this long
 punish:
   latency_frames: 4    # measured: input -> game sees it, 3-5 frames (usually 4)
   # on-block advantage (attacker) at or below the threshold -> that punish. Needs a catalog of the
@@ -46,8 +60,8 @@ punish:
   options:
     # `route`: performed by the combo lab's executor (0.11.3): every input timed from the game's own
     # clock, never before the move can come out. `seq` (wall-clock) is the fallback without Capcom data.
-    - {max_adv: -10, name: "5HP > 623HP", route: "5HP > 623HP", seq: "5+HP@3 5@8 6@2 2@2 3+HP@3"}
-    - {max_adv: -7,  name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
+    - {max_adv: -10, name: "5HP > 623HP", route: "5HP > 623HP", seq: "5+HP@3 5@8 6@3 2@3 3+HP@3"}
+    - {max_adv: -7,  name: "Shoryuken (623HP)", seq: "6@3 2@3 3+HP@3"}
     - {max_adv: -4,  name: "5LP ~ 2LP ~ 5LP", route: "5LP ~ 2LP ~ 5LP", seq: "5+LP@3 5@7 2+LP@3 5@7 5+LP@3"}
 # Opponents without a catalog: ids from the inferred move map (menu X, datasets/move_maps/), only at
 # this confidence or better. Capcom's on-block value + margin is used, so -4 on Capcom's page is
@@ -90,7 +104,10 @@ moves:
   standing_hp: {name: "5HP", seq: "5+HP@3"}
   throw: {name: "Throw", seq: "5+LP+LK@3"}
   throw_tech: {name: "Throw tech", seq: "5+LP+LK@3"}
-  shoryuken: {name: "Shoryuken (623HP)", seq: "6@2 2@2 3+HP@3"}
+  shoryuken: {name: "Shoryuken (623HP)", seq: "6@3 2@3 3+HP@3"}
+  # 0.18.0 anti-air: L Shoryuken (Capcom: start-up 5, active 5-14, air-invincible), crouching HP (start-up 9)
+  anti_air_srk: {name: "L Shoryuken (anti-air)", seq: "6@3 2@3 3+LP@3", startup: 5}
+  anti_air_normal: {name: "2HP (anti-air)", seq: "2+HP@4", startup: 9}
   drive_impact: {name: "Drive Impact", seq: "5+HP+HK@3"}
   walk_forward: {name: "walk forward", seq: "6@12"}
 neutral:
@@ -126,6 +143,9 @@ di_punish:
 # to one option so it reaches the game on the first free frame, drawn from what this opponent did before.
 defense:
   max_dist: 1.4            # opponent within this (game units; throw range ~0.8 + a step) = a pressure moment
+  approach: true           # 0.18.0: the opponent walking in to within approach_dist in neutral is a moment too
+  approach_dist: 1.15
+  approach_reset: 1.6      # a new approach once the opponent was this far away again
   watch_frames: 30         # nothing within this many frames after it = the opponent "waited"
   # MEASURED (0.17.5, 13 recordings: Ryu, Ken, Akuma, Jamie, Viper): the last get-up action lasts 30 frames, then the
   # player is free (the exported action length says 42-50: the animation). Only these ids are wake-up moments.
@@ -141,7 +161,7 @@ defense:
     jab:        {seq: "2+LP@3 1@6"}
     back_dash:  {seq: "4@3 5@2 4@3"}
     jump:       {seq: "8@4"}
-    reversal:   {seq: "6@2 2@2 3+HP@3"}        # Shoryuken: invincible start-up (Capcom notes)
+    reversal:   {seq: "6@3 2@3 3+HP@3"}        # Shoryuken: invincible start-up (Capcom notes)
     parry:      {seq: "5+MP+MK@14", drive: drive_parry}
   # ESTIMATES from game knowledge (NOT measured), thousands of hp for the bot when the opponent answers with
   # each option. What each option actually scores against an opponent replaces these as tries accumulate.

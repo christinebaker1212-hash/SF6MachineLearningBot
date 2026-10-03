@@ -32,7 +32,8 @@ import math
 import random
 
 RESPONSES = ("throw", "strike", "shimmy", "wait")
-SITUATIONS = {"after_block": "after blocking", "after_hit": "after being hit", "wakeup": "getting up"}
+SITUATIONS = {"after_block": "after blocking", "after_hit": "after being hit", "wakeup": "getting up",
+              "approach": "with the opponent walking in", "their_wakeup": "with the opponent getting up next to me"}
 NICE = {"block": "block", "delay_tech": "delay tech", "tech": "tech", "jab": "jab", "back_dash": "back dash",
         "jump": "jump", "reversal": "Shoryuken", "parry": "Drive Parry"}
 RESP_NICE = {"throw": "threw", "strike": "attacked", "shimmy": "backed off (shimmy)", "wait": "waited"}

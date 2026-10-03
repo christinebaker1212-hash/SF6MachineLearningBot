@@ -14,6 +14,7 @@ capture:
   device_idx: 0
   output_idx: null        # null = primary monitor. Set if the game is on another monitor.
   target_fps: 120         # dxcam polling rate; 0 = unpaced (may use a full CPU core)
+  in_fights: false         # 0.18.0: fights capture the screen only when recording video (the bot plays from game state)
 
 input:
   # sendinput_keyboard: the bot types on the keyboard (shares Player 1 with you).

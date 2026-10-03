@@ -33,6 +33,8 @@ SHRINK = 3.0          # an option needs a few tries before its own average outwe
 BETA = 1.3            # weight factor = exp(BETA x shrunk average, in 1000s of hp)
 DECAY = 0.8           # after each match, older evidence counts this much (follows an opponent who adapts)
 DECAY_RANKED = 0.97   # ranked: a different human every match, so one match says little about the next one
+ROUND_DECAY = 0.85    # 0.18.0: after each ROUND, older evidence counts this much less, so what this opponent did in the
+                      # rounds just played weighs more (0.17.5 ranked: 3 round 1s won, every round 2 and 3 lost)
 WINDOW_S = 1.5
 NICE = {"idle": "waiting", "walk_fwd": "walking forward", "walk_back": "walking back", "crouch": "crouch-blocking",
         "jump_fwd": "jumping in", "jump_neutral": "neutral jumps", "jump_back": "back jumps",
@@ -186,16 +188,24 @@ class Experience:
             z = store.setdefault(zone, {})
             z[what] = z.get(what, 0) + 1
 
+    def _decay(self, f: float) -> None:
+        for k in ("neutral", "moves", "defense"):
+            for e in self.d[k].values():
+                e["n"] = round(e["n"] * f, 3)
+                e["sum"] = round(e["sum"] * f, 3)
+        for z in self.d["responses"].values():
+            for kind in list(z):
+                z[kind] = round(z[kind] * f, 3)
+
+    def end_round(self) -> None:
+        """Between rounds: older evidence counts less, so the rounds just played against this opponent weigh more."""
+        self.pending, self.pending_def = [], []          # hp resets: nothing pending is scored across the break
+        self._decay(ROUND_DECAY)
+
     def end_match(self, result: dict) -> None:
         self.d["matches"].append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), **result})
         # recency: what happened before this match counts a little less from now on
-        for k in ("neutral", "moves", "defense"):
-            for e in self.d[k].values():
-                e["n"] = round(e["n"] * self.decay, 3)
-                e["sum"] = round(e["sum"] * self.decay, 3)
-        for z in self.d["responses"].values():
-            for kind in list(z):
-                z[kind] = round(z[kind] * self.decay, 3)
+        self._decay(self.decay)
         self.d["sf6bot_version"] = __import__("sf6bot").__version__
         self.save()
 
@@ -313,6 +323,18 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 + "."))
     from .human_limits import thoughts as hl_thoughts
     out += hl_thoughts(summary)
+    for rv in summary.get("round_reviews") or []:
+        top = sorted((rv.get("taken") or {}).items(), key=lambda kv: -kv[1]["damage"])[:2]
+        if top:
+            out.append(("learned", f"Round {int(rv.get('round') or 0) + 1} ({'won' if rv.get('bot_won') else 'lost'}): most "
+                                   "damage from " + ", ".join(f"{k} ({v['damage']:,})" for k, v in top)
+                                   + ("; changed: " + "; ".join(rv["changes"]) if rv.get("changes") else "") + "."))
+    sa = summary.get("state_arrival") or {}
+    if sa:
+        late = sa["lines_per_arrival"] > 1.5
+        out.append(("measured", f"Game state reached me {sa['arrivals_per_s']} times a second ({sa['lines_per_arrival']} "
+                                f"frames at a time, gap {sa['gap_ms_p50']} ms typical)"
+                                + ("; I was seeing the game late." if late else ".")))
     idl = summary.get("input_delay") or {}
     if idl.get("median") is not None:
         out.append(("measured", f"My input delay this session: {idl['median']} frames (median of {idl['n']} presses "

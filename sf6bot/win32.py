@@ -109,6 +109,18 @@ def set_dpi_aware() -> None:
             pass
 
 
+def set_timer_resolution(ms: int = 1) -> bool:
+    """Ask Windows for 1 ms timer resolution for this process (timeBeginPeriod). By default waits round up to the
+    ~15.6 ms system tick, so the state reader's 1 ms polls and the sequence timing slept ~16 ms (0.18.0: state lines
+    arrived in bursts). Windows restores it when the process ends."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        return ctypes.windll.winmm.timeBeginPeriod(int(ms)) == 0
+    except Exception:
+        return False
+
+
 def send_key_events(events: list[tuple[int, bool, bool]]) -> None:
     """Inject key events atomically in one SendInput call.
 

@@ -28,8 +28,9 @@ def test_anti_air_where_the_jump_lands():
     d = f.decide(state(op={"x": 2.54, "y": 1.45, "action_id": 37}, timer=501), 0.02, 0)   # lands at 1.82: too far
     assert d.rule != "anti_air"
     f.decide(state(op={"x": 1.96, "y": 1.25, "action_id": 37}, timer=511), 0.18, 0)
-    d = f.decide(state(op={"x": 1.90, "y": 1.2, "action_id": 37}, timer=512), 0.2, 0)     # lands at ~1.18
-    assert d.rule == "anti_air" and d.seq.endswith("3+HP@3")
+    d = f.decide(state(op={"x": 1.90, "y": 1.2, "action_id": 37}, timer=512), 0.2, 0)     # lands at ~1.3 in ~10f
+    # 0.18.0: timed from the landing; 10 frames is too late for a Shoryuken (motion 6 + delay 4 + start-up 5): 2HP
+    assert d.rule == "anti_air" and d.name.startswith("2HP") and "too late" in d.reason
     assert f.decide(state(op={"x": 1.84, "y": 1.1, "action_id": 37}, timer=513), 0.22, 0).rule != "anti_air"
 
 
@@ -43,7 +44,7 @@ def test_no_anti_air_on_juggled_opponent():
 def test_cross_up_is_blocked_toward_the_landing_side():
     f = ScriptedFighter(FCFG, seed=1)
     f.decide(state(op={"x": 0.40, "y": 1.6, "action_id": 37}, timer=500), 0.0, 0)
-    d = f.decide(state(op={"x": 0.34, "y": 1.5, "action_id": 37}, timer=501), 0.02, 0)
+    d = f.decide(state(op={"x": 0.30, "y": 1.5, "action_id": 37}, timer=501), 0.02, 0)   # lands ~0.65 past the bot
     assert d.rule == "block_crossup" and d.direction == 4 and d.facing is Facing.LEFT
 
 

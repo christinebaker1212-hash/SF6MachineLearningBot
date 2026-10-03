@@ -77,5 +77,8 @@ def test_unknown_move_named_from_its_first_hit_damage_without_inputs(tmp_path):
                       "p2": {"x": 0.0, "y": 0.0, "input": 0, "action_id": 990}})
     lines.append({"stage_timer": 567, "p1": {**me, "hp": 8600}, "p2": {"x": 0.0, "y": 0.0, "input": 0, "action_id": 1}})
     got = [g for g in (lm.on_line(l, "p2", "p1") for l in lines) if g]
+    assert got == [] and 990 not in moves                  # 0.18.0: one sighting is a vote, not yet a name
+    again = [dict(l, stage_timer=l["stage_timer"] + 200) for l in lines]
+    got = [g for g in (lm.on_line(l, "p2", "p1") for l in again) if g]
     assert got == [(990, "H Shoryuken", True)] and moves[990]["how"] == "first-hit damage"
-    assert lm.lines == len(lines) and lm.lines_with_input == 0
+    assert lm.lines == 2 * len(lines) and lm.lines_with_input == 0

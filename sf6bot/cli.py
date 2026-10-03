@@ -360,7 +360,10 @@ def cmd_fight(args, cfg):
         blind_ask = lambda: input("Participant's guess for that match (h = human, b = bot, Enter = none): ")  # noqa: E731
     hl = True if (args.human_limits or args.blind) else None
     name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
-    with _session(args, cfg, name) as s:
+    # 0.18.0: no screen capture in fights unless video is recorded (the bot plays from game state; capture slowed the
+    # state reader in the 0.17.5 ranked session)
+    cap = bool(cfg["recording"].get("record_video")) or bool(cfg["capture"].get("in_fights", False))
+    with _session(args, cfg, name, capture=cap) as s:
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
                   first_to=first_to or None, versus=vh, opponent_name=args.opponent, human_limits=hl,

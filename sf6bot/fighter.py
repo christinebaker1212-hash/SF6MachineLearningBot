@@ -32,11 +32,15 @@ from . import clock
 from .actions import Facing, InputState
 from .dataset import DatasetBuilder
 from .episodes import FIGHT_START_FRAME, EpisodeTracker
-from .game_state import character_name, facing_of, file_stem, num, open_state_reader, player_distance
+from .game_state import (ArrivalMeter, character_name, facing_of, file_stem, num, open_state_reader,
+                         player_distance)
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 
-INTRO_IDS = {400, 401}  # match intro actions (real match data, 2026-10-01)
+INTRO_IDS = {400, 401}
+RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741): cancelable into normals
+GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry"}
+GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
 @dataclass
@@ -110,7 +114,7 @@ def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dic
     out: dict = {}
     for a, e in ((mp or {}).get("ids") or {}).items():
         # 0.16.0: a move seen once (live lookup) is used when every sighting agreed; the margin keeps it safe
-        unanimous = not e.get("alternatives") and (e.get("votes") or 0) >= 1
+        unanimous = not e.get("alternatives") and (e.get("votes") or 0) >= 2     # 0.18.0: two agreeing sightings
         if LEVELS.index(e.get("confidence", "low")) < floor and not unanimous:
             continue
         ob = (e.get("capcom") or {}).get("on_block")
@@ -201,6 +205,20 @@ class ScriptedFighter:
         self.defense = Defense(fcfg["defense"], experience, seed) if fcfg.get("defense") else None
         self._pressure_fired = False
         self._my_act, self._my_act_t0, self._hit_by, self._prev_hs = None, None, None, 0
+        self._approach_fired = False
+        self._their_wake_fired = None
+        # 0.18.0 round review: what opened up the damage the bot took this round, and what to change next round
+        self.round_taken: dict = {}
+        self._rr = {"hp": None, "free": True, "cat": "other"}
+        self.aa_extra = 0                 # extra anti-air frames after losing a round to jump-ins
+        self.stale = 0                    # frames the newest state is probably old (state arrival bursts, 0.18.0)
+        self.own_total = {m["id"]: m.get("total") for m in self.own if isinstance(m.get("total"), int)}
+        self.busy_stats: dict = {}        # rule -> {why: count}: decisions held back because the bot could not act
+        # 0.18.0: own attacks and whether they connected, fed to reach.LiveReach (the policy's reach) when they end
+        self.live_reach = None
+        self._own_atk: dict | None = None
+        self._own_proj = {m["id"] for m in self.own if m.get("projectile")}
+        self._own_last = None
         self.watch: dict | None = None
         self.defense_stats: dict = {}
         self.whiff_stats = {"chances": 0, "taken": 0}
@@ -334,7 +352,52 @@ class ScriptedFighter:
     def decide(self, raw: dict, t: float, me_i: int) -> Decision:
         d = self._decide(raw, t, me_i)
         self.prev_raw = raw
+        if d.kind in ("seq", "route") and (d.rule in GATED_RULES or (d.rule or "").startswith(GATED_PREFIX)):
+            why = self.busy(raw.get(f"p{me_i + 1}") or {})
+            if why:
+                # 0.18.0: an input sent while the bot cannot act is lost (MEASURED 0.17.5 ranked: ~27 of ~70 Shoryuken
+                # motions were sent in blockstun, hitstun, the bot's own move, a parry or a super). Not now: try again
+                # on the next line. Undo what the rule marked as done.
+                st = self.busy_stats.setdefault(d.rule.split(":")[0], {})
+                st[why] = st.get(why, 0) + 1
+                if d.rule == "anti_air":
+                    self.aa_done_for_jump = False
+                elif d.rule == "di_reaction":
+                    self.di_handled_id = None
+                elif d.rule in ("whiff_punish", "di_punish"):
+                    self.op_move["punished"] = False
+                return Decision("none", reason=f"busy: {why}")
         return d
+
+    def busy(self, me: dict) -> str | None:
+        """Why the bot cannot start a move now (its input would be lost), or None. A move of its own whose catalogued
+        total ends within the input delay counts as free: an input sent now arrives after it (the game buffers)."""
+        if (_num(me.get("hitstun")) or 0) > 0:
+            return "hitstun"
+        if (_num(me.get("blockstun")) or 0) > 0:
+            return "blockstun"
+        aid = me.get("action_id")
+        if aid in self.hit_ids or aid in self.thrown_ids:
+            return "hit reaction"
+        if (_num(me.get("y")) or 0.0) > 0.05:
+            return "airborne"
+        if not isinstance(aid, int):
+            return None
+        ic = self.c.get("inputs") or {}
+        fr = _num(me.get("action_frame"))
+        if aid in (17, 18):
+            tot = int(ic.get("dash_frames", 20))
+            return "dash" if fr is None or tot - fr > self.lead + 1 else None
+        if aid < 450 or aid in RUSH_IDS:
+            return None
+        if aid >= 1200:
+            return "super"
+        if 480 <= aid < 500:
+            return "parry"
+        tot = self.own_total.get(aid) or int(ic.get("unknown_move_frames", 30))
+        if fr is None or tot - fr > self.lead + 1:
+            return f"own move {aid}"
+        return None
 
     def _note_onset(self, oa, tmr) -> None:
         if oa != self._onset_act:
@@ -394,22 +457,36 @@ class ScriptedFighter:
             return self._move("drive_impact", "di_reaction", f"opponent Drive Impact at {dist:.2f}")
         if not info.get("di"):
             self.di_handled_id = None
-        # 4. anti-air on a real jump, where the opponent WILL be when Shoryuken is active
+        # 4. anti-air on a real jump, timed from WHEN the opponent lands (0.18.0). MEASURED 0.17.5 ranked: of 42 jump-ins
+        #    that landed near the bot, 2 met a Shoryuken in time; the old rule waited for the opponent to fall (apex)
+        #    and then needed motion + input delay + start-up, ~20 frames, which is about all of the fall.
         aa = self.c["anti_air"]
         if (self._jumping(op) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
-                and not (_num(me.get("blockstun")) or 0) and op_y <= aa["max_height"] and self._ok("anti_air")):
+                and not (_num(me.get("blockstun")) or 0) and self._ok("anti_air")):
+            t_land = landing_frames(op_y, self.op_vy, float(aa.get("gravity", 0.0123)))
             mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
-            px = ox + self.op_vx * aa["lead_frames"]
+            px = ox + self.op_vx * t_land
             pdx, dx = px - mx, ox - mx
-            if dx * pdx < 0 or abs(pdx) < aa["min_dist"]:
-                # cross-up: a 623 input now would come out for the wrong side; block toward where they land
-                land = Facing.RIGHT if pdx > 0 else Facing.LEFT
-                return Decision("hold", direction=4, facing=land, rule="block_crossup",
-                                reason=f"opponent crossing over (lands {abs(pdx):.2f} {'right' if pdx > 0 else 'left'})")
-            if abs(pdx) <= aa["max_dist"] and self.op_vy <= 0.02:
-                self.aa_done_for_jump = True
-                return self._move("shoryuken", "anti_air", f"opponent jumping in (height {op_y:.2f}, "
-                                  f"now {dist:.2f}, in {aa['lead_frames']}f {abs(pdx):.2f})")
+            srk, nrm = self.c["moves"][aa.get("move", "shoryuken")], self.c["moves"].get(aa.get("normal", ""))
+            need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
+            early = int(aa.get("early_frames", 6)) + self.aa_extra   # active this many frames before they land
+            if abs(pdx) <= aa["max_dist"] + 0.6 and t_land <= need + early:
+                if dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3)):
+                    # cross-up: a 623 input now would come out for the wrong side; block toward where they land.
+                    # MEASURED 0.18.0 (99 jump-ins, 3 checks each): predicted >= 0.3 past the bot = a real cross-up 54
+                    # of 72, no false alarm; closer predictions land in front (the bodies push apart at ~0.6)
+                    land = Facing.RIGHT if pdx > 0 else Facing.LEFT
+                    return Decision("hold", direction=4, facing=land, rule="block_crossup",
+                                    reason=f"opponent crossing over (lands {abs(pdx):.2f} {'right' if pdx > 0 else 'left'})")
+                if abs(pdx) <= aa["max_dist"]:
+                    why = f"opponent jumping in (height {op_y:.2f}, lands in {t_land:.0f}f {abs(pdx):.2f} away)"
+                    if t_land >= need - 2:
+                        self.aa_done_for_jump = True
+                        return Decision("seq", srk["name"], srk["seq"], reason=why, rule="anti_air")
+                    if nrm is not None and t_land >= self.lead + self.stale + int(nrm.get("startup", 9)) - 3:
+                        self.aa_done_for_jump = True    # too late for the Shoryuken: the anti-air normal
+                        return Decision("seq", nrm["name"], nrm["seq"], reason=why + "; too late for a Shoryuken",
+                                        rule="anti_air")
         # 4b. perfect parry an opponent projectile whose arrival time has been learned (assess.ProjectileTimer)
         pp = self._perfect_parry(raw, me, dist)
         if pp is not None:
@@ -471,6 +548,10 @@ class ScriptedFighter:
                                 reason=f"opponent attacking (action {op_act})", rule="block")
         if t < self.block_until:
             return Decision("hold", direction=block_dir, facing=block_face, reason="holding block", rule="block")
+        # 6b. the opponent getting up next to the bot, or walking into throw range (0.18.0)
+        ap = self._their_wakeup(raw, me, op, dist, t) or self._approach(raw, me, op, dist, t)
+        if ap is not None:
+            return ap
         # 7. neutral
         if t < self.next_neutral_t:
             return Decision("none")
@@ -526,7 +607,9 @@ class ScriptedFighter:
         else:
             self._pressure_fired = False             # free again: the next stun is a new moment
             return None
-        if self._pressure_fired or rem is None or rem > self.lead + self.defense.pad + 1:
+        # 0.18.0: + stale, how old the newest state probably is (0.17.5 ranked: state arrived in bursts ~53 ms apart and
+        # defences chosen after a block - Shoryuken, jab, delay tech - were thrown: their input came too late)
+        if self._pressure_fired or rem is None or rem > self.lead + self.stale + self.defense.pad + 1:
             return None
         if dist > float(dc.get("max_dist", 1.4)) or (_num(op.get("y")) or 0.0) > 0.3:
             return None
@@ -535,6 +618,47 @@ class ScriptedFighter:
             if adv is not None and adv <= -4 and not self.punished:
                 return None                          # punishable: the punish rule acts on this one
         self._pressure_fired = True
+        return self._commit_defense(sit, raw, me, op, dist, t)
+
+    def _approach(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.18.0: the opponent walking into throw range in neutral is a pressure moment too (0.17.5 ranked: 9 of 26
+        throws on the bot came from neutral, walk-ups and after its dashes / landings). Once per approach; the same
+        per-opponent game as after a block (what this opponent did when walking in: throw / strike / shimmy / wait)."""
+        dc = self.c.get("defense") or {}
+        if self.defense is None or not dc.get("approach", True):
+            return None
+        if dist > float(dc.get("approach_reset", 1.6)):
+            self._approach_fired = False
+            return None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if (self._approach_fired or mx is None or ox is None or dist > float(dc.get("approach_dist", 1.15))
+                or (_num(op.get("y")) or 0.0) > 0.05 or self.busy(me) is not None or not self.vel_ok):
+            return None
+        toward = (mx - ox) * self.op_vx > 0.004              # walking or dashing at the bot
+        if not toward or (isinstance(op.get("action_id"), int) and op["action_id"] >= self.c["attack_id_min"]):
+            return None
+        self._approach_fired = True
+        return self._commit_defense("approach", raw, me, op, dist, t)
+
+    def _their_wakeup(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.18.0: the opponent getting up close to the bot (0.17.5 ranked: the bot dashed or landed a jump next to a
+        waking Terry and was thrown on Terry's first free frame). The get-up action lasts 30 frames (MEASURED); the
+        bot commits to an option that reaches the game on that frame, from the same per-opponent game."""
+        dc = self.c.get("defense") or {}
+        oa, tmr = op.get("action_id"), raw.get("stage_timer")
+        wf = (dc.get("wakeup_frames") or {}).get(oa)
+        if self.defense is None or not wf or not isinstance(tmr, int) or not isinstance(self.op_onset, int):
+            return None
+        if self._their_wake_fired == self.op_onset or dist > float(dc.get("max_dist", 1.4)):
+            return None
+        rem = int(wf) - (tmr - self.op_onset)
+        if rem > self.lead + self.stale + self.defense.pad + 1 or rem < 0 or self.busy(me) is not None:
+            return None
+        self._their_wake_fired = self.op_onset
+        return self._commit_defense("their_wakeup", raw, me, op, dist, t)
+
+    def _commit_defense(self, sit: str, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision:
+        dc = self.c.get("defense") or {}
         ch = self.defense.choose(sit, lambda a: self.can_spend(me, a))
         opt = ch["option"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
@@ -564,6 +688,61 @@ class ScriptedFighter:
             self._hit_by = op.get("action_id")
         self._prev_hs = hs
 
+    def _track_damage_taken(self, me: dict, op: dict) -> None:
+        """Every hp the bot loses goes to the opener of that exchange: the opponent's action when the bot, free the
+        line before, was first hit (or thrown)."""
+        hp, rr = _num(me.get("hp")), self._rr
+        aid = me.get("action_id")
+        if rr["hp"] is not None and hp is not None and hp < rr["hp"]:
+            if rr["free"]:
+                rr["cat"] = opener_category(op, aid)
+                self.round_taken.setdefault(rr["cat"], [0, 0])[0] += 1
+            self.round_taken.setdefault(rr["cat"], [0, 0])[1] += int(rr["hp"] - hp)
+        rr["hp"] = hp
+        rr["free"] = not ((_num(me.get("hitstun")) or 0) > 0 or (_num(me.get("blockstun")) or 0) > 0
+                          or aid in self.hit_ids or aid in self.thrown_ids)
+
+    def round_review(self) -> dict:
+        """At a round's end: what hurt most, and the changes for the next round (anti-air earlier after losing to
+        jump-ins; throws expected at pressure moments after losing to throws). Resets the round's counts."""
+        taken, self.round_taken = self.round_taken, {}
+        self._rr = {"hp": None, "free": True, "cat": "other"}
+        total = sum(d for _, d in taken.values())
+        out = {"taken": {k: {"openings": n, "damage": d} for k, (n, d) in taken.items()}, "changes": []}
+        if total <= 0:
+            return out
+        share = {k: d / total for k, (_, d) in taken.items()}
+        if share.get("jump-in", 0) >= 0.25 and taken["jump-in"][1] >= 1500:
+            self.aa_extra = min(6, self.aa_extra + 3)
+            out["changes"].append(f"anti-air {self.aa_extra} frames earlier")
+        if share.get("throw", 0) >= 0.2:
+            out["changes"].append("expect throws at pressure moments")
+            out["throws"] = True
+        return out
+
+    def _track_own_attack(self, me: dict, op: dict) -> None:
+        """Each own ground attack (normal or non-projectile special): its start distance and whether it touched the
+        opponent (hitstop / blockstun rising or hp lost) before the bot's next action; the result goes to live_reach."""
+        aid = me.get("action_id")
+        a = self._own_atk
+        if a is not None and aid != a["id"]:
+            if self.live_reach is not None and not a["rush"]:
+                self.live_reach.add(a["id"], a["dist"], a["contact"])
+            a = self._own_atk = None
+        if a is None and isinstance(aid, int) and (600 <= aid < 715 or 900 <= aid < 1200) and aid not in self._own_proj \
+                and (_num(me.get("y")) or 0.0) <= 0.05 and aid != self._own_last:
+            d = player_distance(me, op)
+            if d is not None:
+                a = self._own_atk = {"id": aid, "dist": d, "contact": False, "rush": self._own_last in RUSH_IDS,
+                                     "op": (_num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp")))}
+        if a is not None and not a["contact"]:
+            hs, bs, hp = _num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp"))
+            hs0, bs0, hp0 = a["op"]
+            if (hs > 0 and not hs0) or (bs > 0 and not bs0) or (hp is not None and hp0 is not None and hp < hp0):
+                a["contact"] = True
+            a["op"] = (hs, bs, hp)
+        self._own_last = aid
+
     def observe_line(self, raw: dict, me_i: int) -> None:
         """Every state line (not only the ones decisions are made on): what the opponent answered a pressure
         moment with, whether its current move has touched the bot, and projectile timings."""
@@ -573,6 +752,8 @@ class ScriptedFighter:
         tmr = raw.get("stage_timer")
         self._note_onset(oa, tmr)
         self._track_self(me, op, tmr)
+        self._track_own_attack(me, op)
+        self._track_damage_taken(me, op)
         if oa != self.op_move["id"]:
             self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False}
             if (self.opp.get(oa) or {}).get("projectile"):
@@ -766,6 +947,59 @@ def _has_motion(seq: str) -> bool:
     return len(dirs) > 1
 
 
+def opener_category(op: dict, my_aid=None) -> str:
+    """What opened up an exchange, from the opponent's action (round review, 0.18.0)."""
+    a = op.get("action_id")
+    if my_aid in (721, 725, 726) or (isinstance(a, int) and 715 <= a <= 725):
+        return "throw"
+    if not isinstance(a, int):
+        return "other"
+    if (num(op.get("y")) or 0.0) > 0.05 or 650 <= a <= 659:
+        return "jump-in"
+    if 850 <= a <= 869:
+        return "Drive Impact"
+    if 1200 <= a < 1300:
+        return "super"
+    if 900 <= a < 1200:
+        return "special"
+    if 600 <= a < 715:
+        return "ground normal"
+    return "other"
+
+
+def landing_frames(y: float, vy: float, g: float) -> float:
+    """Frames until an airborne player at height y moving up at vy (units per frame) lands, with gravity g. MEASURED
+    0.18.0: a jump lasts 37 frames for most characters and peaks at 2.11 (g ~ 0.0123)."""
+    y, vy = max(0.0, y), vy
+    return (vy + (vy * vy + 2.0 * g * y) ** 0.5) / g if g > 0 else 0.0
+
+
+def seq_prefix(seq: str) -> int:
+    """Frames from a sequence's start to its first button (a motion's directions)."""
+    n = 0
+    for tok in seq.split():
+        head, _, fr = tok.partition("@")
+        if "+" in head:
+            return n
+        n += int(fr or 1)
+    return n
+
+
+def motion_guard(seq: str, since_forward_s: float | None, clear_frames: int) -> tuple[str, int]:
+    """A motion that starts with down and ends forward (236, 236236, 2363...) right after the bot held forward reads
+    as forward-down-downforward: a Shoryuken (MEASURED 0.17.5 ranked: H / M Hadoken came out as H / M Shoryuken
+    after walking forward). Prepend neutral until forward is `clear_frames` old. Returns (sequence, frames added).
+    `clear_frames` is an ESTIMATE of SF6's motion leniency (configs/fighter/ryu.yaml: inputs.motion_clear_frames)."""
+    toks = seq.split()
+    dirs = [t.split("@")[0].split("+")[0] for t in toks]
+    if not toks or dirs[0] not in ("1", "2", "3") or "6" not in dirs[1:] or since_forward_s is None:
+        return seq, 0
+    wait = int(clear_frames - since_forward_s * 60.0 + 0.999)
+    if wait <= 0:
+        return seq, 0
+    return f"5@{wait} " + seq, wait
+
+
 def _new_match_summary(me_key: str) -> dict:
     return {"player": me_key, "decisions": {}, "landed": {}, "rounds": [], "match": None,
             "opponent_catalog": False, "character": None, "opponent": None, "interrupted": {},
@@ -866,7 +1100,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     from .route_book import build as build_book
     from .side_probe import by_character, probe
     lines: queue.Queue = queue.Queue()
-    cur = {"data": DatasetBuilder()}
+    cur = {"data": DatasetBuilder(), "arrival": ArrivalMeter()}
     reader = open_state_reader(cfg, on_state=lines.put)
     if reader is None:
         return {}
@@ -983,6 +1217,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     def finish_match() -> None:
         nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0, learner
         data, cur["data"] = cur["data"], DatasetBuilder()
+        arrival, cur["arrival"] = cur["arrival"].summary(), ArrivalMeter()
+        if arrival:
+            summary["state_arrival"] = arrival
         if summary["match"] is not None or summary["rounds"] or summary["decisions"]:   # the bot played
             if fighter is not None:
                 if fighter.policy is not None and fighter.policy.win_push():
@@ -1000,6 +1237,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["blind"] = {"guess": {"h": "human", "b": "bot"}.get(g_)}
                 summary["projectile_timings"] = {str(k): v for k, v in fighter.pt.samples.items()}
                 summary["whiff_punishes"] = dict(fighter.whiff_stats)
+                if fighter.live_reach is not None and fighter.live_reach.changes():
+                    summary["live_reach"] = fighter.live_reach.changes()
+                if fighter.busy_stats:
+                    summary["held_while_busy"] = {k: dict(v) for k, v in fighter.busy_stats.items()}
                 summary["defense"] = fighter.defense_stats
                 summary["input_delay_used"] = fighter.lead
             if learner is not None:
@@ -1010,6 +1251,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["opponent_inputs_seen"] = {"lines": learner.lines, "with_input": learner.lines_with_input}
                 summary["live_moves"] = {"learned": [f"{a} = {n}" for a, n in learner.learned],
                                          "unmatched_ids": dict(learner.unmatched.most_common(8)),
+                                         "waiting_for_second_sighting": {str(k): v for k, v in learner.unconfirmed.most_common(8)},
                                          "saved": str(saved) if saved else None}
             if meter is not None:
                 ms = meter.summary()
@@ -1079,6 +1321,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         sess.narrate("Waiting for a match: the bot takes over at \"Fight!\".", source="scripted")
         t_end = clock.now() + seconds
         stop_all = False
+        fight_on = False
         carry: list = []
         while clock.now() < t_end and not sess.stop_event.is_set() and not stop_all:
             if carry:
@@ -1106,12 +1349,30 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             me_key, op_key = keys()
             for i, st in enumerate(batch):
                 cur["data"].add(st.raw, st.t_recv)
+                if fight_on:
+                    cur["arrival"].add(st.t_recv)
                 t = st.t_recv
                 for e in tracker.update(st.raw, t):
                     if e["event"] == "round_end":
                         won = side["i"] is not None and e.get("winner") == side["i"]
                         summary["rounds"].append({"round": e.get("round"), "reason": e.get("reason"), "bot_won": won})
                         sess.narrate(f"Round over: {'won' if won else 'lost'} ({e.get('reason')}).", source="measured")
+                        if fighter is not None:
+                            # 0.18.0: review the round and adapt before the next one (0.17.5 ranked: every round 2 and 3 lost)
+                            rv = fighter.round_review()
+                            rv["round"], rv["bot_won"] = e.get("round"), won
+                            summary.setdefault("round_reviews", []).append(rv)
+                            if exp is not None:
+                                exp.end_round()
+                                if rv.get("throws"):
+                                    for sit_ in ("after_block", "after_hit", "wakeup", "approach", "their_wakeup"):
+                                        exp.response(sit_, "throw")
+                            top = sorted(rv["taken"].items(), key=lambda kv: -kv[1]["damage"])[:2]
+                            if top:
+                                sess.narrate("Round review: most damage from " + ", ".join(
+                                    f"{k} ({v['damage']:,} from {v['openings']} openings)" for k, v in top)
+                                    + (". Next round: " + "; ".join(rv["changes"]) + "." if rv["changes"] else "."),
+                                    source="learned")
                     elif e["event"] == "match_end":
                         won = side["i"] is not None and e.get("winner") == side["i"]
                         summary["match"] = {"winner": f"p{e.get('winner') + 1}" if e.get("winner") is not None else None,
@@ -1287,8 +1548,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["route_book"] = len(book)
                 from .reach import load as load_reach
                 own_reach, opp_reach = load_reach(ds_root, summary["character"]), load_reach(ds_root, summary["opponent"])
+                from .reach import LiveReach
+                if cur.get("live_reach") is None:        # one per session: what it learned carries to the next match
+                    cur["live_reach"] = LiveReach(own_reach)
+                else:
+                    cur["live_reach"].base = dict(own_reach)
                 if policy is not None:
-                    policy.reach = own_reach
+                    policy.reach = cur["live_reach"]
                 summary["reach_known"] = {"own": len(own_reach), "opponent": len(opp_reach)}
                 fighter = ScriptedFighter(fcfg, opp_moves, policy=policy, book=book, experience=exp,
                                           own=own_moves(summary["character"], ds_root), own_reach=own_reach,
@@ -1296,6 +1562,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
                 fighter.human = human
+                fighter.live_reach = cur["live_reach"]
                 try:
                     from .live_moves import LiveMoveLearner
                     learner = LiveMoveLearner(summary["opponent"], ds_root, fighter.opp, load_input_bits(), fcfg)
@@ -1352,6 +1619,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             set_panel(True)
             if meter is not None:
                 fighter.lead = meter.lead(fighter.lead)
+            fighter.stale = cur["arrival"].stale_frames()
             d = fighter.decide(st.raw, t, side["i"])
             if fighter.assessment:
                 sess.status["assessment"] = fighter.assessment.get("line")
@@ -1410,6 +1678,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
                     continue
                 seq_ = human.jitter(d.seq) if human is not None else d.seq
+                since = None if c.forward_t is None else clock.now() - c.forward_t
+                seq_, guard_wait = motion_guard(seq_, since, int((fcfg.get("inputs") or {}).get("motion_clear_frames", 12)))
+                if guard_wait:
+                    summary["motion_guard"] = summary.get("motion_guard", 0) + 1
                 _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
                                    abort=urgent if neutral else None)
                 if not d.intent or d.intent in itn.ATTACK_INTENTS or d.intent.startswith(("jump", "dash")):

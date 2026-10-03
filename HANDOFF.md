@@ -241,7 +241,12 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.17.5 (latest):** online the exported move frame is frozen (CLAUDE.md 0.17.5); the bot now counts it from the
+**0.18.0 (latest):** all eight fixes from the 0.17.5 ranked baseline (CLAUDE.md "BASELINE" and "0.18.0"). Next
+ranked session: compare with the baseline (0-6, 3 rounds; dealt/taken 0.64; anti-air 2 of 42; thrown 26; combos 4 of
+~110), and check in S: `state_arrival` (lines per arrival near 1?), `held_while_busy`, `round_reviews`, `live_reach`,
+`motion_guard`, `live_moves.waiting_for_second_sighting`.
+
+**0.17.5:** online the exported move frame is frozen (CLAUDE.md 0.17.5); the bot now counts it from the
 game clock, and treats the end of a hit's stun (and a 30-frame get-up) as a throw-defence moment. Next ranked run:
 check in S that routes complete online (`routes_completed`), the defence moments `after_hit` and their results, and
 that the background retrain at session start finished (features v2). Jamie's Drive Impact id is 862, not 855.
