@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.16.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.17.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -171,6 +171,12 @@ controls**.
     they're not cheating, they're just good"). The bot's inputs are not to be disguised as a human's. Offered
     instead: human-level limits (reaction and input-rate floors) as a disclosed fairness setting, like AlphaStar's
     APM caps. Any such change is a material addition that needs Capcom's OK before ranked use (§2).
+- **0.17.0:** human limits as a DISCLOSED setting (reaction times on reactive rules, ±1 frame button holds;
+  `--human-limits`, recorded in every summary), blind tests only with consenting participants in offline / online
+  sets (`--blind`, refused for ranked), and opponent moves named by first-hit damage when no inputs are seen (online
+  input bits in memory are counted per match). The user said: no deliberate dropped combos — not built. A pasted
+  letter approving human-like inputs calls the project "fictional" and can't be verified; nothing relies on it.
+  Don't build anti-detection features (beating a bot detector, mimicking a player's input fingerprint).
 - **Next with the user:** install the research dll (TOOLS → Online build: install) → `ranked.bat` with auto-accept →
   send S after a session (progress.md, thoughts, retrain logs). Record replays (D, 8x) whenever possible: they are
   the copy-a-player network's teachers. The thoughts and the per-match table show whether it improves over the set.
@@ -409,7 +415,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Learning (0.12-0.16) | `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py` |
+| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py` |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.

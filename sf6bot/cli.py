@@ -341,11 +341,23 @@ def cmd_fight(args, cfg):
             for line in describe(st):
                 print("  " + line)
             print("  (TOOLS -> REFramework research build, or: sf6bot refw-research status)\n")
+    blind_ask = None
+    if args.blind:
+        # 0.17.0: blind evaluation, only with participants who agreed beforehand that their opponent may be a human or a
+        # bot (offline / online sets; ranked opponents have not agreed to that)
+        if vh not in ("offline", "online"):
+            print("--blind is for Versus Human offline / online sets with participants who agreed to a blind test.")
+            return
+        print("Blind evaluation: only with a participant who agreed beforehand that the opponent may be a human or a "
+              "bot. Keep the overlay and this window out of their view. After each match, type their guess.")
+        blind_ask = lambda: input("Participant's guess for that match (h = human, b = bot, Enter = none): ")  # noqa: E731
+    hl = True if (args.human_limits or args.blind) else None
     name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
     with _session(args, cfg, name) as s:
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
-                  first_to=first_to or None, versus=vh, opponent_name=args.opponent)
+                  first_to=first_to or None, versus=vh, opponent_name=args.opponent, human_limits=hl,
+                  blind_ask=blind_ask)
     _print_report(s)
 
 
@@ -767,6 +779,10 @@ def main(argv=None):
                         "PC's player (start once, queue as often as you like); side found automatically, no "
                         "countdown")
     p.add_argument("--opponent", default=None, help="optional nickname for the opponent (stored with the matches)")
+    p.add_argument("--human-limits", action="store_true", help="human reaction times and uneven button holds "
+                   "(configs/fighter/ryu.yaml human_limits; recorded in every match summary)")
+    p.add_argument("--blind", action="store_true", help="blind evaluation (offline / online sets, participants who "
+                   "agreed beforehand): human limits on, the participant's guess asked after each match")
     p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "
                    "controller and the overlay buttons press that controller (default: P1's keys)")
     p.set_defaults(fn=cmd_fight)

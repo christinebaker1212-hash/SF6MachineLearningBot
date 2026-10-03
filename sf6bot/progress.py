@@ -33,7 +33,9 @@ def compact(summary: dict, models: dict | None = None) -> dict:
             "finished": bool(m), "won": m.get("bot_won") if m else None,
             "rounds_won": sum(1 for r in rounds if r.get("bot_won")), "rounds": len(rounds),
             "dealt": dmg.get("dealt", 0), "taken": dmg.get("taken", 0),
-            "input_delay": idl.get("median"), "models": models or {}}
+            "input_delay": idl.get("median"), "models": models or {},
+            "human_limits": bool(summary.get("human_limits")), "blind_guess": (summary.get("blind") or {}).get("guess"),
+            "opponent_inputs_seen": summary.get("opponent_inputs_seen")}
 
 
 def load_ladder(ds_root: Path, last: int | None = None) -> list[dict]:
@@ -71,6 +73,9 @@ def summarize(session: list[dict], history: list[dict]) -> dict:
         e = out["by_opponent"].setdefault(k, {"won": 0, "lost": 0})
         if x.get("finished"):
             e["won" if x.get("won") else "lost"] += 1
+    bl = [x for x in session if x.get("blind_guess")]
+    if bl:
+        out["blind"] = {"guessed": len(bl), "guessed_human": sum(1 for x in bl if x["blind_guess"] == "human")}
     for i in range(0, len(history), 20):
         blk = history[i:i + 20]
         d, t = sum(x.get("dealt", 0) for x in blk), sum(x.get("taken", 0) for x in blk)
@@ -92,6 +97,9 @@ def markdown(p: dict) -> str:
         e = p["history"].get(k)
         if e and e.get("win_rate") is not None:
             lines.append(f"- win rate, {k.replace('_', ' ')} matches: {e['win_rate']:.0%} ({e['won']}-{e['lost']})")
+    if p.get("blind"):
+        lines.append(f"- blind evaluation: the participant guessed 'human' {p['blind']['guessed_human']} of "
+                     f"{p['blind']['guessed']} matches")
     if p["by_opponent"]:
         lines.append("- by opponent character: " + ", ".join(
             f"{k} {v['won']}-{v['lost']}" for k, v in sorted(p["by_opponent"].items(), key=lambda kv: -sum(kv[1].values()))))

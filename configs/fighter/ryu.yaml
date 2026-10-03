@@ -104,6 +104,16 @@ neutral:
 # projectile is a sample: distance when thrown -> frames to contact); a miss is a normal parry, which against a
 # projectile gives the Drive back. Drive Impact punishes moves that leave the opponent busy >= 26F (DI start-up)
 # + the input delay, out of the bot's pokes but inside Drive Impact's reach (measured by reach.py, else 3.0).
+# 0.17.0 human limits (human_limits.py; `fight --human-limits`, `--blind`, panel "Human limits"): reactive rules wait
+# for a sampled human reaction time; button holds vary. ESTIMATES (reaction literature), not measured on SF6 players.
+# A disclosed setting: every match summary, the thoughts and progress.md record it.
+human_limits:
+  enabled: false
+  reaction: {median: 16, sigma: 0.18, floor: 11}      # game frames
+  per_kind:
+    guard: {median: 21, sigma: 0.2, floor: 14}        # switching block height for an overhead / low
+    anti_air: {median: 15, sigma: 0.2, floor: 10}
+  hold_jitter: 1
 perfect_parry:
   enabled: true
   min_dist: 1.2            # closer, a projectile arrives too soon to time; block instead

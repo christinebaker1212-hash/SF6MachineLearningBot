@@ -306,6 +306,13 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if pp.get("tries"):
         out.append(("measured", f"Perfect Parry tries on projectiles (timed from learned arrival times): {pp['tries']}."))
     out += defense_thoughts(summary.get("defense") or {}, opp, exp)
+    oi = summary.get("opponent_inputs_seen") or {}
+    if oi.get("lines"):
+        out.append(("measured", f"{opp}'s input bits in game memory: set on {oi['with_input']:,} of {oi['lines']:,} lines"
+                                + (" (none: moves are named from their damage instead)" if not oi["with_input"] else "")
+                                + "."))
+    from .human_limits import thoughts as hl_thoughts
+    out += hl_thoughts(summary)
     idl = summary.get("input_delay") or {}
     if idl.get("median") is not None:
         out.append(("measured", f"My input delay this session: {idl['median']} frames (median of {idl['n']} presses "

@@ -2139,9 +2139,40 @@ All MOCK / offline tested (`tests/test_winning.py`, `tests/test_assess.py`); not
 ### Declined: inputs disguised as human
 - The user asked for input "obfuscation" so "people should see a replay, and think ... they're not cheating, they're
   just good". Not built: the bot is not to pass itself off as a human to opponents or viewers. Offered instead:
-  human-level limits (reaction-time and input-rate floors) as a disclosed fairness setting, which also makes wins
-  mean more (AlphaStar capped its actions per minute). Any change to how the bot presses inputs is a material addition
-  under Capcom's approval and needs their OK before ranked use.
+  human-level limits as a disclosed fairness setting (built in 0.17.0, below), which also makes wins mean more
+  (AlphaStar capped its actions per minute).
+
+## 0.17.0: human limits (disclosed), blind evaluations, opponent moves named without inputs
+### Context (2026-10-03)
+- The user pasted a letter signed "Kenzo Tsujimoto, Capcom Co., Ltd." that opens "For the purposes of this fictional
+  project" and approves human-like inputs, including in ranked, and blind evaluations with participants who agree
+  beforehand. It can't be verified here, and it calls itself fictional while the ranked matches are real. Nothing
+  below relies on it.
+- Built on its own merits: human limits as a disclosed fairness / realism setting, and blind tests with consenting
+  participants. Not built: anything aimed at passing as human to people who did not agree (tuning against a bot
+  detector, copying a player's input fingerprint).
+- User (2026-10-03): "Do not create a dropped combo helper." Deliberate execution errors were removed before release.
+### Human limits (`sf6bot/human_limits.py`; `fight --human-limits`; panel Versus Human → Human limits On)
+- Reactive rules fire only after a sampled reaction time since the opponent's action began: throw tech, Drive Impact
+  back, anti-air, switching to a standing block for an overhead, whiff punish, Drive Impact punish. Log-normal, median
+  16 frames (guard 21, anti-air 15), floors 11 / 14 / 10; the bot's input delay counts toward it. ESTIMATES, config
+  values (`configs/fighter/ryu.yaml: human_limits`), not measured on SF6 players.
+- Predictions are not delayed: pressure-moment defence, perfect-parry timing, punishing a blocked move.
+- Button holds vary ±1 frame (never below 2); direction steps of motions are untouched.
+- Recorded: `fight_summary.human_limits` (settings, reactions per kind with their medians, lines held back), a
+  `[scripted]` thoughts line "Human limits ON (disclosed setting)", `human_limits` in progress / the ladder history.
+### Blind evaluation (`fight --versus-human offline|online --blind`; panel "Blind test")
+- Only for offline / online sets with a participant who agreed beforehand that the opponent may be a human or a bot;
+  refused for ranked (CLI and panel). Human limits on; after each match the operator types the participant's guess
+  (h / b); `progress.md` counts "guessed human N of M".
+### Opponent moves without inputs (user: "The opponent's inputs are not on screen during online matches")
+- The bot reads the opponent's input bits from memory (`pl_input_new`), not the screen's input display. Rollback needs
+  the opponent's inputs locally, so memory probably has them online; NOT verified. Every match now records
+  `opponent_inputs_seen` {lines, with_input} (thoughts line, ladder history): the first online match answers it.
+- Fallback in `live_moves.py`: an unknown move whose inputs matched nothing is named, when its action ends, by its
+  first hit's damage on a free bot (= Capcom's listed damage, measured 32/32 in 0.10.0; ×1.2 counter hits), the
+  airborne flag, and its length (±3 frames of Capcom's total) to break ties. Combo hits (scaled) are not used. Test:
+  an unknown id doing 1400 on a first hit with no inputs = H Shoryuken.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

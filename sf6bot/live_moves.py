@@ -38,6 +38,19 @@ class LiveMoveLearner:
         self.votes: dict = {}               # action id -> Counter(move name), this match
         self.learned: list = []             # [(action id, name)] in the order they were first learned
         self.unmatched: Counter = Counter()  # unknown ids whose press matched nothing
+        # the opponent's input mask online (user, 2026-10-03: the opponent's inputs are not on SCREEN online; whether
+        # the game's memory has them is what this counts): lines read, lines with any input bit set
+        self.lines = 0
+        self.lines_with_input = 0
+        # fallback without inputs: an unknown move is named by the damage of its first hit (MEASURED 0.10.0: a first
+        # hit on a free defender does exactly Capcom's listed damage, 32/32; counter / punish counter 1.2x) and, to
+        # break ties, how long its action id lasted
+        self.pending: dict = {}             # action id -> {"t0", "air", "dmg"}
+        self.prev_me: dict = {}
+        self.by_damage: dict = {}
+        for m in self.rows.values():
+            if isinstance(m.get("damage_n"), int) and m["damage_n"] > 0:
+                self.by_damage.setdefault(m["damage_n"], []).append(m)
 
     def known(self, aid) -> bool:
         info = self.moves.get(aid)
@@ -57,6 +70,9 @@ class LiveMoveLearner:
         facing_right = (mx > ox) if ox is not None and mx is not None and abs(mx - ox) > 0.05 \
             else bool(op.get("facing_right", True))
         mask = op.get("input")
+        self.lines += 1
+        if isinstance(mask, int) and mask:
+            self.lines_with_input += 1
         if isinstance(mask, int):
             d, btn = decode_input_relative(mask, self.bits, facing_right)
             if not self.hist or self.hist[-1][0] != fr:
@@ -66,10 +82,45 @@ class LiveMoveLearner:
         a = op.get("action_id")
         out = None
         started = a != self.prev_act and self.prev_frame is not None and 0 < fr - self.prev_frame <= MAX_GAP
-        if started and isinstance(a, int) and a >= MIN_ACTION_ID and not self.known(a) and len(self.hist) >= 2:
-            out = self._sighting(a, fr, (num(op.get("y")) or 0.0) > 0.05)
-        self.prev_act, self.prev_frame = a, fr
+        if self.prev_act in self.pending and a != self.prev_act:
+            out = self._by_damage(self.prev_act, fr)        # the unknown move ended: name it by its damage
+        if started and isinstance(a, int) and a >= MIN_ACTION_ID and not self.known(a):
+            got = self._sighting(a, fr, (num(op.get("y")) or 0.0) > 0.05) if len(self.hist) >= 2 else None
+            if got is None and a not in self.votes:
+                self.pending[a] = {"t0": fr, "air": (num(op.get("y")) or 0.0) > 0.05, "dmg": None}
+            out = got or out
+        p = self.pending.get(a)
+        if p is not None and p["dmg"] is None and a == self.prev_act:
+            h0, h1 = num(self.prev_me.get("hp")), num(me.get("hp"))
+            free_before = not (num(self.prev_me.get("hitstun")) or 0) and not (num(self.prev_me.get("blockstun")) or 0)
+            if h0 is not None and h1 is not None and h1 < h0:
+                p["dmg"] = int(h0 - h1) if free_before else -1      # -1: a combo hit (scaled), not usable
+        self.prev_act, self.prev_frame, self.prev_me = a, fr, me
         return out
+
+    def _by_damage(self, a: int, fr: int) -> tuple | None:
+        p = self.pending.pop(a)
+        dmg = p["dmg"]
+        if not dmg or dmg < 0:
+            return None
+        cands = [m for d in {dmg, round(dmg / 1.2)} for m in self.by_damage.get(d, [])
+                 if ("jump" in (m.get("input") or "").lower()) == p["air"]]
+        names = {m["name"] for m in cands}
+        if len(names) > 1:                             # several moves do that damage: the closest length decides
+            dur = fr - p["t0"]
+            close = [m for m in cands if isinstance(m.get("total_n"), int) and abs(m["total_n"] - dur) <= 3]
+            names = {m["name"] for m in close}
+        if len(names) != 1:
+            self.unmatched[a] += 1
+            return None
+        name = names.pop()
+        v = self.votes.setdefault(a, Counter())
+        v[name] += 1
+        new = a not in self.moves or self.moves[a].get("name") != name
+        self.moves[a] = dict(self._entry(name, v), how="first-hit damage")
+        if new and all(x[0] != a for x in self.learned):
+            self.learned.append((a, name))
+        return a, name, new
 
     def _sighting(self, a: int, fr: int, airborne: bool) -> tuple | None:
         h = list(self.hist)

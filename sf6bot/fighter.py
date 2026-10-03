@@ -243,6 +243,11 @@ class ScriptedFighter:
         self._was_threat = False
         self._pp_watch: dict | None = None
         self._prev_me_stun = 0
+        # 0.17.0 human limits (human_limits.py): reactive rules wait for a sampled human reaction time
+        self.human = None
+        self.op_onset = None                 # game frame the opponent's current action began
+        self._onset_act = None
+        self._now = None
 
     def _move(self, key: str, rule: str, reason: str) -> Decision:
         m = self.c["moves"][key]
@@ -330,11 +335,21 @@ class ScriptedFighter:
         self.prev_raw = raw
         return d
 
+    def _note_onset(self, oa, tmr) -> None:
+        if oa != self._onset_act:
+            self._onset_act, self.op_onset = oa, tmr if isinstance(tmr, int) else None
+
+    def _ok(self, kind: str) -> bool:
+        """Human limits: has a human reaction time passed since the opponent's current action began?"""
+        return self.human is None or self.human.ready(kind, self.op_onset, self._now, self.lead)
+
     def _decide(self, raw: dict, t: float, me_i: int) -> Decision:
         me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
         dist = player_distance(me, op)
         if dist is None:
             return Decision("release", reason="no positions")
+        self._now = raw.get("stage_timer")
+        self._note_onset(op.get("action_id"), self._now)
         self._track(raw, op)
         self.facing(me, op)
         op_y, me_y = _num(op.get("y")) or 0.0, _num(me.get("y")) or 0.0
@@ -348,7 +363,7 @@ class ScriptedFighter:
         # Capcom's block type of the move the opponent is doing NOW: overheads (Gorai Axe Kick 925,
         # Thunder Kick 682 - 58% of the damage the user did to the bot, 0.9.0) need a standing block
         guard = info.get("guard")
-        if guard == "overhead":
+        if guard == "overhead" and self._ok("guard"):
             block_dir = 4
         elif guard == "low":
             block_dir = 1
@@ -366,14 +381,14 @@ class ScriptedFighter:
         # 2. throw tech: the opponent's throw start-up (forward 715 / back 717 measured for Ken) is
         #    visible for ~5 frames before it connects; press throw at once. Before 0.8.0 the bot held
         #    down-back here (rule 5 counted the throw as an attack): throws were 42-62% of its damage.
-        if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05:
+        if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05 and self._ok("throw"):
             self.tech_handled = op_act
             return self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
         if op_act not in self.throw_ids:
             self.tech_handled = None
         # 3. Drive Impact reaction (shared id 855, or the opponent's catalog)
         if (info.get("di") and op_act != self.di_handled_id and dist < 3.0 and me_y <= 0.05
-                and self.can_spend(me, "drive_impact")):
+                and self.can_spend(me, "drive_impact") and self._ok("di")):
             self.di_handled_id = op_act
             return self._move("drive_impact", "di_reaction", f"opponent Drive Impact at {dist:.2f}")
         if not info.get("di"):
@@ -381,7 +396,7 @@ class ScriptedFighter:
         # 4. anti-air on a real jump, where the opponent WILL be when Shoryuken is active
         aa = self.c["anti_air"]
         if (self._jumping(op) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
-                and not (_num(me.get("blockstun")) or 0) and op_y <= aa["max_height"]):
+                and not (_num(me.get("blockstun")) or 0) and op_y <= aa["max_height"] and self._ok("anti_air")):
             mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
             px = ox + self.op_vx * aa["lead_frames"]
             pdx, dx = px - mx, ox - mx
@@ -531,6 +546,7 @@ class ScriptedFighter:
         me, op = raw.get(me_key) or {}, raw.get(op_key) or {}
         oa = op.get("action_id")
         tmr = raw.get("stage_timer")
+        self._note_onset(oa, tmr)
         if oa != self.op_move["id"]:
             self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False}
             if (self.opp.get(oa) or {}).get("projectile"):
@@ -601,6 +617,8 @@ class ScriptedFighter:
         from .assess import move_class
         if not (self.c.get("di_punish") or {}).get("enabled", True) or self.op_move["punished"] or info.get("di"):
             return None
+        if not self._ok("di_punish"):
+            return None
         if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0):
             return None
         poke = max([v for k, v in self.own_reach.items() if isinstance(k, int) and 600 <= k < 715] or [0.0])
@@ -642,6 +660,8 @@ class ScriptedFighter:
     def _whiff_punish(self, me: dict, op: dict, dist: float, info: dict) -> Decision | None:
         wc = self.c.get("whiff_punish") or {}
         if not wc.get("enabled", True) or self.op_move["connected"] or self.op_move["punished"]:
+            return None
+        if not self._ok("whiff"):
             return None
         # the move's total from Capcom / the catalog: the exported action_frames_total is the animation's length
         # (measured 0.16.0: Ryu 5LP 39 vs 13 frames), which made 0.14's whiff punishes start too late
@@ -799,7 +819,7 @@ def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
 
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, matches: int | None = 1,
               panel=None, first_to: int | None = None, versus: str | None = None,
-              opponent_name: str | None = None) -> dict:
+              opponent_name: str | None = None, human_limits: bool | None = None, blind_ask=None) -> dict:
     """Play matches until `matches` are done, someone reaches `first_to` wins, `seconds` pass or F8.
 
     Waits for a battle instead of requiring one at the start, and goes back to waiting after each
@@ -840,6 +860,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     retrainer = Retrainer(pc.get("retrain_every", 20) if (versus == "ranked" or pc.get("retrain_in_all_modes"))
                           else 0, sess.recorder.dir, enabled=not sess.mock and brain is not None)
     brain_mtime = [None]
+    # 0.17.0 human limits: a disclosed setting (recorded in every summary, the thoughts and progress.md)
+    from .human_limits import HumanLimits
+    hl_cfg = fcfg.get("human_limits") or {}
+    use_hl = bool(hl_cfg.get("enabled")) if human_limits is None else human_limits
+    human = HumanLimits(hl_cfg) if use_hl else None
+    if human is not None:
+        print(f"Human limits ON: reaction ~{human.c['reaction']['median']}F, button holds +/-{human.c['hold_jitter']}F, "
+              "(recorded in every match summary).")
     c = sess.controller
     runner = SequenceRunner(c, sink=sess.recorder.event)
     # the bot's input delay, measured live from its own input mask (input_delay.py, 0.14.0)
@@ -929,6 +957,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["win_push"] = fighter.policy.win_push()
                 summary["punishes"] = dict(fighter.punish_stats)
                 summary["assessment"] = fighter.assess_stats
+                if human is not None:
+                    summary["human_limits"] = human.summary()
+                    human.reset_stats()
+                if blind_ask is not None:
+                    try:
+                        g_ = (blind_ask() or "").strip().lower()[:1]
+                    except (EOFError, OSError):
+                        g_ = ""
+                    summary["blind"] = {"guess": {"h": "human", "b": "bot"}.get(g_)}
                 summary["projectile_timings"] = {str(k): v for k, v in fighter.pt.samples.items()}
                 summary["whiff_punishes"] = dict(fighter.whiff_stats)
                 summary["defense"] = fighter.defense_stats
@@ -938,6 +975,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     saved = learner.save()
                 except OSError as e:
                     saved = f"not saved: {e}"
+                summary["opponent_inputs_seen"] = {"lines": learner.lines, "with_input": learner.lines_with_input}
                 summary["live_moves"] = {"learned": [f"{a} = {n}" for a, n in learner.learned],
                                          "unmatched_ids": dict(learner.unmatched.most_common(8)),
                                          "saved": str(saved) if saved else None}
@@ -1225,6 +1263,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                           opp_reach=opp_reach)
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
+                fighter.human = human
                 try:
                     from .live_moves import LiveMoveLearner
                     learner = LiveMoveLearner(summary["opponent"], ds_root, fighter.opp, load_input_bits(), fcfg)
@@ -1338,7 +1377,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     if res.get("aborted"):
                         summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
                     continue
-                _, ok = runner.run(parse_sequence(d.seq, d.name), stop_event=sess.stop_event,
+                seq_ = human.jitter(d.seq) if human is not None else d.seq
+                _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
                                    abort=urgent if neutral else None)
                 if not d.intent or d.intent in itn.ATTACK_INTENTS or d.intent.startswith(("jump", "dash")):
                     c.apply(InputState(), tag="fighter_seq_end")

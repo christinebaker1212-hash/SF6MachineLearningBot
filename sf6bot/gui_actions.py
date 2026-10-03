@@ -42,7 +42,9 @@ ACTIONS: list[Action] = [
            [Option("mode", "Mode", choices=[("Offline", "offline"), ("Online", "online"),
                                             ("Ranked", "ranked")], default="offline"),
             Option("first_to", "First to", kind="int", default=2, hint="0 = no limit (ranked: none)"),
-            Option("opponent", "Nickname", kind="text", default="", hint="optional")], menu="H"),
+            Option("opponent", "Nickname", kind="text", default="", hint="optional"),
+            Option("limits", "Human limits", choices=[("Off", "off"), ("On", "on"), ("Blind test", "blind")],
+                   default="off")], menu="H"),
     # ---- RECORD ------------------------------------------------------------------------------------------
     Action("replay_one", "record", "One replay", "Record a replay you play back (stops 5 s after the match).",
            menu="D 1"),
@@ -147,6 +149,13 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             args += ["--first-to", str(_int(v["first_to"], "First to"))]
         if str(v.get("opponent") or "").strip():
             args += ["--opponent", str(v["opponent"]).strip()]
+        lim = v.get("limits") or "off"
+        if lim == "blind":
+            if v["mode"] == "ranked":
+                raise BadInput("Blind tests are for offline / online sets with a participant who agreed to one.")
+            args += ["--blind"]
+        elif lim == "on":
+            args += ["--human-limits"]
         return [one(*args)]
     if action_id == "replay_one":
         return [one("replay-record")]
