@@ -23,6 +23,7 @@ MACROS = {      # movement intents: short macro actions (decided again right aft
     "drive_impact": "5+HP+HK@3", "parry": "5+MP+MK@16",
 }
 AIR_ATTACK_MAX_Y = 1.3     # jump attacks only below this height on the way down (apex ~2.1, measured)
+REACH_MARGIN = 0.1        # a move is chosen up to this far beyond its measured reach
 SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 
 
@@ -53,7 +54,7 @@ def own_moves(character: str, ds_root: Path) -> list[dict]:
             seq = seq.split()[-1]               # the button only: the bot is already in the air
         row = rows.get(name) or {}
         out.append({"name": name, "id": mid, "intent": intent, "seq": seq,
-                    "startup": g.get("startup") or row.get("startup_n"),
+                    "startup": g.get("startup") or row.get("startup_n"), "damage": row.get("damage_n"),
                     "projectile": "projectile" in (row.get("properties") or "").lower(),
                     "super_cost": next((v for k, v in SUPER_COST.items() if name.startswith(k)), 0)})
     return out
@@ -86,6 +87,9 @@ class NeutralPolicy:
         self.explore = float(c.get("explore", 0.08))
         self.rng = np.random.default_rng(seed)
         self.last: dict = {}
+        # measured reach per own action id (reach.py, menu B): pokes and close specials only from where they
+        # have been seen to connect (0.14.0; the FT5 had ~20 combo starters whiff from too far)
+        self.reach: dict = {}
 
     def allowed(self, me: dict, dist: float, can_spend, falling: bool | None = None) -> np.ndarray:
         air = (num(me.get("y")) or 0.0) > 0.05
@@ -144,7 +148,7 @@ class NeutralPolicy:
             else:
                 out.update(route=e, move=e["route"], seq=None)
         elif intent in ("poke", "special", "super", "air_attack"):
-            m = self._move(intent, zone, me)
+            m = self._move(intent, zone, me, dist)
             if m is None:
                 out.update(intent="walk_fwd" if intent != "air_attack" else "idle",
                            seq=MACROS["walk_fwd"] if intent != "air_attack" else None)
@@ -159,8 +163,16 @@ class NeutralPolicy:
         self.last = out
         return out
 
-    def _move(self, intent: str, zone: str, me: dict) -> dict | None:
-        cands = [m for m in self.moves if m["intent"] == intent
+    def in_reach(self, m: dict, dist: float | None) -> bool:
+        """False only when the move's measured reach is shorter than the distance (projectiles and moves
+        without a measurement pass)."""
+        if dist is None or m.get("projectile") or m["intent"] == "air_attack":
+            return True
+        r = self.reach.get(m["id"])
+        return r is None or dist <= r + REACH_MARGIN
+
+    def _move(self, intent: str, zone: str, me: dict, dist: float | None = None) -> dict | None:
+        cands = [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist)
                  and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))]
         if not cands:
             return None

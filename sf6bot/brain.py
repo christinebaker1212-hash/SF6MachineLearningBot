@@ -165,6 +165,9 @@ def report_md(rep: dict) -> str:
             extra += " <- " + ", ".join(r["made_from"])
         lines.append(f"  - {r['file']} ({r['source']}): {r['samples']}{extra}")
     lines.append(f"- what players chose: {rep.get('intent_counts')}")
+    if rep.get("reach") is not None:
+        lines.append("- move reach measured (moves with 3+ connecting starts, datasets/reach/): "
+                     + (", ".join(f"{k} {v}" for k, v in sorted(rep["reach"].items())) or "none yet"))
     if rep.get("network"):
         lines.append(f"- network: {rep['network']}")
     ho = rep.get("held_out")

@@ -95,3 +95,41 @@ neutral:
   close: {light_chain: 3, throw: 2, low_forward_fireball: 2, block: 2}
   decision_every_s: 0.35   # one neutral decision every N seconds
   block_s: 0.4             # "block" = hold down-back this long
+# 0.14.0: defence at pressure moments by PREDICTION (sf6bot/defense.py). Throws can't be teched on reaction:
+# a 5-frame start-up vs seeing it + 3-5 frames of input delay (26 of 29 throws landed in the user's FT5).
+# When the bot is about to be free (blockstun / knockdown ending) with the opponent this close, it commits
+# to one option so it reaches the game on the first free frame, drawn from what this opponent did before.
+defense:
+  max_dist: 1.4            # opponent within this (game units; throw range ~0.8 + a step) = a pressure moment
+  watch_frames: 30         # nothing within this many frames after it = the opponent "waited"
+  temperature: 0.35        # lower = lean harder on the best-looking option (still a mix)
+  model_weight: 4          # tries of an option before its own measured result outweighs the payoff table
+  # starting odds of the opponent's answer (counts are added per opponent, learning.Experience)
+  prior: {throw: 1.5, strike: 1.5, shimmy: 0.5, wait: 1.5}
+  options:
+    block:      {seq: "1@12"}
+    delay_tech: {seq: "1@4 4+LP+LK@3 1@8"}     # hold down-back, then back + throw: late enough to block a strike
+    tech:       {seq: "4+LP+LK@3 1@8"}
+    jab:        {seq: "2+LP@3 1@6"}
+    back_dash:  {seq: "4@3 5@2 4@3"}
+    jump:       {seq: "8@4"}
+    reversal:   {seq: "6@2 2@2 3+HP@3"}        # Shoryuken: invincible start-up (Capcom notes)
+    parry:      {seq: "5+MP+MK@14", drive: drive_parry}
+  # ESTIMATES from game knowledge (NOT measured), thousands of hp for the bot when the opponent answers with
+  # each option. What each option actually scores against an opponent replaces these as tries accumulate.
+  payoff:
+    block:      {throw: -1.2, strike: 0.0, shimmy: 0.0, wait: 0.0}
+    delay_tech: {throw: 0.0, strike: -0.2, shimmy: -1.6, wait: -0.3}
+    tech:       {throw: 0.0, strike: -0.9, shimmy: -1.6, wait: -0.3}
+    jab:        {throw: 0.3, strike: -0.9, shimmy: -0.6, wait: 0.2}
+    back_dash:  {throw: 0.0, strike: -1.0, shimmy: -0.2, wait: 0.0}
+    jump:       {throw: 0.6, strike: -1.2, shimmy: -0.4, wait: -0.3}
+    reversal:   {throw: 1.2, strike: 1.2, shimmy: -2.5, wait: -2.5}   # a blocked Shoryuken is a full punish
+    parry:      {throw: -1.5, strike: 0.6, shimmy: -0.4, wait: -0.2}
+# 0.14.0: block only what can reach; punish what whiffed (sf6bot/fighter.py rule 6).
+whiff_punish:
+  enabled: true
+  active_frames_guess: 4   # an opponent move counts as recovering this many frames after its first active frame
+                           # (Capcom start-up; active lengths are not in the match data: an assumption)
+  reach_margin: 0.0        # own move used only within its measured reach (reach.py, menu B)
+  block_margin: 0.3        # block an opponent move only within its measured reach + this

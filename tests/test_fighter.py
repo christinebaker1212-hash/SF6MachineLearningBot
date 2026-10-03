@@ -8,7 +8,9 @@ from sf6bot.actions import Facing
 from sf6bot.fighter import ScriptedFighter, load_fighter_config, load_opponent_catalog
 
 DATA = Path(__file__).parent / "data"
-FCFG = load_fighter_config(Path(__file__).parent.parent / "configs" / "fighter")
+FCFG_ALL = load_fighter_config(Path(__file__).parent.parent / "configs" / "fighter")
+# the blocking / punish / reaction rules on their own; the 0.14.0 pressure-moment defence is tested apart
+FCFG = {k: v for k, v in FCFG_ALL.items() if k != "defense"}
 
 
 def state(me=None, op=None, timer=500):

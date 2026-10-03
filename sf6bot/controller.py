@@ -28,6 +28,9 @@ class Controller:
         self._armed = False
         self.current = NEUTRAL
         self.send_errors = 0
+        # called with (t_sent, newly pressed logical names) after every send: the live input-delay meter
+        # (input_delay.DelayMeter) matches them to the game's input mask
+        self.on_press: list = []
 
     # ---- arming -----------------------------------------------------------
     @property
@@ -83,6 +86,12 @@ class Controller:
                     raise
                 self._held = target
             t1 = clock.now()
+            if presses:
+                for f in list(self.on_press):
+                    try:
+                        f(t1, presses)
+                    except Exception:      # a listener must never break input
+                        pass
             if releases or presses:
                 self.sink({"type": "input", "t": t1, "t_call": t0, "send_s": t1 - t0, "tag": tag,
                            "state": state.label(), "facing": self.facing.value,

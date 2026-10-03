@@ -185,9 +185,22 @@ def _common_moves(fcfg: dict) -> dict:
 
 class ScriptedFighter:
     def __init__(self, fcfg: dict, opp_moves: dict | None = None, seed: int | None = None,
-                 policy=None, book: list | None = None, experience=None) -> None:
+                 policy=None, book: list | None = None, experience=None, own: list | None = None,
+                 own_reach: dict | None = None, opp_reach: dict | None = None) -> None:
         self.c = fcfg
         self.opp = opp_moves or {}
+        self.own = own or []              # the bot's own moves (neutral_policy.own_moves): whiff punishes
+        self.own_reach = own_reach or {}  # reach.load: measured reach per action id (own / opponent)
+        self.opp_reach = opp_reach or {}
+        # the bot's input delay in frames: the config's measured 4, replaced live by input_delay.DelayMeter
+        self.lead = int((fcfg.get("punish") or {}).get("latency_frames", 4))
+        from .defense import Defense
+        self.defense = Defense(fcfg["defense"], experience, seed) if fcfg.get("defense") else None
+        self._pressure_fired = False
+        self.watch: dict | None = None
+        self.defense_stats: dict = {}
+        self.whiff_stats = {"chances": 0, "taken": 0}
+        self.op_move: dict = {"id": None, "connected": False, "chance": False, "punished": False}
         self.policy = policy              # neutral_policy.NeutralPolicy: the learned neutral game
         self.book = book or []            # route_book entries: the combo lab's TRUE combos
         self.exp = experience             # learning.Experience: what worked against this opponent
@@ -323,6 +336,11 @@ class ScriptedFighter:
         elif guard == "low":
             block_dir = 1
 
+        # 0. a pressure moment: about to be free with the opponent close -> commit to a defensive option
+        #    now (defense.py: throws can't be teched on reaction, 26 of 29 landed in the user's FT5)
+        d = self._pressure(raw, me, op, dist, t)
+        if d is not None:
+            return d
         # 1. being hit: nothing to do
         if (_num(me.get("hitstun")) or 0) > 0:
             self.blocked_id = None
@@ -395,12 +413,21 @@ class ScriptedFighter:
                                         reason=f"blocked {name} ({adv:+d} on block{src})")
             return Decision("hold", direction=block_dir, facing=block_face, reason="blocking", rule="block")
         self.blocked_id = None
-        # 6. opponent attacking nearby -> block (throws are handled above, not blocked)
+        # 6. opponent attacking -> block only while the move can still reach the bot (its start-up / active
+        #    frames, within its measured reach); a move already recovering without having connected is a
+        #    whiff to punish (0.14.0: the FT5 showed ~500-970 lines of blocking per match, including against
+        #    whiffs, and no whiff punishes)
         op_busy = (_num(op.get("hitstun")) or 0) > 0 or (_num(op.get("blockstun")) or 0) > 0
         if (op_act is not None and op_act >= self.c["attack_id_min"] and op_act not in self.throw_ids
-                and op_act not in self.hit_ids and not op_busy and dist <= self.c["ranges"]["poke"] + 0.4):
-            return Decision("hold", direction=block_dir, facing=block_face, reason=f"opponent attacking (action {op_act})",
-                            rule="block")
+                and op_act not in self.hit_ids and not op_busy):
+            phase = self._op_phase(op, info)
+            if phase == "recovery" and not info.get("projectile"):
+                wp = self._whiff_punish(me, op, dist, info)
+                if wp is not None:
+                    return wp
+            elif self._threat(op, info, dist):
+                return Decision("hold", direction=block_dir, facing=block_face,
+                                reason=f"opponent attacking (action {op_act})", rule="block")
         if t < self.block_until:
             return Decision("hold", direction=block_dir, facing=block_face, reason="holding block", rule="block")
         # 7. neutral
@@ -425,6 +452,133 @@ class ScriptedFighter:
             return Decision("hold", direction=block_dir, reason=reason, rule="neutral:block")
         return self._move(pick, f"neutral:{pick}", reason)
 
+
+    # ---- 0.14.0: pressure moments, the opponent's move phase, whiff punishes --------------------------
+    def _pressure(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        dc = self.c.get("defense") or {}
+        if self.defense is None:
+            return None
+        bs, hs, aid = _num(me.get("blockstun")) or 0, _num(me.get("hitstun")) or 0, me.get("action_id")
+        grounded = (_num(me.get("y")) or 0.0) <= 0.05
+        if bs > 0:
+            sit, rem = "after_block", bs
+        elif hs > 0:
+            return None    # in a combo the next hit comes before the stun ends: not a moment to choose
+        elif isinstance(aid, int) and aid in self.hit_ids and grounded:
+            fr, tot = me.get("action_frame"), me.get("action_frames_total")
+            sit = "wakeup"
+            rem = tot - fr if isinstance(fr, (int, float)) and isinstance(tot, (int, float)) and tot > fr else None
+        else:
+            self._pressure_fired = False             # free again: the next stun is a new moment
+            return None
+        if self._pressure_fired or rem is None or rem > self.lead + self.defense.pad + 1:
+            return None
+        if dist > float(dc.get("max_dist", 1.4)) or (_num(op.get("y")) or 0.0) > 0.3:
+            return None
+        if sit == "after_block":
+            adv = self.opp.get(op.get("action_id"), {}).get("block_adv")
+            if adv is not None and adv <= -4 and not self.punished:
+                return None                          # punishable: the punish rule acts on this one
+        self._pressure_fired = True
+        ch = self.defense.choose(sit, lambda a: self.can_spend(me, a))
+        opt = ch["option"]
+        # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
+        # did 58% of the user's damage against a crouch block)
+        g = self.opp.get(op.get("action_id"), {}).get("guard")
+        if g == "overhead" or (_num(op.get("y")) or 0.0) > 0.3:
+            ch["seq"] = " ".join(("4" + tok[1:]) if tok.startswith("1@") else tok for tok in ch["seq"].split())
+        st = self.defense_stats.setdefault(sit, {"moments": 0, "options": {}, "responses": {}})
+        st["moments"] += 1
+        st["options"][opt] = st["options"].get(opt, 0) + 1
+        self.watch = {"sit": sit, "t0": raw.get("stage_timer"), "ox0": _num(op.get("x")), "mx0": _num(me.get("x")),
+                      "oa0": op.get("action_id"), "frames": int(dc.get("watch_frames", 30))}
+        if self.exp is not None:
+            self.exp.defended(t, sit, opt, me.get("hp"), op.get("hp"))
+        odds = ", ".join(f"{k} {v:.0%}" for k, v in sorted(ch["odds"].items(), key=lambda kv: -kv[1]))
+        from .defense import NICE, SITUATIONS
+        return Decision("seq", f"defence: {NICE.get(opt, opt)}", ch["seq"], rule=f"defense:{opt}",
+                        reason=f"{SITUATIONS[sit]} at {dist:.2f}; the opponent's odds: {odds}")
+
+    def observe_line(self, raw: dict, me_i: int) -> None:
+        """Every state line (not only the ones decisions are made on): what the opponent answered a pressure
+        moment with, and whether its current move has touched the bot."""
+        me_key, op_key = f"p{me_i + 1}", f"p{2 - me_i}"
+        me, op = raw.get(me_key) or {}, raw.get(op_key) or {}
+        oa = op.get("action_id")
+        if oa != self.op_move["id"]:
+            self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False}
+        if (_num(me.get("blockstun")) or 0) > 0 or (_num(me.get("hitstun")) or 0) > 0:
+            self.op_move["connected"] = True
+        if self.watch is not None:
+            from .defense import classify_response
+            kind = classify_response(self.watch, raw, me_key, op_key,
+                                     {"throw": self.throw_ids, "thrown": self.thrown_ids})
+            if kind is not None:
+                st = self.defense_stats.setdefault(self.watch["sit"], {"moments": 0, "options": {}, "responses": {}})
+                st["responses"][kind] = st["responses"].get(kind, 0) + 1
+                if self.exp is not None:
+                    self.exp.response(self.watch["sit"], kind)
+                self.watch = None
+
+    def _op_phase(self, op: dict, info: dict) -> str | None:
+        """'early' (start-up / active frames), 'recovery', or None when unknown (no start-up known)."""
+        su, fr = info.get("startup"), op.get("action_frame")
+        if not isinstance(su, (int, float)) or not isinstance(fr, (int, float)):
+            return None
+        active = int((self.c.get("whiff_punish") or {}).get("active_frames_guess", 4))
+        return "recovery" if fr >= su - 1 + active else "early"
+
+    def _threat(self, op: dict, info: dict, dist: float) -> bool:
+        """Can the opponent's current move reach the bot? Projectiles: yes. Else its measured reach (reach.py)
+        plus a margin, or the old fixed distance when it has none."""
+        if info.get("projectile"):
+            return dist <= 5.0
+        air = (_num(op.get("y")) or 0.0) > 0.05
+        r = self.opp_reach.get(f"air:{op.get('action_id')}" if air else op.get("action_id"))
+        if r is not None:
+            return dist <= r + float((self.c.get("whiff_punish") or {}).get("block_margin", 0.3))
+        return dist <= self.c["ranges"]["poke"] + 0.4
+
+    def _whiff_punish(self, me: dict, op: dict, dist: float, info: dict) -> Decision | None:
+        wc = self.c.get("whiff_punish") or {}
+        if not wc.get("enabled", True) or self.op_move["connected"] or self.op_move["punished"]:
+            return None
+        fr, tot = op.get("action_frame"), op.get("action_frames_total")
+        if not isinstance(fr, (int, float)) or not isinstance(tot, (int, float)) or tot <= fr:
+            return None
+        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0):
+            return None
+        remaining = int(tot - fr)
+        best = None
+        for m in self.own:
+            if m["intent"] != "poke" or m.get("projectile") or not isinstance(m.get("startup"), int):
+                continue
+            r = self.own_reach.get(m["id"])
+            if r is None or dist > r + float(wc.get("reach_margin", 0.0)):
+                continue
+            if m["startup"] + self.lead + 1 > remaining:
+                continue
+            key = (m.get("damage") or 0, -m["startup"])
+            if best is None or key > best[0]:
+                best = (key, m)
+        if dist <= max(list(self.own_reach.values()) or [0]) + 0.5 and not self.op_move["chance"]:
+            self.op_move["chance"] = True
+            self.whiff_stats["chances"] += 1
+        if best is None:
+            return None
+        m = best[1]
+        self.op_move["punished"] = True
+        self.whiff_stats["taken"] += 1
+        name = info.get("name") or f"action {op.get('action_id')}"
+        why = (f"{name} whiffed: {remaining}F of recovery left, {m['name']} reaches {self.own_reach[m['id']]:.2f} "
+               f"(now {dist:.2f}), starts in {m['startup']}F + {self.lead}F input delay")
+        if self.book:
+            from .route_book import choose
+            e = choose(self.book, me, op, starter=m["name"], hit_types=("punish_counter", "normal"),
+                       learned=self.exp.routes() if self.exp else None, reserve=self.c.get("drive_reserve", 0))
+            if e is not None:
+                return Decision("route", e["route"], route=e, rule="whiff_punish", reason=why + f" -> {e['route']}")
+        return Decision("seq", m["name"], m["seq"], rule="whiff_punish", reason=why)
 
     def _policy_neutral(self, raw: dict, me: dict, op: dict, t: float, me_i: int, block_dir: int) -> Decision:
         """The learned neutral game (neutral_policy): network + counts, re-weighted by this opponent's
@@ -546,6 +700,19 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         print(f"Brain: {brain.problem}")
     c = sess.controller
     runner = SequenceRunner(c, sink=sess.recorder.event)
+    # the bot's input delay, measured live from its own input mask (input_delay.py, 0.14.0)
+    from .game_state import load_input_bits
+    from .input_delay import DelayMeter
+
+    def _latest_timer():
+        st_ = reader.latest()
+        return st_.raw.get("stage_timer") if st_ is not None else None
+    try:
+        meter = DelayMeter(load_input_bits(), _latest_timer)
+        c.on_press.append(meter.on_press)
+    except Exception:              # no input-bit table: keep the configured delay
+        meter = None
+    meter_n0 = 0
     fixed_side = player
     side: dict = {"i": player, "how": "given" if player is not None else None, "lag": None}
     keys = lambda: (f"p{side['i'] + 1}", f"p{2 - side['i']}") if side["i"] is not None else (None, None)  # noqa: E731
@@ -563,6 +730,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     was_active = False
     record = {"won": 0, "lost": 0, "first_to": first_to}
     thoughts_path = sess.recorder.dir / "thoughts.md"
+    # 0.14.0: why the bot is not acting, as it changes (user's first ranked run: it never took over, and
+    # nothing in the run said which condition it was waiting on). Written to fight_status.json (in S).
+    t_start = clock.now()
+    wait = {"status": None, "log": [], "last_line": clock.now(), "last_beat": 0.0}
+
+    def status(text: str, detail: dict | None = None) -> None:
+        now = clock.now()
+        if text != wait["status"] or now - wait["last_beat"] > 15.0:
+            changed = text != wait["status"]
+            wait["status"], wait["last_beat"] = text, now
+            entry = {"t": round(now - t_start, 1), "status": text, **(detail or {})}
+            wait["log"].append(entry)
+            del wait["log"][:-200]
+            if changed:
+                print(f"[status {entry['t']:.0f}s] {text}" + (f" {detail}" if detail else ""))
+                sess.narrate(f"Status: {text}.", source="measured")
+            sess.status["fighter"] = text
 
     def set_panel(locked: bool) -> None:
         if panel is not None and panel.locked != locked:
@@ -570,11 +754,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             sess.status["controller"] = "BOT FIGHTING (buttons locked)" if locked else "yours: overlay buttons"
 
     def finish_match() -> None:
-        nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp
+        nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0
         data, cur["data"] = cur["data"], DatasetBuilder()
         if summary["match"] is not None or summary["rounds"] or summary["decisions"]:   # the bot played
             if fighter is not None:
                 summary["punishes"] = dict(fighter.punish_stats)
+                summary["whiff_punishes"] = dict(fighter.whiff_stats)
+                summary["defense"] = fighter.defense_stats
+                summary["input_delay_used"] = fighter.lead
+            if meter is not None:
+                ms = meter.summary()
+                summary["input_delay"] = dict(ms, new_samples=ms["n"] - meter_n0)
+                meter_n0 = ms["n"]
             if (summary.get("match") or {}).get("bot_won") is True:
                 record["won"] += 1
             elif summary.get("match"):
@@ -631,10 +822,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             else:
                 try:
                     batch = [lines.get(timeout=0.25)]
+                    wait["last_line"] = clock.now()
                 except queue.Empty:
                     if match_end_t is not None and clock.now() - match_end_t > 3.0:
                         batch = []          # no more lines after the match: close it anyway
                     else:
+                        if clock.now() - wait["last_line"] > 5.0:
+                            status("no game state from SF6 for 5 s+ (exporter not writing?)")
                         continue
             while True:
                 try:
@@ -659,6 +853,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         match_end_t = t
                     elif e["event"] == "fight_start":
                         sess.narrate("Fight!", source="measured")
+                if meter is not None and st.in_battle and me_key:
+                    meter.player = me_key
+                    meter.on_line(st.raw)
+                if fighter is not None and st.in_battle and side["i"] is not None:
+                    fighter.observe_line(st.raw, side["i"])
                 if fighter is not None and st.in_battle and prev_raw is not None and me_key:
                     _count_hits(prev_raw, st.raw, me_key, op_key, self_moves, fighter.opp, summary, sess, fighter)
                     _count_damage(prev_raw, st.raw, me_key, op_key, fighter.opp, summary)
@@ -702,6 +901,17 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 continue
             st = batch[-1]
             t = st.t_recv
+            p1d, p2d = st.raw.get("p1") or {}, st.raw.get("p2") or {}
+            detail = {"stage_timer": st.raw.get("stage_timer"), "round": st.raw.get("round"),
+                      "chara": [p1d.get("chara"), p2d.get("chara")], "hp": [p1d.get("hp"), p2d.get("hp")],
+                      "actions": [p1d.get("action_id"), p2d.get("action_id")], "armed": c.armed,
+                      "missing": (st.raw.get("missing") or [])[:6]}
+            if not st.in_battle:
+                status("in menus (the game reports no battle)", detail)
+            elif not st.ready:
+                status("battle loading (players not ready yet)", detail)
+            elif not c.armed:
+                status("waiting for the SF6 window to be focused (or paused with F7)", detail)
             if not st.ready or not st.in_battle:
                 if was_active:                         # left the battle without a match result (menus)
                     c.release_all("left battle")
@@ -713,12 +923,22 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             fight_on = (match_end_t is None and isinstance(timer, int) and timer >= FIGHT_START_FRAME
                         and (_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0
                         and p1r.get("action_id") not in INTRO_IDS and p2r.get("action_id") not in INTRO_IDS)
+            if c.armed and not fight_on:
+                why = ("the match is over" if match_end_t is not None else
+                       "intro" if p1r.get("action_id") in INTRO_IDS or p2r.get("action_id") in INTRO_IDS else
+                       "a player at 0 hp" if not ((_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0) else
+                       f"round clock {timer} < {FIGHT_START_FRAME}" if isinstance(timer, int) else "no round clock")
+                status(f"in battle, waiting for \"Fight!\" ({why})", detail)
+            elif c.armed and side["i"] is not None:
+                status(f"fighting as {keys()[0].upper()}", detail)
             # which side is the bot? (Versus Human / auto): by character, else the crouch probe at "Fight!"
             if side["i"] is None:
                 i_ = by_character(st.raw, fcfg.get("character"))
                 if i_ is not None:
                     side.update(i=i_, how="character")
                 elif fight_on and c.armed:
+                    status("finding my side: crouch probe (neither or both players are "
+                           f"{fcfg.get('character')})", detail)
                     res = probe(sess, reader)
                     summary["side_probe"] = res
                     if res["player"] is None:
@@ -760,7 +980,16 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["note"] = ("learned neutral (" + ("network + counts" if brain.net is not None else "counts")
                                        + f", {len(mv)} own moves) + reflex rules; combo lab routes: {len(book)}")
                 summary["route_book"] = len(book)
-                fighter = ScriptedFighter(fcfg, opp_moves, policy=policy, book=book, experience=exp)
+                from .reach import load as load_reach
+                own_reach, opp_reach = load_reach(ds_root, summary["character"]), load_reach(ds_root, summary["opponent"])
+                if policy is not None:
+                    policy.reach = own_reach
+                summary["reach_known"] = {"own": len(own_reach), "opponent": len(opp_reach)}
+                fighter = ScriptedFighter(fcfg, opp_moves, policy=policy, book=book, experience=exp,
+                                          own=own_moves(summary["character"], ds_root), own_reach=own_reach,
+                                          opp_reach=opp_reach)
+                if meter is not None and meter.lead() is not None:
+                    fighter.lead = meter.lead()
                 self_moves, _ = opponent_moves(summary["character"], ds_root, fcfg)
                 plans = route_plans(fcfg, summary["character"], ds_root)
                 summary["routes_on_game_clock"] = sorted(plans)
@@ -801,6 +1030,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 continue
             was_active = True
             set_panel(True)
+            if meter is not None:
+                fighter.lead = meter.lead(fighter.lead)
             d = fighter.decide(st.raw, t, side["i"])
             if fighter.side is not None and facing_of(me) is not None and facing_of(me) is not fighter.side:
                 summary["facing_flag_disagreed"] += 1     # frames where 0.7.0 would have mirrored wrongly
@@ -833,7 +1064,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     # combos run on the game's clock: each input no earlier than the move can come out;
                     # a block of the first hit stops the rest (combo_lab.perform_route)
                     from .combo_lab import perform_route
-                    lead = side["lag"] if isinstance(side["lag"], int) and side["how"] == "input probe" else None
+                    lead = meter.lead() if meter is not None else None      # measured live this session
+                    if lead is None:
+                        lead = side["lag"] if isinstance(side["lag"], int) and side["how"] == "input probe" else None
+                    if lead is not None:
+                        fighter.lead = lead
                     res = perform_route(sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
                                         FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=6.0,
                                         abort=urgent if neutral else None,
@@ -864,7 +1099,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             else:
                 c.apply(InputState(), tag=d.rule or "release")
     finally:
+        try:
+            sess.recorder.write_json("fight_status.json", {"status_log": wait["log"], "matches_played": len(done),
+                                                           "record": record})
+        except Exception:
+            pass
         c.release_all("fighter end")
+        if meter is not None and meter.on_press in c.on_press:
+            c.on_press.remove(meter.on_press)
         reader.stop()
         set_panel(False)
     while not lines.empty():             # the last lines of a match cut short by F8 / time

@@ -511,6 +511,9 @@ def cmd_train(args, cfg):
     if (root / "replays").exists():
         summarize(root)          # merge repeat recordings of the same replay first
     rep = train(root, log=print)
+    from .reach import build as build_reach
+    reach = build_reach(root, log=print)
+    rep["reach"] = reach
     run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_train")
     run.mkdir(parents=True, exist_ok=True)
     (run / "meta.json").write_text(json.dumps({"kind": "train"}, indent=1))

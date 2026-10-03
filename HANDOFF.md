@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.13.1**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.14.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -135,6 +135,10 @@ controls**.
   Shoryuken after a whiffed 2LK). The panel is rebuilt as a local page in an Edge app window: crisp at 125%, SF6's
   title bar kept visible by ARRANGE. Proposed, not built (waiting on the user): throw defence by prediction, measuring
   the virtual pad's input delay live, a reach table from replays, less blanket blocking, faster per-opponent learning.
+- **0.14.0:** the five improvements the user approved (throw defence by prediction, live input delay, whiff
+  punishes, move reach from recordings, faster pooled learning), and a status log of why the bot is waiting.
+  **Open: ranked never took over** (3 runs on 0.13.1, zero inputs, user picked Ryu); the next ranked run's
+  `fight_status.json` (in S) names the gate it is stuck on.
 - **Next with the user:** record replays (D, at 8x) → B (train) → the user's FT20 in Versus Human (H) →
   send S. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the

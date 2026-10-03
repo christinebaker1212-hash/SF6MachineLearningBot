@@ -1938,6 +1938,81 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
   - the clipboard
   - ARRANGE with the real SF6 window
 
+## 0.14.0: throw defence by prediction, live input delay, whiff punishes, move reach, faster learning; ranked diagnostics
+User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then 5 and 6". All MOCK-tested only
+(synthetic states, `tests/test_defense.py`); nothing here is verified in game yet.
+### Ranked: "it never took over" (user, 3 ranked runs on 0.13.1)
+- Every run: `SendInput call: 0` (not one input), no match recorded, the controller armed (only `disarm: game lost
+  focus` when STOP was clicked). The user picked Ryu, so the side is found by character.
+- So one of the gates before acting never opened: battle + ready state, SF6 focus, "Fight!" (round clock >= 190 and
+  no intro ids), or side detection. 0.13.1 recorded none of them. **Cause not known yet.**
+- Now the fight loop records **why it is waiting**, on every change (and every 15 s):
+  - no game state for 5 s
+  - in menus (no battle)
+  - battle loading (not ready)
+  - waiting for the SF6 window to be focused
+  - waiting for "Fight!" (match over / intro / 0 hp / round clock N < 190 / no round clock)
+  - finding the side
+  - fighting as P1/P2
+- Each entry carries the round clock, round, character ids, hp, action ids, armed and missing fields. It is
+  printed, narrated, and written to `fight_status.json` (in S as "bot status log").
+### 2. Throw defence by prediction (`sf6bot/defense.py`)
+- **Pressure moment:** the bot's blockstun or knockdown ends within lead + 4 + 1 frames, with the opponent
+  ≤ 1.4 away and grounded. It is not a moment:
+  - in hitstun (mid-combo)
+  - when the blocked move is punishable (the punish rule acts)
+- The bot then commits to one option, so its decisive input reaches the game on the first free frame:
+  block, delay tech (hold, then 4+LP+LK), tech, jab, back dash, jump, Shoryuken, Drive Parry.
+- The block height follows the move: stand against an overhead or a jump attack.
+- **Choice** (`configs/fighter/ryu.yaml: defense`):
+  - what this opponent answered earlier moments with (throw / strike / back off = shimmy / wait) is counted per
+    situation, from a prior
+  - the odds × a payoff table (ESTIMATES, not measured) give each option's expected value
+  - that is blended with the option's measured result against this opponent (damage dealt − taken over 1.5 s)
+  - options are then drawn from exp(value / 0.35), so the bot keeps mixing
+- The answer is classified from the following lines (`classify_response`): throw start-up or being thrown;
+  block / hit after the bot was free, or a new attack; the opponent moving away ≥ 0.3; nothing in 30 frames.
+- The reaction throw tech (rule 2) stays.
+### 4. Live input delay (`sf6bot/input_delay.py`)
+- Every button the bot presses (`Controller.on_press`) is matched to the first frame its own input mask shows it.
+  The delay counts from the newest line the bot had at the press: the executor's units.
+- The median of the last 60 (5 needed) is the combo executor's lead and the punish / defence trigger
+  (`fighter.lead`). Recorded timing from the lab is replayed only when the measured lead equals its lead.
+- Per match: `input_delay` {n, median, frames} in the summary and the thoughts.
+- Before, a side found by character left the delay unmeasured, and the virtual pad and online used the keyboard's
+  lab value.
+### 3. Block only what can reach; whiff punishes (`fighter.py` rule 6)
+- **Phase:** an opponent attack is in its recovery once its frame ≥ Capcom start-up − 1 + 4
+  (`active_frames_guess`, an assumption).
+- **Recovering:** no block. If the move never touched the bot (`observe_line` on every line), the bot whiff-punishes
+  with its best own poke when both hold:
+  - its measured reach covers the distance
+  - start-up + input delay + 1 ≤ the frames left of the opponent's move
+  - a TRUE combo from that starter is used when the lab has one
+- **Start-up / active:** block only within the move's measured reach + 0.3. Projectiles are always blocked; moves
+  without a measured reach use the old fixed distance.
+- `whiff_punishes` {chances, taken} are in the summary and the thoughts.
+### 5. Move reach from recordings (`sf6bot/reach.py`, built by menu B)
+- Every attack start in every recording (merged, replays, fights both players) gives the distance at its start
+  and whether it connected (defender hitstop / blockstun / hp loss before the attacker's next action).
+- `reach` = the 75th percentile of the connected start distances (3+). Left out:
+  - starts after a Drive Rush
+  - starts within 1.5 s of the attacker's own special (its fireball could be what hit)
+  - airborne starts are kept apart (`air:<id>`)
+- Output `datasets/reach/<Character>.json` (erased with "training").
+- On the two CPU fights: Ryu 2MK 1.25 (7 contacts), Ken 2LP 0.87, Ken 5MP 1.32.
+- Used by:
+  - the neutral policy: a poke or non-projectile special is not chosen beyond its reach + 0.1
+  - whiff punishes
+  - blocking
+### 6. Faster per-opponent learning (`learning.py`)
+- Pooled estimates: (zone, intent) is shrunk toward (intent, every distance, this opponent), which is shrunk
+  toward (intent, every opponent the bot met) instead of 0.
+- Moves are shrunk toward the same move at every distance.
+- `SHRINK` 3 (was 4), `BETA` 1.3 (was 1.0).
+- After every match all evidence (neutral, moves, defence, the opponent's answers) is multiplied by 0.8, so an
+  opponent who adapts during a set is followed.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

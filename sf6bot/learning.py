@@ -3,9 +3,19 @@
 Every neutral decision the bot makes (zone, intent, concrete move) is scored by what happened in the
 next 1.5 s: damage dealt minus damage taken, in thousands of hp. The averages, kept per opponent
 character in datasets/learning/<bot>_vs_<opponent>.json and saved after EVERY match, change how often
-the bot picks each option next time (a bandit on top of the network's suggestions). Combo routes keep
-their real-match completion rate the same way. The opponent's habits (what it does at each distance)
-are counted for the after-match thoughts.
+the bot picks each option (a bandit on top of the network's suggestions; it applies at once, in the same
+match). Combo routes keep their real-match completion rate the same way. The opponent's habits (what it
+does at each distance) are counted for the after-match thoughts.
+
+0.14.0, faster learning (the user's FT5: the averages rested on 3-11 tries each and swung between matches):
+  - pooled estimates: a (zone, intent) average starts from that intent's average at every distance against
+    this opponent, which starts from the intent's average against EVERY opponent the bot has met, instead of
+    from zero. Few tries in one bucket borrow from the related ones, so an option that keeps failing
+    everywhere is dropped after a handful of tries, not dozens.
+  - recency: after each match older evidence is weighted down (x0.8), so the bot follows an opponent who
+    adapts during a set.
+  - defence at pressure moments (defense.py): the option chosen and its result, and what the opponent did
+    in that situation (throw / strike / back off / wait), are learned here too.
 
 Every thought line is tagged with where it comes from: [measured] (game state), [learned] (these
 averages), [policy] (the network + counts).
@@ -19,8 +29,9 @@ from pathlib import Path
 
 from .game_state import file_stem, num
 
-SHRINK = 4.0          # an option needs a few tries before its average moves its weight much
-BETA = 1.0            # weight factor = exp(BETA x shrunk average, in 1000s of hp)
+SHRINK = 3.0          # an option needs a few tries before its own average outweighs the pooled one
+BETA = 1.3            # weight factor = exp(BETA x shrunk average, in 1000s of hp)
+DECAY = 0.8           # after each match, older evidence counts this much (follows an opponent who adapts)
 WINDOW_S = 1.5
 NICE = {"idle": "waiting", "walk_fwd": "walking forward", "walk_back": "walking back", "crouch": "crouch-blocking",
         "jump_fwd": "jumping in", "jump_neutral": "neutral jumps", "jump_back": "back jumps",
@@ -38,24 +49,67 @@ class Experience:
             self.d = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             self.d = {}
-        for k in ("neutral", "moves", "routes", "habits"):
+        for k in ("neutral", "moves", "routes", "habits", "defense", "responses"):
             self.d.setdefault(k, {})
         self.d.setdefault("matches", [])
         self.pending: list = []
+        self.pending_def: list = []
+        self.others = self._other_opponents()
         self.match: dict = {"neutral": {}, "moves": {}, "routes": {}, "habits": {}, "intents": {},
-                            "policy_sources": {}, "before": self.weights()}
+                            "policy_sources": {}, "defense": {}, "responses": {}, "before": self.weights()}
+
+    def _other_opponents(self) -> dict:
+        """{intent: (sum, n)} over this bot's experience against EVERY OTHER opponent (the top of the pool)."""
+        out: dict = {}
+        for p in self.path.parent.glob(f"{file_stem(self.bot)}_vs_*.json"):
+            if p == self.path:
+                continue
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            for k, e in (d.get("neutral") or {}).items():
+                s, n = out.get(k.split("|")[-1], (0.0, 0.0))
+                out[k.split("|")[-1]] = (s + e.get("sum", 0.0), n + e.get("n", 0))
+        return out
 
     # ---- what it has learned --------------------------------------------------------------------
+    def _intent_pooled(self, intent: str) -> float:
+        """The intent's average at every distance against this opponent, shrunk toward its average
+        against every opponent (itself shrunk toward 0)."""
+        s0, n0 = self.others.get(intent, (0.0, 0.0))
+        s1, n1 = s0, n0
+        for k, e in self.d["neutral"].items():
+            if k.endswith("|" + intent):
+                s1, n1 = s1 + e.get("sum", 0.0), n1 + e.get("n", 0)
+        top = s1 / (n1 + SHRINK)                         # every opponent, this one included
+        s2 = sum(e.get("sum", 0.0) for k, e in self.d["neutral"].items() if k.endswith("|" + intent))
+        n2 = sum(e.get("n", 0) for k, e in self.d["neutral"].items() if k.endswith("|" + intent))
+        return (s2 + SHRINK * top) / (n2 + SHRINK)
+
     def value(self, zone: str, intent: str) -> float:
         e = self.d["neutral"].get(f"{zone}|{intent}") or {}
-        return e.get("sum", 0.0) / (e.get("n", 0) + SHRINK)
+        return (e.get("sum", 0.0) + SHRINK * self._intent_pooled(intent)) / (e.get("n", 0) + SHRINK)
 
     def factor(self, zone: str, intent: str) -> float:
         return math.exp(BETA * max(-1.5, min(1.5, self.value(zone, intent))))
 
     def move_factor(self, zone: str, move: str) -> float:
+        s_all = sum(e.get("sum", 0.0) for k, e in self.d["moves"].items() if k.endswith("|" + move))
+        n_all = sum(e.get("n", 0) for k, e in self.d["moves"].items() if k.endswith("|" + move))
+        pooled = s_all / (n_all + SHRINK)                # the move at every distance
         e = self.d["moves"].get(f"{zone}|{move}") or {}
-        return math.exp(BETA * max(-1.5, min(1.5, e.get("sum", 0.0) / (e.get("n", 0) + SHRINK))))
+        v = (e.get("sum", 0.0) + SHRINK * pooled) / (e.get("n", 0) + SHRINK)
+        return math.exp(BETA * max(-1.5, min(1.5, v)))
+
+    def defense_value(self, situation: str, option: str) -> tuple[float, float]:
+        """(sum, n) of what this defensive option scored in this situation against this opponent."""
+        e = self.d["defense"].get(f"{situation}|{option}") or {}
+        return e.get("sum", 0.0), e.get("n", 0)
+
+    def responses(self, situation: str) -> dict:
+        """What the opponent did after this kind of pressure moment: {throw, strike, shimmy, wait: count}."""
+        return dict(self.d["responses"].get(situation) or {})
 
     def weights(self) -> dict:
         return {k: round(self.factor(*k.split("|")), 3) for k in self.d["neutral"]}
@@ -72,6 +126,7 @@ class Experience:
 
     def update(self, t: float, my_hp, opp_hp, force: bool = False) -> None:
         my_hp, opp_hp = num(my_hp), num(opp_hp)
+        self._update_def(t, my_hp, opp_hp, force)
         keep = []
         for p in self.pending:
             t0, zone, intent, move, m0, o0 = p
@@ -93,6 +148,30 @@ class Experience:
                     e["sum"] = round(e["sum"] + r, 3)
         self.pending = keep
 
+    def defended(self, t: float, situation: str, option: str, my_hp, opp_hp) -> None:
+        self.pending_def.append((t, situation, option, num(my_hp), num(opp_hp)))
+
+    def response(self, situation: str, kind: str) -> None:
+        for store in (self.d["responses"], self.match["responses"]):
+            z = store.setdefault(situation, {})
+            z[kind] = round(z.get(kind, 0) + 1, 3)
+
+    def _update_def(self, t: float, my_hp, opp_hp, force: bool) -> None:
+        keep = []
+        for p in self.pending_def:
+            t0, sit, opt, m0, o0 = p
+            if not force and t - t0 < WINDOW_S:
+                keep.append(p)
+                continue
+            if None in (m0, o0, my_hp, opp_hp):
+                continue
+            r = max(-3.0, min(3.0, ((o0 - opp_hp) - (m0 - my_hp)) / 1000.0))
+            for store in (self.d["defense"], self.match["defense"]):
+                e = store.setdefault(f"{sit}|{opt}", {"n": 0, "sum": 0.0})
+                e["n"] += 1
+                e["sum"] = round(e["sum"] + r, 3)
+        self.pending_def = keep
+
     def route_done(self, route: str, completed: bool, damage) -> None:
         for store in (self.d["routes"], self.match["routes"]):
             e = store.setdefault(route, {"n": 0, "completed": 0, "damage": 0})
@@ -107,6 +186,14 @@ class Experience:
 
     def end_match(self, result: dict) -> None:
         self.d["matches"].append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), **result})
+        # recency: what happened before this match counts a little less from now on
+        for k in ("neutral", "moves", "defense"):
+            for e in self.d[k].values():
+                e["n"] = round(e["n"] * DECAY, 3)
+                e["sum"] = round(e["sum"] * DECAY, 3)
+        for z in self.d["responses"].values():
+            for kind in list(z):
+                z[kind] = round(z[kind] * DECAY, 3)
         self.d["sf6bot_version"] = __import__("sf6bot").__version__
         self.save()
 
@@ -184,12 +271,47 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
             out.append(("learned", "Next match: " + "; ".join(
                 f"{'more' if w > b else 'less'} {NICE.get(k.split('|')[1], k)} {ZONE_NICE.get(k.split('|')[0], '')} "
                 f"(x{b:.2f} -> x{w:.2f})" for k, b, w in changes) + "."))
-        n_total = sum(e["n"] for e in exp.d["neutral"].values())
-        out.append(("learned", f"All of this rests on {n_total} scored decisions against {opp} so far; "
-                               "one match is noisy, the averages settle over many."))
+        n_total = round(sum(e["n"] for e in exp.d["neutral"].values()))
+        out.append(("learned", f"All of this rests on {n_total} scored decisions against {opp} (older matches "
+                               "count less); options with few tries borrow from the same option at other "
+                               "distances and against other opponents."))
     pm = summary.get("punishes") or {}
     if pm.get("chances"):
         out.append(("measured", f"Punishable moves I blocked: {pm['chances']}; I punished {pm.get('taken', 0)}."))
+    wp = summary.get("whiff_punishes") or {}
+    if wp.get("chances") or wp.get("taken"):
+        out.append(("measured", f"{opp}'s moves that whiffed near me: {wp.get('chances', 0)}; I whiff-punished "
+                                f"{wp.get('taken', 0)}."))
+    out += defense_thoughts(summary.get("defense") or {}, opp, exp)
+    idl = summary.get("input_delay") or {}
+    if idl.get("median") is not None:
+        out.append(("measured", f"My input delay this session: {idl['median']} frames (median of {idl['n']} presses "
+                                f"read back from the game: {idl.get('frames')}); my combos are timed with it."))
+    return out
+
+
+def defense_thoughts(dstats: dict, opp: str, exp: Experience | None) -> list[tuple[str, str]]:
+    """Pressure moments: what the opponent answered with, and what the bot chose (defense.py)."""
+    from .defense import NICE, RESP_NICE, SITUATIONS
+    out = []
+    for sit, st in dstats.items():
+        if not st.get("moments"):
+            continue
+        resp = st.get("responses") or {}
+        said = ", ".join(f"{RESP_NICE[k]} {v}" for k, v in sorted(resp.items(), key=lambda kv: -kv[1]))
+        out.append(("measured", f"{SITUATIONS.get(sit, sit).capitalize()} with {opp} close ({st['moments']} times), "
+                                f"{opp} " + (said or "showed nothing yet") + "."))
+        mix = ", ".join(f"{NICE.get(k, k)} {v}" for k, v in sorted((st.get("options") or {}).items(),
+                                                                    key=lambda kv: -kv[1]))
+        out.append(("policy", f"My answers there: {mix}."))
+        if exp is not None:
+            res = []
+            for opt in st.get("options") or {}:
+                s_, n_ = exp.defense_value(sit, opt)
+                if n_ >= 2:
+                    res.append(f"{NICE.get(opt, opt)} {1000 * s_ / n_:+,.0f} hp per try")
+            if res:
+                out.append(("learned", f"So far {SITUATIONS.get(sit, sit)}: " + ", ".join(res) + "."))
     return out
 
 

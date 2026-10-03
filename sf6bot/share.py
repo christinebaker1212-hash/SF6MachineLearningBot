@@ -45,13 +45,15 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
         out += ["", "--- sysinfo ---", si.read_text(encoding="utf-8", errors="replace").strip()]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
-        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "combo_lab.md", "brain_report.md", "thoughts.md"):
+        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "fight_status.json", "combo_lab.md", "brain_report.md", "thoughts.md"):
             f = d / name
             if not f.exists():
                 continue
             text = f.read_text(encoding="utf-8", errors="replace").strip()
             if name == "fight_summary.json":
                 text = compact_fights(text)
+            elif name == "fight_status.json":
+                text = compact_status(text)
             elif name == "thoughts.md" and len(text) > 20_000:
                 text = "(earlier matches cut)\n" + text[-20_000:]
             out += [text, ""]
@@ -78,3 +80,16 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
     p = root / "for_claude.txt"
     p.write_text(text, encoding="ascii")
     return p
+
+
+def compact_status(text: str) -> str:
+    """fight_status.json -> one line per status change (0.14.0: why the bot was not acting)."""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return text[:4000]
+    out = [f"bot status log (matches played: {d.get('matches_played')}):"]
+    for e in (d.get("status_log") or [])[-60:]:
+        extra = {k: v for k, v in e.items() if k not in ("t", "status")}
+        out.append(f"  {e.get('t')}s {e.get('status')}" + (f" {json.dumps(extra, default=str)}" if extra else ""))
+    return "\n".join(out)
