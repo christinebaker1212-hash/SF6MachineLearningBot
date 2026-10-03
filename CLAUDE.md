@@ -1756,6 +1756,32 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
 - Deletes also clear read-only files and retry once (Windows: an Explorer window, the indexer or antivirus can hold
   a file for a moment). The purge prints the folders it looked in.
 
+## 0.12.3: recording replays with less (or no) human work (`sf6bot/harvest.py`)
+- **8x recording VERIFIED (user, 2026-10-03, 0.12.1, Ryu vs Cammy replay at 8x):** 7,917 frames, 0 skipped during
+  the fight (1 overall), 7,913 lines from the per-tick hook (`nBattle.sGame.PreUpdateShell`, confirmed), inputs on
+  every line, recorded in ~56 s. A replay takes 15-30 s at 8x (user).
+- User: the slow part is "the human element": "selecting a replay, setting it to 8x, and then stopping and playing
+  another". Built all three proposals (user: "do 1, 2, and 3"):
+  1. **Batch** (`replay-record --batch`, menu D → 2): the user plays replays back to back; each match is saved as
+     its own file as soon as it ends; a replay quit before any round ended is not kept. F8 stops.
+  2. **Skip intros / win poses** with an optional taught routine `replay_skip`, pressed when intro ids 400/401
+     appear and right after the KO.
+  3. **Auto** (`replay-record --auto [--count N]`, menu D → 3): routines taught once with menu L (exact names),
+     from SF6's replay list: `replay_play` (start the highlighted replay), `replay_next` (leave it, highlight the
+     next), optional `replay_8x`, `replay_skip`. The GAME STATE says when a replay started, how fast it runs
+     (game frames per wall second: 8x = ~8.0, measured per replay as `playback_speed`) and when the match is
+     over; routines are pressed only then. `replay_8x` is pressed when the measured speed is < 6x, then not again
+     for 2 s (a second press could cycle the speed), at most 3 times per replay.
+  - Safeguards: a replay that does not start in 40 s is retried once; two failures stop the run; the same match
+    recorded twice in a row means the list did not move (end of the list, or `replay_next` needs re-teaching):
+    stop, with the reason. 8 h limit.
+- Not verified in game: SF6's replay-list screens and keys (menu-only buttons may need `input.menu_keys`), paging
+  to the next set of replays, error pop-ups, whether 8x must be set per replay. Routines press fixed buttons;
+  the step screenshots are not compared yet.
+- Tests (`tests/test_harvest.py`, MOCK): a simulated replay browser playing the user's real matches: 3 replays
+  recorded at 8x with one speed press each, stopped at the end of the list with the reason; batch saves the two
+  finished matches and drops one quit early.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

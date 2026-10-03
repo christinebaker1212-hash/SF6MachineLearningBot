@@ -24,7 +24,7 @@ echo       EVERY match writes what it thinks (thoughts.md, in S) and what it lea
 echo    B  Train the bot's brain from all recordings (replays + matches; no game needed)
 echo.
 echo  RECORD
-echo    D  Record a replay you play back (training data)
+echo    D  Record replays (training data): one, many in a row, or AUTO (the bot plays them)
 echo    C  Move catalog in Training Mode
 echo    K  Combo lab: find TRUE combos in Training Mode (dummy guard: After first hit)
 echo.
@@ -147,7 +147,7 @@ if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
 if /i "%CH%"=="h" goto versus
 if /i "%CH%"=="b" (%BOT% train & goto done)
-if /i "%CH%"=="d" (%BOT% replay-record & goto done)
+if /i "%CH%"=="d" goto record
 if /i "%CH%"=="c" goto catalog
 if /i "%CH%"=="p" (%BOT% pad & goto done)
 if /i "%CH%"=="l" goto teach
@@ -179,6 +179,24 @@ if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
 if /i "%CH%"=="z" goto torch
+goto menu
+
+:record
+echo.
+echo    1  One replay (stops 5 s after the match)
+echo    2  Many in a row: you play replays back to back, each match is saved; F8 when done
+echo    3  AUTO: the bot plays the replays itself from SF6's replay list, at 8x, until F8 or the
+echo       list ends. Teach these routines ONCE with L (exact names), starting on the replay list:
+echo         replay_play  start the highlighted replay
+echo         replay_next  leave the finished replay and highlight the next one
+echo         replay_8x    (optional) set 8x during playback
+echo         replay_skip  (optional) skip the intro / win pose
+echo    Then: B to train.
+set "RC="
+set /p RC=Choose: 
+if "%RC%"=="1" (%BOT% replay-record & goto done)
+if "%RC%"=="2" (%BOT% replay-record --batch & goto done)
+if "%RC%"=="3" (%BOT% replay-record --auto & goto done)
 goto menu
 
 :versus

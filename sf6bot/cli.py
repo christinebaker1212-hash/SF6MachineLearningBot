@@ -169,6 +169,13 @@ def cmd_input_map(args, cfg):
 def cmd_replay_record(args, cfg):
     from .dataset import run_replay_record
     cfg["recording"]["record_video"] = False  # state is the dataset; skip video to save disk/CPU
+    if args.batch or args.auto:
+        from .harvest import run as harvest
+        with _session(args, cfg, "replay_auto" if args.auto else "replay_batch") as s:
+            harvest(s, cfg, auto=args.auto, count=args.count or None,
+                    seconds=args.seconds if args.seconds != 420 else 8 * 3600.0)
+        _print_report(s)
+        return
     with _session(args, cfg, "replay_record") as s:
         run_replay_record(s, cfg, args.seconds, args.notes)
     _print_report(s)
@@ -595,6 +602,11 @@ def main(argv=None):
     p = sub.add_parser("replay-record", help="record a replay you play back in SF6 into a demonstration dataset")
     p.add_argument("--seconds", type=float, default=420)
     p.add_argument("--notes", default="", help="free text, e.g. 'Master replay, Ken vs Ryu'")
+    p.add_argument("--batch", action="store_true", help="you play replays one after another; each match is "
+                   "saved on its own until F8")
+    p.add_argument("--auto", action="store_true", help="the bot plays the replays from SF6's replay list with "
+                   "the taught routines replay_play / replay_next (+ replay_8x, replay_skip)")
+    p.add_argument("--count", type=int, default=0, help="stop after N replays (0 = until F8 / end of list)")
     p.set_defaults(fn=cmd_replay_record)
 
     p = sub.add_parser("dataset-from-run", help="convert a recorded run's events.jsonl into a dataset")

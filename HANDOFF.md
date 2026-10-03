@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.12.2**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.12.3**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -120,7 +120,9 @@ controls**.
   plain-language thoughts after EVERY match (thoughts.md, in S).
 - **0.12.1:** Versus Human is FT2 by default; ranked = menu H → 3 or `ranked.bat`, started once, back-to-back
   matches.
-- **Next with the user:** record replays (D, at 1x) → B (train) → the user's FT20 in Versus Human (H) →
+- **0.12.3:** 8x replay recording verified (0 frames skipped). Menu D: 2 = batch (each match saved), 3 = AUTO
+  (taught routines replay_play / replay_next / replay_8x / replay_skip; the bot plays the replay list itself).
+- **Next with the user:** record replays (D, at 8x) → B (train) → the user's FT20 in Versus Human (H) →
   send S. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the
   tests; it beat the "always idle" baseline by only a few points). It gets better with real replays; the
