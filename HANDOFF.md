@@ -148,7 +148,9 @@ controls**.
   - Install with TOOLS → "Online build: install" (`sf6bot refw-research install`, SF6 closed, admin).
   - The safety check of the earlier auto-mode session refused to apply this patch. The user then switched the session
     to accept-edits and approved each command.
-  - **Changing the exporter Lua needs a rebuild of the research dll.** The workflow starts on its own when it changes.
+  - **Changing the exporter Lua needs a rebuild of the research dll.** The workflow starts on its own when it changes;
+    then download its artifact (GitHub MCP `download_workflow_run_artifact`) into `refw_research/dist/` (0.17.1: the
+    user installs the copy update.bat brings; a test checks it matches the Lua).
   - When the period ends: TOOLS → "Online build: restore". The build also stops by itself.
 - **0.16.0, unattended ranked and learning to WIN (user: "learn how to DEFEAT a Platinum player, and eventually ... a
   Diamond, a Master, a 1500, a 1700, a 2000"; "the strongest player on Earth"):**

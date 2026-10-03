@@ -2070,6 +2070,12 @@ User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then
     research dll and the exporter, checks the exporter matches
   - restore: puts the official dll back
   - The SF6 folder is remembered (`configs/.sf6_dir`), since the game must be closed for these.
+- **0.17.1: the build comes with the bot.** The user had no zip: a workflow artifact is not a release and sits on
+  GitHub's Actions page (sign-in needed). The artifact of run 37138758225 (sha256 8770e708…, = GitHub's digest; the dll
+  marker says until 2033-10-01, exporter 2019824bedc07c87 = the current Lua) is committed as
+  `refw_research/dist/sf6bot-refw-research.zip`, so update.bat brings it; `install` with no path uses it
+  (`refw_research.find_zip`, then Downloads). A test fails if the Lua changes without a new build copied there.
+  The panel's administrator window now starts in the bot's folder (`pushd`; Windows starts it in System32).
 - Online and ranked modes print a warning when the installed build cannot see online matches. The "no game state"
   status names the official build as the likely cause in online modes.
 

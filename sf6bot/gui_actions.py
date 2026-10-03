@@ -103,7 +103,7 @@ ACTIONS: list[Action] = [
            "Which REFramework is installed; the official one turns the bot's script off in online matches."),
     Action("refw_research", "tools", "Online build: install",
            "Close SF6 first. Installs the research build (keeps the official one as a backup). Administrator.",
-           [Option("path", "Zip", kind="text", default="", hint="empty = newest sf6bot-refw-research*.zip in Downloads")],
+           [Option("path", "Zip", kind="text", default="", hint="empty = the build that comes with update.bat")],
            special="admin"),
     Action("refw_restore", "tools", "Online build: restore",
            "Close SF6 first. Puts the official REFramework back (end of the research period). Administrator.",

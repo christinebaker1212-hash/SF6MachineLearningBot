@@ -146,11 +146,10 @@ def cmd_refw_research(args, cfg):
         if args.action == "install":
             src = Path(args.path or "")
             if not args.path:
-                cands = sorted(Path.home().joinpath("Downloads").glob("sf6bot-refw-research*.zip"),
-                               key=lambda p: p.stat().st_mtime)
-                if not cands:
-                    sys.exit("Give the downloaded zip: sf6bot refw-research install <path to sf6bot-refw-research.zip>")
-                src = cands[-1]
+                src = rr.find_zip()
+                if src is None:
+                    sys.exit("The research build was not found. It comes with update.bat (refw_research\\dist\\"
+                             "sf6bot-refw-research.zip in the bot's folder): run update.bat, then install again.")
                 print(f"Using {src}")
             for m in rr.install(d, src, running):
                 print(m)

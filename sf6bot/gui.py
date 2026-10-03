@@ -476,7 +476,9 @@ def special(panel: Panel, hwnd_box: dict, aid: str, args: list | None = None) ->
         import ctypes
         py = _python(console=True)
         line = subprocess.list2cmdline([py, "-m", "sf6bot", *args])
-        r = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/k "{line}"', str(panel.root), 1)
+        # an administrator window starts in C:\\Windows\\System32 whatever folder is asked for: change to the bot's first
+        r = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/k "pushd "{panel.root}" && {line}"',
+                                                str(panel.root), 1)
         panel.say(f"Opened an administrator window for: sf6bot {' '.join(args)}" if r > 32 else
                   "Windows did not allow the administrator window.", "good" if r > 32 else "bad")
 

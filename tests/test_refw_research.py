@@ -85,3 +85,12 @@ def test_status_install_restore(tmp_path):
 def test_expired_build_says_so():
     d = rr.dll_info(b"xx SF6BOT-RESEARCH-BUILD until=2020-01-01 exporter=0123456789abcdef xx")
     assert d["kind"] == "research" and d["online_lua"] is False
+
+
+def test_the_bundled_build_runs_the_current_exporter():
+    """refw_research/dist holds the GitHub build (brought by update.bat). The research build runs only the exporter it
+    was built with: a changed sf6bot_state.lua needs a new build copied there, or the bot is blind online."""
+    z = rr.find_zip()
+    assert z == rr.BUNDLED and z.exists()
+    data = zipfile.ZipFile(z).read("dinput8.dll")
+    assert rr.dll_info(data)["exporter"] == rr.exporter_id(LUA_SRC.read_bytes())

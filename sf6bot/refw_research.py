@@ -133,3 +133,15 @@ def restore(game_dir: Path, game_running: bool) -> str:
         raise FileNotFoundError(f"No {BACKUP} in {game_dir}: reinstall the official REFramework by hand.")
     shutil.copy2(b, game_dir / DLL)
     return "Official REFramework restored (Lua off in online matches again)."
+
+
+BUNDLED = Path(__file__).resolve().parent.parent / "refw_research" / "dist" / "sf6bot-refw-research.zip"
+
+
+def find_zip() -> Path | None:
+    """The research build to install: the one that comes with the bot (refw_research/dist, put there from the
+    GitHub build and brought by update.bat), else the newest sf6bot-refw-research*.zip in Downloads."""
+    if BUNDLED.exists():
+        return BUNDLED
+    cands = sorted(Path.home().joinpath("Downloads").glob("sf6bot-refw-research*.zip"), key=lambda q: q.stat().st_mtime)
+    return cands[-1] if cands else None
