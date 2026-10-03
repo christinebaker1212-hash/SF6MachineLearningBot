@@ -5,8 +5,8 @@ cd /d "%~dp0"
 set "URL=https://github.com/christinebaker1212-hash/SF6MachineLearningBot/archive/refs/heads/claude/admiring-mccarthy-uyyay4.zip"
 set "TMPZ=%TEMP%\sf6bot_update.zip"
 set "TMPD=%TEMP%\sf6bot_update"
-echo Downloading latest version ...
-powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -Uri '%URL%' -OutFile '%TMPZ%' } catch { exit 1 }"
+echo Downloading latest version (about 15 MB) ...
+powershell -NoProfile -Command "$ProgressPreference = 'SilentlyContinue'; try { Invoke-WebRequest -UseBasicParsing -Uri '%URL%' -OutFile '%TMPZ%' } catch { exit 1 }"
 if errorlevel 1 (
     echo.
     echo Download failed. If the repository is private, download the ZIP in your browser instead:
