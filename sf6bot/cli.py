@@ -258,14 +258,24 @@ def _panel(s, cfg, pad: bool, routine: str | None = None):
 def cmd_fight(args, cfg):
     """The bot plays every match until F8. Default (vs CPU): it presses P1's keyboard keys, and the
     overlay buttons press P1 too, for menus between matches. --pad (vs a human): the bot is P2 on its
-    own virtual controller and the overlay buttons press that controller."""
+    own virtual controller and the overlay buttons press that controller.
+
+    --versus-human offline|online (0.12.0, consenting volunteers): the bot finds its side each match,
+    starts as soon as the SF6 window is focused (no countdown) and acts from "Fight!". Offline (Versus at
+    this PC, the volunteer here or over Parsec): the bot gets its own virtual controller. Online: the bot
+    plays as this PC's player with the keyboard (Capcom's written approval, 2026-10-02, disclosed CFN)."""
     from .fighter import run_fight
-    if args.pad:
+    vh = args.versus_human
+    pad = args.pad or vh == "offline"
+    if pad:
         cfg = _with_pad(cfg)
-    with _session(args, cfg, f"fight_{args.player}") as s:
-        panel = _panel(s, cfg, pad=args.pad)
-        run_fight(s, cfg, args.seconds, player=0 if args.player == "p1" else 1,
-                  matches=args.matches or None, panel=panel)
+    player = None if (vh or args.player == "auto") else (0 if args.player == "p1" else 1)
+    seconds = args.seconds if not vh or args.seconds != 3600.0 else 6 * 3600.0
+    name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
+    with _session(args, cfg, name) as s:
+        panel = _panel(s, cfg, pad=pad)
+        run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
+                  first_to=args.first_to or None, versus=vh, opponent_name=args.opponent)
     _print_report(s)
 
 
@@ -464,6 +474,24 @@ def cmd_move_map(args, cfg):
     print(f"\nSaved to {root / 'move_maps'}. The fighter uses ids at medium confidence or better.")
 
 
+def cmd_train(args, cfg):
+    """Train the bot's brain from every recording (no game needed): the network + counts (brain.py)."""
+    import time as _time
+    from pathlib import Path
+    from .brain import report_md, train
+    from .training_data import summarize
+    root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    if (root / "replays").exists():
+        summarize(root)          # merge repeat recordings of the same replay first
+    rep = train(root, log=print)
+    run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_train")
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "meta.json").write_text(json.dumps({"kind": "train"}, indent=1))
+    (run / "brain_report.md").write_text(report_md(rep), encoding="utf-8")
+    print(report_md(rep))
+    print("The fighter uses the brain from the next match on (menus V, N, H).")
+
+
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
@@ -595,13 +623,23 @@ def main(argv=None):
     p.add_argument("--dir", default="framedata_pages", help="folder with the saved pages")
     p.set_defaults(fn=cmd_framedata_import)
 
-    p = sub.add_parser("fight", help="scripted Ryu fights (vs CPU); hand-written rules, not learned")
-    p.add_argument("--player", choices=("p1", "p2"), default="p1", help="which side the bot plays")
-    p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h)")
+    p = sub.add_parser("fight", help="the bot fights (vs CPU or a volunteer): learned neutral + reflex rules")
+    p.add_argument("--player", choices=("p1", "p2", "auto"), default="p1",
+                   help="which side the bot plays (auto: by character, else a crouch probe at Fight!)")
+    p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h; "
+                   "6 h with --versus-human)")
     p.add_argument("--matches", type=int, default=0, help="stop after N matches (0 = until F8 / --seconds)")
+    p.add_argument("--first-to", type=int, default=0, help="stop when the bot or its opponent wins N matches")
+    p.add_argument("--versus-human", choices=("offline", "online"), default=None,
+                   help="a volunteer: offline = Versus at this PC (bot on its own controller), online = the "
+                        "bot plays as this PC's player; side found automatically, no countdown")
+    p.add_argument("--opponent", default=None, help="optional nickname for the opponent (stored with the matches)")
     p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "
                    "controller and the overlay buttons press that controller (default: P1's keys)")
     p.set_defaults(fn=cmd_fight)
+
+    sub.add_parser("train", help="train the bot's brain (network + counts) from every recording; no game "
+                   "needed").set_defaults(fn=cmd_train)
 
     p = sub.add_parser("controller", help="(obsolete since 0.9.0: the side decides) reset to keyboard")
     p.add_argument("mode", choices=("keyboard", "pad"))

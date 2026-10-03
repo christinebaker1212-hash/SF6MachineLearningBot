@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-02: code version **0.10.1**, REFramework exporter script **v8**, branch
+*State as of 2026-10-03: code version **0.12.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -34,8 +34,11 @@ controls**.
 
 - **Ranked starts at Diamond or above. There is no alt account, and the user's account is
   non-negotiable.** Never suggest an alt.
-- **REFramework stays offline only:** Training Mode, CPU, replays. Before online play the user
-  disables it by renaming `dinput8.dll`.
+- **Online play with REFramework is allowed (user, 2026-10-03)** under Capcom's written approval
+  (2026-10-02, below): ranked testing on the CFN disclosed to Capcom, with REFramework and memory reading
+  part of the disclosed method. This replaces the earlier "REFramework offline only" rule. Versus Human
+  (menu H) runs offline (Versus at the PC / Parsec) and online. Volunteers' consent is verbal and implicit:
+  no prompts (user).
 - **Ranked deployment is a separate, later milestone,** gated on checking Capcom/Steam rules.
   The user makes the call.
   - **2026-10-02: written authorisation from Capcom Support, pasted by the user.** Ranked testing
@@ -108,6 +111,18 @@ controls**.
   - If the Lua script changed: menu **R must run as administrator**, because SF6 is under
     Program Files. Then **fully restart SF6**. Bump `SCRIPT_VERSION` in the Lua and
     `EXPECTED_SCRIPT_VERSION` in `sf6bot/game_state.py` together.
+
+## 3b. Where things stand (0.12.0): the bot learns to fight
+- **The user (2026-10-03): "enough setup ... time for this thing to really learn how to fight".** 0.12.0
+  gives the fighter a learned neutral game (a numpy neural network + counts, trained with menu B on every
+  recording), learning from its own matches per opponent, the combo lab's TRUE combos for punishes, hit
+  confirms and lethal, a Versus Human mode (offline and online, auto side, no countdown, first-to N), and
+  plain-language thoughts after EVERY match (thoughts.md, in S).
+- **Next with the user:** record replays (D, at 1x) → B (train) → the user's FT20 in Versus Human (H) →
+  send S. The thoughts and the per-match table show whether it improves over the set.
+- Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the
+  tests; it beat the "always idle" baseline by only a few points). It gets better with real replays; the
+  per-opponent learning needs many matches. No outcome is promised.
 
 ## 4. Milestone status
 

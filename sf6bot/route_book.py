@@ -1,0 +1,120 @@
+"""The combo lab's TRUE combos, ready for a match.
+
+Built once per match from datasets/combo_lab/<Character>.json (combo_lab.verified_routes: verified with
+the dummy on "After first hit", repeated at least half the time) and planned with the same executor the
+lab used (each input on the game's own clock, the lab's recorded send points replayed exactly).
+
+The fighter asks it three questions:
+  - punish: the opponent's move was blocked and leaves `frames` to act -> the best route whose first
+    move starts in time (punish-counter routes first: a punish IS a punish counter in SF6)
+  - confirm: the bot is about to use a move -> a route starting with it (performed move by move; a
+    blocked first hit stops the rest, so the route is only finished on hit)
+  - lethal: a route whose lowest measured damage kills: the ONLY case where spending into burnout is
+    allowed (user rule, 0.10.0)
+Expected value = lowest measured damage x lab success rate x the route's success in real matches so far.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .game_state import file_stem, num
+from .intents import CORNER, WALL
+
+
+def _starter_kind(plan: dict) -> str:
+    s0 = (plan.get("steps") or [{}])[0]
+    if s0.get("system") in ("drive_rush", "drive_impact"):
+        return s0["system"]
+    return "air" if s0.get("air") or s0.get("system") == "jump" else "ground"
+
+
+def build(character: str, ds_root: Path, min_rate: float = 0.5) -> list[dict]:
+    from . import framedata as fd
+    from .combo_lab import plan_route, verified_routes
+    from .combos import resolve
+    ds_root = Path(ds_root)
+    capcom = fd.load(character, ds_root / "framedata")
+    if not capcom:
+        return []
+    catalog = None
+    p = ds_root / "catalog" / f"{file_stem(character)}_movelist.json"
+    if p.exists():
+        try:
+            catalog = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError:
+            catalog = None
+    book = []
+    for v in verified_routes(ds_root, character, min_rate=min_rate):
+        route = v.get("route") or ""
+        r = resolve(route, capcom["moves"])
+        if r.get("unresolved"):
+            continue
+        plan = plan_route({"route": route, **r}, capcom, catalog)
+        if plan.get("unsupported") or plan.get("setup") or not plan["steps"]:
+            continue                       # Denjin setups need a quiet moment: not in a match yet
+        if plan.get("jump_in"):
+            continue                       # jump-ins need the lab's measured jump distance
+        rec = v.get("recorded_timing") or {}
+        if rec and len(rec.get("steps") or []) == len(plan["steps"]):
+            plan["recorded_timing"], plan["lead"] = rec["steps"], rec.get("lead")
+        s0 = plan["steps"][0]
+        book.append({"route": route, "position": v.get("position") or "midscreen",
+                     "hit_type": v.get("tested_as") or v.get("hit_type") or "normal",
+                     "situation": v.get("situation"), "damage": v.get("damage"),
+                     "drive": num(v.get("drive_spent")) or 0, "super": num(v.get("super_spent")) or 0,
+                     "rate": v.get("success_rate_final_timing") or 0.0, "plan": plan,
+                     "starter": s0.get("name"), "starter_id": s0.get("expect_id"),
+                     "startup": s0.get("startup"), "kind": _starter_kind(plan)})
+    return book
+
+
+def cornered(op: dict, me: dict) -> bool:
+    """The opponent's back is near the wall (the side away from the bot)."""
+    ox, mx = num(op.get("x")), num(me.get("x"))
+    if ox is None or mx is None:
+        return False
+    s = 1.0 if ox >= mx else -1.0
+    return WALL - s * ox <= CORNER
+
+
+def affordable(e: dict, me: dict, opp_hp: float | None, reserve: float = 0) -> tuple[bool, bool]:
+    """(can pay for it, it kills). Drive into burnout only when it kills."""
+    drive, sup = num(me.get("drive")) or 0, num(me.get("super")) or 0
+    lethal = bool(e.get("damage") and opp_hp is not None and e["damage"] >= opp_hp)
+    if e["super"] > sup:
+        return False, lethal
+    if e["drive"] and (drive - e["drive"] <= reserve and not lethal) or e["drive"] > drive:
+        return False, lethal
+    return True, lethal
+
+
+def value(e: dict, learned: dict | None = None) -> float:
+    real = (learned or {}).get(e["route"]) or {}
+    n, ok = real.get("n", 0), real.get("completed", 0)
+    match_rate = (ok + 2.0) / (n + 2.5)          # optimistic until it has been tried in matches
+    return (e.get("damage") or 0) * max(0.05, e.get("rate") or 0) * match_rate
+
+
+def choose(book: list[dict], me: dict, op: dict, *, frames: int | None = None, starter: str | None = None,
+           hit_types=("normal",), learned: dict | None = None, reserve: float = 0) -> dict | None:
+    """The best affordable route for the situation; a killing route wins over everything else."""
+    corner = cornered(op, me)
+    opp_hp = num(op.get("hp"))
+    best, best_v = None, -1.0
+    for e in book:
+        if e["hit_type"] not in hit_types or e["kind"] not in ("ground", "drive_rush"):
+            continue
+        if e["position"] == "corner" and not corner:
+            continue
+        if starter is not None and e["starter"] != starter:
+            continue
+        if frames is not None and not (isinstance(e.get("startup"), int) and e["startup"] <= frames):
+            continue
+        ok, lethal = affordable(e, me, opp_hp, reserve)
+        if not ok:
+            continue
+        v = value(e, learned) + (1e6 if lethal else 0.0)
+        if v > best_v:
+            best, best_v = dict(e, lethal=lethal), v
+    return best

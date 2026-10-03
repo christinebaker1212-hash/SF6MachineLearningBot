@@ -188,7 +188,7 @@ has written SF6 hitbox and frame-data viewers. This could give exact HP, positio
 states and a game frame counter, i.e. ground truth for M2 and frame-level timing checks.
 - To verify in M2: current game patch compatibility, the exact fields, and a way to export
   them to Python (file, socket or shared memory).
-- Keep it offline-only until ranked rules are checked.
+- (Since 2026-10-03: online use is covered by Capcom's written approval; see the constraints.)
 
 **Master rank:** a top-human-level fighting game agent trained from real-time play on a single
 instance is an open research problem. No outcome is promised.
@@ -394,8 +394,8 @@ The safety tests are part of acceptance. During a run:
   Results go into `report.md` and `state_check.json`.
 - **MOCK-tested only:** the Lua was run under a stubbed REFramework API with `lua5.4`, and the
   checks were run against a simulated exporter (`tests/test_state_check.py`).
-- **Offline only:** keep REFramework out of online play. Before going online, disable it by
-  renaming `dinput8.dll` in the SF6 folder.
+- **Online:** allowed since 2026-10-03 (user) under Capcom's written approval of 2026-10-02 (disclosed CFN;
+  REFramework is part of the disclosed method). Before 0.12.0 the rule was offline only.
 - The REFramework install itself: the SF6 build of REFramework (praydog/REFramework-nightly
   releases, or Nexus "REFramework" for SF6) goes in the game folder as `dinput8.dll`. Whether
   it's installed on the user's PC is unknown; `refw-install` reports it.
@@ -1654,6 +1654,84 @@ searched).
     `configs/fighter/ryu.yaml`.
   - `verified_routes` / `lethal_route` have no caller.
   - Replays feed the move map only; no policy is trained.
+
+## 0.12.0: the bot learns to fight (user, 2026-10-03)
+User: "it's enough setup, right? It's time for this thing to really learn how to fight"; "complete both step 1
+AND 2 - a true neural network, plus counting"; "build human readable language about what the bot 'thinks'
+after every match ... for all matches"; a "Versus Human" setting "with auto-side recognition, a wait until the
+screen is focused, and no count down to inputs, just waiting until 'fight' appears", for consenting
+volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom's approval).
+### Intents (`sf6bot/intents.py`)
+- A character-independent action vocabulary read from the STATE (no input masks needed, so every recording
+  counts): idle, walk fwd/back, crouch, jump fwd/neutral/back, dash fwd/back, poke, special, super, throw,
+  Drive Impact, parry, Drive Rush, air attack.
+- Id ranges measured in the user's fights: walk forward 9 (+x toward the opponent), walk back 13, dashes 17/18,
+  jumps 33-40 (36 neutral, 37 forward), normals 600-714, throws 715-725 (721/725 = being thrown), DI 850-859,
+  specials 900-1199, supers 1200-1299, hit reactions 200-399. Directions come from positions.
+- A decision = every 2 game frames while a player is free (not attacking, not in stun); its label = what
+  started in the next 10 frames. 37 features from the deciding player's side: distance and zones, both wall
+  distances (stage edge |x| = 7.65, measured), heights, speeds, hp, Drive, burnout, Super, round time, the
+  opponent's category (15) and move progress.
+### Brain (`sf6bot/brain.py`, `sf6bot/mlp.py`, `sf6bot train`, menu **B**)
+- **Network:** a multi-layer perceptron (37 → 64 → 64 → 17, ReLU, softmax) in plain numpy, trained by
+  backpropagation with Adam on class-balanced cross-entropy, early stopping on held-out recordings. numpy only:
+  no CUDA on the Ally X, PyTorch not installed; it trains in seconds and answers in microseconds.
+- **Counts:** P(intent | zone, opponent's category), and which concrete move per (character, intent, zone).
+  The fighter mixes 75% network + 25% counts.
+- **Data:** datasets/merged + replays (both players), datasets/fights (the OPPONENT only, CPU weight 0.5,
+  volunteers 1.0). The bot's own side is never imitated.
+- **Report** (`brain_report.md`, in S): held-out top-1 / top-3 / log loss for the network, the counts, the
+  mix, and the always-the-commonest baseline. On the two CPU fights (test fixtures): 640 decisions, network
+  top-1 0.24 vs always-idle 0.21 — tiny data; real replays are what will make it useful.
+### Policy in matches (`sf6bot/neutral_policy.py`, `ScriptedFighter._policy_neutral`)
+- The reflex rules still come first (hitstun, throw tech, DI reaction, anti-air, blocking, punish, block on
+  attacks). In neutral, every 0.12 s: brain probabilities × the learned factor for this opponent → masked
+  (airborne: air attack / wait; throw only ≤ 1.0; Drive / Super only when affordable) → temperature 0.8 →
+  8% exploration → sampled.
+- Intent → move: movement macros (walk 8 frames, jump, dash, crouch-block), or the bot's own catalogued move
+  of that kind (menu C), weighted by how often its character's players used it there, a frame-data prior
+  (fast moves up close, projectiles from far) and the learned move factor.
+- **Combo lab routes in matches (`sf6bot/route_book.py`):** every TRUE combo (verified on "After first hit",
+  repeated ≥ 50%), planned with the lab's executor and recorded timing. Jump-in and Denjin-setup routes are
+  left out for now.
+  - Punish: the best route whose first move starts within the frames the blocked move leaves (punish-counter
+    routes first), else the old options. Counted: `punishes.chances / taken`.
+  - Confirm: a chosen move that starts a route is performed as the route; a blocked first hit stops it.
+  - Lethal: a route whose lowest measured damage kills wins over everything, and only then may it spend
+    into burnout. Corner routes only with the opponent's back ≤ 1.6 from the wall.
+  - Value = damage × lab success rate × its success in real matches (learned).
+### Learning from its own matches (`sf6bot/learning.py`)
+- Each neutral decision is scored over the next 1.5 s: (damage dealt − damage taken) / 1000. Averages per
+  (zone, intent) and (zone, move), shrunk toward 0 by 4 tries, set a factor exp(average) on the next
+  choices. Combo routes keep their match completion rate. Saved per opponent character in
+  `datasets/learning/<Bot>_vs_<Opponent>.json` after EVERY match.
+- The opponent's habits are counted per zone (its moves by name when known, else by kind).
+### Thoughts after every match (all modes: V, N, H)
+- Plain-language lines, each tagged [measured] / [policy] / [learned]: result and set score, damage, what hurt
+  most, throws, the opponent's habits per range, the bot's neutral mix (and its source), what worked and what
+  cost it (hp per try), combos finished, punishes taken vs chances, and what it will do more / less next
+  match. Written to `thoughts.md` (run folder, in S), printed, and shown in the overlay THOUGHTS strip.
+### Versus Human (`fight --versus-human offline|online`, menu **H**)
+- offline: SF6 Versus at this PC, the bot on its own virtual controller (volunteer here or over Parsec).
+  online: the bot plays as this PC's player with the keyboard.
+- No countdown: inputs start once the SF6 window is focused; the bot acts from "Fight!".
+- **Auto side (`sf6bot/side_probe.py`)** each match: by character (only one side plays `character: Ryu`), else a
+  crouch pattern at "Fight!" (DOWN 6 on / 6 off, twice) and the player whose input mask follows it (≥ 85%
+  agreement, the other clearly less). The best-fitting delay is the bot's input delay in that match and is
+  used as the combo executor's lead (online it may be larger; recorded timing is replayed only when it
+  matches). Unclear twice → assumes P2 and says so.
+- `--first-to N` (FT20), `--opponent NICKNAME` (optional, stored locally with the matches), 6 h limit.
+- S stays small for long sets: one line per match plus thoughts.md (the last 20 KB).
+### Not verified in game (all MOCK / offline tests)
+- Whether the network's choices play well; whether 0.12 s macro decisions look natural; whether the crouch
+  probe registers on the input masks at "Fight!" and online; how online rollback shows in the state stream;
+  whether combo timing holds online.
+- Tests: `tests/test_learning.py` (backprop on a nonlinear problem, intent labels, training on the real CPU
+  fights with the held-out report, policy masks and route confirms, learning factors and the thoughts text,
+  side by character and by a synthetic probe, punish route by frames), and an end-to-end MOCK session over
+  the two real matches (`test_learned_fighter_auto_side_first_to_and_thoughts`).
+- Menu: **B** = train (it was an old alias for catalog guard All; C → 2 does that). Erase: training also
+  clears the trained brain; fights also clears what was learned per opponent.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

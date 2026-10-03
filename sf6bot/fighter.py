@@ -48,6 +48,8 @@ class Decision:
     reason: str = ""
     rule: str = ""
     facing: Facing | None = None   # override the side for this decision (block a cross-up)
+    route: dict | None = None      # a combo lab TRUE combo (route_book entry), performed move by move
+    intent: str = ""               # the learned policy's intent (neutral decisions)
 
 
 def _ids(spec) -> set:
@@ -182,9 +184,16 @@ def _common_moves(fcfg: dict) -> dict:
 
 
 class ScriptedFighter:
-    def __init__(self, fcfg: dict, opp_moves: dict | None = None, seed: int | None = None) -> None:
+    def __init__(self, fcfg: dict, opp_moves: dict | None = None, seed: int | None = None,
+                 policy=None, book: list | None = None, experience=None) -> None:
         self.c = fcfg
         self.opp = opp_moves or {}
+        self.policy = policy              # neutral_policy.NeutralPolicy: the learned neutral game
+        self.book = book or []            # route_book entries: the combo lab's TRUE combos
+        self.exp = experience             # learning.Experience: what worked against this opponent
+        self.punish_stats = {"chances": 0, "taken": 0}
+        self._chance_for = None
+        self.prev_raw: dict | None = None
         self.rng = random.Random(seed)
         ids = fcfg.get("ids") or {}
         self.jump_ids = _ids(ids.get("jump"))
@@ -287,6 +296,11 @@ class ScriptedFighter:
         return None
 
     def decide(self, raw: dict, t: float, me_i: int) -> Decision:
+        d = self._decide(raw, t, me_i)
+        self.prev_raw = raw
+        return d
+
+    def _decide(self, raw: dict, t: float, me_i: int) -> Decision:
         me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
         dist = player_distance(me, op)
         if dist is None:
@@ -352,10 +366,29 @@ class ScriptedFighter:
                     self.punished = False
                 self.blocked_id = op_act
             adv = self.opp.get(self.blocked_id, {}).get("block_adv")
+            if adv is not None and adv <= -4 and self._chance_for != self.blocked_id:
+                self._chance_for = self.blocked_id
+                self.punish_stats["chances"] += 1
+            if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"]
+                    and adv <= -4 and self.book):
+                # the best TRUE combo whose first move starts in time (combo lab; punish = punish counter)
+                from .route_book import choose
+                e = choose(self.book, me, op, frames=-adv, hit_types=("punish_counter", "normal"),
+                           learned=self.exp.routes() if self.exp else None,
+                           reserve=self.c.get("drive_reserve", 0))
+                if e is not None:
+                    self.punished = True
+                    self.punish_stats["taken"] += 1
+                    name = self.opp[self.blocked_id]["name"]
+                    kill = ", it kills" if e.get("lethal") else ""
+                    return Decision("route", e["route"], route=e, rule="punish",
+                                    reason=f"blocked {name} ({adv:+d}): combo lab true combo, "
+                                           f"{e.get('damage')} dmg{kill}")
             if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"]):
                 for opt in self.c["punish"]["options"]:
                     if adv <= opt["max_adv"]:
                         self.punished = True
+                        self.punish_stats["taken"] += 1
                         name = self.opp[self.blocked_id]["name"]
                         src = " inferred" if self.opp[self.blocked_id].get("source") == "inferred" else ""
                         return Decision("seq", opt["name"], opt["seq"], rule="punish",
@@ -373,6 +406,8 @@ class ScriptedFighter:
         # 7. neutral
         if t < self.next_neutral_t:
             return Decision("none")
+        if self.policy is not None:
+            return self._policy_neutral(raw, me, op, t, me_i, block_dir)
         n = self.c["neutral"]
         self.next_neutral_t = t + n["decision_every_s"]
         z = self.zone(dist)
@@ -389,6 +424,38 @@ class ScriptedFighter:
             self.block_until = t + n["block_s"]
             return Decision("hold", direction=block_dir, reason=reason, rule="neutral:block")
         return self._move(pick, f"neutral:{pick}", reason)
+
+
+    def _policy_neutral(self, raw: dict, me: dict, op: dict, t: float, me_i: int, block_dir: int) -> Decision:
+        """The learned neutral game (neutral_policy): network + counts, re-weighted by this opponent's
+        results, turned into a move; a move that starts a TRUE combo is performed as that route."""
+        pcfg = self.c.get("policy") or {}
+        self.next_neutral_t = t + float(pcfg.get("decision_every_s", 0.12))
+        prev = self.prev_raw or {}
+        mk, ok = f"p{me_i + 1}", f"p{2 - me_i}"
+        t0, t1 = prev.get("stage_timer"), raw.get("stage_timer")
+        dt = (t1 - t0) if isinstance(t0, int) and isinstance(t1, int) else 0
+        if not 0 < dt <= 10:
+            prev, dt = {}, 1
+        ch = self.policy.choose(me, op, prev.get(mk), prev.get(ok), t1, lambda a: self.can_spend(me, a), dt=dt)
+        intent = ch["intent"]
+        probs = " · ".join(f"{k.replace('_', ' ')} {v:.0%}" for k, v in ch["top"])
+        reason = f"{ch['zone']} {ch['dist']:.2f}: {probs} ({ch['source']})"
+        rule = f"policy:{intent}"
+        dist = ch["dist"]
+        if ch.get("route"):
+            e = ch["route"]
+            return Decision("route", e["route"], route=e, rule=rule, intent=intent,
+                            reason=reason + f" -> {e['route']} (true combo, {e.get('damage')} dmg)")
+        if not ch.get("seq") or intent == "idle":
+            return Decision("release", reason=reason, rule=rule, intent=intent)
+        if intent == "crouch":
+            return Decision("hold", direction=1, reason=reason, rule=rule, intent=intent)
+        name = ch.get("move") or intent.replace("_", " ")
+        if dist < self.c["ranges"].get("side_deadzone", 0.15) * 2 and _has_motion(ch["seq"]):
+            return Decision("hold", direction=block_dir, reason=reason + "; side unclear, no motion inputs",
+                            rule="policy:crouch", intent="crouch")
+        return Decision("seq", name, ch["seq"], reason=reason + f" -> {name}", rule=rule, intent=intent)
 
 
 def _has_motion(seq: str) -> bool:
@@ -445,19 +512,28 @@ def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
     return out
 
 
-def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches: int | None = 1,
-              panel=None) -> dict:
-    """Play matches as `player` until `matches` are done, `seconds` pass or F8.
+def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, matches: int | None = 1,
+              panel=None, first_to: int | None = None, versus: str | None = None,
+              opponent_name: str | None = None) -> dict:
+    """Play matches until `matches` are done, someone reaches `first_to` wins, `seconds` pass or F8.
 
     Waits for a battle instead of requiring one at the start, and goes back to waiting after each
     match: menus, character select and rematch screens happen in between. With `panel` (the overlay's
-    clickable pad, pad_teach.PadPanel) the user drives those menus on the bot's controller; the panel
-    is locked while the bot fights and unlocked between matches, so there is no need to time
-    "stop the buttons, start the fight" by hand (user request, 2026-10-02)."""
-    # Every state line goes, in order, through the match tracker and into a dataset of the current match
-    # (datasets/fights/, kept apart from the replay demonstrations: scripted bot play is for evaluation,
-    # not imitation). Decisions use only the newest line; lines that arrive while a sequence runs are
-    # caught up afterwards, so round and match ends are never missed.
+    clickable pad, pad_teach.PadPanel) the user drives those menus; the panel is locked while the bot
+    fights and unlocked between matches (user request, 2026-10-02).
+
+    `player` None = find the bot's side each match (side_probe: by character, else by a crouch pattern
+    at "Fight!"). `versus` = "offline" / "online" for Versus Human (0.12.0): no countdown, inputs start
+    once the SF6 window is focused, the bot acts from "Fight!".
+
+    After EVERY match the bot writes what it thinks (learning.thoughts) to thoughts.md, the console and
+    the overlay, and saves what it learned against that opponent (datasets/learning/)."""
+    from . import intents as itn
+    from .brain import Brain
+    from .learning import Experience, thoughts, thoughts_md
+    from .neutral_policy import NeutralPolicy, own_moves
+    from .route_book import build as build_book
+    from .side_probe import by_character, probe
     lines: queue.Queue = queue.Queue()
     cur = {"data": DatasetBuilder()}
     reader = open_state_reader(cfg, on_state=lines.put)
@@ -465,13 +541,19 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
         return {}
     fcfg = load_fighter_config(cfg.get("fighter", {}).get("config_dir", "configs/fighter"))
     ds_root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    brain = Brain(ds_root) if (fcfg.get("policy") or {}).get("enabled", True) else None
+    if brain is not None and brain.problem:
+        print(f"Brain: {brain.problem}")
     c = sess.controller
     runner = SequenceRunner(c, sink=sess.recorder.event)
-    me_key, op_key = f"p{player + 1}", f"p{2 - player}"
+    fixed_side = player
+    side: dict = {"i": player, "how": "given" if player is not None else None, "lag": None}
+    keys = lambda: (f"p{side['i'] + 1}", f"p{2 - side['i']}") if side["i"] is not None else (None, None)  # noqa: E731
     done: list[dict] = []
-    summary = _new_match_summary(me_key)
+    summary = _new_match_summary(keys()[0])
     tracker = EpisodeTracker(self_index=player)
     fighter = None
+    exp = None
     plans: dict = {}
     self_moves: dict = {}
     pending: list = []   # (rule, t_sent, opp_hp_before) -> did it hit within 1.0 s?
@@ -479,6 +561,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
     prev_op_act = prev_me_act = None
     prev_raw: dict | None = None
     was_active = False
+    record = {"won": 0, "lost": 0, "first_to": first_to}
+    thoughts_path = sess.recorder.dir / "thoughts.md"
 
     def set_panel(locked: bool) -> None:
         if panel is not None and panel.locked != locked:
@@ -486,25 +570,56 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
             sess.status["controller"] = "BOT FIGHTING (buttons locked)" if locked else "yours: overlay buttons"
 
     def finish_match() -> None:
-        nonlocal summary, tracker, fighter, pending, match_end_t, was_active
+        nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp
         data, cur["data"] = cur["data"], DatasetBuilder()
         if summary["match"] is not None or summary["rounds"] or summary["decisions"]:   # the bot played
+            if fighter is not None:
+                summary["punishes"] = dict(fighter.punish_stats)
+            if (summary.get("match") or {}).get("bot_won") is True:
+                record["won"] += 1
+            elif summary.get("match"):
+                record["lost"] += 1
+            summary["set"] = dict(record)
+            if exp is not None:
+                exp.update(clock.now() + 99, None, None, force=True)
+                summary["learning_file"] = str(exp.path)
+                exp.end_match({"result": summary.get("match"), "rounds": summary.get("rounds"),
+                               "opponent_kind": summary.get("opponent_kind"),
+                               "nickname": (summary.get("opponent_human") or {}).get("nickname")})
+            lines_ = thoughts(summary, exp, record if first_to else None)
+            summary["thoughts"] = [f"[{s}] {t}" for s, t in lines_]
+            title = f"Match {len(done) + 1}: {summary.get('character')} vs {summary.get('opponent')}"
+            with open(thoughts_path, "a", encoding="utf-8") as fh:
+                fh.write(thoughts_md(lines_, title))
+            print("\n" + title)
+            for s_, t_ in lines_:
+                print(f"  [{s_}] {t_}")
+                sess.narrate(t_, source=s_)
             if data.rows:
+                who = f"vs human{' ' + versus if versus else ''}" if versus else "vs cpu"
                 summary["dataset"] = str(data.save(ds_root, "fights", "scripted_fight",
-                                                   f"bot={me_key}, scripted rules, vs {summary.get('opponent')}"))
+                                                   f"bot={keys()[0]}, {who}, learned policy" if brain else
+                                                   f"bot={keys()[0]}, {who}, scripted rules"))
             done.append(summary)
             sess.recorder.write_json("fight_summary.json", _overall(done))
-        summary, tracker, fighter, pending = _new_match_summary(me_key), EpisodeTracker(self_index=player), None, []
-        match_end_t, was_active = None, False
+        if fixed_side is None:
+            side.update(i=None, how=None, lag=None)
+        summary, tracker, fighter, pending = _new_match_summary(keys()[0]), EpisodeTracker(self_index=side["i"]), None, []
+        match_end_t, was_active, exp = None, False, None
 
     try:
-        print(f"Scripted fighter as {me_key.upper()}: it plays every match from \"Fight!\" to the KO "
-              f"and records it, for up to {seconds / 60:.0f} min. F8 stops it.")
+        who = "the bot finds its side each match" if player is None else f"as {keys()[0].upper()}"
+        print(f"Fighter ({who}): it plays every match from \"Fight!\" to the KO and records it, for up to "
+              f"{seconds / 60:.0f} min" + (f" or until someone wins {first_to} matches" if first_to else "")
+              + ". F8 stops it.")
+        if brain:
+            print("Neutral game: learned (" + ("network + counts" if brain.net is not None else "counts only")
+                  + "); train it with menu B after recording replays or matches.")
         if panel is not None:
             print("Between matches the controller is yours: use the overlay buttons for menus and "
                   "character select. They lock while the bot fights.")
         set_panel(False)
-        if not sess.start_inputs():
+        if not sess.start_inputs(countdown_s=0.0 if versus else None):
             return {}
         sess.narrate("Waiting for a match: the bot takes over at \"Fight!\".", source="scripted")
         t_end = clock.now() + seconds
@@ -527,35 +642,44 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 except queue.Empty:
                     break
             match_over, end_i = False, len(batch)
+            me_key, op_key = keys()
             for i, st in enumerate(batch):
                 cur["data"].add(st.raw, st.t_recv)
                 t = st.t_recv
                 for e in tracker.update(st.raw, t):
                     if e["event"] == "round_end":
-                        summary["rounds"].append({"round": e.get("round"), "reason": e.get("reason"),
-                                                  "bot_won": e.get("winner") == player})
-                        won = e.get("winner") == player   # tracker winners are player indexes (0 = p1)
+                        won = side["i"] is not None and e.get("winner") == side["i"]
+                        summary["rounds"].append({"round": e.get("round"), "reason": e.get("reason"), "bot_won": won})
                         sess.narrate(f"Round over: {'won' if won else 'lost'} ({e.get('reason')}).", source="measured")
                     elif e["event"] == "match_end":
+                        won = side["i"] is not None and e.get("winner") == side["i"]
                         summary["match"] = {"winner": f"p{e.get('winner') + 1}" if e.get("winner") is not None else None,
-                                            "bot_won": e.get("winner") == player, "score": e.get("score")}
-                        sess.narrate(f"Match over: {'WON' if e.get('winner') == player else 'lost'} {e.get('score')}.",
-                                     source="measured")
+                                            "bot_won": won, "score": e.get("score")}
+                        sess.narrate(f"Match over: {'WON' if won else 'lost'} {e.get('score')}.", source="measured")
                         match_end_t = t
                     elif e["event"] == "fight_start":
                         sess.narrate("Fight!", source="measured")
-                if fighter is not None and st.in_battle and prev_raw is not None:
+                if fighter is not None and st.in_battle and prev_raw is not None and me_key:
                     _count_hits(prev_raw, st.raw, me_key, op_key, self_moves, fighter.opp, summary, sess, fighter)
-                prev_raw = st.raw if st.in_battle else None
-                if fighter is not None and st.in_battle:
+                    _count_damage(prev_raw, st.raw, me_key, op_key, fighter.opp, summary)
+                if fighter is not None and st.in_battle and me_key:
                     me_, op_ = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
                     # throws against the bot, and whether they connected (victim ids vs Ken: 721/725)
                     ta = summary["throws_against"]
-                    if op_.get("action_id") in fighter.throw_ids and op_.get("action_id") != prev_op_act:
+                    oa = op_.get("action_id")
+                    if oa in fighter.throw_ids and oa != prev_op_act:
                         ta["seen"] += 1
                     if me_.get("action_id") in fighter.thrown_ids and me_.get("action_id") != prev_me_act:
                         ta["thrown"] += 1
-                    prev_op_act, prev_me_act = op_.get("action_id"), me_.get("action_id")
+                    if exp is not None:
+                        exp.update(t, me_.get("hp"), op_.get("hp"))
+                        if oa != prev_op_act:
+                            cat = itn.category(op_)
+                            if cat not in ("idle", "walk", "crouch", "hit", "block"):
+                                d_ = player_distance(me_, op_)
+                                exp.habit(itn.zone(d_), _what(fighter.opp, op_, ids=False))
+                    prev_op_act, prev_me_act = oa, me_.get("action_id")
+                prev_raw = st.raw if st.in_battle else None
                 if match_end_t is not None and (t - match_end_t > 3.0 or not st.in_battle):
                     match_over, end_i = True, i   # 3 s after the KO, or the game already left the battle
                     break
@@ -570,6 +694,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 carry = rest           # processed first, as the next match's first lines
                 if matches is not None and len(done) >= matches:
                     break
+                if first_to and max(record["won"], record["lost"]) >= first_to:
+                    print(f"First to {first_to} decided: bot {record['won']} - {record['lost']}.")
+                    break
                 sess.narrate("Waiting for the next match (rematch / menus: the controller is yours).",
                              source="scripted")
                 continue
@@ -581,13 +708,56 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                     finish_match()
                 set_panel(False)
                 continue
+            timer = st.raw.get("stage_timer")
+            p1r, p2r = st.raw.get("p1") or {}, st.raw.get("p2") or {}
+            fight_on = (match_end_t is None and isinstance(timer, int) and timer >= FIGHT_START_FRAME
+                        and (_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0
+                        and p1r.get("action_id") not in INTRO_IDS and p2r.get("action_id") not in INTRO_IDS)
+            # which side is the bot? (Versus Human / auto): by character, else the crouch probe at "Fight!"
+            if side["i"] is None:
+                i_ = by_character(st.raw, fcfg.get("character"))
+                if i_ is not None:
+                    side.update(i=i_, how="character")
+                elif fight_on and c.armed:
+                    res = probe(sess, reader)
+                    summary["side_probe"] = res
+                    if res["player"] is None:
+                        res = probe(sess, reader)
+                        summary["side_probe_retry"] = res
+                    if res["player"] is not None:
+                        side.update(i=res["player"], how="input probe", lag=res["lag"])
+                    else:
+                        side.update(i=1, how="probe unclear: assumed P2")
+                        sess.narrate("Could not tell which side I am; assuming P2.", source="measured")
+                    continue
+                else:
+                    set_panel(False)
+                    continue
+                tracker.self_index = side["i"]
+                me_key, op_key = keys()
+                summary["player"] = me_key
+                summary["side_detection"] = {"side": me_key, "how": side["how"], "input_delay_frames": side["lag"]}
+                sess.narrate(f"I am {me_key.upper()} ({side['how']}).", source="measured")
+            me_key, op_key = keys()
             me, op = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
             if fighter is None and isinstance(op.get("chara"), int):
                 summary["character"] = character_name(me.get("chara"))
                 summary["opponent"] = character_name(op["chara"])
+                summary["opponent_kind"] = "human" if versus else "cpu"
+                if versus:
+                    summary["opponent_human"] = {"mode": versus, "nickname": opponent_name}
                 opp_moves, label = opponent_moves(summary["opponent"], ds_root, fcfg)
                 summary["opponent_catalog"] = label or False
-                fighter = ScriptedFighter(fcfg, opp_moves)
+                book = build_book(summary["character"], ds_root)
+                exp = Experience(ds_root, summary["character"], summary["opponent"])
+                policy = None
+                if brain:
+                    mv = own_moves(summary["character"], ds_root)
+                    policy = NeutralPolicy(brain, mv, exp, book, chara_id=me.get("chara"), cfg=fcfg.get("policy"))
+                    summary["note"] = ("learned neutral (" + ("network + counts" if brain.net is not None else "counts")
+                                       + f", {len(mv)} own moves) + reflex rules; combo lab routes: {len(book)}")
+                summary["route_book"] = len(book)
+                fighter = ScriptedFighter(fcfg, opp_moves, policy=policy, book=book, experience=exp)
                 self_moves, _ = opponent_moves(summary["character"], ds_root, fcfg)
                 plans = route_plans(fcfg, summary["character"], ds_root)
                 summary["routes_on_game_clock"] = sorted(plans)
@@ -596,8 +766,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                     now = game_build(cfg)
                 except Exception:
                     now = None
-                stale = [c for c in {summary["character"], summary["opponent"]}
-                         if now and catalog_build(c, ds_root) not in (None, now)]
+                stale = [c_ for c_ in {summary["character"], summary["opponent"]}
+                         if now and catalog_build(c_, ds_root) not in (None, now)]
                 if stale:
                     summary["stale_catalogs"] = stale
                     sess.narrate(f"The game was updated since the move catalog of {', '.join(stale)} was "
@@ -607,7 +777,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 sess.narrate(f"Opponent {summary['opponent']}: "
                              + (f"move data: {label} (punishes and DI reactions on)." if label
                                 else "no move catalog or inferred map: no punishes; DI reactions from the shared "
-                                     "system-move ids."), source="scripted")
+                                     "system-move ids.") + f" {len(book)} true combos ready.", source="scripted")
             if fighter is None:
                 fighter = ScriptedFighter(fcfg, _common_moves(fcfg))
             # resolve outcomes of earlier actions
@@ -619,12 +789,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                     pending.remove(p)
                 elif t - t0 > 1.0:
                     pending.remove(p)
-            timer = st.raw.get("stage_timer")
             # not before "Fight!": 0.5.0 threw Hadokens during the round-start pause (real fight log)
-            active = (match_end_t is None and isinstance(timer, int) and timer >= FIGHT_START_FRAME
-                      and (_num(me.get("hp")) or 0) > 0 and (_num(op.get("hp")) or 0) > 0
-                      and me.get("action_id") not in INTRO_IDS and op.get("action_id") not in INTRO_IDS)
-            if not active:
+            if not fight_on:
                 if was_active:
                     c.apply(InputState(), tag="fighter_idle")
                 was_active = False
@@ -632,47 +798,58 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
                 continue
             was_active = True
             set_panel(True)
-            d = fighter.decide(st.raw, t, player)
+            d = fighter.decide(st.raw, t, side["i"])
             if fighter.side is not None and facing_of(me) is not None and facing_of(me) is not fighter.side:
                 summary["facing_flag_disagreed"] += 1     # frames where 0.7.0 would have mirrored wrongly
-            side = d.facing or fighter.side
-            if side is not None:
-                c.set_facing(side)
+            face = d.facing or fighter.side
+            if face is not None:
+                c.set_facing(face)
             if d.kind == "none":
                 continue
             if d.rule:
                 summary["decisions"][d.rule] = summary["decisions"].get(d.rule, 0) + 1
-            if d.kind == "seq":
-                if d.rule != "neutral:walk_forward":
-                    sess.narrate(f"{d.name}: {d.reason}", source="scripted")
+            if d.intent and exp is not None and fighter.policy is not None:
+                ch = fighter.policy.last
+                exp.decided(t, ch.get("zone"), d.intent, ch.get("move") if d.kind in ("seq", "route") else None,
+                            me.get("hp"), op.get("hp"), ch.get("source", "?"))
+            if d.kind in ("seq", "route"):
+                if d.kind == "route" or d.intent in itn.ATTACK_INTENTS or d.rule in ("punish", "anti_air"):
+                    sess.narrate(f"{d.name}: {d.reason}", source="policy" if d.intent else "scripted")
                 pending.append((d.rule, t, ohp))
                 if not c.armed and not sess.wait_armed(timeout=10):
                     stop_all = True
                     continue
+
                 # neutral pokes and combos stop between steps when a throw, DI or jump-in shows up
                 def urgent():
                     latest = reader.latest()
-                    return fighter.urgent(latest.raw, player) if latest is not None else None
-                if d.name in plans:
+                    return fighter.urgent(latest.raw, side["i"]) if latest is not None else None
+                neutral = d.rule.startswith(("neutral:", "policy:"))
+                pl = d.route["plan"] if d.kind == "route" else plans.get(d.name)
+                if pl is not None:
                     # combos run on the game's clock: each input no earlier than the move can come out;
                     # a block of the first hit stops the rest (combo_lab.perform_route)
                     from .combo_lab import perform_route
-                    pl = plans[d.name]
+                    lead = side["lag"] if isinstance(side["lag"], int) and side["how"] == "input probe" else None
                     res = perform_route(sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
-                                        FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=4.0,
-                                        abort=urgent if d.rule.startswith("neutral:") else None,
-                                        lead=pl.get("lead") or 4, fixed=pl.get("recorded_timing"))
+                                        FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=6.0,
+                                        abort=urgent if neutral else None,
+                                        lead=lead or pl.get("lead") or 4,
+                                        fixed=pl.get("recorded_timing") if not lead or lead == pl.get("lead") else None)
                     c.apply(InputState(), tag="fighter_route_end")
                     rk = "routes_completed" if res.get("success") else "routes_stopped"
                     summary.setdefault(rk, {})
                     why = d.name if res.get("success") else f"{d.name}: {(res.get('fail') or {}).get('kind') or res.get('aborted')}"
                     summary[rk][why] = summary[rk].get(why, 0) + 1
+                    if d.kind == "route" and exp is not None:
+                        exp.route_done(d.route["route"], bool(res.get("success")), res.get("damage"))
                     if res.get("aborted"):
                         summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
                     continue
                 _, ok = runner.run(parse_sequence(d.seq, d.name), stop_event=sess.stop_event,
-                                   abort=urgent if d.rule.startswith("neutral:") else None)
-                c.apply(InputState(), tag="fighter_seq_end")
+                                   abort=urgent if neutral else None)
+                if not d.intent or d.intent in itn.ATTACK_INTENTS or d.intent.startswith(("jump", "dash")):
+                    c.apply(InputState(), tag="fighter_seq_end")
                 if runner.aborted:
                     summary["interrupted"][runner.aborted] = summary["interrupted"].get(runner.aborted, 0) + 1
                     continue
@@ -693,8 +870,39 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int = 0, matches
     result = _overall(done)
     if done:
         sess.recorder.write_json("fight_summary.json", result)
-    print(json.dumps(result, indent=2, default=str))
+    print(json.dumps({k: v for k, v in result.items() if k != "matches"} if "matches" in result else
+                     {k: v for k, v in result.items() if k != "thoughts"}, indent=2, default=str))
     return result
+
+
+_PLURAL = {"normal": "normals", "special": "specials", "super": "supers", "throw": "throws", "jump": "jumps",
+           "air_attack": "jump attacks", "drive_impact": "Drive Impact", "parry": "Drive Parry",
+           "drive_rush": "Drive Rush", "dash": "dashes", "hit": "hits", "block": "blocks", "idle": "standing",
+           "walk": "walking", "crouch": "crouching"}
+
+
+def _what(moves: dict, p: dict, ids: bool = True) -> str:
+    """A readable name for what a player is doing: the move's name when known, else its kind."""
+    from .intents import category
+    aid = p.get("action_id")
+    name = (moves.get(aid) or {}).get("name")
+    if name:
+        return name
+    kind = _PLURAL.get(category(p), category(p))
+    return f"{kind} (id {aid})" if ids and aid is not None else kind
+
+
+def _count_damage(prev: dict, cur: dict, me_key: str, op_key: str, opp_moves: dict, summary: dict) -> None:
+    """Damage dealt and taken, and which opponent move did the damage taken (for the thoughts)."""
+    dm = summary.setdefault("damage", {"dealt": 0, "taken": 0})
+    for who, key, sign in ((op_key, "dealt", 1), (me_key, "taken", 1)):
+        a, b = _num((prev.get(who) or {}).get("hp")), _num((cur.get(who) or {}).get("hp"))
+        if a is not None and b is not None and b < a:
+            dm[key] += int(a - b)
+            if key == "taken":
+                name = _what(opp_moves, cur.get(op_key) or {})
+                tb = summary.setdefault("damage_taken_by_move", {})
+                tb[name] = tb.get(name, 0) + int(a - b)
 
 
 def _count_hits(prev: dict, cur: dict, me_key: str, op_key: str, self_moves: dict, opp_moves: dict,

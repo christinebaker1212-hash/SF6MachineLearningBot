@@ -8,6 +8,29 @@ from pathlib import Path
 MAX_CHARS = 60_000
 
 
+def compact_fights(text: str) -> str:
+    """A long session (an FT20 is up to 39 matches): the record plus one line per match; each match's
+    thoughts are in thoughts.md."""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return text
+    if "matches" not in d:
+        d.pop("thoughts", None)
+        return json.dumps(d, indent=1, default=str)
+    rows = [f"record: {d.get('record')}"]
+    for i, m in enumerate(d["matches"], 1):
+        res = m.get("match") or {}
+        rows.append(json.dumps({"n": i, "won": res.get("bot_won"), "score": res.get("score"),
+                                "opponent": m.get("opponent"), "side": m.get("side_detection"),
+                                "damage": m.get("damage"), "punishes": m.get("punishes"),
+                                "throws_against": m.get("throws_against"), "routes_completed": m.get("routes_completed"),
+                                "routes_stopped": m.get("routes_stopped"), "interrupted": m.get("interrupted"),
+                                "top_decisions": dict(sorted((m.get("decisions") or {}).items(),
+                                                             key=lambda kv: -kv[1])[:8])}, default=str))
+    return "\n".join(rows)
+
+
 def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) -> Path:
     root = Path(root)
     runs = sorted([d for d in root.iterdir() if d.is_dir() and (d / "meta.json").exists()
@@ -22,10 +45,16 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
         out += ["", "--- sysinfo ---", si.read_text(encoding="utf-8", errors="replace").strip()]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
-        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "combo_lab.md"):
+        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "combo_lab.md", "brain_report.md", "thoughts.md"):
             f = d / name
-            if f.exists():
-                out += [f.read_text(encoding="utf-8", errors="replace").strip(), ""]
+            if not f.exists():
+                continue
+            text = f.read_text(encoding="utf-8", errors="replace").strip()
+            if name == "fight_summary.json":
+                text = compact_fights(text)
+            elif name == "thoughts.md" and len(text) > 20_000:
+                text = "(earlier matches cut)\n" + text[-20_000:]
+            out += [text, ""]
         notable = []
         ev = d / "events.jsonl"
         if ev.exists():

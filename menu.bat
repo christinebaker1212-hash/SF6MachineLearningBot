@@ -18,9 +18,10 @@ echo.
 echo  FIGHT
 echo    V  Bot vs CPU, bot on the LEFT  (bot presses P1's keys)
 echo    N  Bot vs CPU, bot on the RIGHT
-echo    H  Bot vs YOU  (bot is P2 on its own controller)
-echo       Start any of these from a menu: use the overlay buttons for menus,
-echo       the bot takes over at "Fight!" and records every match until F8.
+echo    H  Versus Human: a volunteer plays the bot (offline at this PC, or online)
+echo       The bot finds its side, waits for "Fight!", records every match, and after
+echo       EVERY match writes what it thinks (thoughts.md, in S) and what it learned.
+echo    B  Train the bot's brain from all recordings (replays + matches; no game needed)
 echo.
 echo  RECORD
 echo    D  Record a replay you play back (training data)
@@ -61,8 +62,8 @@ goto ask
 cls
 echo ================ sf6bot: erase data ================
 echo    1  Clear runs           (reports, videos and logs in the runs folder)
-echo    2  Clear training data  (recorded replays, merged replays, learned move ids)
-echo    3  Clear fight data     (the bot's recorded matches)
+echo    2  Clear training data  (recorded replays, merged replays, learned move ids, trained brain)
+echo    3  Clear fight data     (the bot's recorded matches and what it learned from them)
 echo    4  Purge data from OLD bot versions (old runs, old fights, old combo lab results, learned
 echo       move ids). Keeps catalogs, Capcom data, combo pages, recorded replays and routines.
 echo  Move catalogs, Capcom frame data and taught routines are never erased.
@@ -144,10 +145,10 @@ set "CH="
 set /p CH=Choose: 
 if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
-if /i "%CH%"=="h" (%BOT% fight --player p2 --pad & goto done)
+if /i "%CH%"=="h" goto versus
+if /i "%CH%"=="b" (%BOT% train & goto done)
 if /i "%CH%"=="d" (%BOT% replay-record & goto done)
 if /i "%CH%"=="c" goto catalog
-if /i "%CH%"=="b" (%BOT% catalog --guard all & goto done)
 if /i "%CH%"=="p" (%BOT% pad & goto done)
 if /i "%CH%"=="l" goto teach
 if /i "%CH%"=="u" goto routine
@@ -179,6 +180,30 @@ if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
 if /i "%CH%"=="z" goto torch
 goto menu
+
+:versus
+echo.
+echo  Versus Human (a volunteer). Pick the characters and sides as you like: the bot finds its side.
+echo    1  Offline, at this PC: Versus mode, the bot gets its own controller (the volunteer plays
+echo       here or joins over Parsec)
+echo    2  Online: the bot plays as this PC's player with the keyboard
+set "VM="
+set /p VM=Choose: 
+set "VMODE="
+if "%VM%"=="1" set "VMODE=offline"
+if "%VM%"=="2" set "VMODE=online"
+if "%VMODE%"=="" goto menu
+set "FT="
+set /p FT=First to how many wins? (e.g. 20; Enter = no limit): 
+if "%FT%"=="" set "FT=0"
+set "OPN="
+set /p OPN=Opponent nickname (optional, Enter = skip): 
+if "%OPN%"=="" (
+    %BOT% fight --versus-human %VMODE% --first-to %FT%
+) else (
+    %BOT% fight --versus-human %VMODE% --first-to %FT% --opponent "%OPN%"
+)
+goto done
 
 :teach
 set "RN="

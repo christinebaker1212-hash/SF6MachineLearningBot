@@ -6,6 +6,14 @@
 # Sequences use the bot notation (numpad relative to facing, @frames). Combo routes are the
 # "Very Easy" ones from wiki.supercombo.gg/w/Street_Fighter_6/Ryu/Combos (user-provided link).
 
+character: Ryu        # Versus Human: the side playing this character is the bot (else the input probe)
+# 0.12.0: the learned neutral game (brain trained with menu B; learning per opponent in datasets/learning/).
+# The reflex rules below (throw tech, DI reaction, anti-air, blocking, punishes) still come first.
+policy:
+  enabled: true
+  decision_every_s: 0.12   # a neutral decision about every 7 frames (movement macros last 8)
+  temperature: 0.8         # < 1 = closer to the most likely choice
+  explore: 0.08            # share of decisions spread over every allowed option (to keep learning)
 ranges:
   throw: 0.80          # SuperCombo
   close: 1.00

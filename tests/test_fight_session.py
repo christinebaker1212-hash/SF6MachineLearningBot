@@ -87,3 +87,29 @@ def test_two_matches_with_menus_between(cfg, tmp_path, monkeypatch):
     assert all(Path(m["dataset"]).exists() for m in out["matches"])
     assert all(sum(m["decisions"].values()) > 0 for m in out["matches"])
     assert True in panel.history and panel.locked is False               # locked while fighting, free after
+
+
+def test_learned_fighter_auto_side_first_to_and_thoughts(cfg, tmp_path, monkeypatch):
+    """0.12.0, MOCK over the same real matches: the bot finds its side by character, plays neutral from the
+    trained brain, stops when the first-to target is reached, writes its thoughts after the match and saves
+    what it learned against Ken."""
+    from tests.test_learning import _datasets, _ryu_catalog
+    from sf6bot import brain
+    ds = _datasets(tmp_path)
+    brain.train(ds, log=lambda *a: None)
+    _ryu_catalog(ds)
+    menu = [{"in_battle": False, "ready": False}] * 300
+    lines = menu + _rows("fight_2026-10-02_cpu4_ken.jsonl.gz") + menu + _rows("fight_2026-10-02_cpu7_ken.jsonl.gz") + menu
+    monkeypatch.setattr(fi, "open_state_reader", lambda c, on_state=None: _Reader(on_state, lines, 0.00025).start())
+    cfg["datasets"] = {"root": str(ds)}
+    cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
+    with Session(cfg, "fight_learned_test", mock=True) as s:
+        out = fi.run_fight(s, cfg, 60.0, player=None, matches=None, first_to=1, versus="offline",
+                           opponent_name="volunteer1")
+        thoughts_md = (s.recorder.dir / "thoughts.md").read_text(encoding="utf-8")
+    assert out["side_detection"] == {"side": "p1", "how": "character", "input_delay_frames": None}
+    assert out["set"]["won"] == 1 and out["opponent_human"]["nickname"] == "volunteer1"
+    assert any(k.startswith("policy:") for k in out["decisions"])
+    assert out["thoughts"] and "Match 1: Ryu vs Ken" in thoughts_md and "[measured] I WON" in thoughts_md
+    assert (ds / "learning" / "Ryu_vs_Ken.json").exists()
+    assert "vs human offline" in json.loads(Path(out["dataset"].replace(".jsonl.gz", ".meta.json")).read_text())["notes"]
