@@ -141,7 +141,13 @@ def cmd_refw_research(args, cfg):
     if d is None:
         sys.exit("SF6's folder is not known: start SF6 once while any bot command runs (or set game.install_dir).")
     from . import win32
-    running = bool(win32.IS_WINDOWS and win32.find_game_window(cfg["game"]["exe_name"], cfg["game"]["title_contains"]))
+    # only the game's own process counts: a title match also catches browser tabs about Street Fighter 6 (0.17.2: the
+    # user's install was refused with SF6 closed)
+    exe = cfg["game"]["exe_name"].lower()
+    game_w = next((w for w in win32.list_windows() if w.exe.lower() == exe), None) if win32.IS_WINDOWS else None
+    running = game_w is not None
+    if running:
+        print(f"SF6 seems to be running: window '{game_w.title}' of {game_w.exe}. Close it (and wait a few seconds).")
     try:
         if args.action == "install":
             src = Path(args.path or "")
