@@ -630,6 +630,35 @@ FIGHT_NEUTRAL = set(range(0, 33))        # MEASURED: idle / walk / crouch ids < 
 FIGHT_MOVEMENT = set(range(33, 41))      # jump ids 34-40 (fights)
 
 
+def _reader_diag(reader) -> dict:
+    """Why no state arrives (0.14.1, ranked: 165 s of silence during an online match): is the file growing, are
+    lines unreadable, what the exporter's own heartbeat says (frames rendered, lines written, last error)."""
+    import os
+    d = {"lines_read": reader.lines, "unreadable": reader.parse_errors, "repaired_nan": getattr(reader, "repaired", 0),
+         "bytes_read": getattr(reader, "bytes_read", None)}
+    if getattr(reader, "last_bad", ""):
+        d["last_unreadable"] = reader.last_bad[:200]
+    if reader.error is not None:
+        d["reader_error"] = repr(reader.error)[:200]
+    try:
+        d["file_bytes"] = os.path.getsize(reader.path)
+    except OSError as e:
+        d["file_bytes"] = repr(e)[:80]
+    try:
+        info = json.loads((Path(reader.path).parent / "sf6bot_exporter_info.json").read_text(encoding="utf-8"))
+        import time as _t
+        age = round(_t.time() - (Path(reader.path).parent / "sf6bot_exporter_info.json").stat().st_mtime, 1)
+        th = info.get("tick_hook") or {}
+        d["exporter"] = {"age_s": age, "frame": info.get("frame"), "lines": info.get("lines"),
+                         "in_battle": info.get("in_battle"), "enabled": info.get("enabled"),
+                         "last_error": (info.get("last_error") or "")[:200], "missing": info.get("missing"),
+                         "tick_lines": info.get("tick_lines"), "frame_lines": info.get("frame_lines"),
+                         "tick_hook": {k: th.get(k) for k in ("chosen", "status", "last_tick_error") if k in th}}
+    except Exception as e:                       # noqa: BLE001 - diagnostics only
+        d["exporter"] = f"no heartbeat: {e!r}"[:120]
+    return d
+
+
 def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
     """{move name: combo-lab plan} for the config's moves with a `route` (0.11.3): those are performed
     from the game's clock, each input no earlier than the move can come out (combo_lab.perform_route).
@@ -828,7 +857,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         batch = []          # no more lines after the match: close it anyway
                     else:
                         if clock.now() - wait["last_line"] > 5.0:
-                            status("no game state from SF6 for 5 s+ (exporter not writing?)")
+                            status("no game state from SF6 for 5 s+", _reader_diag(reader))
                         continue
             while True:
                 try:

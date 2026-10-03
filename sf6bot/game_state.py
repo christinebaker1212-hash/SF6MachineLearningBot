@@ -11,6 +11,7 @@ not assumed. Missing fields are reported, never silently filled in.
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import queue
@@ -186,6 +187,9 @@ class StateReader:
         self._thread = threading.Thread(target=self._run, name="StateReader", daemon=True)
         self.lines = 0
         self.parse_errors = 0
+        self.repaired = 0          # lines with nan / inf numbers, read with those values as null
+        self.last_bad = ""         # the newest line that could not be read (diagnostics)
+        self.bytes_read = 0
         self.last_fm: dict | None = None      # latest Training Mode frame meter export (only sent on change)
         self.last_fm_t: float | None = None
         self.truncations = 0
@@ -227,6 +231,7 @@ class StateReader:
                     continue
                 t = clock.now()
                 buf += chunk
+                self.bytes_read += len(chunk)
                 *complete, buf = buf.split(b"\n")
                 for line in complete:
                     if not line.strip():
@@ -234,12 +239,21 @@ class StateReader:
                     try:
                         raw = json.loads(line)
                     except json.JSONDecodeError:
+                        raw = _repair(line)
+                        if raw is None:
+                            self.parse_errors += 1
+                            self.last_bad = line[:300].decode("utf-8", "replace")
+                            continue
+                        self.repaired += 1
+                    if not isinstance(raw, dict):
                         self.parse_errors += 1
                         continue
                     self.lines += 1
                     if isinstance(raw.get("fm"), dict):
                         self.last_fm, self.last_fm_t = raw["fm"], t
-                    st = GameState(t, int(raw.get("f", -1)), bool(raw.get("in_battle")), raw)
+                    f_no = raw.get("f")
+                    st = GameState(t, int(f_no) if isinstance(f_no, (int, float)) else -1,
+                                   bool(raw.get("in_battle")), raw)
                     with self._cond:
                         self._latest = st
                         for sq in self._subs:
@@ -344,6 +358,21 @@ def decode_input_relative(mask: int, bits: dict, facing_right: bool) -> tuple[in
 NO_STATE_HELP = ("No game state from SF6. Check: (1) SF6 is running and you are in a match or Training "
                  "Mode, (2) the exporter is installed (menu R, run menu.bat as administrator), "
                  "(3) SF6 was fully restarted after installing.")
+
+
+_NONFINITE = re.compile(rb'(?<=[:,\[])\s*-?(?:nan|inf)(?:inity)?(?:\([a-z]*\))?(?=\s*[,}\]])', re.I)
+
+
+def _repair(line: bytes):
+    """A line the exporter wrote with a non-finite number ('nan', '-nan(ind)', 'inf': Lua's string.format of
+    a NaN / infinity) is not JSON, and before 0.14.1 it was dropped silently. Read those values as null."""
+    fixed = _NONFINITE.sub(b"null", line)
+    if fixed == line:
+        return None
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        return None
 
 
 def open_state_reader(cfg: dict, on_state=None) -> "StateReader | None":

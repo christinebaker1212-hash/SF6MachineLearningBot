@@ -2013,6 +2013,28 @@ User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then
 - After every match all evidence (neutral, moves, defence, the opponent's answers) is multiplied by 0.8, so an
   opponent who adapts during a set is followed.
 
+## 0.14.1: ranked run on 0.14.0: no game state during the online match
+- **The status log (user, 2026-10-03, 0.14.0, one ranked match, user picked Ryu):**
+  - battle loading (stage_timer 0, hp 0, no action ids) at 0 s and 11 s
+  - then **"no game state from SF6" for 165 s**: not one line reached the bot during the whole online fight,
+    not even the exporter's out-of-battle heartbeats
+  - at 177.5 s one line right after the KO: round 2, clock 2512, hp 6220 / 0
+  - then loading again
+  - `chara` was null in every line: the UpdateGameInfo hook's character ids are not set online
+- So the bot never acted because it never received state. The reason is not known yet. Candidates:
+  - the exporter writes nothing online (its callbacks or file writes stop)
+  - its lines are unreadable: a NaN / infinity is written as `nan` / `-nan(ind)` / `inf`, which is not JSON, and the
+    reader dropped such lines silently
+- **0.14.1:**
+  - the reader reads non-finite numbers as null (`game_state._repair`), counts unreadable lines and keeps the last one
+  - "no game state" now records:
+    - reader: lines read, unreadable, repaired, bytes read, the last unreadable line, a reader error
+    - the state file's size
+    - the exporter's own heartbeat file: age, frames rendered, lines written, in battle, last error, missing fields,
+      tick hook
+  - The exporter writes null for NaN / inf (script still v9; a reinstall is only needed for that).
+- Research into online REFramework behaviour asked for by the user (pending).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

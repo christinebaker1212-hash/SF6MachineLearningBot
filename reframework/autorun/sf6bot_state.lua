@@ -87,6 +87,7 @@ end
 local function enc(v)
     local t = type(v)
     if t == "number" then
+        if v ~= v or v == math.huge or v == -math.huge then return "null" end   -- NaN / inf are not JSON
         if v == math.floor(v) and math.abs(v) < 1e15 then return string.format("%d", v) end
         return string.format("%.5f", v)
     elseif t == "boolean" then return v and "true" or "false"

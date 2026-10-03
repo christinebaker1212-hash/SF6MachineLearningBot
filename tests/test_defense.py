@@ -134,3 +134,25 @@ def test_status_log_says_why_the_bot_waits():
         {"t": 1.0, "status": "in menus (the game reports no battle)"},
         {"t": 40.2, "status": "waiting for the SF6 window to be focused (or paused with F7)", "armed": False}]}))
     assert "matches played: 0" in text and "focused" in text and "40.2s" in text
+
+
+def test_state_lines_with_nan_or_inf_are_read_not_dropped(tmp_path):
+    """0.14.1 (ranked: no state lines for a whole online match): a line with a non-finite number used to be
+    dropped silently; it is now read with those values as null, and unreadable lines are counted."""
+    import time
+    from sf6bot.game_state import StateReader
+    p = tmp_path / "sf6bot_state.jsonl"
+    p.write_text("")
+    got = []
+    r = StateReader(p, on_state=got.append).start()
+    time.sleep(0.1)
+    with open(p, "a") as f:
+        f.write('{"f":1,"in_battle":true,"p1":{"x":-nan(ind),"hp":5},"p2":{"y":inf}}\n')
+        f.write('{"f":2,"in_battle":true,"p1":{"x":1.0}}\n')
+        f.write('{"f":3,broken\n')
+    end = time.time() + 3
+    while len(got) < 2 and time.time() < end:
+        time.sleep(0.02)
+    r.stop()
+    assert [g.raw["f"] for g in got] == [1, 2] and got[0].raw["p1"]["x"] is None
+    assert r.repaired == 1 and r.parse_errors == 1 and "broken" in r.last_bad
