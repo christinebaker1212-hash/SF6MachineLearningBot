@@ -51,6 +51,10 @@ def status(game_dir: Path | None) -> dict:
         return out
     p = game_dir / DLL
     out["dll"] = dll_info(p.read_bytes() if p.is_file() else None)
+    if p.is_file():
+        st_ = p.stat()
+        out["dll_file"] = {"path": str(p), "bytes": st_.st_size,
+                           "modified": dt.datetime.fromtimestamp(st_.st_mtime).strftime("%Y-%m-%d %H:%M:%S")}
     out["backup_of_official"] = (game_dir / BACKUP).is_file()
     lua = game_dir / "reframework" / "autorun" / LUA_NAME
     out["installed_exporter"] = exporter_id(lua.read_bytes()) if lua.is_file() else None
@@ -65,6 +69,9 @@ def describe(st: dict) -> list[str]:
     if st.get("problem"):
         return lines + [st["problem"]]
     d = st["dll"]
+    f = st.get("dll_file")
+    if f:
+        lines.append(f"dinput8.dll: {f['bytes']:,} bytes, modified {f['modified']}")
     if d["kind"] == "missing":
         lines.append("REFramework: not installed (no dinput8.dll).")
     elif d["kind"] == "official":
@@ -115,7 +122,11 @@ def install(game_dir: Path, src: Path, game_running: bool) -> list[str]:
             f.write(data)
     except PermissionError as e:
         raise PermissionError(f"Windows refused to write {dst} ({e}): run this as administrator.") from e
-    msgs.append(f"Installed the research build (online until {info['until']} UTC).")
+    back = dll_info(dst.read_bytes())               # read back what is now on disk
+    if back.get("kind") != "research":
+        raise OSError(f"Wrote {dst} but it does not read back as the research build: something else replaced it.")
+    msgs.append(f"Installed the research build (online until {info['until']} UTC) as {dst} "
+                f"({dst.stat().st_size:,} bytes), checked by reading it back.")
     lua = install_exporter(game_dir)
     if exporter_id(lua.read_bytes()) != info["exporter"]:
         msgs.append("WARNING: the exporter in this repo differs from the one the build allows, so it will not run. "

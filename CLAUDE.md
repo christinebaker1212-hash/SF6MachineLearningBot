@@ -2078,6 +2078,13 @@ User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then
   The panel's administrator window now starts in the bot's folder (`pushd`; Windows starts it in System32).
 - Online and ranked modes print a warning when the installed build cannot see online matches. The "no game state"
   status names the official build as the likely cause in online modes.
+- **First ranked test with the build (user, 2026-10-03, 0.17.2): Ryu did not move.** The status log: 26 lines while
+  loading, then the exporter's heartbeat froze (frame 32341, lines 51,662, age 6 → 187 s) for the whole match, as with
+  the official build. `refw-research status` afterwards: **official build in the game folder, no backup** (an install
+  always keeps one), although the user had seen the install succeed. So the research dll was not in the folder SF6
+  ran from. The patch itself covers every online check in ScriptRunner (`m_last_online_match_state` is recomputed
+  from `is_online_match()` every frame). 0.17.3: install reads the dll back after writing and names the file; status
+  shows the dll's size and modified time, to see if something replaces it later.
 
 ## 0.16.0: unattended ranked, live move lookup, learning to WIN, situation assessment, combo mining
 User (2026-10-03): "record ranked sessions into ONE run file, that last until the last match is finished"; "live
