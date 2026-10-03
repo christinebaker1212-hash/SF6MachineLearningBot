@@ -1557,6 +1557,42 @@ searched).
     - The cause of the misread is unknown (motion pressed during the Hashogeki's recovery?). The details will
       show whether it repeats with the Denjin route.
 
+## 0.11.12: common-sense improvements (user: "Yes" to the six proposed)
+1. **Conclusive failures are not retested while their plan is unchanged.**
+   - Each result stores `plan_fp` (a fingerprint of what the lab performs: moves, connectors, triggers,
+     expected ids, sequences, floors, setup) and `conclusive` (the search ran out, or the bar proved no link
+     window, and the run wasn't interrupted).
+   - The next run skips a route with the same fingerprint in the same pass and prints how many it skipped.
+   - A parser, data or timing fix changes the fingerprint and brings the route back.
+   - Never-tried routes go first. Menu K → 7 (`--again`) retests everything; K → 4 (`--only`) always runs
+     the routes picked.
+2. **Training Mode check, from one jab** (`evaluate_preflight`):
+   - **Stops the run:** the dummy blocked the first jab (Guard = All in the lab, or Guard ≠ None in a
+     guard-None catalog), or the counter-hit setting doesn't match the pass (via hits.py).
+   - **Warns:** the dummy's health doesn't drop (early catalogs recorded 0 damage), Super/Drive not full
+     (30000/60000), no frame bar, an old exporter version.
+   - Where it runs:
+     - lab: before every pass, written to `combo_lab_result.json: training_mode_check`
+     - catalog: on its own first connecting move, because a separate test jab left the same meter reading
+       as the catalog's 5LP, which then looked like "frame meter did not update"
+3. **Failures readable from S:** `combo_lab.md` adds a "last try" line per failed route.
+   - Per move: its id and game frame; whether it hit; "NOT the planned move"; the side the inputs were
+     mirrored for.
+   - The bar's verdict for each link: "started on the first free frame, dummy recovered 1F before the hit",
+     or "pressed 3F before the bot was free".
+4. **More of Ryu's routes read: 62 → 67 of 97 plannable** (Ken 53/53).
+   - Wording now handled: "forward dash" / "dash forward X", "SA1 or 3" / "Super 1", "HP Shoryuken",
+     "MK Tatsu", "OD Hasho", "DENJIN CHARGE", "PC DI or 5HK" ("or" = alternative), "meaty 5HP".
+   - The other 30 are prose ("Any Medium starter"), wall-splat starts, held Denjin supers and air juggles.
+5. **Each press records the facing used and both x positions** (attempt details and the trace), to find
+   out whether 623LP → 2LP (id 622) was a mirrored motion.
+6. **Frame bar for presses that came out nothing:**
+   - The bar gives the bot's first free frame. The previous move's own frames left between the press's
+     arrival (send + input delay + motion) and that frame are counted on the bar, so hitstop is excluded
+     (`early_own_frames`).
+   - The press moves later by exactly that much.
+   - Simulator test: 4 frames early → retried 4 later → success.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

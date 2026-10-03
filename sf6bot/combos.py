@@ -195,17 +195,32 @@ def _expand_repeats(r: str) -> str:
 
 
 # community nicknames for motions (Ryu's page: "DC Hasho", "LP / MP Hasho"); a button before the name sets it
-ALIASES = {"hasho": "214", "hashogeki": "214", "hado": "236", "hadoken": "236"}
+ALIASES = {"hasho": ("214", "P"), "hashogeki": ("214", "P"), "hado": ("236", "P"), "hadoken": ("236", "P"),
+           "shoryuken": ("623", "P"), "shoryu": ("623", "P"), "srk": ("623", "P"), "dp": ("623", "P"),
+           "tatsu": ("214", "K")}
+_ALIAS_RE = "|".join(sorted(ALIASES, key=len, reverse=True))
 
 
 def _aliases(r: str) -> str:
+    """Community wording -> our notation: move nicknames ('DC Hasho', 'HP Shoryuken', 'MK Tatsu'), dashes
+    written out ('forward dash', 'dash forward 623LP'), 'SA1 or 3' / 'Super 1' and 'Denjin Charge'."""
     def rep(m):
-        btn = m.group(1) or m.group(2) or ""
-        btn = {"L": "LP", "M": "MP", "H": "HP"}.get(btn, btn) or "P"
-        return ALIASES[m.group(3).lower()] + btn
+        motion, kind = ALIASES[m.group(3).lower()]
+        b = (m.group(1) or m.group(2) or "").upper()
+        if b == "OD":
+            return motion + kind * 2
+        if b in ("L", "M", "H"):
+            return motion + b + kind
+        return motion + (b if b else kind)
     # 'LP / MP Hasho' = L or M Hashogeki (the first): not a standing jab
-    r = re.sub(r"\b(LP|MP|HP)\s*/\s*(?:LP|MP|HP)\s*(?=(?:hashogeki|hasho|hadoken|hado)\b)", r"\1 ", r, flags=re.I)
-    return re.sub(r"\b(?:(LP|MP|HP|PP|P)\s*|(L|M|H|OD)\s+)?(hashogeki|hasho|hadoken|hado)\b", rep, r, flags=re.I)
+    r = re.sub(r"\b(LP|MP|HP|LK|MK|HK)\s*/\s*(?:LP|MP|HP|LK|MK|HK)\s*(?=(?:" + _ALIAS_RE + r")\b)", r"\1 ", r,
+               flags=re.I)
+    r = re.sub(r"\b(?:(LP|MP|HP|LK|MK|HK|PP|KK|P|K)\s*|(L|M|H|OD)\s+)?(" + _ALIAS_RE + r")\b", rep, r, flags=re.I)
+    r = re.sub(r"\b(?:walk\s*/\s*)?(?:forward dash|dash forward)\b\s*(?![,>~/)]|$)", "66 , ", r, flags=re.I)
+    r = re.sub(r"\b(?:walk\s*/\s*)?(?:forward dash|dash forward)\b", "66", r, flags=re.I)
+    r = re.sub(r"\b(?:SA|Super\s*)([123])(?:\s*(?:or|/)\s*[123])?\b", r"SA\1", r, flags=re.I)
+    r = re.sub(r"\bDenjin Charge\b(\s*\(\s*DC\s*\))?", "DC", r, flags=re.I)
+    return r
 
 
 def split_route(route: str) -> list[tuple[str, str]]:
@@ -215,13 +230,12 @@ def split_route(route: str) -> list[tuple[str, str]]:
     r = re.sub(r"\b(f\s*[~,]\s*f|ff)\b", "66", r)                     # 'f~f' = forward dash
     r = _expand_repeats(r)                                           # '( ... )x2' -> written out twice
     r = _aliases(r)                                                  # 'DC Hasho' -> 'DC 214P'
-    r = re.sub(r"Denjin Charge\s*\(\s*DC\s*\)", "DC", r)              # 'Denjin Charge ( DC )' = 'DC'
     # 'HP /DC Hasho' is NOT 'HP or DC Hasho': it is 5HP cancelled into the Denjin-charged Hashogeki (user,
     # 2026-10-02). A '/' straight before a Denjin-state move is a cancel.
     r = re.sub(r"\s*/\s*(?=(?:DC|Denjin)\b)", " > ", r)
     r = r.replace("(", " ").replace(")", " ")
     r = re.sub(r"\b(PDR|DRC|DR)\s+(?=[\dj]|[LMH][PK]\b)", r"\1 ~ ", r)   # 'PDR 5HP' = rush, then 5HP
-    r = re.sub(r"\s+OR\s+", " / ", r)                                 # '214MK OR 236MK' = alternatives
+    r = re.sub(r"\s+or\s+", " / ", r, flags=re.I)                     # '214MK OR 236MK' = alternatives
     r = re.sub(r"\s*/\s*[^>~,]+", "", r)                             # 'A / B' alternatives: first
     parts = re.split(r"\s*(>|~|,|xx)\s*", r)
     out, conn = [], ""
@@ -271,7 +285,7 @@ def _norm_token(tok: str) -> tuple[str, list[str]]:
     mods = []
     t = tok.strip()
     for pre, name in (("dl.", "delay"), ("delay ", "delay"), ("(whiff)", "whiff"), ("CH ", "counter_hit"),
-                      ("PC ", "punish_counter")):
+                      ("PC ", "punish_counter"), ("meaty ", "meaty")):
         if t.startswith(pre):
             mods.append(name)
             t = t[len(pre):].strip()

@@ -224,6 +224,9 @@ catalogued move (follow-ups, target combos, Drive Rush) and builds on the lab's 
 **0.11.4 (first Ken combo lab run: 6 true combos, damage = community):** the previous move changes what an
 input does (Quick Dash → [QD] Shoryuken / Tatsu), '>' that Capcom doesn't allow is timed after recovery,
 jump-in landing fixed. Re-run K → 1 (`--again` not needed: only failed routes are retried).
+**0.11.12:** Training Mode check before lab passes and on the catalog's first move; conclusive failures are
+skipped until their plan changes (K → 7 retests all); "last try" trace lines in combo_lab.md; 67/97 Ryu routes
+plannable; facing logged per press; the bar also corrects presses that came out nothing.
 **0.11.11:** the lab re-parses saved community routes (the 0.11.10 Denjin fix never reached the user's imported
 Ryu routes). Routes with no link window stop after 2 tries with the bar's proof. Next: K → 1 as Ryu again, send S.
 **0.11.10 (first Ryu C + K with the frame bar):** bar mapping verified against the meter. Fixed: "HP /DC Hasho"

@@ -109,6 +109,7 @@ echo    2  The bot's own routes: built from every catalogued move (run C first)
 echo    3  Keep exploring: own routes, 3 rounds (each round extends what worked)
 echo    4  Only routes containing some text (e.g. DRC)
 echo    5  Only counter-hit routes   6  Only punish-counter routes  (set the dummy's counter hit first)
+echo    7  Community routes again, including ones that already passed or failed for a clear reason
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)
@@ -116,6 +117,7 @@ if "%LC%"=="2" (%BOT% combo-lab --source generated & goto done)
 if "%LC%"=="3" (%BOT% combo-lab --source generated --rounds 3 & goto done)
 if "%LC%"=="5" (%BOT% combo-lab --hit-type counter_hit & goto done)
 if "%LC%"=="6" (%BOT% combo-lab --hit-type punish_counter & goto done)
+if "%LC%"=="7" (%BOT% combo-lab --again & goto done)
 if "%LC%"=="4" (
     set "LT="
     set /p LT=Text: 

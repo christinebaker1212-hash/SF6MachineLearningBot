@@ -362,6 +362,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
     reset, reset_backend, reset_key = make_reset(sess, cfg, reader)
     runner = SequenceRunner(c, sink=sess.recorder.event)
     results: dict = {}
+    training_check = None
     plan, skipped, source = [], [], "generic"
     try:
         st = reader.wait_newer(-1, 2.0)
@@ -385,6 +386,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
 
         neutral_a, neutral_d, movement = learn_ids(sess, reader, reset)
         first_ids: dict = {}
+        checked = False         # Training Mode settings, checked on the first move that connects (0.11.12)
         for mv in plan:
             mname, seq_text, approach = mv["name"], mv["sequence"], mv["approach"]
             if only and mname not in only:
@@ -461,6 +463,21 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     r["result"] = "unknown (frame meter did not update)"
                 r["damage"] = own.get("damage")
                 r["frame_meter_raw"] = fm_raw
+                if not checked and r.get("result") in ("hit", "block"):
+                    # the run's first connecting move doubles as the settings check (a separate test jab
+                    # would leave the same meter reading as the catalog's own 5LP, hiding its update).
+                    # Early catalogs recorded 0 damage on every hit: the dummy's health did not go down.
+                    from .combo_lab import evaluate_preflight
+                    checked = True
+                    pf = evaluate_preflight(pre + post, None, None, guard)
+                    print("  Training Mode check: " + ("STOP: " + pf["stop"] if pf["stop"] else
+                                                      "OK" if not pf["warnings"] else "warnings"))
+                    for w in pf["warnings"]:
+                        print("    - " + w)
+                    training_check = pf
+                    if pf["stop"]:
+                        stopped = True
+                        break
                 bar = _bar_of_move(pre + post, r)
                 if bar:
                     r["frame_bar"] = bar
@@ -521,7 +538,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         data["moves"].setdefault(k, {})[f"guard_{guard}"] = v
     data["caveats"] = __doc__.split("Caveats (stated in the output too):")[1].strip()
     data.setdefault("runs", []).append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "guard": guard,
-                                        "moves": len(results), "sf6bot_version": __import__("sf6bot").__version__})
+                                        "moves": len(results), "sf6bot_version": __import__("sf6bot").__version__,
+                                        "training_mode_check": training_check})
     try:
         from .game_state import game_build
         build = game_build(cfg)
@@ -531,6 +549,6 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         pass
     out.write_text(json.dumps(data, indent=2, default=str))
     sess.recorder.write_json("catalog_result.json", {"file": str(out), "guard": guard, "character": name,
-                                                      "results": results})
+                                                      "results": results, "training_mode_check": training_check})
     print(f"\nSaved {out}")
     return out

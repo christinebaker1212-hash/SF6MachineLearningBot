@@ -788,3 +788,66 @@ def test_a_misread_motion_that_gets_blocked_is_a_wrong_move_not_a_gap():
     run.feed(_line(28, 622, 6, d=160, hs=6, block=12, hp=9700))
     res = run.result()
     assert res["fail"]["kind"] == "wrong_move" and res["fail"]["came_out"] == 622
+
+
+def test_frame_bar_moves_an_ignored_link_press_to_the_first_free_frame():
+    """0.11.12: a link pressed while the previous move still recovers is ignored (nothing comes out). The bar
+    says when the bot became free; the press moves later by exactly the difference."""
+    steps = _steps(MOVES[:2])
+    steps[1]["min_offset"] = -10
+    sim = Sim(MOVES[:2], lead=4)
+    sim.bar_on = True
+    res = _run(sim, steps, {1: -4})                     # 4 frames early: eaten during 2LP's recovery
+    assert res["fail"]["kind"] == "not_out" and res["fail"]["step"] == 1
+    assert res["steps"][1]["bar_link"]["early_own_frames"] == 4
+    nxt = cl.bar_offsets(steps, {1: -4}, res["fail"], res, {})
+    assert nxt is not None and nxt[1] == 0
+    sim = Sim(MOVES[:2], lead=4)
+    sim.bar_on = True
+    assert _run(sim, steps, nxt)["success"]
+
+
+def test_presses_record_facing_and_positions():
+    steps = _steps(MOVES[:1])
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0))
+    run.sent(0, facing="right")
+    assert run.result()["steps"][0]["facing"] == "right" and run.result()["steps"][0]["dummy_x"] == 0.8
+
+
+def test_a_conclusive_failure_is_skipped_until_its_plan_changes():
+    """0.11.12: each K run retried every failed route first. A route that failed for a clear reason (search
+    ran out, or the bar proved no link window) is skipped while the plan the lab would perform is the same;
+    a parser or data fix that changes the plan brings it back."""
+    cap = _capcom("ryu")
+    route = next(c for c in _combos("ryu", cap)["combos"] if c["route"].startswith("HP /DC Hasho , 214LP"))
+    plan = cl.plan_route(route, cap, None)
+    entry = {"verified": False, "conclusive": True, "plan_fp": cl.plan_fingerprint(plan), "tested_as": "normal"}
+    assert cl.skip_known_failure(entry, plan, "normal")
+    assert not cl.skip_known_failure(entry, plan, "punish_counter")              # another pass
+    assert not cl.skip_known_failure(dict(entry, conclusive=False), plan, "normal")   # interrupted, retry
+    old = dict(route, steps=[dict(s, name="L Hashogeki") if s.get("name", "").startswith("[") else s
+                             for s in route["steps"]])
+    assert not cl.skip_known_failure(entry, cl.plan_route(old, cap, None), "normal")  # plan changed
+
+
+def test_training_mode_check_catches_wrong_settings_before_a_run():
+    """0.11.12: one jab before a lab pass or a catalog run checks the Training Mode settings (earlier
+    catalogs recorded 0 damage on every hit; a wrong guard only showed mid-run)."""
+    def line(t, hp=10000, stun=0, block=0, hs=0, drive=60000, sup=30000, bar=True, v=9):
+        x = {"v": v, "stage_timer": t, "p1": {"action_id": 600, "super": sup, "drive": drive},
+             "p2": {"action_id": 202 if stun else 1, "hp": hp, "hitstun": stun, "blockstun": block,
+                    "hitstop": hs, "drive": 60000}}
+        if bar:
+            x["bar"] = {"n": 100, "c": [[t, 7, 0, 0, 0, 0, 0, 0, 0]]}
+        return x
+    good = [line(1), line(2), line(3, hp=9700, stun=10, hs=8), line(4, hp=9700, stun=9)]
+    ok = cl.evaluate_preflight(good, 300, "normal", expected_v=9)
+    assert ok["stop"] is None and not ok["warnings"] and ok["seen"]["hit_kind"] == "normal"
+    blocked = [line(1), line(2, block=10, hs=8)]
+    assert "After first hit" in cl.evaluate_preflight(blocked, 300, "normal", expected_v=9)["stop"]
+    no_hp = [line(1, bar=False, sup=10000, v=8), line(2, stun=10, hs=8, sup=10000, bar=False, v=8), line(3, stun=9, sup=10000, bar=False, v=8)]
+    w = " ".join(cl.evaluate_preflight(no_hp, 300, "normal", expected_v=9)["warnings"])
+    assert "health did not go down" in w and "Super gauge" in w and "frame bar" in w and "exporter v8" in w
+    counter = [line(1), line(2, hp=9640, stun=10, hs=8)]               # 1.2x damage = counter hit
+    assert "counter hit" in cl.evaluate_preflight(counter, 300, "normal", expected_v=9)["stop"]

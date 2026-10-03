@@ -646,14 +646,29 @@ class ComboRun:
                     self.min[f"{who}_{f}"] = min(self.min.get(f"{who}_{f}", v), v)
         self.last = raw
 
-    def sent(self, k: int, tick: int | None = None):
+    def sent(self, k: int, tick: int | None = None, facing: str | None = None):
         p1 = (self.last or {}).get(self.me) or {}
+        p2 = (self.last or {}).get(self.op) or {}
         t = tick if tick is not None else (self.last or {}).get("stage_timer") or 0
+        # which way the inputs were mirrored and where both stood (0.11.12: 623LP came out as 2LP in the
+        # corner; a wrong side would turn 623 into 421 = crouching jab)
+        self.rt[k].update(facing=facing, bot_x=num(p1.get("x")), dummy_x=num(p2.get("x")))
         self.rt[k].update(sent=t, at_send=(p1.get("action_id"), p1.get("action_frame")),
                           sent_moving_prev=self.rt[k - 1]["moving"] if k else None,
                           sent_after_prev_start=(t - self.rt[k - 1]["start"]) if k and self.rt[k - 1]["start"] is not None else None,
                           land_at_send=self._land_est if self.steps[k].get("trigger") in ("air", "landing") else None)
         self.pending = k
+
+    def _bar_link(self, k: int) -> dict | None:
+        """The frame bar's reading of link step k; for a press that came out nothing, also how many of the
+        previous move's own frames (bar cells: none in hitstop) were left when it arrived."""
+        r, st = self.rt[k], self.steps[k]
+        bl = self.bar.link(self.rt[k - 1]["start"], r["start"], st.get("startup"))
+        if bl and r["start"] is None and isinstance(r.get("sent"), int) and isinstance(bl.get("free_at"), int):
+            arrive = r["sent"] + self.lead + (st.get("prefix") or 0)
+            bl["arrive_est"] = arrive
+            bl["early_own_frames"] = sum(1 for t, _, _ in self.bar.t if arrive <= t < bl["free_at"])
+        return bl
 
     def _finish(self, kind, step):
         self.done = True
@@ -696,9 +711,10 @@ class ComboRun:
                "dummy_x": [num(d0.get("x")), num(d1.get("x"))], "bot_x": [num(b0.get("x")), num(b1.get("x"))],
                "steps": [{"name": st.get("name"), "sent": r["sent"], "start": r["start"], "id": r["start_id"],
                           "contact": r["contact"], "lead_measured": r.get("lead_measured"), "unexpected": r.get("unexpected"),
+                          "facing": r.get("facing"), "bot_x": r.get("bot_x"), "dummy_x": r.get("dummy_x"),
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
                           "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
-                          "bar_link": self.bar.link(self.rt[k - 1]["start"], r["start"], st.get("startup"))
+                          "bar_link": self._bar_link(k)
                           if k and st.get("trigger") in ("own_frame", "prev_neutral") and self.bar else None}
                          for k, (st, r) in enumerate(zip(steps, self.rt))]}
         out["frame_bar"] = bool(self.bar)
@@ -715,19 +731,32 @@ class ComboRun:
 
 def bar_offsets(steps: list[dict], offsets: dict, fail: dict, res: dict, tried: dict) -> dict | None:
     """Timing correction read off the frame bar (user, 0.11.9: the bar shows "when it is allowed to input a
-    move after the last move has connected and the animation has finished"). A link that missed although
-    the bot had been free `gap` frames before the move began was pressed `gap` frames late: try it that
-    much earlier, straight away. None when the bar has nothing to say (the blind search goes on)."""
+    move after the last move has connected and the animation has finished"). Returns new offsets, or None
+    when the bar has nothing to say (the blind search goes on).
+    - a link that missed although the bot had been free `gap` frames before the move began was pressed
+      `gap` frames late: try it that much earlier
+    - a link that never came out (0.11.12) arrived while the previous move was still recovering and was
+      ignored: the bar says when the bot became free, the send tick + input delay + motion frames say when
+      the press arrived; try it that much later"""
     k, kind = fail.get("step"), fail.get("kind")
-    if not isinstance(k, int) or k >= len(steps) or kind not in ("dropped", "whiff", "blocked"):
+    if not isinstance(k, int) or k >= len(steps) or kind not in ("dropped", "whiff", "blocked", "not_out"):
         return None
-    bl = ((res.get("steps") or [{}] * (k + 1))[k] or {}).get("bar_link") or {}
-    gap = bl.get("gap")
-    if not isinstance(gap, int) or gap <= 0:
-        return None
+    rs = (res.get("steps") or [{}] * (k + 1))[k] or {}
+    bl = rs.get("bar_link") or {}
     base = steps[k].get("base_offset", 0)
     cur = max(offsets.get(k, 0), steps[k].get("min_offset", NO_FLOOR) - base)   # what _off() applied
-    d = max(cur - gap, steps[k].get("min_offset", NO_FLOOR) - base)
+    if kind == "not_out":
+        early = bl.get("early_own_frames")       # in the previous move's own frames (hitstop excluded)
+        if not isinstance(early, int):
+            return None
+        if early <= 0:
+            return None
+        d = cur + early
+    else:
+        gap = bl.get("gap")
+        if not isinstance(gap, int) or gap <= 0:
+            return None
+        d = max(cur - gap, steps[k].get("min_offset", NO_FLOOR) - base)
     if d == cur or ("bar", k, d) in tried:
         return None
     tried[("bar", k, d)] = True
@@ -795,6 +824,91 @@ def console_prompt(hit_pass: str, n: int) -> bool:
     except EOFError:
         return False
     return ans.strip().lower() not in ("s", "skip", "n", "no")
+
+
+SUPER_MAX, DRIVE_MAX = 30000, 60000     # measured: Training Mode infinite gauges read 30000 / 60000
+
+
+def evaluate_preflight(states: list[dict], jab_damage: float | None, hit_pass: str | None,
+                       guard: str = "after_first_hit", expected_v: int | None = None) -> dict:
+    """The Training Mode settings check (0.11.12), from the state lines around one standing jab on the
+    dummy. Returns {"stop": reason or None, "warnings": [...], "seen": {...}}. Pure, so it is unit tested."""
+    from .game_state import EXPECTED_SCRIPT_VERSION
+    expected_v = EXPECTED_SCRIPT_VERSION if expected_v is None else expected_v
+    warn, stop, seen = [], None, {}
+    ready = [x for x in states if (x.get("p1") or {}).get("action_id") is not None]
+    if not ready:
+        return {"stop": "no game state arrived: is SF6 in Training Mode with the exporter running (menu R)?",
+                "warnings": [], "seen": {}}
+    first, last = ready[0], ready[-1]
+    blocked = any(((x.get("p2") or {}).get("blockstun") or 0) > 0 for x in ready)
+    hit_i = next((i for i in range(1, len(ready)) if ((ready[i].get("p2") or {}).get("hitstun") or 0) > 0
+                  or (num((ready[i].get("p2") or {}).get("hp")) or 0) < (num((ready[i - 1].get("p2") or {}).get("hp")) or 0)),
+                 None)
+    hp0, hp_min = num((first.get("p2") or {}).get("hp")), min((num((x.get("p2") or {}).get("hp")) or 0) for x in ready)
+    seen.update(blocked=blocked, hit=hit_i is not None, hp_drop=(hp0 - hp_min) if hp0 is not None else None)
+    if blocked and guard == "after_first_hit":
+        stop = ("the dummy BLOCKED the first jab: set Training Mode's dummy Guard to 'After first hit' "
+                "(not 'All')")
+    elif blocked and guard == "none":
+        stop = "the dummy BLOCKED the jab: set the dummy's Guard to None for this run"
+    elif guard == "all" and not blocked:
+        warn.append("the dummy did not block: for guard-All runs set the dummy's Guard to 'All'")
+    elif hit_i is None and not blocked:
+        warn.append("the test jab did not connect (the bot was not next to the dummy?)")
+    if hit_i is not None and not seen["hp_drop"]:
+        warn.append("the dummy's health did not go down: in Training Mode's dummy settings let damage count "
+                    "(the lab measures combo damage from it; earlier catalogs recorded 0 damage)")
+    if hit_i is not None and hit_pass:
+        kind = (classify_hit(ready[hit_i - 1].get("p2") or {}, ready[hit_i].get("p2") or {}, jab_damage) or {}).get("kind")
+        seen["hit_kind"] = kind
+        want = {"normal": "normal", "counter_hit": "counter", "punish_counter": "punish_counter"}[hit_pass]
+        if kind in ("normal", "counter", "punish_counter") and kind != want:
+            stop = stop or (f"the test jab landed as a {kind.replace('_', ' ')} hit: set the dummy's counter-hit "
+                            f"setting to {PASS_SETTING[hit_pass]} for this pass")
+    p1 = last.get("p1") or {}
+    seen.update(super=num(p1.get("super")), drive=num(p1.get("drive")))
+    if (seen["super"] or 0) < SUPER_MAX:
+        warn.append("Super gauge is not full: set Training Mode's Super gauge to max / infinite")
+    if (seen["drive"] or 0) < DRIVE_MAX:
+        warn.append("Drive gauge is not full: set Training Mode's Drive gauge to max / infinite")
+    seen["frame_bar"] = any(isinstance(x.get("bar"), dict) for x in ready)
+    if not seen["frame_bar"]:
+        warn.append("no frame bar arrived: show Training Mode's frame meter, and after an update run menu R "
+                    "(as admin) and restart SF6")
+    seen["exporter"] = last.get("v")
+    if isinstance(last.get("v"), int) and last["v"] != expected_v:
+        warn.append(f"SF6 runs exporter v{last['v']}, this version needs v{expected_v}: run menu R (as admin) "
+                    f"and restart SF6")
+    return {"stop": stop, "warnings": warn, "seen": seen}
+
+
+def preflight(sess, reader, runner, reset, hit_pass: str | None, guard: str, capcom: dict | None) -> dict:
+    """Before a combo lab pass or a catalog run: one standing jab on the dummy, then evaluate_preflight."""
+    from .catalog import walk_to_contact
+    reset(2)
+    walk_to_contact(sess, reader)
+    jab = next((m for m in (capcom or {}).get("moves", []) if m.get("name") == "Standing Light Punch"), {})
+    q = reader.subscribe()
+    lines = []
+    try:
+        runner.run(parse_sequence("5+LP@3", "preflight jab"), stop_event=sess.stop_event)
+        end = clock.now() + 1.2
+        while clock.now() < end and not sess.stop_event.is_set():
+            try:
+                st = q.get(timeout=0.05)
+            except Exception:
+                continue
+            lines.append(st.raw)
+    finally:
+        reader.unsubscribe(q)
+    res = evaluate_preflight(lines, jab.get("damage_n"), hit_pass, guard)
+    print("  Training Mode check: " + ("STOP: " + res["stop"] if res["stop"] else
+                                      "OK" if not res["warnings"] else "warnings"))
+    for w in res["warnings"]:
+        print("    - " + w)
+    sess.stop_event.wait(0.5)
+    return res
 
 
 def wrong_hit_setting(hit_pass: str, first_hits: list) -> str | None:
@@ -1125,6 +1239,24 @@ def _do_setup(sess, reader, runner, setup: dict, neutral_a: set, neutral_d: set)
     return seen
 
 
+def plan_fingerprint(plan: dict) -> str:
+    """What the lab will actually do for a route: if this changes (a parser fix, new catalog data, a timing
+    rule), an earlier failure no longer says anything about the route."""
+    import hashlib
+    keys = ("name", "connector", "trigger", "at", "expect_id", "sequence", "min_offset", "system", "air")
+    body = [[st.get(k) for k in keys] for st in plan.get("steps") or []]
+    body.append((plan.get("setup") or {}).get("name"))
+    return hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+def skip_known_failure(entry: dict | None, plan: dict, hit_pass: str) -> bool:
+    """0.11.12 (user: not re-testing what already failed): a route that failed conclusively in this pass
+    with the very same plan is not tried again (--again overrides)."""
+    return bool(entry and not entry.get("verified") and entry.get("conclusive")
+                and entry.get("plan_fp") == plan_fingerprint(plan)
+                and entry.get("tested_as", "normal") == hit_pass)
+
+
 def recorded_timing(res: dict) -> list:
     """The exact send point of every step of a successful attempt: the previous move's own frame (links,
     follow-ups), frames after the previous move started (cancels, chains) or frames to landing (jump-ins)."""
@@ -1170,6 +1302,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     prefix_misses = 0
     no_window: dict = {}      # step -> how often the bar showed it started on the first free frame and missed
     no_window_proof = None
+    exhausted = False         # the timing search ran out (a verdict), as opposed to being stopped
     while not sess.stop_event.is_set():
         how = set_position(sess, reader, reset, _position(combo), state)
         if plan.get("jump_in"):
@@ -1233,7 +1366,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                         "kept": res.get("kept_steps"), "replay": res.get("replayed_recorded_timing"),
                         "steps": [{k2: s2.get(k2) for k2 in ("name", "id", "sent", "start", "contact",
                                                               "lead_measured", "prev_frame", "after_prev_start",
-                                                              "bar_link")}
+                                                              "bar_link", "facing", "bot_x", "dummy_x", "unexpected")}
                                   for s2 in res.get("steps") or []]})
         f = res.get("fail") or {}
         tag = "OK" if res["success"] else (f"failed at move {move_no(steps, f['step'])} ({f.get('kind')})"
@@ -1257,6 +1390,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 break
         else:
             if len(attempts) >= tries:
+                exhausted = True
                 break
             if plan.get("jump_in") and f.get("step") == 1 and f.get("kind") in ("whiff", "dropped", "first_blocked") \
                     and jump_variant + 1 < len(JUMP_DISTANCES):
@@ -1298,14 +1432,21 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 continue                     # same offsets: a second identical miss proves it
             nxt = bar_offsets(steps, offsets, f, res, tried)
             if nxt is not None:
-                print(f"    frame bar: move {move_no(steps, f['step'])} began "
-                      f"{res['steps'][f['step']]['bar_link']['gap']} frame(s) after the bot was free: pressing it earlier")
+                shift = nxt[f["step"]] - offsets.get(f["step"], 0)
+                print(f"    frame bar: move {move_no(steps, f['step'])} pressed {abs(shift)} frame(s) too "
+                      f"{'late' if shift < 0 else 'early'}: moving it {'earlier' if shift < 0 else 'later'}")
             else:
                 nxt = next_offsets(steps, offsets, f, tried)
             if nxt is None:
+                exhausted = True
                 break
             offsets = nxt
     summ = _summary(attempts, plan, combo)
+    summ["plan_fp"] = plan_fingerprint(plan)
+    # a verdict worth remembering: the search ran out, or the bar proved there is no link window (not an
+    # interrupted run, a setup failure or a wrong Training Mode setting)
+    summ["conclusive"] = bool(not summ["verified"] and (exhausted or no_window_proof)
+                              and not sess.stop_event.is_set())
     if recorded is not None:
         replays = [a for a in attempts if a.get("replayed_recorded_timing")]
         summ["recorded_timing"] = {"steps": recorded, "lead": found_lead, "offsets": {str(k): v for k, v in (found or {}).items()},
@@ -1342,6 +1483,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     lab_state: dict = {}
     setup_error = None
     setup_notes: list = []
+    checks: list = []
     prompt = prompt or console_prompt
     try:
         st = reader.wait_newer(-1, 2.0)
@@ -1394,6 +1536,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                         or route_key(x) in run_results)]
                 seen_keys: set = set()
                 plans = []
+                known_failures = 0
                 for combo in todo:
                     k = route_key(combo)
                     if k in seen_keys:
@@ -1403,7 +1546,16 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     if plan["unsupported"]:
                         skipped[k] = plan["unsupported"]
                         continue
+                    if not again and not only and skip_known_failure(lab["routes"].get(k), plan, hit_pass):
+                        known_failures += 1
+                        continue
                     plans.append((combo, plan))
+                # never-tried routes first, then the ones that failed before (they may need more tries)
+                plans.sort(key=lambda cp: route_key(cp[0]) in lab["routes"])
+                if known_failures:
+                    print(f"  {known_failures} route(s) already failed for a clear reason with the same plan: "
+                          f"not tried again (menu K -> 7 retests everything; K -> 4 picks routes by text)")
+                    known_failures = 0
                 if limit:
                     plans = plans[:limit]
                 if not plans:
@@ -1425,6 +1577,17 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     if not sess.start_inputs():
                         return None
                     ids = learn_ids(sess, reader, reset)
+                if rnd == 0:
+                    # the Training Mode settings this pass needs, checked with one jab (0.11.12)
+                    pf = preflight(sess, reader, runner, reset, hit_pass, guard, capcom)
+                    checks.append({"pass": hit_pass, **pf})
+                    setup_notes.append(f"Training Mode check ({PASS_TEXT[hit_pass]}): "
+                                       + (f"STOP: {pf['stop']}" if pf["stop"] else
+                                          "; ".join(pf["warnings"]) if pf["warnings"] else "OK"))
+                    if pf["stop"]:
+                        setup_error = f"Training Mode check: {pf['stop']}"
+                        print(setup_error)
+                        break
                 for n_route, (combo, plan) in enumerate(plans, 1):
                     if sess.stop_event.is_set():
                         break
@@ -1498,7 +1661,8 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     out.write_text(json.dumps(lab, indent=1, default=str), encoding="utf-8")
     sess.recorder.write_json("combo_lab_result.json", {"character": name, "file": str(out), "guard": guard,
                                                         "routes": run_results, "skipped": skipped,
-                                                        "setup_error": setup_error, "setup_notes": setup_notes})
+                                                        "setup_error": setup_error, "setup_notes": setup_notes,
+                                                        "training_mode_checks": checks})
     (sess.recorder.dir / "combo_lab.md").write_text(report_md(name, run_results, skipped,
                                                                "; ".join([setup_error] * bool(setup_error) + setup_notes) or None),
                                                    encoding="utf-8")
@@ -1538,7 +1702,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
             if bx is not None and dx is not None and (side is None or abs(dx - bx) >= 0.15):
                 side = Facing.RIGHT if dx > bx else Facing.LEFT
                 sess.controller.set_facing(side)
-            run.sent(k)
+            run.sent(k, facing="right" if side == Facing.RIGHT else "left" if side == Facing.LEFT else None)
             _, ok = runner.run(parse_sequence(steps[k]["sequence"], steps[k]["name"]), stop_event=sess.stop_event)
             if not ok:
                 break
@@ -1570,6 +1734,37 @@ def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movemen
                          gravity=gravity, fixed=fixed)
 
 
+def trace_line(detail: dict) -> str:
+    """One attempt, step by step, readable in S (0.11.12): what came out (game frame), which step got the
+    hit, the side the inputs were mirrored for, and what the frame bar said about each link."""
+    parts = []
+    for s2 in detail.get("steps") or []:
+        if s2.get("sent") is None:
+            parts.append(f"{s2.get('name')}: not pressed")
+            continue
+        if s2.get("start") is None:
+            txt = f"{s2.get('name')}: pressed @{s2['sent']}, nothing came out"
+        else:
+            txt = f"{s2.get('name')}: id {s2.get('id')} @{s2['start']}"
+            if s2.get("unexpected") is not None:
+                txt += " (NOT the planned move)"
+            txt += f", hit @{s2['contact']}" if s2.get("contact") is not None else ", no hit"
+        if s2.get("facing"):
+            txt += f", facing {s2['facing']}"
+        bl = s2.get("bar_link") or {}
+        if bl.get("early_own_frames"):
+            txt += f" [bar: pressed {bl['early_own_frames']}F before the bot was free]"
+        elif isinstance(bl.get("gap"), int):
+            txt += (f" [bar: started on the first free frame" if bl["gap"] == 0 else
+                    f" [bar: started {bl['gap']}F after the bot was free")
+            if isinstance(bl.get("late_by"), int) and bl["late_by"] > 0:
+                txt += f", dummy recovered {bl['late_by']}F before the hit"
+            txt += "]"
+        parts.append(txt)
+    f = detail.get("fail") or {}
+    return f"last try ({f.get('kind')}): " + " | ".join(parts)
+
+
 def report_md(character: str, results: dict, skipped: dict, setup_error: str | None = None) -> str:
     ok = {k: v for k, v in results.items() if v.get("verified")}
     true = sum(1 for v in ok.values() if v.get("true_combo"))
@@ -1597,6 +1792,8 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
                 kept += (f" | NO LINK WINDOW at move {nw['move_no']} ({nw['move']}): it started on the first free "
                          f"frame and the dummy still recovered first (frame bar)")
             lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}")
+            if v.get("attempt_details"):
+                lines.append("  - " + trace_line(v["attempt_details"][-1]))
     if skipped:
         from collections import Counter
         why = Counter(re.sub(r"'.*?'|\[.*?\]", "...", s) for s in skipped.values())

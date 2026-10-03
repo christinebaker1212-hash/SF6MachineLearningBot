@@ -65,3 +65,17 @@ def test_saved_bot_check_page_is_reported_not_imported(tmp_path):
     summary = cb.import_all(tmp_path / "ds", tmp_path, fetch=False, log=lambda *_: None,
                             characters=["Cammy", "Ken"])
     assert "bot-check" in summary["Cammy"]["error"] and summary["Ken"]["combos"] == 53
+
+
+def test_community_wording_dashes_supers_nicknames():
+    """0.11.12: Ryu routes written with words ('dash forward 623LP', 'SA1 or 3', 'HP Shoryuken', 'DENJIN
+    CHARGE', 'PC DI or 5HK', 'meaty 5HP', 'MK Tatsu') are read instead of skipped."""
+    from sf6bot.combos import split_route
+    assert split_route("2MP , dash forward 623LP") == [("", "2MP"), (",", "66"), (",", "623LP")]
+    assert split_route("5HP > SA1 or 3")[-1] == (">", "SA1")
+    assert split_route("Wall Splat, 5HP > Super 1 or 3")[-1] == (">", "SA1")
+    assert split_route("HP Shoryuken > SA3") == [("", "623HP"), (">", "SA3")]
+    assert split_route("DENJIN CHARGE , j.HP")[0] == ("", "DC")
+    assert split_route("2MK > MK Tatsu")[-1] == (">", "214MK")
+    assert split_route("5HP > OD Hasho")[-1] == (">", "214PP")
+    assert split_route("PC  DI or 5HK , 2MK")[0][1].split()[-1] == "DI"
