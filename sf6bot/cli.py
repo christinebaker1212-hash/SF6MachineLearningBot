@@ -134,6 +134,8 @@ def cmd_refw_research(args, cfg):
     from . import refw_research as rr
     from .game_state import remembered_sf6_dir
     d = remembered_sf6_dir(cfg)
+    for m in rr.cleanup_misinstall():           # 0.17.3's install into C:\\Windows, if it is still there
+        print(m)
     if args.action == "status":
         for line in rr.describe(rr.status(d)):
             print(line)

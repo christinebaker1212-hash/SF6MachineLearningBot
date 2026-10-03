@@ -55,6 +55,7 @@ def test_patch_edits_each_upstream_spot_once_and_embeds_the_exact_exporter(tmp_p
 def test_status_install_restore(tmp_path):
     game = tmp_path / "SF6"
     game.mkdir()
+    (game / "StreetFighter6.exe").write_bytes(b"MZ game")
     (game / "dinput8.dll").write_bytes(b"MZ official reframework")
     st = rr.status(game)
     assert st["dll"]["kind"] == "official" and "OFF in online matches" in " ".join(rr.describe(st))
@@ -94,3 +95,44 @@ def test_the_bundled_build_runs_the_current_exporter():
     assert z == rr.BUNDLED and z.exists()
     data = zipfile.ZipFile(z).read("dinput8.dll")
     assert rr.dll_info(data)["exporter"] == rr.exporter_id(LUA_SRC.read_bytes())
+
+
+def _research_zip(tmp_path):
+    marker = f"SF6BOT-RESEARCH-BUILD until=2033-10-01 exporter={rr.exporter_id(LUA_SRC.read_bytes())}".encode()
+    z = tmp_path / "b.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("dinput8.dll", b"MZ research \x00" + marker + b"\x00")
+    return z, marker
+
+
+def test_only_a_folder_holding_the_game_counts_and_a_misplaced_install_is_cleaned(tmp_path, monkeypatch):
+    """0.17.3 installed into C:\\Windows: a File Explorer window titled 'Street Fighter 6' (explorer.exe in
+    C:\\Windows) was taken for the game. Now the folder must hold StreetFighter6.exe, and the misplaced files are
+    removed, only when they are provably the bot's own."""
+    from sf6bot import game_state as gs
+    from sf6bot import win32
+    windows = tmp_path / "Windows"
+    windows.mkdir()
+    (windows / "explorer.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(win32, "IS_WINDOWS", True)
+    monkeypatch.setattr(win32, "list_windows", lambda: [win32.WindowInfo(1, "Street Fighter 6", 7, "explorer.exe",
+                                                                         (0, 0, 1, 1), (0, 0, 1, 1))])
+    monkeypatch.setattr(win32, "process_image_path", lambda pid: str(windows / "explorer.exe"))
+    monkeypatch.setattr(gs, "LAST_DIR_FILE", tmp_path / ".sf6_dir")
+    cfg = {"game": {"exe_name": "StreetFighter6.exe", "title_contains": "Street Fighter 6"}}
+    assert gs.find_sf6_dir(cfg) is None
+    (tmp_path / ".sf6_dir").write_text(str(windows))
+    assert gs.remembered_sf6_dir(cfg) is None                     # a remembered folder without the game is refused
+    z, marker = _research_zip(tmp_path)
+    with pytest.raises(ValueError):
+        rr.install(windows, z, game_running=False)
+    # the 0.17.3 leftovers: our dll + exporter in "C:\\Windows"; a system dinput8.dll elsewhere is never touched
+    (windows / "dinput8.dll").write_bytes(b"MZ research \x00" + marker)
+    (windows / "reframework" / "autorun").mkdir(parents=True)
+    (windows / "reframework" / "autorun" / "sf6bot_state.lua").write_bytes(LUA_SRC.read_bytes())
+    system32 = tmp_path / "System32"
+    system32.mkdir()
+    (system32 / "dinput8.dll").write_bytes(b"MZ windows dinput")
+    msgs = rr.cleanup_misinstall([windows, system32])
+    assert len(msgs) == 2 and not (windows / "dinput8.dll").exists() and not (windows / "reframework").exists()
+    assert (system32 / "dinput8.dll").read_bytes() == b"MZ windows dinput" and (windows / "explorer.exe").exists()

@@ -2085,6 +2085,16 @@ User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then
   ran from. The patch itself covers every online check in ScriptRunner (`m_last_online_match_state` is recomputed
   from `is_online_match()` every frame). 0.17.3: install reads the dll back after writing and names the file; status
   shows the dll's size and modified time, to see if something replaces it later.
+- **0.17.3's install output said `C:\Windows\dinput8.dll`: the bot installed into C:\Windows (my bug).** With SF6
+  closed, `find_sf6_dir` fell back to any window whose TITLE contains "Street Fighter 6" (very likely a File Explorer
+  window on the game's folder: explorer.exe lives in C:\Windows), took its process folder for SF6's and remembered it
+  in `configs/.sf6_dir`. The same window caused the earlier "Close SF6 first" refusal. Windows loads dinput8.dll from
+  System32 before C:\Windows, so the stray copy most likely did nothing, but it must go.
+- **0.17.4:** SF6's folder comes only from the game's own process (exe name), and every folder (config, running
+  game, remembered) must hold StreetFighter6.exe (`game_state.is_sf6_dir`); install / restore / status refuse any
+  other. `refw_research.cleanup_misinstall` (run by every `refw-research` command) removes from C:\Windows only a
+  dinput8.dll carrying the research marker and the sf6bot exporter script, then the empty folders it created;
+  Windows' own dinput8.dll never carries the marker. Removing needs administrator: the install does it.
 
 ## 0.16.0: unattended ranked, live move lookup, learning to WIN, situation assessment, combo mining
 User (2026-10-03): "record ranked sessions into ONE run file, that last until the last match is finished"; "live

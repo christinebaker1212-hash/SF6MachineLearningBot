@@ -46,8 +46,10 @@ def dll_info(data: bytes | None) -> dict:
 def status(game_dir: Path | None) -> dict:
     from .game_state import LUA_NAME, LUA_SRC
     out: dict = {"game_dir": str(game_dir) if game_dir else None, "repo_exporter": exporter_id(LUA_SRC.read_bytes())}
-    if game_dir is None:
-        out["problem"] = "SF6's folder is not known yet: start SF6 once with the bot running (any command), or set game.install_dir."
+    from .game_state import is_sf6_dir
+    if game_dir is None or not is_sf6_dir(game_dir):
+        out["problem"] = ("SF6's folder is not known yet: start SF6, then click 'Online build: status' (or run any bot "
+                          "command) while it runs, or set game.install_dir.")
         return out
     p = game_dir / DLL
     out["dll"] = dll_info(p.read_bytes() if p.is_file() else None)
@@ -107,8 +109,47 @@ def _read_dll(src: Path) -> tuple[bytes, dict]:
     return data, info
 
 
+def _check_dir(game_dir: Path) -> None:
+    from .game_state import is_sf6_dir
+    if not is_sf6_dir(game_dir):
+        raise ValueError(f"{game_dir} is not SF6's folder (no StreetFighter6.exe in it): nothing was changed. Start "
+                         "SF6, click 'Online build: status' so the bot sees where it is, close SF6, then try again.")
+
+
+def cleanup_misinstall(dirs: list | None = None) -> list[str]:
+    """0.17.3 installed the research build into C:\\Windows by mistake (a window titled 'Street Fighter 6' was taken
+    for the game). Remove only what is provably ours there: a dinput8.dll carrying the research-build marker and the
+    sf6bot exporter script, then the folders it created if they are empty. Windows' own dinput8.dll (System32 /
+    SysWOW64) never carries the marker and is never touched."""
+    import os
+    root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+    out = []
+    for d in dirs if dirs is not None else [root]:
+        d = Path(d)
+        dll = d / DLL
+        try:
+            if dll.is_file() and dll_info(dll.read_bytes()).get("kind") == "research":
+                dll.unlink()
+                out.append(f"Removed the misplaced research build {dll}.")
+            from .game_state import LUA_NAME
+            lua = d / "reframework" / "autorun" / LUA_NAME
+            if lua.is_file() and b"sf6bot game-state exporter" in lua.read_bytes()[:200]:
+                lua.unlink()
+                out.append(f"Removed the misplaced exporter {lua}.")
+            for sub in (d / "reframework" / "autorun", d / "reframework" / "data", d / "reframework"):
+                if sub.is_dir() and not any(sub.iterdir()):
+                    sub.rmdir()
+        except PermissionError:
+            out.append(f"Could not remove the misplaced files in {d} (needs administrator): run 'Online build: install' "
+                       "(it runs as administrator) or delete them by hand.")
+        except OSError as e:
+            out.append(f"Could not clean {d}: {e}")
+    return out
+
+
 def install(game_dir: Path, src: Path, game_running: bool) -> list[str]:
     from .game_state import install_exporter
+    _check_dir(game_dir)
     if game_running:
         raise RuntimeError("Close SF6 first: Windows locks dinput8.dll while the game runs.")
     data, info = _read_dll(src)
@@ -137,6 +178,7 @@ def install(game_dir: Path, src: Path, game_running: bool) -> list[str]:
 
 
 def restore(game_dir: Path, game_running: bool) -> str:
+    _check_dir(game_dir)
     if game_running:
         raise RuntimeError("Close SF6 first: Windows locks dinput8.dll while the game runs.")
     b = game_dir / BACKUP

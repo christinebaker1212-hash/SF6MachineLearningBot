@@ -81,18 +81,30 @@ class GameState:
         return self.p1 if idx == 0 else self.p2
 
 
+def is_sf6_dir(d, exe_name: str = "StreetFighter6.exe") -> bool:
+    """A folder is SF6's only if the game's exe is in it (0.17.4: a File Explorer window titled 'Street Fighter 6'
+    made C:\\Windows count as SF6's folder, and the online build was installed there)."""
+    try:
+        return d is not None and (Path(d) / exe_name).is_file()
+    except OSError:
+        return False
+
+
 def find_sf6_dir(cfg: dict) -> Path | None:
-    """SF6 install folder, from the running game's process (most reliable), else config."""
+    """SF6 install folder: the configured one, else the running game's own process (its exe, never a window that
+    merely has the game's name in its title)."""
+    exe_name = cfg["game"]["exe_name"]
     if cfg["game"].get("install_dir"):
-        return Path(cfg["game"]["install_dir"])
+        d = Path(cfg["game"]["install_dir"])
+        return d if is_sf6_dir(d, exe_name) else None
     from . import win32
     if not win32.IS_WINDOWS:
         return None
-    w = win32.find_game_window(cfg["game"]["exe_name"], cfg["game"]["title_contains"])
+    w = next((x for x in win32.list_windows() if x.exe.lower() == exe_name.lower()), None)
     if w is None:
         return None
     exe = win32.process_image_path(w.pid)
-    if not exe:
+    if not exe or not is_sf6_dir(Path(exe).parent, exe_name):
         return None
     try:            # remembered for jobs that need SF6 closed (replacing REFramework's dll: refw_research.py)
         LAST_DIR_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -106,15 +118,16 @@ LAST_DIR_FILE = Path(__file__).resolve().parent.parent / "configs" / ".sf6_dir"
 
 
 def remembered_sf6_dir(cfg: dict) -> Path | None:
-    """The SF6 folder even when the game is closed: config, the running game, else the last one seen."""
+    """The SF6 folder even when the game is closed: config, the running game, else the last one seen (only if it
+    still holds the game's exe)."""
     d = find_sf6_dir(cfg)
     if d is not None:
         return d
     try:
         p = Path(LAST_DIR_FILE.read_text(encoding="utf-8").strip())
-        return p if p.is_dir() else None
     except OSError:
         return None
+    return p if is_sf6_dir(p, cfg["game"]["exe_name"]) else None
 
 
 def game_build(cfg: dict) -> dict | None:
