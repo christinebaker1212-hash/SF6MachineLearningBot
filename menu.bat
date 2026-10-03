@@ -12,6 +12,7 @@ if not exist runs mkdir runs
 :menu
 cls
 echo ==================== sf6bot ====================
+echo  (Prefer a window? Double-click gui.bat: the same functions, with buttons.)
 %BOT% --version
 echo  While the bot plays:  F8 = STOP   F7 = pause
 echo.

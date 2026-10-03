@@ -1850,6 +1850,38 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
     Ally as real key events (as for the overlay).
 - Not verified in game: that F confirms in every SF6 menu the routines need; the key polling on the user's PC.
 
+## 0.13.0: the control panel (GUI); jump attacks on the way down
+- **User (2026-10-03): "any attack that uses a jumping normal appears to act as if you need to press it in the air,
+  when you actually need to press it as you're coming down."**
+  - Combo lab: the landing estimate counted down while the bot was still rising (it projects the whole arc), and
+    nothing required falling. The air press now also needs a falling speed (`ComboRun._vy < 0`), in searched and
+    replayed attempts alike.
+  - Fighter: an air attack is only allowed while falling and below height 1.3 (`AIR_ATTACK_MAX_Y`; the jump apex is
+    ~2.1, measured); before it could be chosen right after take-off.
+- **User: "My screen is 1920x1080, and the game is 1280x720. Can we remake the program entirely to become a user
+  friendly GUI version with the exact same functionality, and SF6's design philosophy for the interface?"**
+  - `gui.bat` / `sf6bot gui` (`sf6bot/gui.py`, `sf6bot/gui_actions.py`): a 1280x360 control panel meant for the strip
+    under the game (game client at (640, 0), the bot's overlay in the 640-px column on the left; ARRANGE WINDOWS
+    moves SF6 there with `win32.move_client_to` and the panel to (640, 720)).
+  - Style after SF6's menus without Capcom assets: near-black panels, bold slanted condensed uppercase type
+    (Bahnschrift on Windows), hot magenta / yellow / cyan accents, slanted tabs, tiles with START buttons.
+  - Tabs: FIGHT, RECORD, TRAIN, COMBOS, BUTTONS, RESULTS, TOOLS. Each tile = one menu.bat function with its options
+    (segmented choices, a dropdown for longer lists, numbers, text). `gui_actions.build` turns a tile + options into
+    the same `sf6bot` command lines as menu.bat (test: every menu letter maps to the identical command).
+  - Commands run in the background (no console window), output streams into LIVE LOG (tagged lines coloured:
+    [measured] cyan, [learned] yellow, [policy] magenta), questions are answered from the input box or the
+    ENTER / YES / S buttons. STOP creates a stop file the safety watchdog treats like F8
+    (`Watchdog(stop_file=...)`, env `SF6BOT_STOP_FILE`), then ends the process after 6 s if needed. The bot's
+    hotkeys (F6-F10) work as before.
+  - Specials: SEND TO CLAUDE copies `runs/for_claude.txt` to the clipboard; RUNS FOLDER opens it; VIDEO toggles
+    and shows the setting; GAME-STATE SCRIPT opens an administrator window for `refw-install`; PyTorch timing
+    installs torch first. Options and the window position are remembered (`configs/gui_state.json`, not in git).
+  - Standard library only (tkinter): nothing new to install; `gui.bat` says so if the Python has no tkinter.
+    menu.bat and the CLI are unchanged.
+- Verified here: rendered under Xvfb (all tabs fit 1280x360), a live run streamed a command's output and answered
+  its question through the input box. Not verified on the user's PC: fonts, DPI scaling, the stop file under
+  Windows, ARRANGE WINDOWS.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

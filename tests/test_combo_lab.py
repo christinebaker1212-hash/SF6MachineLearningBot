@@ -1090,3 +1090,33 @@ def test_operator_f10_skips_only_presses_made_during_this_route():
     assert not cl.operator_skipped(sess, 60.0)      # an F10 for an earlier route does not skip this one
     sess.watchdog.skips.append(75.0)
     assert cl.operator_skipped(sess, 60.0)
+
+
+def test_jump_attack_is_pressed_on_the_way_down_not_while_rising():
+    """User, 2026-10-03: jumping normals acted "as if you need to press it in the air, when you actually need to
+    press it as you're coming down". The landing estimate also counted down while rising."""
+    steps = [{"name": "jump", "system": "jump", "sequence": "9@3", "prefix": 0, "trigger": "first",
+              "allow_movement": True, "hitting": False, "min_offset": 0},
+             {"name": "j.HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "air", "startup": 30, "air": True,
+              "landing": 3, "hitting": True, "min_offset": cl.NO_FLOOR}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, {37}, gravity=-0.004)
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(2, 37, 0, y=0.0))
+    # rising: even with a huge start-up (an early press window) nothing is pressed
+    for t, y in zip(range(3, 12), (0.2, 0.38, 0.55, 0.7, 0.84, 0.97, 1.08, 1.18, 1.27)):
+        assert run.feed(_line(t, 37, t, y=y)) is None
+    # first falling line: now it may go
+    assert run.feed(_line(12, 37, 12, y=1.26)) == 1
+
+
+def test_policy_allows_air_attacks_only_falling_and_low():
+    from sf6bot.neutral_policy import NeutralPolicy
+    import numpy as np
+    pol = NeutralPolicy(None, [{"name": "j.HP", "id": 653, "intent": "air_attack", "seq": "5+HP@3",
+                                "startup": 9, "projectile": False, "super_cost": 0}])
+    me = {"x": 0.0, "y": 1.0, "drive": 60000, "super": 0}
+    from sf6bot import intents
+    ai = list(intents.INTENTS).index("air_attack")
+    assert not pol.allowed(me, 2.0, lambda a: True, falling=False)[ai]          # rising
+    assert pol.allowed(me, 2.0, lambda a: True, falling=True)[ai]               # falling, low enough
+    assert not pol.allowed(dict(me, y=1.8), 2.0, lambda a: True, falling=True)[ai]   # still too high

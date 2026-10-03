@@ -23,7 +23,8 @@ class Watchdog:
                  skip_pressed: Callable[[], bool] | None = None,
                  game_focused: Callable[[], bool], window_alive: Callable[[], bool] = lambda: True,
                  window_moved: Callable[[], bool] = lambda: False,
-                 poll_s: float = 0.005, refocus_grace_s: float = 0.5, sink=None) -> None:
+                 poll_s: float = 0.005, refocus_grace_s: float = 0.5, sink=None,
+                 stop_file: str | None = None) -> None:
         self.c = controller
         self.stop_event = stop_event
         self.kill_pressed = kill_pressed
@@ -39,6 +40,8 @@ class Watchdog:
         self.poll_s = poll_s
         self.refocus_grace_s = refocus_grace_s
         self.sink = sink or (lambda e: None)
+        self.stop_file = stop_file           # the GUI's STOP button creates this file (0.12.7): same as F8
+        self._stop_check = 0.0
         self.paused = False
         self.stop_reason: str | None = None
         self.allow_arm = True  # owner can hold the controller disarmed (e.g. countdown)
@@ -77,6 +80,16 @@ class Watchdog:
                 if self.kill_pressed():
                     self.trip("kill hotkey")
                     break
+                if self.stop_file and clock.now() - self._stop_check > 0.1:
+                    self._stop_check = clock.now()
+                    import os
+                    if os.path.exists(self.stop_file):
+                        try:
+                            os.remove(self.stop_file)
+                        except OSError:
+                            pass
+                        self.trip("STOP pressed in the GUI")
+                        break
                 if not self.window_alive():
                     self.trip("game window closed")
                     break

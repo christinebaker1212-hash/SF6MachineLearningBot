@@ -478,6 +478,7 @@ class ComboRun:
         self.bot_y = None                    # recent (y, tick) of the bot: jump-in timing
         self.gravity = gravity               # per tick^2 (negative), measured from the bot's jump
         self._land_est = None
+        self._vy = None                      # the bot's vertical speed (per tick): jump attacks only when < 0
         self.neutral_a, self.neutral_d, self.movement = set(neutral_a), set(neutral_d), set(movement)
         self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[]) for _ in steps]
         self.hits: list[dict] = []
@@ -518,6 +519,7 @@ class ComboRun:
             return None
         (y1, t1), (y2, t2) = hist[-2], hist[-1]
         vy = (y2 - y1) / (t2 - t1)
+        self._vy = vy
         g = self.gravity
         if g is None and len(hist) == 3 and hist[0][1] < t1:
             v0 = (y1 - hist[0][0]) / (t1 - hist[0][1])
@@ -715,6 +717,8 @@ class ComboRun:
             return n if pr["moving"] >= fx["prev_frame"] else None
         if fx:
             # replay the recorded success exactly (user, 0.11.5: "record that exact state and repeat it")
+            if trig == "air" and not (self._vy is not None and self._vy < 0):
+                return None                   # still rising: a jump attack is pressed on the way DOWN
             if trig in ("air", "landing") and fx.get("land") is not None:
                 if trig == "landing" and (num(p1.get("y")) or 0.0) > 0.01 and pr["contact"] is None:
                     return None
@@ -727,8 +731,10 @@ class ComboRun:
                 return n if tick - pr["start"] >= fx["after_prev_start"] else None
         if trig == "air":
             # jump-in: the attack should hit JUMP_DEPTH frames before landing (deep), so press when
-            # landing is (start-up - 1 + depth + input delay) frames away; later offsets = deeper
-            if not (num(p1.get("y")) or 0) > 0.05 or land is None:
+            # landing is (start-up - 1 + depth + input delay) frames away; later offsets = deeper.
+            # Only on the way DOWN (user, 0.12.7: jump normals were pressed "in the air" instead of "as you're
+            # coming down"; the landing estimate also counts down while rising)
+            if not (num(p1.get("y")) or 0) > 0.05 or land is None or not (self._vy is not None and self._vy < 0):
                 return None
             return n if land <= (st.get("startup") or 8) - 1 + JUMP_DEPTH + self.lead + st["prefix"] - off else None
         if trig == "landing":

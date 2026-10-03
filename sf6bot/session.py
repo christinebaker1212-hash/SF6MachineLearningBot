@@ -2,6 +2,7 @@
 guarantees teardown (inputs released, files flushed, report written)."""
 from __future__ import annotations
 
+import os
 import platform
 import sys
 import threading
@@ -141,7 +142,7 @@ class Session:
         self.watchdog = Watchdog(self.controller, self.stop_event, kill_pressed=kill, pause_pressed=pause,
                                  flip_pressed=flip, mark_pressed=mark, skip_pressed=skip, game_focused=focused, window_alive=alive, window_moved=moved,
                                  poll_s=float(s["poll_s"]), refocus_grace_s=float(s["refocus_grace_s"]),
-                                 sink=self.recorder.event)
+                                 sink=self.recorder.event, stop_file=os.environ.get("SF6BOT_STOP_FILE"))
         self.watchdog.allow_arm = False
         self.watchdog.start()
         prev_hook = threading.excepthook

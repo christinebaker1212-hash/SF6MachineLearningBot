@@ -375,3 +375,16 @@ class XInputCombo:
             if b is not None and (b & self.mask) == self.mask:
                 return True
         return False
+
+
+def move_client_to(hwnd: int, x: int, y: int) -> tuple[int, int, int, int]:
+    """Move a window so its CLIENT area's top-left is at screen (x, y), keeping its size (the GUI's
+    'Arrange windows': SF6 to the top right of a 1920x1080 screen). Returns the new client rect."""
+    _require_windows()
+    wr = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(wr))
+    cl, ct, _, _ = client_rect_screen(hwnd)
+    SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+    user32.SetWindowPos(hwnd, None, x - (cl - wr.left), y - (ct - wr.top), 0, 0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    return client_rect_screen(hwnd)

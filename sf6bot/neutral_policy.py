@@ -22,6 +22,7 @@ MACROS = {      # movement intents: short macro actions (decided again right aft
     "jump_back": "7@4", "dash_fwd": "6@3 5@3 6@3", "dash_back": "4@3 5@3 4@3", "throw": "5+LP+LK@3",
     "drive_impact": "5+HP+HK@3", "parry": "5+MP+MK@16",
 }
+AIR_ATTACK_MAX_Y = 1.3     # jump attacks only below this height on the way down (apex ~2.1, measured)
 SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 
 
@@ -86,13 +87,16 @@ class NeutralPolicy:
         self.rng = np.random.default_rng(seed)
         self.last: dict = {}
 
-    def allowed(self, me: dict, dist: float, can_spend) -> np.ndarray:
+    def allowed(self, me: dict, dist: float, can_spend, falling: bool | None = None) -> np.ndarray:
         air = (num(me.get("y")) or 0.0) > 0.05
+        # jump attacks on the way DOWN and low enough to reach (user, 0.12.7: not while still rising; the jump
+        # peaks at ~2.1, measured)
+        air_ok = air and falling is not False and (num(me.get("y")) or 0.0) <= AIR_ATTACK_MAX_Y
         ok = np.ones(len(it.INTENTS), dtype=bool)
         for i, name in enumerate(it.INTENTS):
             if air and name not in it.AIR_INTENTS:
                 ok[i] = False
-            elif not air and name == "air_attack":
+            elif name == "air_attack" and not air_ok:
                 ok[i] = False
             elif name == "throw" and dist > 1.0:
                 ok[i] = False
@@ -117,7 +121,9 @@ class NeutralPolicy:
         p = np.asarray(p, dtype=np.float64)
         if self.exp is not None:
             p = p * np.array([self.exp.factor(zone, i) for i in it.INTENTS])
-        ok = self.allowed(me, dist, can_spend)
+        py, y = num((prev_me or {}).get("y")), num(me.get("y"))
+        falling = None if py is None or y is None else y < py
+        ok = self.allowed(me, dist, can_spend, falling)
         p = np.where(ok, p, 0.0)
         if p.sum() <= 0:
             p = ok.astype(float)

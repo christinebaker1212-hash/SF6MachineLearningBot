@@ -697,6 +697,9 @@ def main(argv=None):
     p.add_argument("mode", nargs="?", choices=("on", "off", "toggle"), default=None)
     p.set_defaults(fn=cmd_video)
 
+    sub.add_parser("gui", help="the control panel window (same functions as menu.bat)").set_defaults(
+        fn=lambda args, cfg: __import__("sf6bot.gui", fromlist=["main"]).main())
+
     sub.add_parser("train", help="train the bot's brain (network + counts) from every recording; no game "
                    "needed").set_defaults(fn=cmd_train)
 
