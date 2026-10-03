@@ -79,12 +79,18 @@ def _prior(m: dict, zone: str) -> float:
 
 class NeutralPolicy:
     def __init__(self, brain, moves: list[dict], experience=None, book=None, chara_id=None, cfg: dict | None = None,
-                 seed: int | None = None):
+                 seed: int | None = None, win=None):
         self.brain, self.moves, self.exp, self.book = brain, moves, experience, book or []
         self.chara_id = chara_id
         c = cfg or {}
         self.temperature = float(c.get("temperature", 0.8))
         self.explore = float(c.get("explore", 0.08))
+        # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
+        # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
+        self.win = win
+        self.win_beta = float(c.get("win_beta", 1.5))
+        self.win_sum = np.zeros(len(it.INTENTS))     # the win model's advantage per choice, summed (thoughts)
+        self.win_n = 0
         self.rng = np.random.default_rng(seed)
         self.last: dict = {}
         # measured reach per own action id (reach.py, menu B): pokes and close specials only from where they
@@ -123,6 +129,13 @@ class NeutralPolicy:
         x = it.features(me, op, prev_me, prev_op, frame, dt)
         p, source = self.brain.probs(x, zone, cat)
         p = np.asarray(p, dtype=np.float64)
+        adv = None
+        if self.win:
+            adv = self.win.advantage(x, p)
+            self.win_sum += adv
+            self.win_n += 1
+            p = p * np.exp(np.clip(self.win_beta * self.win.trust * adv, -3.0, 3.0))
+            source += "+win"
         if self.exp is not None:
             p = p * np.array([self.exp.factor(zone, i) for i in it.INTENTS])
         py, y = num((prev_me or {}).get("y")), num(me.get("y"))
@@ -138,7 +151,8 @@ class NeutralPolicy:
         intent = it.INTENTS[k]
         top = sorted(((it.INTENTS[i], float(p[i])) for i in range(len(p)) if p[i] > 0), key=lambda kv: -kv[1])[:3]
         out = {"intent": intent, "zone": zone, "dist": dist, "top": top, "source": source, "move": None,
-               "seq": MACROS.get(intent), "route": None}
+               "seq": MACROS.get(intent), "route": None,
+               "win_adv": None if adv is None else round(float(adv[k]), 3)}
         if intent == "drive_rush":
             from .route_book import choose as pick
             e = pick([b for b in self.book if b["kind"] == "drive_rush"], me, op, hit_types=("normal",),
@@ -162,6 +176,12 @@ class NeutralPolicy:
                         out["route"] = e
         self.last = out
         return out
+
+    def win_push(self) -> dict:
+        """{intent: mean advantage (1000s of hp)} the win model gave each choice this match."""
+        if not self.win_n:
+            return {}
+        return {it.INTENTS[i]: round(float(v / self.win_n), 3) for i, v in enumerate(self.win_sum)}
 
     def in_reach(self, m: dict, dist: float | None) -> bool:
         """False only when the move's measured reach is shorter than the distance (projectiles and moves

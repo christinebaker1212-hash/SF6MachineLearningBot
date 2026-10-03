@@ -313,6 +313,13 @@ def cmd_fight(args, cfg):
         cfg = _with_pad(cfg)
     player = None if (vh or args.player == "auto") else (0 if args.player == "p1" else 1)
     seconds = args.seconds if not vh or args.seconds != 3600.0 else 6 * 3600.0
+    if vh == "ranked":
+        # 0.16.0: unattended ranked runs until F8 / STOP, F10 or AFTER MATCH (stop after the current match), or
+        # --matches; one run folder for the whole session. Video off unless asked for (hours of video fill the disk).
+        if args.seconds == 3600.0:
+            seconds = 365 * 24 * 3600.0
+        if args.video is None:
+            cfg["recording"]["record_video"] = False
     # Versus Human: a set is first to 2 unless the setup says otherwise (--first-to N; 0 = no limit).
     # Ranked: back-to-back single matches, no set, until F8 / --matches / 6 h.
     first_to = args.first_to
@@ -548,24 +555,41 @@ def cmd_move_map(args, cfg):
 
 
 def cmd_train(args, cfg):
-    """Train the bot's brain from every recording (no game needed): the network + counts (brain.py)."""
+    """Train the bot from every recording (no game needed): the copy-a-player network + counts (brain.py), the
+    win model (win_model.py) and the move reach (reach.py). --background (started by long fight sessions every
+    few dozen matches): reports go to datasets/models/ instead of a new run folder."""
     import time as _time
     from pathlib import Path
     from .brain import report_md, train
     from .training_data import summarize
+    from .win_model import report_md as win_md
+    from .win_model import train as train_win
     root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    bg = getattr(args, "background", False)
     if (root / "replays").exists():
         summarize(root)          # merge repeat recordings of the same replay first
     rep = train(root, log=print)
     from .reach import build as build_reach
     reach = build_reach(root, log=print)
     rep["reach"] = reach
-    run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_train")
-    run.mkdir(parents=True, exist_ok=True)
-    (run / "meta.json").write_text(json.dumps({"kind": "train"}, indent=1))
-    (run / "brain_report.md").write_text(report_md(rep), encoding="utf-8")
+    wrep = train_win(root, log=print)
+    from .combo_mining import build as mine_combos
+    try:
+        wrep["mined_combos"] = mine_combos(root, log=print)
+    except Exception as e:                       # noqa: BLE001 - the networks are trained either way
+        print(f"Combo mining failed: {e}")
+    if bg:
+        out = root / "models"
+        out.mkdir(parents=True, exist_ok=True)
+    else:
+        out = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_train")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "meta.json").write_text(json.dumps({"kind": "train"}, indent=1))
+    (out / "brain_report.md").write_text(report_md(rep), encoding="utf-8")
+    (out / "win_report.md").write_text(win_md(wrep), encoding="utf-8")
     print(report_md(rep))
-    print("The fighter uses the brain from the next match on (menus V, N, H).")
+    print(win_md(wrep))
+    print("The fighter uses the new models from the next match on (menus V, N, H).")
 
 
 def cmd_video(args, cfg):
@@ -707,8 +731,9 @@ def main(argv=None):
     p.add_argument("--rounds", type=int, default=1,
                    help="generated routes: test, regenerate from the results (extend what worked, drop "
                         "what was blocked), test again; this many rounds")
-    p.add_argument("--source", choices=["community", "generated", "both"], default="community",
-                   help="community routes (menu T, A), routes worked out from Capcom data, or both")
+    p.add_argument("--source", choices=["community", "generated", "mined", "both"], default="community",
+                   help="community routes (menu T, A), routes worked out from Capcom data, routes found in "
+                        "recordings (built by train), or all of them")
     p.add_argument("--position", choices=["any", "midscreen", "corner"], default="any")
     p.add_argument("--hit-type", dest="hit_type", default="all",
                    choices=["all", "normal", "counter_hit", "punish_counter"],
@@ -732,7 +757,7 @@ def main(argv=None):
     p.add_argument("--player", choices=("p1", "p2", "auto"), default="p1",
                    help="which side the bot plays (auto: by character, else a crouch probe at Fight!)")
     p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h; "
-                   "6 h with --versus-human)")
+                   "6 h with --versus-human offline/online; ranked: no limit, F10 = stop after this match)")
     p.add_argument("--matches", type=int, default=0, help="stop after N matches (0 = until F8 / --seconds)")
     p.add_argument("--first-to", type=int, default=None, help="stop when the bot or its opponent wins N "
                    "matches (Versus Human default 2 = FT2; 0 = no limit)")
@@ -753,8 +778,11 @@ def main(argv=None):
     sub.add_parser("gui", help="the control panel window (same functions as menu.bat)").set_defaults(
         fn=lambda args, cfg: __import__("sf6bot.gui", fromlist=["main"]).main([]))
 
-    sub.add_parser("train", help="train the bot's brain (network + counts) from every recording; no game "
-                   "needed").set_defaults(fn=cmd_train)
+    p = sub.add_parser("train", help="train the bot (copy-a-player network + counts, win model, move reach) from "
+                       "every recording; no game needed")
+    p.add_argument("--background", action="store_true", help="(started by long fight sessions) reports to "
+                   "datasets/models/ instead of a new run folder")
+    p.set_defaults(fn=cmd_train)
 
     p = sub.add_parser("controller", help="(obsolete since 0.9.0: the side decides) reset to keyboard")
     p.add_argument("mode", choices=("keyboard", "pad"))

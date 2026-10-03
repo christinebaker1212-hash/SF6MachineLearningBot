@@ -10,10 +10,11 @@ from pathlib import Path
 # target -> (description, folders relative to the datasets root or "RUNS" for the runs root)
 TARGETS = {
     "runs": ("run reports, videos and logs", ["RUNS"]),
-    "training": ("training data: recorded replays, merged replays, learned move ids, the trained brain, "
-                 "measured move reach", ["replays", "merged", "move_maps", "models", "reach"]),
-    "fights": ("fight data: the bot's recorded matches and what it learned from them per opponent",
-               ["fights", "learning"]),
+    "training": ("training data: recorded replays, merged replays, learned move ids, the trained networks (brain and "
+                 "win model) and their sample cache, measured move reach, combos found in recordings",
+                 ["replays", "merged", "move_maps", "models", "reach", "combos_mined"]),
+    "fights": ("fight data: the bot's recorded matches, what it learned from them per opponent and the ladder "
+               "progress history", ["fights", "learning", "ladder"]),
 }
 KEEP = ("catalog", "framedata")
 

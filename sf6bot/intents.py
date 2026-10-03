@@ -188,13 +188,52 @@ def label(window: list[tuple[dict, dict]]) -> str:
     return "idle"
 
 
-def samples(rows: list[dict], players=(0, 1), stride: int = STRIDE, horizon: int = HORIZON) -> list[dict]:
+RETURN_HALF_LIFE = 60    # frames: damage 1 s after a choice counts half (win model, 0.16.0)
+ROUND_BONUS = 2.0         # a round won / lost, in the same units as damage (1000s of hp): a KO is worth more than
+                          # its last hit
+
+
+def returns(rows: list[dict], pi: int, half_life: int = RETURN_HALF_LIFE, round_bonus: float = ROUND_BONUS) -> dict:
+    """{(round, seg, frame): discounted return} for player pi: damage dealt minus damage taken from that frame on,
+    in 1000s of hp, each frame's worth halving every `half_life` frames, plus +/- round_bonus when a player is KO'd.
+    What the win model learns to predict per choice. Segments end at round changes and gaps of more than 3 frames."""
+    mk, ok = ("p1", "p2") if pi == 0 else ("p2", "p1")
+    g = 0.5 ** (1.0 / max(1, half_life))
+    rows = [r for r in rows if isinstance(r.get("frame"), int)]
+    out: dict = {}
+    nxt = None                           # the following row (reverse pass)
+    acc = 0.0
+    for r in reversed(rows):
+        key = (r.get("round"), r.get("seg", 0), r["frame"])
+        if nxt is None or (nxt.get("round"), nxt.get("seg", 0)) != key[:2] or not 0 < nxt["frame"] - r["frame"] <= 3:
+            acc, dt, rew = 0.0, 1, 0.0
+        else:
+            dt = nxt["frame"] - r["frame"]
+            m0, m1 = num((r.get(mk) or {}).get("hp")), num((nxt.get(mk) or {}).get("hp"))
+            o0, o1 = num((r.get(ok) or {}).get("hp")), num((nxt.get(ok) or {}).get("hp"))
+            rew = 0.0
+            if None not in (m0, m1, o0, o1):
+                rew = (max(0.0, o0 - o1) - max(0.0, m0 - m1)) / 1000.0
+                if o0 > 0 >= o1:
+                    rew += round_bonus
+                if m0 > 0 >= m1:
+                    rew -= round_bonus
+        acc = rew + (g ** dt) * acc
+        out[key] = acc
+        nxt = r
+    return out
+
+
+def samples(rows: list[dict], players=(0, 1), stride: int = STRIDE, horizon: int = HORIZON,
+            with_return: bool = False) -> list[dict]:
     """Decision samples from one recording: for each player, every `stride` contiguous in-fight frames
     while the player is free, the features and the intent that followed. Gaps (8x recordings) end a
-    window, so labels never span missing frames."""
+    window, so labels never span missing frames. with_return: also "g", what followed the choice
+    (returns(): discounted damage difference + round result) for the win model."""
     from .training_data import in_fight
     out = []
     keys = ("p1", "p2")
+    rets = {pi: returns(rows, pi) for pi in players} if with_return else {}
     rows = [r for r in rows if in_fight(r) and isinstance(r.get("frame"), int)]
     for pi in players:
         mk, ok = keys[pi], keys[1 - pi]
@@ -217,10 +256,13 @@ def samples(rows: list[dict], players=(0, 1), stride: int = STRIDE, horizon: int
             dist = None
             if num(me.get("x")) is not None and num(op.get("x")) is not None:
                 dist = abs(num(op["x"]) - num(me["x"]))
-            out.append({"x": features(me, op, prev_me, prev_op, r.get("frame")), "y": lab,
-                        "chara": me.get("chara"), "opp_chara": op.get("chara"), "zone": zone(dist),
-                        "opp_cat": category(op), "move_id": move_id, "air": (num(me.get("y")) or 0) > 0.05,
-                        "player": pi})
+            smp = {"x": features(me, op, prev_me, prev_op, r.get("frame")), "y": lab,
+                   "chara": me.get("chara"), "opp_chara": op.get("chara"), "zone": zone(dist),
+                   "opp_cat": category(op), "move_id": move_id, "air": (num(me.get("y")) or 0) > 0.05,
+                   "player": pi}
+            if with_return:
+                smp["g"] = rets[pi].get((r.get("round"), r.get("seg", 0), r["frame"]), 0.0)
+            out.append(smp)
     return out
 
 

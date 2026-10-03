@@ -68,6 +68,7 @@ ACTIONS: list[Action] = [
     Action("combo_lab", "combos", "Combo lab",
            "Training Mode, dummy guard AFTER FIRST HIT, gauges max. F9 = that try worked, F10 = skip route.",
            [Option("what", "Routes", choices=[("Community", "community"), ("Own routes", "generated"),
+                                              ("Found in recordings", "mined"),
                                               ("Explore x3", "explore"), ("Containing text", "only"),
                                               ("Counter-hit only", "counter_hit"), ("Punish-counter only", "punish_counter"),
                                               ("Everything again", "again")], default="community"),
@@ -176,6 +177,7 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
     if action_id == "combo_lab":
         w = v["what"]
         table = {"community": ["combo-lab"], "generated": ["combo-lab", "--source", "generated"],
+                 "mined": ["combo-lab", "--source", "mined"],
                  "explore": ["combo-lab", "--source", "generated", "--rounds", "3"],
                  "counter_hit": ["combo-lab", "--hit-type", "counter_hit"],
                  "punish_counter": ["combo-lab", "--hit-type", "punish_counter"], "again": ["combo-lab", "--again"]}

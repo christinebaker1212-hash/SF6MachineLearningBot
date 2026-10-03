@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.15.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.16.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -150,8 +150,30 @@ controls**.
     to accept-edits and approved each command.
   - **Changing the exporter Lua needs a rebuild of the research dll.** The workflow starts on its own when it changes.
   - When the period ends: TOOLS → "Online build: restore". The build also stops by itself.
-- **Next with the user:** record replays (D, at 8x) → B (train) → the user's FT20 in Versus Human (H) →
-  send S. The thoughts and the per-match table show whether it improves over the set.
+- **0.16.0, unattended ranked and learning to WIN (user: "learn how to DEFEAT a Platinum player, and eventually ... a
+  Diamond, a Master, a 1500, a 1700, a 2000"; "the strongest player on Earth"):**
+  - ranked runs as ONE run folder until stopped: F10 / the panel's AFTER MATCH = stop after the current match, F8 =
+    now; no time cap; video off; `progress.md` after every match and `datasets/ladder/matches.jsonl` across sessions
+  - live move lookup (`live_moves.py`): an unknown opponent move is named from its inputs + Capcom's list on the
+    first sighting, used at once with a +2 on-block margin, saved to the move map
+  - win model (`win_model.py`): a second network, Q(situation, choice) = what followed each choice (damage
+    difference, 1 s half-life, ±2 per round); newest own matches weigh most, so it follows the ladder. Used only as
+    far as held-out matches show it predicts better than the per-choice average (`trust`)
+  - copy-a-player network: ranked opponents weigh 0.2 (replays 1.0)
+  - background retraining every 20 ranked matches (low priority, one core); models swap in at a match start
+  - situation assessment (`assess.py`): meterless / Drive / Super / cashout damage from true combos, kill checks
+    both ways, Drive Impact punishes, perfect parries timed from learned projectile arrival times
+  - combo mining (`combo_mining.py`): combos found in every recording → lab candidates (K → 8) and each character's
+    real damage for the threat check
+  - **Bug found and fixed:** the exported `action_frames_total` is the animation length (Ryu 5LP 39 vs 13 frames,
+    M Hadoken 110 vs 46); 0.14's whiff punishes used it. Remaining frames now come from Capcom's totals.
+  - **Declined (2026-10-03): input "obfuscation" so replays look human** ("people should see a replay and think
+    they're not cheating, they're just good"). The bot's inputs are not to be disguised as a human's. Offered
+    instead: human-level limits (reaction and input-rate floors) as a disclosed fairness setting, like AlphaStar's
+    APM caps. Any such change is a material addition that needs Capcom's OK before ranked use (§2).
+- **Next with the user:** install the research dll (TOOLS → Online build: install) → `ranked.bat` with auto-accept →
+  send S after a session (progress.md, thoughts, retrain logs). Record replays (D, 8x) whenever possible: they are
+  the copy-a-player network's teachers. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the
   tests; it beat the "always idle" baseline by only a few points). It gets better with real replays; the
   per-opponent learning needs many matches. No outcome is promised.
@@ -321,6 +343,30 @@ Mode) → punish table from verified routes by start-up, position, resources and
 (burnout only when lethal) → projectile perfect parry (export projectile positions, calibrate timing)
 → decision layer with the opponent model.
 
+## 7a. The pathway toward the top (written 0.16.0, user: "a neural network that beats the best players in the world
+cleanly. Like the chess bot who beat a Grand Master")
+
+Honest frame: chess and Go engines got there with a perfect simulator and millions of self-play games; GT Sophy
+(Gran Turismo) with many consoles in parallel. Here: ONE real-time game on a handheld, no simulator, no save
+states. The path below is what can be built; each stage is measured before the next. No outcome is promised.
+
+1. **Data engine (0.16.0, built):** unattended ranked (~40 matches/hour with auto-accept), every match recorded,
+   progress tracked across sessions.
+2. **Knowledge (built; grows by itself):** catalogs, Capcom data, true combos, live move lookup, mined combos,
+   reach, situation assessment.
+3. **Offline value learning (0.16.0, built):** the win model scores choices by what followed them; the copy-a-player
+   network supplies the moves strong players use. Measure: held-out trust, win rate per 20-match block at a rising
+   rank.
+4. **Next: richer actions and state.** The win model chooses among 17 intents; the next step is to score concrete
+   moves and route choices (punish routes, oki, corner, meter spend) the same way, and add the opponent model
+   (habits, skill estimate) as inputs.
+5. **Next: a learned simulator ("world model").** Hundreds of hours of recorded state at every frame can train a
+   model of how the game state evolves under both players' inputs. Self-play and planning inside that model is how
+   the bot can practise far more than real time allows; real matches keep it honest. This is research, not a sure
+   step.
+6. **Evaluation:** frozen checkpoints vs the Model Trainer, CPU 8 and consenting Master players (the user is the
+   first, 1450 MR), both sides, with confidence intervals. "Competitive with Masters" is reported apart from rank.
+
 ## 7. Recommended next steps (in order) — the road to fights
 
 The user asked (2026-10-02) how many more tests remain before the fights and "Amiibo" training.
@@ -363,6 +409,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
+| Learning (0.12-0.16) | `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py` |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.

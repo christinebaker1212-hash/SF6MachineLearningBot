@@ -116,6 +116,7 @@ echo    3  Keep exploring: own routes, 3 rounds (each round extends what worked)
 echo    4  Only routes containing some text (e.g. DRC)
 echo    5  Only counter-hit routes   6  Only punish-counter routes  (set the dummy's counter hit first)
 echo    7  Community routes again, including ones that already passed or failed for a clear reason
+echo    8  Routes found in recordings (replays and matches; built by B = train)
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)
@@ -124,6 +125,7 @@ if "%LC%"=="3" (%BOT% combo-lab --source generated --rounds 3 & goto done)
 if "%LC%"=="5" (%BOT% combo-lab --hit-type counter_hit & goto done)
 if "%LC%"=="6" (%BOT% combo-lab --hit-type punish_counter & goto done)
 if "%LC%"=="7" (%BOT% combo-lab --again & goto done)
+if "%LC%"=="8" (%BOT% combo-lab --source mined & goto done)
 if "%LC%"=="4" (
     set "LT="
     set /p LT=Text: 
@@ -212,7 +214,9 @@ echo    1  Offline at this PC: Versus mode, the bot gets its own controller
 echo       (the opponent plays here or joins over Parsec). A set is first to 2.
 echo    2  Online room / casual set: the bot plays as this PC's player. First to 2.
 echo    3  RANKED: start this once, then queue. The bot plays every ranked match as this PC's
-echo       player, back to back, until F8. (Also: double-click ranked.bat.)
+echo       player, back to back, until you stop it: F10 = stop after this match, F8 = stop now.
+echo       One run folder for the whole session (progress.md), no video, retrains every 20 matches.
+echo       (Also: double-click ranked.bat.)
 set "VM="
 set /p VM=Choose: 
 if "%VM%"=="3" (%BOT% fight --versus-human ranked & goto done)

@@ -95,15 +95,17 @@ def test_response_is_classified_from_the_lines_that_follow():
 
 
 def test_whiff_punish_only_in_reach_and_in_time_and_no_block_against_a_whiff():
-    opp = {640: {"name": "Crouching Medium Kick", "startup": 7}}
+    # the move's total comes from Capcom (30 here), not the exported animation length (0.16.0: the export reads 39 for a
+    # 13-frame 5LP); a wrong export value must not change anything
+    opp = {640: {"name": "Crouching Medium Kick", "startup": 7, "total": 30}}
     own = [{"name": "Standing Heavy Punch", "id": 608, "intent": "poke", "seq": "5+HP@3", "startup": 10, "damage": 800},
            {"name": "Crouching Medium Kick", "id": 640, "intent": "poke", "seq": "2+MK@3", "startup": 8, "damage": 500}]
     f = ScriptedFighter(FCFG, opp, seed=1, own=own, own_reach={608: 1.3, 640: 1.5}, opp_reach={640: 1.4})
     # Ken's 2MK in its recovery (frame 14 of 30), it never touched the bot, at 1.4: 5HP reaches 1.3 -> 2MK
-    d = f.decide(state(op={"x": 1.4, "action_id": 640, "action_frame": 14, "action_frames_total": 30}), 0.0, 0)
+    d = f.decide(state(op={"x": 1.4, "action_id": 640, "action_frame": 14, "action_frames_total": 99}), 0.0, 0)
     assert d.rule == "whiff_punish" and d.name == "Crouching Medium Kick" and f.whiff_stats["taken"] == 1
     g = ScriptedFighter(FCFG, opp, seed=1, own=own, own_reach={608: 1.3, 640: 1.5}, opp_reach={640: 1.4})
-    d = g.decide(state(op={"x": 1.4, "action_id": 640, "action_frame": 25, "action_frames_total": 30}), 0.0, 0)
+    d = g.decide(state(op={"x": 1.4, "action_id": 640, "action_frame": 25, "action_frames_total": 99}), 0.0, 0)
     assert d.rule != "whiff_punish" and d.rule != "block"   # 5 frames left: too late; and no reason to block
     h = ScriptedFighter(FCFG, opp, seed=1, own=own, own_reach={608: 1.3}, opp_reach={640: 1.4})
     assert h.decide(state(op={"x": 2.3, "action_id": 640, "action_frame": 3}), 0.0, 0).rule != "block"   # out of reach

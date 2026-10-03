@@ -1824,6 +1824,12 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                 if source in ("generated", "both"):
                     from .combo_gen import generate        # the bot's own routes: normal hits, except
                     combos += generate(capcom, catalog, community, lab)   # punish-only starters (below)
+                if source in ("mined", "both"):
+                    # 0.16.0: routes found in recordings (replays, matches; combo_mining.py), unlabelled: tested
+                    # with the normal hits, a failure is not a verdict (it may need a counter hit)
+                    from .combo_mining import lab_candidates
+                    have = {route_key(x) for x in combos}
+                    combos += [x for x in lab_candidates(ds, name, capcom) if route_key(x) not in have]
                 combos = apply_requirements(combos, capcom, rules, name)
                 todo = select_routes(combos, position, hit_pass, max_difficulty, only)
                 if not again or rnd > 0:

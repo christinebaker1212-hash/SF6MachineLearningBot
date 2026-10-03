@@ -22,7 +22,10 @@ from . import intents as it
 from .mlp import MLP
 
 MIN_SAMPLES = 200          # below this the network is not trained (counts only)
-SOURCE_WEIGHT = {"replay": 1.0, "human": 1.0, "cpu": 0.5}
+# how much a recording teaches the copy-a-player network: top-player replays fully; ranked opponents little (0.16.0:
+# the bot starts ranked at Platinum 1, and it should learn to BEAT those players, not to play like them; what wins
+# against them is the win model's job, win_model.py)
+SOURCE_WEIGHT = {"replay": 1.0, "human": 1.0, "cpu": 0.5, "ranked": 0.2}
 MODEL = "intent_net.npz"
 COUNTS = "counts.json"
 
@@ -56,7 +59,8 @@ def recordings(ds_root: Path) -> list[dict]:
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
         if bot is None:
             continue
-        out.append({"path": p, "players": (1 - bot,), "source": "human" if "vs human" in notes else "cpu"})
+        src = "ranked" if "vs human ranked" in notes else "human" if "vs human" in notes else "cpu"
+        out.append({"path": p, "players": (1 - bot,), "source": src, "bot": bot})
     return out
 
 
@@ -65,13 +69,13 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
     recs = recordings(ds_root)
     samples, info = [], []
     for ri, r in enumerate(recs):
+        from .sample_cache import file_samples
         try:
-            rows = _load(r["path"])
+            s = [x for x in file_samples(r["path"], ds_root) if x["player"] in r["players"]]
         except (OSError, ValueError, EOFError) as e:
             log(f"  skipped {r['path'].name}: {e}")
             info.append({"file": r["path"].name, "source": r["source"], "samples": 0, "skipped": str(e)[:120]})
             continue
-        s = it.samples(rows, players=r["players"], stride=2)
         for x in s:
             x["rec"], x["w"] = ri, SOURCE_WEIGHT[r["source"]]
         samples += s

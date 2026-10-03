@@ -2073,6 +2073,76 @@ User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then
 - Online and ranked modes print a warning when the installed build cannot see online matches. The "no game state"
   status names the official build as the likely cause in online modes.
 
+## 0.16.0: unattended ranked, live move lookup, learning to WIN, situation assessment, combo mining
+User (2026-10-03): "record ranked sessions into ONE run file, that last until the last match is finished"; "live
+move ID lookup, so it can learn a move from seeing it once"; "run unattended"; "not to learn how to play like a
+Platinum player, but to learn how to DEFEAT a Platinum player, and eventually ... a Diamond, a Master, a 1500, a
+1700, a 2000"; "discover new techniques and combos, and constantly assess its meterless damage, metered damage, game
+state, cashout combos, whether it can kill or not, moves that need perfect parrying, moves that need a DI punish".
+All MOCK / offline tested (`tests/test_winning.py`, `tests/test_assess.py`); nothing here is verified in game yet.
+### Ranked sessions (`fight --versus-human ranked`, `ranked.bat`, menu H → 3)
+- One run folder for the whole session; no time limit. **F10 or the panel's AFTER MATCH = stop after the current
+  match** (the fight loop reads `<SF6BOT_STOP_FILE>_after`; in menus it stops at once). F8 / STOP = stop now.
+- Video off unless `--video`. `fight_summary.json` keeps the last 30 matches in full, older ones compact.
+- `progress.py`: after every match `progress.md` / `progress.json` in the run (session record, win rate over the last
+  20 / 50 / 200 matches of ALL sessions, per opponent character, damage ratio per 20-match block with the models
+  that played) and one line in `datasets/ladder/matches.jsonl`. The opponent's rank / MR is not read (no field known).
+- Per-opponent bandit decay in ranked 0.97 per match (sets 0.8): a different human every match.
+### Live move lookup (`sf6bot/live_moves.py`)
+- An opponent action id >= 450 the bot has no name for: the opponent's input mask of the last frames is matched to
+  that character's Capcom inputs (`move_map.requirement / match`, the same matcher as menu X). The move is used AT
+  ONCE (block type, start-up, total, on-block + 2 margin), narrated `[measured]`, and its vote saved to
+  `datasets/move_maps/<Character>.json` after the match. Next match: a unanimous single sighting is loaded too.
+- Unverified: whether the opponent's input mask is filled in online matches (it is in replays and offline fights).
+### Win model (`sf6bot/win_model.py`): what wins, not what players do
+- Q(situation, choice) for the 17 intents: what FOLLOWED a choice = damage dealt − taken (1000s of hp), each frame's
+  worth halving every 60 frames, ±2 for a round won / lost (`intents.returns`). Fitted by a masked Huber regression
+  (`MLP.fit_q`), starting from the per-choice average.
+- Data: the bot's side of its matches 1.0, its opponents' side 0.5, replays 0.5; fights weighted by recency (half
+  every 300 matches back, newest 800 files), so the model follows the opponents at the bot's current rank.
+- `trust` = held-out gain over "the average for that choice" / 10% (0..1). The policy multiplies the copy-a-player
+  probabilities by exp(1.5 × trust × advantage), advantage = Q − the mix's expected Q, shrunk for choices with few
+  samples. Thoughts: "Win model ... pushed me toward X and away from Y".
+- `sample_cache.py`: per-recording samples (both players, with returns) cached in `datasets/models/cache/`.
+- `brain.py`: ranked opponents weigh 0.2 in the copy-a-player network (replays / volunteers 1.0, CPU 0.5).
+- `retrain.py`: ranked sessions run `sf6bot train --background` every 20 matches (`policy.retrain_every`) at
+  below-normal priority with one BLAS thread; models load at the next match start; reports land in `datasets/models/`
+  and are copied into the run.
+- The network starts exactly at the per-choice average (last layer zero) and has a scale floor on its inputs; on the
+  two CPU test fights its held-out gain is -0.1% → trust 0 (not used): one match of data teaches it nothing that
+  carries over. Early stopping uses the same held-out recordings, so trust is slightly optimistic.
+- Limits: short-term outcomes plus the round result; choices never tried can't be scored; no opponent strength input.
+### Situation assessment (`sf6bot/assess.py`)
+- Every decision: best meterless / Drive / Super / cashout damage from the combo lab's TRUE combos that fit the
+  position and resources (burnout only when it kills), and the kill check. The opponent's threat: the biggest combo
+  seen from that character in recordings with its current resources, or Capcom's Super Art damage. Overlay status
+  line; thoughts: kill chances taken, times the opponent could have killed.
+- **Drive Impact punish** (rule in rule 6): the opponent's move leaves >= 26F (DI start-up) + input delay + 1, the
+  distance is beyond the bot's pokes and inside DI's reach (reach.py, else 3.0 assumed). E.g. a fireball at mid range.
+  Never into burnout unless lethal.
+- **Perfect parry of projectiles** (rule 4b): each projectile blocked / taken is a sample (distance when thrown →
+  frames to contact); a straight-line fit per projectile id predicts the arrival; parry is pressed so its first frame
+  lands one frame before it (2-frame window, ±1 frame of input-delay jitter). A miss is a normal parry. The bot's ids
+  after a timed parry are logged (`perfect_parry.after_ids`) to find the Perfect Parry id.
+- **MEASURED bug fixed:** the exported `action_frames_total` is the ANIMATION's length, not the move's (real fights:
+  Ryu 5LP 39 vs a 13-frame move, M Hadoken 110 vs 46). 0.14's whiff punishes used it as the move's end, so they
+  would start too late. Remaining frames now = Capcom's total − `action_frame` (`assess.remaining`). Still open: the
+  pressure-moment wake-up timing uses the export for knockdown reactions (unverified).
+### Combo mining (`sf6bot/combo_mining.py`, built by B = train)
+- Every recording, both players: a combo = from a hit on a free defender while the defender stays in hitstun or an
+  airborne hit reaction (a grounded knockdown ends it: hits after it are oki), moves named by the catalog / move map,
+  "," / ">" by whether the previous move had ended (Capcom totals), moves after the last hit dropped. Stored per
+  character in `datasets/combos_mined/<Character>.json` (seen, damage min / max, Drive / Super spent, corner).
+- On the two real CPU fights: Ryu 2MK > M Hadoken (7x), 2MK > SA1, 5HP , 5LP; Ken's jump-ins into Shoryuken.
+- Lab: `combo-lab --source mined` (menu K → 8, panel "Found in recordings"); `both` includes them. Unlabelled
+  routes: a failure is not a verdict.
+### Declined: inputs disguised as human
+- The user asked for input "obfuscation" so "people should see a replay, and think ... they're not cheating, they're
+  just good". Not built: the bot is not to pass itself off as a human to opponents or viewers. Offered instead:
+  human-level limits (reaction-time and input-rate floors) as a disclosed fairness setting, which also makes wins
+  mean more (AlphaStar capped its actions per minute). Any change to how the bot presses inputs is a material addition
+  under Capcom's approval and needs their OK before ranked use.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

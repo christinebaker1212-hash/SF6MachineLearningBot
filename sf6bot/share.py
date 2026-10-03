@@ -19,7 +19,10 @@ def compact_fights(text: str) -> str:
         d.pop("thoughts", None)
         return json.dumps(d, indent=1, default=str)
     rows = [f"record: {d.get('record')}"]
-    for i, m in enumerate(d["matches"], 1):
+    ms = d["matches"]
+    if len(ms) > 40:                 # a long unattended ranked session: progress.md has the whole trend
+        rows.append(f"(matches 1-{len(ms) - 40} left out; see progress.md)")
+    for i, m in list(enumerate(ms, 1))[-40:]:
         res = m.get("match") or {}
         rows.append(json.dumps({"n": i, "won": res.get("bot_won"), "score": res.get("score"),
                                 "opponent": m.get("opponent"), "side": m.get("side_detection"),
@@ -45,7 +48,7 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
         out += ["", "--- sysinfo ---", si.read_text(encoding="utf-8", errors="replace").strip()]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
-        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "fight_status.json", "combo_lab.md", "brain_report.md", "thoughts.md"):
+        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "fight_status.json", "combo_lab.md", "brain_report.md", "win_report.md", "progress.md", "thoughts.md"):
             f = d / name
             if not f.exists():
                 continue
@@ -54,8 +57,8 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
                 text = compact_fights(text)
             elif name == "fight_status.json":
                 text = compact_status(text)
-            elif name == "thoughts.md" and len(text) > 20_000:
-                text = "(earlier matches cut)\n" + text[-20_000:]
+            elif name == "thoughts.md" and len(text) > 12_000:
+                text = "(earlier matches cut)\n" + text[-12_000:]
             out += [text, ""]
         notable = []
         ev = d / "events.jsonl"

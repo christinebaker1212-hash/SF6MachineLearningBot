@@ -60,6 +60,7 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; }
 .tbtn.stop { background: var(--magenta); color: var(--ink); box-shadow: 0 0 12px -3px var(--magenta); }
 .tbtn.stop:hover { background: var(--ink); color: var(--magenta); }
 .tbtn.stop.idle { opacity: .45; box-shadow: none; }
+#after.idle { opacity: .45; }
 .key { display: inline-block; padding: 0 4px; margin-left: 4px; border: 1px solid currentColor; border-radius: 3px;
        font: normal 700 10px/14px var(--body); opacity: .85; }
 
@@ -146,6 +147,7 @@ input.num { flex: 0 0 46px; }
   <div id="tabs"></div>
   <div id="status"><span class="dot"></span><span class="txt">READY</span></div>
   <button class="tbtn slant" id="arrange" title="SF6 to the top right (title bar visible), this panel under it"><span>Arrange</span></button>
+  <button class="tbtn slant" id="after" title="Fights: finish the current match, then stop (F10 does the same)"><span>After match<span class="key">F10</span></span></button>
   <button class="tbtn slant stop" id="stop" title="Stop the running command like F8 (inputs released, files saved)"><span>Stop<span class="key">F8</span></span></button>
 </div>
 <div id="main">
@@ -260,6 +262,7 @@ async function poll(once) {
     $("#video").textContent = "Video " + r.video;
     $("#ans").classList.toggle("waiting", !!r.prompt);
     $("#stop").classList.toggle("idle", !RUNNING);
+    $("#after").classList.toggle("idle", !RUNNING);
     markRunning();
     if (r.ask && r.ask.id !== ASKED) { ASKED = r.ask.id; $("#mtext").textContent = r.ask.text; $("#modal").classList.add("on"); }
   } catch (e) { /* the panel's server restarting or gone: keep trying */ }
@@ -278,6 +281,7 @@ async function main() {
     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { $("#cards").scrollLeft += e.deltaY; e.preventDefault(); }
   }, {passive: false});
   $("#stop").onclick = () => api("/api/stop", {});
+  $("#after").onclick = () => api("/api/stop_after", {});
   $("#arrange").onclick = () => run("arrange");
   $("#video").onclick = () => run("video");
   $("#clear").onclick = () => { $("#log").innerHTML = ""; };

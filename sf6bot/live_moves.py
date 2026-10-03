@@ -1,0 +1,138 @@
+"""Live move lookup (0.16.0, user: "learn a move from seeing it once").
+
+During a match the opponent's per-frame input mask is in every state line. When the opponent starts an
+action id the bot has no data for, the inputs of the last frames (fresh buttons, held direction, the motion)
+are matched against that character's Capcom move list with the same matcher as the replay move map
+(move_map.requirement / match: exact button set, motions as subsequences, charge, 360, airborne). A match
+is added to the fighter's move knowledge AT ONCE, enriched with Capcom's data by move name (block type,
+start-up, on-block), with the inferred safety margin on the on-block value (fewer, safer punishes).
+
+Every sighting is a vote; votes are saved after the match into datasets/move_maps/<Character>.json (the
+same file menu X writes), so the next match starts with them. A later sighting that disagrees changes the
+name to the majority, and the margin keeps a single wrong vote from causing an unsafe punish.
+
+Not verified in game: whether the opponent's input mask is filled in online matches (it is in replays and
+offline fights).
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter, deque
+from pathlib import Path
+
+from . import framedata as fd
+from .game_state import decode_input_relative, file_stem, num
+from .move_map import MAX_GAP, MIN_ACTION_ID, MOTION_LOOKBACK, PRESS_LOOKBACK, confidence, match, requirement
+
+
+class LiveMoveLearner:
+    def __init__(self, character: str, ds_root: Path, moves: dict, bits: dict, fcfg: dict | None = None):
+        self.character, self.ds_root, self.moves, self.bits = character, Path(ds_root), moves, bits
+        data = fd.load(character, self.ds_root / "framedata") or {}
+        self.rows = {m["name"]: m for m in data.get("moves") or []}
+        self.reqs = [q for q in (requirement(m) for m in data.get("moves") or []) if q]
+        self.margin = int(((fcfg or {}).get("inferred") or {}).get("block_adv_margin", 2))
+        self.hist: deque = deque()          # (frame, dir, buttons) of the opponent
+        self.prev_act = None
+        self.prev_frame = None
+        self.votes: dict = {}               # action id -> Counter(move name), this match
+        self.learned: list = []             # [(action id, name)] in the order they were first learned
+        self.unmatched: Counter = Counter()  # unknown ids whose press matched nothing
+
+    def known(self, aid) -> bool:
+        info = self.moves.get(aid)
+        return bool(info and info.get("name") and info.get("source") != "live")
+
+    def on_line(self, raw: dict, op_key: str, me_key: str) -> tuple | None:
+        """Feed every state line. Returns (action id, move name, new?) when a sighting was matched."""
+        if not self.reqs:
+            return None
+        op, me = raw.get(op_key) or {}, raw.get(me_key) or {}
+        fr = raw.get("stage_timer")
+        if not isinstance(fr, int):
+            return None
+        if self.hist and fr < self.hist[-1][0]:
+            self.hist.clear()                              # clock restarted (new round)
+        ox, mx = num(op.get("x")), num(me.get("x"))
+        facing_right = (mx > ox) if ox is not None and mx is not None and abs(mx - ox) > 0.05 \
+            else bool(op.get("facing_right", True))
+        mask = op.get("input")
+        if isinstance(mask, int):
+            d, btn = decode_input_relative(mask, self.bits, facing_right)
+            if not self.hist or self.hist[-1][0] != fr:
+                self.hist.append((fr, d, set(btn)))
+            while self.hist and fr - self.hist[0][0] > MOTION_LOOKBACK:
+                self.hist.popleft()
+        a = op.get("action_id")
+        out = None
+        started = a != self.prev_act and self.prev_frame is not None and 0 < fr - self.prev_frame <= MAX_GAP
+        if started and isinstance(a, int) and a >= MIN_ACTION_ID and not self.known(a) and len(self.hist) >= 2:
+            out = self._sighting(a, fr, (num(op.get("y")) or 0.0) > 0.05)
+        self.prev_act, self.prev_frame = a, fr
+        return out
+
+    def _sighting(self, a: int, fr: int, airborne: bool) -> tuple | None:
+        h = list(self.hist)
+        pressed: set = set()
+        for i in range(1, len(h)):
+            if fr - h[i][0] <= PRESS_LOOKBACK and h[i][0] - h[i - 1][0] <= MAX_GAP:
+                pressed |= h[i][2] - h[i - 1][2]
+        if not pressed:
+            self.unmatched[a] += 1
+            return None
+        dirs = [x[1] for x in h if isinstance(x[1], int)]
+        dedup = [x for i, x in enumerate(dirs) if i == 0 or x != dirs[i - 1]]
+        m = match(self.reqs, pressed, dirs[-1] if dirs else None, dedup[:-1], airborne)
+        if m is None:
+            self.unmatched[a] += 1
+            return None
+        v = self.votes.setdefault(a, Counter())
+        v[m["name"]] += 1
+        name = v.most_common(1)[0][0]
+        new = a not in self.moves or self.moves[a].get("name") != name
+        self.moves[a] = self._entry(name, v)
+        if new and all(x[0] != a for x in self.learned):
+            self.learned.append((a, name))
+        return a, name, new
+
+    def _entry(self, name: str, votes: Counter) -> dict:
+        row = self.rows.get(name) or {}
+        ob = row.get("on_block_n")
+        from .fighter import guard_of
+        return {"name": name, "source": "live", "votes": sum(votes.values()),
+                "block_adv": ob + self.margin if isinstance(ob, int) else None,
+                "block_adv_source": "capcom + live margin", "di": name.startswith("Drive Impact"),
+                "guard": guard_of(row.get("properties")),
+                "projectile": "projectile" in (row.get("properties") or "").lower(),
+                "startup": row.get("startup_n"), "total": row.get("total_n"), "damage": row.get("damage_n"),
+                "punish_class": fd.punish_class(row) if row else None}
+
+    def save(self) -> Path | None:
+        """Merge this match's votes into datasets/move_maps/<Character>.json (menu X's file)."""
+        if not self.votes:
+            return None
+        d = self.ds_root / "move_maps"
+        p = d / f"{file_stem(self.character)}.json"
+        try:
+            mp = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            mp = {"character": self.character, "source": "inferred from replay inputs + Capcom move list", "ids": {}}
+        ids = mp.setdefault("ids", {})
+        for a, v in self.votes.items():
+            e = ids.get(str(a)) or {}
+            allv = Counter(e.get("alternatives") or {})
+            if e.get("name"):
+                allv[e["name"]] += int(e.get("votes") or 0)
+            allv.update(v)
+            name, k, share, level = confidence(allv)
+            row = self.rows.get(name) or {}
+            ids[str(a)] = {"name": name, "votes": k, "share": share, "confidence": level,
+                           "alternatives": dict(allv.most_common(4)[1:]),
+                           "live_votes": int((e.get("live_votes") or 0) + sum(v.values())),
+                           "capcom": {"startup": row.get("startup_n"), "total": row.get("total_n"),
+                                      "on_block": row.get("on_block_n"), "on_hit": row.get("on_hit_n"),
+                                      "knockdown": row.get("on_hit_knockdown")}}
+        mp["sf6bot_version"] = __import__("sf6bot").__version__
+        d.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(mp, indent=1), encoding="utf-8")
+        return p

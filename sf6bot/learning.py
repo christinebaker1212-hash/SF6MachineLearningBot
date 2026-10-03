@@ -32,6 +32,7 @@ from .game_state import file_stem, num
 SHRINK = 3.0          # an option needs a few tries before its own average outweighs the pooled one
 BETA = 1.3            # weight factor = exp(BETA x shrunk average, in 1000s of hp)
 DECAY = 0.8           # after each match, older evidence counts this much (follows an opponent who adapts)
+DECAY_RANKED = 0.97   # ranked: a different human every match, so one match says little about the next one
 WINDOW_S = 1.5
 NICE = {"idle": "waiting", "walk_fwd": "walking forward", "walk_back": "walking back", "crouch": "crouch-blocking",
         "jump_fwd": "jumping in", "jump_neutral": "neutral jumps", "jump_back": "back jumps",
@@ -42,7 +43,8 @@ ZONE_NICE = {"close": "up close", "poke": "at poke range", "mid": "at mid range"
 
 
 class Experience:
-    def __init__(self, ds_root: Path, bot: str, opponent: str):
+    def __init__(self, ds_root: Path, bot: str, opponent: str, decay: float = DECAY):
+        self.decay = decay
         self.path = Path(ds_root) / "learning" / f"{file_stem(bot)}_vs_{file_stem(opponent)}.json"
         self.bot, self.opponent = bot, opponent
         try:
@@ -189,11 +191,11 @@ class Experience:
         # recency: what happened before this match counts a little less from now on
         for k in ("neutral", "moves", "defense"):
             for e in self.d[k].values():
-                e["n"] = round(e["n"] * DECAY, 3)
-                e["sum"] = round(e["sum"] * DECAY, 3)
+                e["n"] = round(e["n"] * self.decay, 3)
+                e["sum"] = round(e["sum"] * self.decay, 3)
         for z in self.d["responses"].values():
             for kind in list(z):
-                z[kind] = round(z[kind] * DECAY, 3)
+                z[kind] = round(z[kind] * self.decay, 3)
         self.d["sf6bot_version"] = __import__("sf6bot").__version__
         self.save()
 
@@ -275,6 +277,15 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         out.append(("learned", f"All of this rests on {n_total} scored decisions against {opp} (older matches "
                                "count less); options with few tries borrow from the same option at other "
                                "distances and against other opponents."))
+    wm, wp = summary.get("win_model") or {}, summary.get("win_push") or {}
+    if wm and wp:
+        ranked = sorted(wp.items(), key=lambda kv: -kv[1])
+        up = [f"{NICE.get(k, k)} ({v * 1000:+,.0f} hp)" for k, v in ranked[:2] if v > 0.02]
+        down = [f"{NICE.get(k, k)} ({v * 1000:+,.0f} hp)" for k, v in ranked[::-1][:2] if v < -0.02]
+        if up or down:
+            out.append(("learned", f"Win model (trust {wm.get('trust', 0):.2f}, {wm.get('samples')} decisions): what "
+                                   "followed these choices in my matches pushed me toward " + (", ".join(up) or "nothing")
+                                   + " and away from " + (", ".join(down) or "nothing") + "."))
     pm = summary.get("punishes") or {}
     if pm.get("chances"):
         out.append(("measured", f"Punishable moves I blocked: {pm['chances']}; I punished {pm.get('taken', 0)}."))
@@ -282,6 +293,18 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if wp.get("chances") or wp.get("taken"):
         out.append(("measured", f"{opp}'s moves that whiffed near me: {wp.get('chances', 0)}; I whiff-punished "
                                 f"{wp.get('taken', 0)}."))
+    a = summary.get("assessment") or {}
+    if a.get("lethal_chances") or a.get("threatened_lethal"):
+        out.append(("measured", f"Kill checks: I had a killing combo available {a.get('lethal_chances', 0)} times and went "
+                                f"for it {a.get('lethal_taken', 0)} times; {opp} could have killed me "
+                                f"{a.get('threatened_lethal', 0)} times (its best damage seen with the meter it had)."))
+    di = a.get("di_punish") or {}
+    if di.get("chances"):
+        out.append(("measured", f"Drive Impact punish chances (moves out of my pokes' reach with 26F+ left): "
+                                f"{di['chances']}; taken {di.get('taken', 0)}."))
+    pp = a.get("perfect_parry") or {}
+    if pp.get("tries"):
+        out.append(("measured", f"Perfect Parry tries on projectiles (timed from learned arrival times): {pp['tries']}."))
     out += defense_thoughts(summary.get("defense") or {}, opp, exp)
     idl = summary.get("input_delay") or {}
     if idl.get("median") is not None:

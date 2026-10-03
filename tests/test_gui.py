@@ -27,6 +27,7 @@ MENU = {
     "K 5": ("combo_lab", {"what": "counter_hit"}, [["combo-lab", "--hit-type", "counter_hit"]]),
     "K 6": ("combo_lab", {"what": "punish_counter"}, [["combo-lab", "--hit-type", "punish_counter"]]),
     "K 7": ("combo_lab", {"what": "again"}, [["combo-lab", "--again"]]),
+    "K 8": ("combo_lab", {"what": "mined"}, [["combo-lab", "--source", "mined"]]),
     "P": ("pad", {}, [["pad"]]),
     "L": ("teach", {"name": "replay_play"}, [["pad", "--teach", "replay_play"]]),
     "U": ("routine", {"name": "replay_play"}, [["routine", "replay_play"]]),

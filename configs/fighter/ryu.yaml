@@ -14,6 +14,11 @@ policy:
   decision_every_s: 0.12   # a neutral decision about every 7 frames (movement macros last 8)
   temperature: 0.8         # < 1 = closer to the most likely choice
   explore: 0.08            # share of decisions spread over every allowed option (to keep learning)
+  # 0.16.0 win model (win_model.py): choices are re-weighted by exp(win_beta x trust x advantage); trust comes from
+  # held-out matches (0 = not used). Ranked sessions retrain everything in the background every N matches.
+  win_beta: 1.5
+  retrain_every: 20
+  retrain_in_all_modes: false
 ranges:
   throw: 0.80          # SuperCombo
   close: 1.00
@@ -95,6 +100,16 @@ neutral:
   close: {light_chain: 3, throw: 2, low_forward_fireball: 2, block: 2}
   decision_every_s: 0.35   # one neutral decision every N seconds
   block_s: 0.4             # "block" = hold down-back this long
+# 0.16.0 (assess.py): perfect parry projectiles once their arrival time has been learned (each blocked / hit
+# projectile is a sample: distance when thrown -> frames to contact); a miss is a normal parry, which against a
+# projectile gives the Drive back. Drive Impact punishes moves that leave the opponent busy >= 26F (DI start-up)
+# + the input delay, out of the bot's pokes but inside Drive Impact's reach (measured by reach.py, else 3.0).
+perfect_parry:
+  enabled: true
+  min_dist: 1.2            # closer, a projectile arrives too soon to time; block instead
+  seq: "5+MP+MK@12"
+di_punish:
+  enabled: true
 # 0.14.0: defence at pressure moments by PREDICTION (sf6bot/defense.py). Throws can't be teched on reaction:
 # a 5-frame start-up vs seeing it + 3-5 frames of input delay (26 of 29 throws landed in the user's FT5).
 # When the bot is about to be free (blockstun / knockdown ending) with the opponent this close, it commits

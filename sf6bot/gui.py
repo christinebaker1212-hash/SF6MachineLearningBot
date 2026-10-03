@@ -184,10 +184,11 @@ class Panel:
                 self.ask = {"id": self._ask_n, "text": step["before"]}
                 return
             self.steps.pop(0)
-            try:
-                self.stop_file.unlink()
-            except OSError:
-                pass
+            for f in (self.stop_file, Path(str(self.stop_file) + "_after")):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
             self.stop_file.parent.mkdir(parents=True, exist_ok=True)
             env = dict(os.environ, SF6BOT_STOP_FILE=str(self.stop_file), PYTHONIOENCODING="utf-8",
                        PYTHONUNBUFFERED="1")
@@ -253,6 +254,19 @@ class Panel:
                 self.prompt = False
             except OSError:
                 pass
+
+    def stop_after(self) -> None:
+        """A fight session finishes its current match, then ends (the fight loop reads <stop file>_after;
+        F10 does the same at the keyboard). F8 / STOP stay an immediate stop."""
+        with self.lock:
+            if self.proc is None:
+                self.say("Nothing is running.", "me")
+                return
+            try:
+                Path(str(self.stop_file) + "_after").write_text("after", encoding="utf-8")
+            except OSError:
+                pass
+            self.say("AFTER MATCH: the bot finishes the current match, then stops.", "me")
 
     def stop(self) -> None:
         with self.lock:
@@ -363,6 +377,8 @@ def make_handler(panel: Panel):
                 panel.send(str(b.get("text") or ""))
             elif p == "/api/stop":
                 panel.stop()
+            elif p == "/api/stop_after":
+                panel.stop_after()
             elif p == "/api/confirm":
                 panel.confirm(int(b.get("id") or 0), bool(b.get("ok")))
             elif p == "/api/values":
