@@ -92,7 +92,29 @@ def find_sf6_dir(cfg: dict) -> Path | None:
     if w is None:
         return None
     exe = win32.process_image_path(w.pid)
-    return Path(exe).parent if exe else None
+    if not exe:
+        return None
+    try:            # remembered for jobs that need SF6 closed (replacing REFramework's dll: refw_research.py)
+        LAST_DIR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LAST_DIR_FILE.write_text(str(Path(exe).parent), encoding="utf-8")
+    except OSError:
+        pass
+    return Path(exe).parent
+
+
+LAST_DIR_FILE = Path(__file__).resolve().parent.parent / "configs" / ".sf6_dir"
+
+
+def remembered_sf6_dir(cfg: dict) -> Path | None:
+    """The SF6 folder even when the game is closed: config, the running game, else the last one seen."""
+    d = find_sf6_dir(cfg)
+    if d is not None:
+        return d
+    try:
+        p = Path(LAST_DIR_FILE.read_text(encoding="utf-8").strip())
+        return p if p.is_dir() else None
+    except OSError:
+        return None
 
 
 def game_build(cfg: dict) -> dict | None:

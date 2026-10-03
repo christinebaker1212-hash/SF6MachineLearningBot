@@ -1,0 +1,81 @@
+# The sf6bot research build of REFramework (see tools/refw_research_patch.py for exactly what changes).
+# Started by a change to refw_research/request.json (any branch) or by hand (Actions -> Run workflow).
+# Output: the artifact "sf6bot-refw-research" = dinput8.dll + BUILD_INFO.txt + the patch + REFramework's LICENSE.
+name: REFramework research build
+on:
+  push:
+    paths:
+      - "refw_research/request.json"
+      - "tools/refw_research_patch.py"
+      - "reframework/autorun/sf6bot_state.lua"
+      - ".github/workflows/refw-research-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sf6bot
+        uses: actions/checkout@v4
+        with:
+          path: sf6bot
+
+      - name: Read the request
+        id: req
+        shell: pwsh
+        run: |
+          $r = Get-Content sf6bot/refw_research/request.json | ConvertFrom-Json
+          "until=$($r.until)" >> $env:GITHUB_OUTPUT
+          "ref=$($r.refw_ref)" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout REFramework (praydog/REFramework, pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: praydog/REFramework
+          ref: ${{ steps.req.outputs.ref }}
+          path: refw
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Patch (research window + exporter-only)
+        run: python sf6bot/tools/refw_research_patch.py refw ${{ steps.req.outputs.until }} sf6bot/reframework/autorun/sf6bot_state.lua
+
+      - name: Configure CMake (as REFramework's own dev release)
+        run: cmake -S refw -B refw/build -G "Visual Studio 18 2026" -A x64 -DCMAKE_BUILD_TYPE=Release -DDEVELOPER_MODE=ON "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
+      - name: Build
+        run: cmake --build refw/build --config Release --target REFramework
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item refw/build/bin/REFramework/dinput8.dll out/
+          Copy-Item refw/LICENSE out/REFramework_LICENSE.txt
+          Copy-Item sf6bot/tools/refw_research_patch.py out/
+          git -C refw diff > out/patch.diff
+          $info = @(
+            "sf6bot research build of REFramework",
+            "REFramework commit: ${{ steps.req.outputs.ref }}",
+            "Research period ends: ${{ steps.req.outputs.until }} 00:00 UTC (after that: stock behaviour, Lua off online)",
+            "Only reframework/autorun/sf6bot_state.lua from sf6bot commit ${{ github.sha }} runs.",
+            "Install: sf6bot refw-research install <this zip>  (keeps the official dinput8.dll as a backup)"
+          )
+          $info | Set-Content out/BUILD_INFO.txt
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: sf6bot-refw-research
+          path: out/
+          if-no-files-found: error
+          retention-days: 90

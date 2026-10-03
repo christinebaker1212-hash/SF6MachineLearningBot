@@ -857,7 +857,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         batch = []          # no more lines after the match: close it anyway
                     else:
                         if clock.now() - wait["last_line"] > 5.0:
-                            status("no game state from SF6 for 5 s+", _reader_diag(reader))
+                            status("no game state from SF6 for 5 s+" + (
+                                   ": in an online match the official REFramework switches Lua off; the research "
+                                   "build is needed (sf6bot refw-research status)" if versus in ("online", "ranked")
+                                   else ""), _reader_diag(reader))
                         continue
             while True:
                 try:

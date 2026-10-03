@@ -1,0 +1,5 @@
+{
+  "until": "2033-10-01",
+  "refw_ref": "d1461375aee4ec3f313170f8eaad12064eb542d9",
+  "note": "End of the research period Capcom approved in writing for REFramework in online matches (disclosed CFN). Changing this file starts a new build (.github/workflows/refw-research-build.yml)."
+}

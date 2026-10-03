@@ -69,7 +69,7 @@ class Panel:
         self.closing_at: float | None = None
         self.state = self._load_state()
         self.command = command or self._command
-        self.on_special = on_special or (lambda aid: None)
+        self.on_special = on_special or (lambda aid, args=None: None)
         self.stop_file = self.root / "runs" / ".gui_stop"
 
     # ---- persistent state ---------------------------------------------------------------------------
@@ -145,8 +145,16 @@ class Panel:
         with self.lock:
             if aid not in BY_ID:
                 return {"ok": False, "error": "unknown action"}
-            if aid in ("arrange", "open_runs", "refw"):
+            if aid in ("arrange", "open_runs"):
                 self.on_special(aid)
+                return {"ok": True}
+            if BY_ID[aid].special == "admin":          # writes into the game folder: an administrator window
+                try:
+                    steps = build(aid, values or {})
+                except BadInput as e:
+                    self.say(str(e), "bad")
+                    return {"ok": False, "error": str(e)}
+                self.on_special(aid, steps[0]["args"])
                 return {"ok": True}
             if self.proc is not None or self.steps:
                 self.say("A command is still running: STOP it first (or wait for it to finish).", "bad")
@@ -432,7 +440,7 @@ def arrange(panel: Panel, hwnd_box: dict) -> None:
         panel.say(f"Could not arrange the windows: {e}", "bad")
 
 
-def special(panel: Panel, hwnd_box: dict, aid: str) -> None:
+def special(panel: Panel, hwnd_box: dict, aid: str, args: list | None = None) -> None:
     if aid == "arrange":
         threading.Thread(target=arrange, args=(panel, hwnd_box), daemon=True).start()
     elif aid == "open_runs":
@@ -445,15 +453,15 @@ def special(panel: Panel, hwnd_box: dict, aid: str) -> None:
                 subprocess.Popen(["xdg-open", str(p)])
         except OSError as e:
             panel.say(f"Could not open {p}: {e}", "bad")
-    elif aid == "refw":
+    elif args:
         if os.name != "nt":
-            panel.say("Installing the game-state script needs Windows.", "bad")
+            panel.say("This needs Windows (it writes into the SF6 folder as administrator).", "bad")
             return
         import ctypes
         py = _python(console=True)
-        r = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe",
-                                                f'/k ""{py}" -m sf6bot refw-install"', str(panel.root), 1)
-        panel.say("Opened an administrator window for the install; restart SF6 afterwards." if r > 32 else
+        line = subprocess.list2cmdline([py, "-m", "sf6bot", *args])
+        r = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/k "{line}"', str(panel.root), 1)
+        panel.say(f"Opened an administrator window for: sf6bot {' '.join(args)}" if r > 32 else
                   "Windows did not allow the administrator window.", "good" if r > 32 else "bad")
 
 
@@ -500,7 +508,7 @@ def main(argv: list[str] | None = None) -> None:
     from . import win32
     win32.set_dpi_aware()
     hwnd_box: dict = {}
-    panel = Panel(on_special=lambda aid: special(panel, hwnd_box, aid))
+    panel = Panel(on_special=lambda aid, args=None: special(panel, hwnd_box, aid, args))
     srv = serve(panel, a.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"SF6 BOT panel at {url}", flush=True)

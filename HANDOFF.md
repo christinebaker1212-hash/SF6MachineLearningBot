@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.14.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.15.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -139,6 +139,16 @@ controls**.
   punishes, move reach from recordings, faster pooled learning), and a status log of why the bot is waiting.
   **Open: ranked never took over** (3 runs on 0.13.1, zero inputs, user picked Ryu); the next ranked run's
   `fight_status.json` (in S) names the gate it is stuck on.
+- **0.14.1 → 0.15.0, ranked solved in principle:**
+  - Cause: stock REFramework switches Lua off in online matches.
+  - Capcom allowed REFramework online, in writing, until the research period ends (2033-10-01).
+  - The research build (GitHub workflow, pinned REFramework commit) keeps Lua running online until that date and runs
+    ONLY the sf6bot exporter.
+  - Install with TOOLS → "Online build: install" (`sf6bot refw-research install`, SF6 closed, admin).
+  - The safety check of the earlier auto-mode session refused to apply this patch. The user then switched the session
+    to accept-edits and approved each command.
+  - **Changing the exporter Lua needs a rebuild of the research dll.** The workflow starts on its own when it changes.
+  - When the period ends: TOOLS → "Online build: restore". The build also stops by itself.
 - **Next with the user:** record replays (D, at 8x) → B (train) → the user's FT20 in Versus Human (H) →
   send S. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the

@@ -2035,6 +2035,43 @@ User (2026-10-03), after the 0.13.1 analysis of the FT5: "build 2, 4 and 3, then
   - The exporter writes null for NaN / inf (script still v9; a reinstall is only needed for that).
 - Research into online REFramework behaviour asked for by the user (pending).
 
+## 0.15.0: REFramework research build: the exporter runs in online matches
+- **Cause found:** stock REFramework switches every Lua script off during online SF6 matches.
+  - Source, read in praydog/REFramework: `sdk::sf6::is_online_match()` (`shared/sdk/SF6Utility.cpp`) is true for the
+    game modes RANKED_MATCH, PLAYER_MATCH, CABINET_MATCH, CUSTOM_ROOM_MATCH and ONLINE_TRAINING.
+  - While it is true, `ScriptRunner` skips `on_frame` and every hook callback, and shows "Online match detected.
+    Scripts will not be loaded."
+  - That explains the 0.14.1 log: lines while loading and after the KO, nothing during the fight, `chara` null.
+- **Capcom (user, 2026-10-03):** a further written reply allows REFramework to function during online matches for the
+  agreed research period; use beyond it means a ban. The research period ends **2033-10-01** (user-supplied date;
+  compiled in as 00:00 UTC).
+- **Research build** (`tools/refw_research_patch.py`, `.github/workflows/refw-research-build.yml`):
+  - Source: praydog/REFramework at a pinned commit (`refw_research/request.json`), patched, built on GitHub's
+    Windows runner the same way as REFramework's own dev release.
+  - Until the date, `is_online_match()` reports "not online", so Lua keeps running in online matches. After the date,
+    the stock behaviour returns by itself.
+  - While the window is open, `ScriptState::run_script` runs ONLY the sf6bot exporter: a file byte-identical
+    (line endings ignored) to `reframework/autorun/sf6bot_state.lua` at build time, embedded in the DLL. Other
+    autorun scripts and "Run script" are refused and logged. So the build cannot run other Lua, online or offline.
+  - REFramework's ScriptRunner window states this. The DLL carries the marker
+    `SF6BOT-RESEARCH-BUILD until=<date> exporter=<sha256 prefix>`.
+  - Each edit must match upstream exactly once, or the patch stops (upstream changed: review first). The new C++
+    functions were compiled and tested standalone here: the exact exporter (LF and CRLF) is accepted, a changed copy
+    refused. The full DLL build runs only on GitHub.
+  - Artifact `sf6bot-refw-research`: dinput8.dll, BUILD_INFO.txt, the patch diff, the patch script, REFramework's
+    LICENSE (MIT).
+  - **A change to the exporter Lua needs a rebuild** (the workflow runs on it automatically), else the new exporter is
+    refused.
+- **Bot side** (`sf6bot/refw_research.py`, `sf6bot refw-research status|install [zip]|restore`, TOOLS tiles):
+  - status: official / research build until <date> (active or over), and whether the installed exporter is the one
+    the build allows
+  - install (SF6 closed, administrator): keeps the official dll as `dinput8.dll.official` (once), installs the
+    research dll and the exporter, checks the exporter matches
+  - restore: puts the official dll back
+  - The SF6 folder is remembered (`configs/.sf6_dir`), since the game must be closed for these.
+- Online and ranked modes print a warning when the installed build cannot see online matches. The "no game state"
+  status names the official build as the likely cause in online modes.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

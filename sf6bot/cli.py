@@ -127,6 +127,41 @@ def cmd_refw_install(args, cfg):
     print("Restart SF6 (or press Insert > ScriptRunner > Reset scripts) so REFramework loads it.")
 
 
+def cmd_refw_research(args, cfg):
+    """REFramework research build (refw_research.py): online Lua for the exporter only, until the research period
+    Capcom approved ends."""
+    from pathlib import Path
+    from . import refw_research as rr
+    from .game_state import remembered_sf6_dir
+    d = remembered_sf6_dir(cfg)
+    if args.action == "status":
+        for line in rr.describe(rr.status(d)):
+            print(line)
+        return
+    if d is None:
+        sys.exit("SF6's folder is not known: start SF6 once while any bot command runs (or set game.install_dir).")
+    from . import win32
+    running = bool(win32.IS_WINDOWS and win32.find_game_window(cfg["game"]["exe_name"], cfg["game"]["title_contains"]))
+    try:
+        if args.action == "install":
+            src = Path(args.path or "")
+            if not args.path:
+                cands = sorted(Path.home().joinpath("Downloads").glob("sf6bot-refw-research*.zip"),
+                               key=lambda p: p.stat().st_mtime)
+                if not cands:
+                    sys.exit("Give the downloaded zip: sf6bot refw-research install <path to sf6bot-refw-research.zip>")
+                src = cands[-1]
+                print(f"Using {src}")
+            for m in rr.install(d, src, running):
+                print(m)
+        else:
+            print(rr.restore(d, running))
+    except (OSError, ValueError, RuntimeError) as e:
+        sys.exit(f"FAILED: {e}")
+    for line in rr.describe(rr.status(d)):
+        print(line)
+
+
 def cmd_state_check(args, cfg):
     from .state_check import run_state_check
     with _session(args, cfg, "state_check") as s:
@@ -288,6 +323,17 @@ def cmd_fight(args, cfg):
         if not (cfg.get("ranked") or {}).get("cfn"):
             print("Reminder: Capcom's approval covers the CFN account you disclosed to them. Put it in "
                   "configs\\local.yaml as  ranked: {cfn: YOUR_CFN}  (kept off the repo); this note goes away.")
+    if vh in ("online", "ranked") and not getattr(args, "mock", False):
+        # official REFramework switches Lua off in online matches: the bot would be blind (0.14.1 ranked runs)
+        from .game_state import remembered_sf6_dir
+        from .refw_research import describe, status
+        st = status(remembered_sf6_dir(cfg))
+        d = st.get("dll") or {}
+        if not (d.get("kind") == "research" and d.get("online_lua") and st.get("exporter_matches_build")):
+            print("\nWARNING: the bot cannot see online matches with this setup:")
+            for line in describe(st):
+                print("  " + line)
+            print("  (TOOLS -> REFramework research build, or: sf6bot refw-research status)\n")
     name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
     with _session(args, cfg, name) as s:
         panel = _panel(s, cfg, pad=pad)
@@ -609,6 +655,10 @@ def main(argv=None):
 
     sub.add_parser("refw-install", help="copy the REFramework state exporter into the SF6 folder").set_defaults(
         fn=cmd_refw_install)
+    p = sub.add_parser("refw-research", help="the REFramework research build for online play: status, install, restore")
+    p.add_argument("action", choices=("status", "install", "restore"))
+    p.add_argument("path", nargs="?", help="install: the downloaded sf6bot-refw-research zip (or dinput8.dll)")
+    p.set_defaults(fn=cmd_refw_research)
     p = sub.add_parser("state-check", help="verify REFramework game state against scripted inputs")
     side(p)
     p.set_defaults(fn=cmd_state_check)

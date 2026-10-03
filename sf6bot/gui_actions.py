@@ -96,6 +96,15 @@ ACTIONS: list[Action] = [
            special="arrange"),
     Action("refw", "tools", "Game-state script", "Needs administrator rights; restart SF6 afterwards.",
            special="admin", menu="T R"),
+    Action("refw_research_status", "tools", "Online build: status",
+           "Which REFramework is installed; the official one turns the bot's script off in online matches."),
+    Action("refw_research", "tools", "Online build: install",
+           "Close SF6 first. Installs the research build (keeps the official one as a backup). Administrator.",
+           [Option("path", "Zip", kind="text", default="", hint="empty = newest sf6bot-refw-research*.zip in Downloads")],
+           special="admin"),
+    Action("refw_restore", "tools", "Online build: restore",
+           "Close SF6 first. Puts the official REFramework back (end of the research period). Administrator.",
+           special="admin"),
     Action("state_check", "tools", "Game-state check", "Training Mode, bot = P1.", menu="T G"),
     Action("input_map", "tools", "Input map", "Which input bit each key sets (Training Mode).", menu="T I"),
     Action("overlay_test", "tools", "Overlay test", "Shows the overlay for 15 s (no game needed).", menu="T O"),
@@ -220,6 +229,13 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         return [one("video", "toggle")]
     if action_id == "refw":
         return [one("refw-install")]
+    if action_id == "refw_research_status":
+        return [one("refw-research", "status")]
+    if action_id == "refw_research":
+        path = str(v.get("path") or "").strip().strip('"')
+        return [one("refw-research", "install", *([path] if path else []))]
+    if action_id == "refw_restore":
+        return [one("refw-research", "restore")]
     if action_id == "torch":
         return [{"args": ["-m", "pip", "install", "torch"], "python": True, "before": None},
                 one("run", "--policy", "probe", "--seconds", "60")]
