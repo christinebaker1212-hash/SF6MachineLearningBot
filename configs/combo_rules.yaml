@@ -24,3 +24,11 @@ punish_only_starters:
 hit_bonus:
   counter_hit: null
   punish_counter: null
+
+# Which hit of a multi-hit move can be canceled (user, 2026-10-03: Ryu's back heavy kick "hits first [and is]
+# non-cancelable and second is cancelable"). Capcom's cancel column marks the whole move; it does not say which
+# hit. Without a rule here the lab cancels on the LAST hit of a multi-hit move (an assumption: canceling a later
+# hit works more often than an earlier one). Moves are Capcom names.
+cancel_hit:
+  Ryu:
+    Axe Kick: 2

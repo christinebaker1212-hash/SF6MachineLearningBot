@@ -996,3 +996,35 @@ def test_old_results_of_a_row_with_choices_are_not_used_by_the_fighter(tmp_path)
     (tmp_path / "combo_lab").mkdir()
     (tmp_path / "combo_lab" / "Ryu.json").write_text(json.dumps(lab), encoding="utf-8")
     assert sorted(v["route"] for v in cl.verified_routes(tmp_path, "Ryu")) == ["2MK > 236MK", "5HP > 623HP"]
+
+
+def test_special_cancel_and_multi_hit_cancel_from_capcom_and_user_rules():
+    """User, 2026-10-03: Ryu's forward heavy kick (Whirlwind Kick, cancel '*') CAN be canceled into a Tatsumaki
+    ("it waits for the move to complete"), and back heavy kick (Axe Kick) hits twice: the first hit is not
+    cancelable, the second is."""
+    cap = dict(_capcom("ryu"), character="Ryu")
+
+    def plan(route):
+        return cl.plan_route({"route": route, **combos.resolve(route, cap["moves"])}, cap, None)
+    p = plan("6HK > 214LK")
+    assert [(s["name"], s["trigger"]) for s in p["steps"]] == [
+        ("Whirlwind Kick", "first"), ("Aerial Tatsumaki Senpu-kyaku", "contact")]
+    assert plan("6HK > 214KK")["steps"][1]["name"] == "OD Aerial Tatsumaki Senpu-kyaku"
+    assert plan("6HK > 236HP")["steps"][1]["trigger"] == "own_frame"     # not named in the notes: after recovery
+    axe = plan("4HK > 236HK")["steps"]
+    assert axe[1]["cancel_on_hit"] == 2 and axe[0]["active_hits"] == [10, 20]
+    # executed: the cancel waits for the SECOND hit, then goes out at once (inside its hitstop)
+    steps = [dict(axe[0], prefix=0, sequence="4+HK@3", expect_id=668),
+             dict(axe[1], prefix=0, sequence="2@3 3@3 6+HK@3", expect_id=1029)]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(2, 668, 0))
+    assert run.feed(_line(11, 668, 9, d=REACT, hs=10, stun=20, hp=9500)) is None      # hit 1: not yet
+    for t in range(12, 22):
+        assert run.feed(_line(t, 668, 9, d=REACT, hs=21 - t, stun=20, hp=9500)) is None
+    assert run.feed(_line(30, 668, 19, d=REACT, hs=10, stun=20, hp=9000)) == 1        # hit 2: cancel now
+
+
+def test_a_success_is_repeated_from_the_same_start_distance():
+    res = {"bot_x": [-0.35, 1.2], "dummy_x": [0.4, 3.0]}
+    assert cl._start_distance(res) == 0.75

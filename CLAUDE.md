@@ -1782,6 +1782,32 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
   recorded at 8x with one speed press each, stopped at the end of the list with the reason; batch saves the two
   finished matches and drops one quit early.
 
+## 0.12.4: combo lab cancel fixes (for the NEXT patch's re-run; the user is not re-running K now)
+- **User (2026-10-03), after the last K run:** the user stops running K for this patch ("the benefit will be small
+  compared to trained routes"; enough routes work). **For the record, when the combo lab is re-run on the next
+  patch, these were not canceling properly before 0.12.4:**
+  1. **Regression after an OK:** "once it finds the correct try and it says okay, it may actually regress on the next
+     try to previous mistakes ... instead of keeping the exact same inputs". The repeats already replayed the
+     success's exact send points (0.11.5); two things still varied:
+     - the start spacing: the walk to contact can stop at a slightly different distance. Repeats (and attempts
+       that keep moves 1..k) now walk to the success's start distance (`recorded_timing.start_distance`).
+     - the game's input delay: 3-5 frames, measured 4 on ~77% of presses in the 8-hour run, so about 1 press in
+       4 lands a frame early or late. That is physical; a failed repeat now says so ("same inputs as the success;
+       the game read move N 1 frame later ...: execution, not a timing change", `jitter` in the attempt details)
+       instead of looking like a regression.
+     - The fighter now uses routes repeated at least 30% of the time (was 50%), so one success followed by two
+       jittered repeats is not lost; the route's value is still multiplied by its rate.
+  2. **Two-hit moves:** "Ryu's back heavy kick ... hits first [and is] non-cancelable and second is cancelable."
+     Capcom's 'active' column shows the hits (Axe Kick '10-23 10-14, 20-23' = hits at 10 and 20) but the cancel
+     column marks the whole move. A cancel after a multi-hit move now waits for hit N (`cancel_on_hit`): the
+     user's rule in `configs/combo_rules.yaml: cancel_hit` (Ryu Axe Kick: 2), else the LAST hit (assumption).
+  3. **Special cancels ('*'):** "Ryu's forward heavy kick is able to be canceled into a tatsumaki because [the lab]
+     waits for the move to complete". Whirlwind Kick's cancel column is '*' with the note "Can be canceled with an
+     Aerial Tatsumaki Senpu-kyaku (Overdrive version included)"; '*' used to count as not cancelable. Now the
+     named moves are allowed cancels, and the same input during the move becomes that move: 6HK > 214K = Aerial
+     Tatsumaki (KK = OD). Other '*' targets stay after recovery.
+- `LAB_RULES` = 0.12.4, so routes that failed under the old rules are retried when K is next run.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

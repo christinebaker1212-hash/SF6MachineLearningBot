@@ -54,7 +54,7 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
                        # previous move's late hit (multi-hit special, projectile), not this move's
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
-LAB_RULES = "0.11.14"      # in plan_fingerprint: a change in how the lab judges attempts retests old failures     # frames an unexpected new action id waits for the step's own (catalogued) id before it
+LAB_RULES = "0.12.4"      # in plan_fingerprint: a change in how the lab judges attempts retests old failures     # frames an unexpected new action id waits for the step's own (catalogued) id before it
                        # counts as the step's start (a Drive Rush changing to its next id is not the 2MK)
 PREFIX_MISSES = 2      # a kept (frozen) prefix that fails this many times in a row is searched again
 FIGHT_IDLE_MAX = 33    # MEASURED (fights 2026-10-02): idle / walk / crouch ids of Ryu and Ken are < 33
@@ -165,11 +165,65 @@ def _is_special(row: dict) -> bool:
 
 def cancel_allowed(prev: dict, row: dict) -> bool:
     """Capcom's cancel column: can `prev` be canceled into `row`? (C -> specials and supers, SA -> supers,
-    SA2/SA3 -> that level and up). Follow-ups and target combos are not cancels."""
+    SA2/SA3 -> that level and up; '*' -> only the moves its notes name, e.g. Ryu's Whirlwind Kick: "Can be
+    canceled with an Aerial Tatsumaki Senpu-kyaku (Overdrive version included)"). Follow-ups and target combos
+    are not cancels."""
     from .combo_gen import _cancels_into
     if prev.get("system") or not prev.get("cancel_col_known"):
         return True
+    if (prev.get("cancel") or "").strip() == "*":
+        return row.get("name") in (prev.get("cancel_targets") or ())
     return _cancels_into({"cancel": prev.get("cancel")}, row)
+
+
+def cancel_hit_rule(character: str | None, move: str | None) -> int | None:
+    """configs/combo_rules.yaml cancel_hit: which hit of a multi-hit move can be canceled."""
+    rules = (load_rules() or {}).get("cancel_hit") or {}
+    for ch, moves in rules.items():
+        if character in (None, ch) and move in (moves or {}):
+            return int(moves[move])
+    return None
+
+
+def cancel_targets(row: dict, rows: dict) -> list[str]:
+    """Capcom rows a '*' cancel names in its notes ('Can be canceled with an X (Overdrive version included)')."""
+    out = []
+    for m in re.finditer(r"[Cc]an be cancell?ed (?:with|into) (?:an? |the )?([A-Z][\w'\- ]+?)(?=\s*\(|\s*/|\.|$)",
+                         row.get("notes") or ""):
+        name = m.group(1).strip()
+        tail = (row.get("notes") or "")[m.end():m.end() + 40]
+        for cand in (name, f"OD {name}") if "Overdrive" in tail else (name,):
+            if cand in rows:
+                out.append(cand)
+    return out
+
+
+def _motion_buttons(inp: str) -> tuple[str, str]:
+    """'(During a forward jump) 214+K+K' -> ('214', 'KK'); '214+MK' -> ('214', 'K')."""
+    core = re.sub(r"\([^()]*\)", "", inp or "").strip()
+    m = re.match(r"^(\d*)\+?(.*)$", core)
+    if not m:
+        return "", ""
+    btn = m.group(2).replace("+", "")
+    kind = "".join(ch for ch in re.sub(r"[LMH]", "", btn) if ch in "PK")
+    return m.group(1), kind
+
+
+def special_cancel_row(prev: dict, row: dict, rows: dict) -> dict | None:
+    """The row an input becomes when it cancels a '*' move (Whirlwind Kick > 214K = Aerial Tatsumaki)."""
+    for name in prev.get("cancel_targets") or ():
+        for cand in rows.get(name) or []:
+            if _motion_buttons(cand.get("input")) == _motion_buttons(row.get("input")):
+                return cand
+    return None
+
+
+def _active_hits(row: dict) -> list[int]:
+    """First active frame of each hit: Capcom 'active' '10-23 10-14, 20-23' -> [10, 20] (two hits)."""
+    pairs = [(int(a), int(b)) for a, b in re.findall(r"(\d+)-(\d+)", row.get("active") or "")]
+    if len(pairs) > 2 and pairs[0][0] == pairs[1][0] and pairs[0][1] >= pairs[-1][1]:
+        pairs = pairs[1:]                     # the overall range first, then each hit
+    return [a for a, _ in pairs] if len(pairs) > 1 else []
 
 
 def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
@@ -265,7 +319,15 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
                 notes.append(f"after {prev['name']}, {s.get('token')} is {variant['name']} (Capcom: "
                              f"{variant.get('input')})")
                 row = variant
+            special = special_cancel_row(prev, row, rows) if conn == ">" and prev \
+                and (prev.get("cancel") or "").strip() == "*" else None
             seq, why = step_sequence(row)
+            if special is not None:
+                # the same input made DURING the '*' move comes out as the move its notes name (Ryu's
+                # Whirlwind Kick > 214K = Aerial Tatsumaki, 0.12.4: the lab waited for 6HK to finish)
+                notes.append(f"{prev['name']} > {s.get('token')} is {special['name']} (Capcom: "
+                             f"{prev.get('cancel_note') or 'special cancel'})")
+                row = special
             if seq is None:
                 return {"unsupported": f"{row['name']}: {why}", "steps": []}
             cn = _catalog_name(row["name"], prev.get("name") if prev else None, catalog)
@@ -277,6 +339,8 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
                       hitting=bool(row.get("damage_n")), capcom_damage=row.get("damage_n"),
                       super_art=bool(re.match(r"(SA[123]|CA)\b", row["name"])), input_key=row.get("input"),
                       cancel=row.get("cancel"), cancel_col_known=True,
+                      cancel_targets=cancel_targets(row, rows) if (row.get("cancel") or "").strip() == "*" else [],
+                      active_hits=_active_hits(row), cancel_note=(row.get("notes") or "")[:120],
                       target_combo=">" in (row.get("input") or ""),
                       hit_adv=(meas.get("advantage") if meas.get("result") == "hit" and isinstance(meas.get("advantage"), int)
                                and not row.get("on_hit_knockdown") else row.get("on_hit_n")
@@ -350,6 +414,16 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
         else:
             st["trigger"], st["min_offset"] = "contact", -CONTACT_PLUS - JITTER
             st["floor"] = "the previous move has hit (contact)"
+            hits = prev.get("active_hits") or []
+            if conn == ">" and len(hits) > 1:
+                # a multi-hit move: cancel on the hit that can be canceled (user, 0.12.4: Ryu's Axe Kick 4HK,
+                # first hit not cancelable, second is). The user's rule, else the last hit (assumption).
+                h = cancel_hit_rule(capcom.get("character"), prev.get("name")) or len(hits)
+                st["cancel_on_hit"] = max(1, min(h, len(hits)))
+                st["floor"] = f"hit {st['cancel_on_hit']} of {prev['name']} has connected"
+                notes.append(f"{prev['name']} hits {len(hits)} times: canceled on hit {st['cancel_on_hit']}"
+                             + ("" if cancel_hit_rule(capcom.get("character"), prev.get("name")) else
+                                " (no rule in configs/combo_rules.yaml: the last hit, an assumption)"))
         plan.append(st)
         prev = st
     if not plan or (jump_row is not None and len(plan) < 2):
@@ -400,7 +474,7 @@ class ComboRun:
         self.gravity = gravity               # per tick^2 (negative), measured from the bot's jump
         self._land_est = None
         self.neutral_a, self.neutral_d, self.movement = set(neutral_a), set(neutral_d), set(movement)
-        self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None) for _ in steps]
+        self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[]) for _ in steps]
         self.hits: list[dict] = []
         self.escape = None
         self.blocked = None
@@ -577,6 +651,8 @@ class ComboRun:
             self.hits.append({"tick": tick, "step": src, "damage": (hp0 - hp) if hp is not None and hp0 is not None else None})
             if src is not None and self.rt[src]["contact"] is None:
                 self.rt[src]["contact"] = tick
+            if src is not None:
+                self.rt[src]["contacts"].append(tick)
             if self.first_hit is None:
                 self.first_hit = (d_prev, p2, src)
         if self.hits and self.escape is None and p2.get("action_id") in self.neutral_d \
@@ -673,6 +749,12 @@ class ComboRun:
             return n if p1.get("action_id") in self.neutral_a else None
         # contact (cancel / chain / target combo)
         base = pr["contact"]
+        h = st.get("cancel_on_hit") or 1
+        if h > 1:
+            # cancel on hit h of a multi-hit move: wait until that hit has connected
+            if len(pr["contacts"]) < h:
+                return None
+            base = pr["contacts"][h - 1]
         if base is None:
             su = pst.get("startup")
             if su is None:
@@ -1314,7 +1396,8 @@ def plan_fingerprint(plan: dict) -> str:
     """What the lab will actually do for a route: if this changes (a parser fix, new catalog data, a timing
     rule), an earlier failure no longer says anything about the route."""
     import hashlib
-    keys = ("name", "connector", "trigger", "at", "expect_id", "sequence", "min_offset", "system", "air")
+    keys = ("name", "connector", "trigger", "at", "expect_id", "sequence", "min_offset", "system", "air",
+            "cancel_on_hit")
     body = [[st.get(k) for k in keys] for st in plan.get("steps") or []]
     body.append((plan.get("setup") or {}).get("name"))
     body.append(LAB_RULES)
@@ -1327,6 +1410,12 @@ def skip_known_failure(entry: dict | None, plan: dict, hit_pass: str) -> bool:
     return bool(entry and not entry.get("verified") and entry.get("conclusive")
                 and entry.get("plan_fp") == plan_fingerprint(plan)
                 and entry.get("tested_as", "normal") == hit_pass)
+
+
+def _start_distance(res: dict) -> float | None:
+    """Distance between the players on the attempt's first line."""
+    bx, dx = (res.get("bot_x") or [None])[0], (res.get("dummy_x") or [None])[0]
+    return round(abs(dx - bx), 3) if isinstance(bx, (int, float)) and isinstance(dx, (int, float)) else None
 
 
 def recorded_timing(res: dict) -> list:
@@ -1372,6 +1461,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     kept_n = 0
     learned: dict = {}         # step -> its own frames until the bot was free (DI / super on hit)
     kept_lead = None
+    found_dist = kept_dist = None   # start spacing of the success / of the kept attempt
+    success_leads: list = []        # each move's measured input delay in the success
     prefix_misses = 0
     no_window: dict = {}      # step -> how often the bar showed it started on the first free frame and missed
     no_window_proof = None
@@ -1391,6 +1482,15 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             steps[0]["start_ids"] = state[key].get("ids") or None
         else:
             walk_to_contact(sess, reader)
+            # repeat a success (or the kept moves) from the SAME spacing (0.12.4, user: after an OK the next try
+            # "may actually regress"; the walk to contact can stop at a slightly different distance)
+            want = found_dist if recorded is not None else kept_dist if kept_n else None
+            if want is not None:
+                st0 = reader.latest()
+                from .game_state import player_distance
+                d0 = player_distance(st0.p1, st0.p2) if st0 is not None else None
+                if d0 is not None and abs(d0 - want) > 0.04:
+                    walk_to_distance(sess, reader, want)
         if plan.get("setup"):
             if not _do_setup(sess, reader, runner, plan["setup"], neutral_a, neutral_d):
                 print(f"  setup {plan['setup']['name']} did not come out")
@@ -1454,6 +1554,18 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         if f.get("kind") == "first_blocked":
             break                    # the dummy blocked the very first hit: the setup is wrong
         if found is not None:
+            if not res["success"]:
+                # the same send points as the success: say whether the game simply read an input a frame earlier
+                # or later (measured input delay 3-5 frames) - nothing about the timing was changed
+                jit = [(move_no(steps, i), a, b) for i, (a, b) in enumerate(
+                    zip(success_leads, [s2.get("lead_measured") for s2 in res.get("steps") or []]))
+                    if isinstance(a, int) and isinstance(b, int) and a != b]
+                if jit:
+                    res["jitter"] = [{"move": m, "success_delay": a, "this_delay": b} for m, a, b in jit]
+                    details[-1]["jitter"] = res["jitter"]
+                    print("    same inputs as the success; the game read " + ", ".join(
+                        f"move {m} {abs(b - a)} frame(s) {'later' if b > a else 'earlier'}" for m, a, b in jit)
+                        + " (input delay varies 3-5 frames): execution, not a timing change")
             confirms_left -= 1
             if confirms_left <= 0:
                 break
@@ -1462,6 +1574,10 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             # unchanged (user, 0.11.5): same send points, same input delay, same jump distance
             found, found_lead = dict(offsets), lead_now
             recorded = recorded_timing(res)
+            found_dist = _start_distance(res)
+            success_leads = [s2.get("lead_measured") for s2 in res.get("steps") or []]
+            if found_dist is not None:
+                print(f"    recorded: every send point, input delay {lead_now}, start distance {found_dist:.2f}")
             if confirm <= 0:
                 break
         else:
@@ -1485,7 +1601,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
             elif isinstance(k, int) and k > kept_n and f.get("kind") != "first_blocked":
                 # a new best: moves 1..k came out (and hit where they should): keep them exactly
                 kept, kept_n, prefix_misses = recorded_timing(res), k, 0
-                kept_lead = lead_now
+                kept_lead, kept_dist = lead_now, _start_distance(res)
                 if _kept_moves(steps, k):
                     print(f"    keeping moves 1-{_kept_moves(steps, k)} exactly; searching move "
                           f"{move_no(steps, k)}'s timing")
@@ -1525,7 +1641,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                               and not sess.stop_event.is_set())
     if recorded is not None:
         replays = [a for a in attempts if a.get("replayed_recorded_timing")]
-        summ["recorded_timing"] = {"steps": recorded, "lead": found_lead, "offsets": {str(k): v for k, v in (found or {}).items()},
+        summ["recorded_timing"] = {"steps": recorded, "lead": found_lead, "start_distance": found_dist,
+                                   "offsets": {str(k): v for k, v in (found or {}).items()},
                                    "jump_distance_extra": next((a.get("jump_distance_extra") for a in attempts if a["success"]), None),
                                    "replays": len(replays), "replay_successes": sum(a["success"] for a in replays)}
         summ["success_rate_final_timing"] = round((1 + sum(a["success"] for a in replays)) / (1 + len(replays)), 2)

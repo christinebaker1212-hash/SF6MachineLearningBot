@@ -29,7 +29,7 @@ def _starter_kind(plan: dict) -> str:
     return "air" if s0.get("air") or s0.get("system") == "jump" else "ground"
 
 
-def build(character: str, ds_root: Path, min_rate: float = 0.5) -> list[dict]:
+def build(character: str, ds_root: Path, min_rate: float = 0.3) -> list[dict]:
     from . import framedata as fd
     from .combo_lab import plan_route, verified_routes
     from .combos import resolve
