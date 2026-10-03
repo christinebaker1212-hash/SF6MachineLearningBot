@@ -98,10 +98,11 @@ experimental outcome we're working toward, not a promised capability.
 | Input method | keyboard via SendInput (scancodes) | user |
 | REFramework | available | user |
 
-**Fixed constraint: ranked starts at Diamond or above.** The user's account, and any account
-they have, cannot queue below Diamond. No alt account will be used.
-- The ranked milestone therefore needs offline evidence of roughly Diamond-level play first:
-  CPU, the Model Trainer (Master), and consenting players.
+**Ranked start: Platinum 1 for the bot (user, 2026-10-03).** This updates the earlier note that the account could
+not queue below Diamond. The user plays Ken at Master; the bot's ranked play starts at Platinum 1, which the user
+welcomes for variance against weaker or erratic players. No alt account will be used.
+- The user has started ranked play (2026-10-03, the bot's first rank Platinum 1); offline evidence (CPU, the Model
+  Trainer, consenting players) keeps being collected alongside.
 - The first ranked games are a high-stakes test on the user's real account.
 - Ranked deployment remains a separate milestone.
   - **Capcom Support authorised ranked testing in writing (2026-10-02, pasted by the user).**
@@ -2119,4 +2120,4 @@ in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing valid
 - **M5 — evaluation:**
   - Frozen checkpoints, both sides, held-out opponents, with confidence intervals.
   - "Competitive with Master players" is reported separately from "achieved Master rank".
-- **Ranked:** a separate milestone. Starts at Diamond+ (see constraints).
+- **Ranked:** started by the user (2026-10-03) at Platinum 1 (see constraints).

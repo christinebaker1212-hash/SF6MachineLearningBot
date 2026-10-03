@@ -32,8 +32,8 @@ controls**.
 
 ## 2. Fixed constraints (non-negotiable)
 
-- **Ranked starts at Diamond or above. There is no alt account, and the user's account is
-  non-negotiable.** Never suggest an alt.
+- **The bot's ranked play starts at Platinum 1 (user, 2026-10-03; replaces the earlier "Diamond or above").
+  There is no alt account, and the user's account is non-negotiable.** Never suggest an alt.
 - **Online play with REFramework is allowed (user, 2026-10-03)** under Capcom's written approval
   (2026-10-02, below): ranked testing on the CFN disclosed to Capcom, with REFramework and memory reading
   part of the disclosed method. This replaces the earlier "REFramework offline only" rule. Versus Human
@@ -54,7 +54,8 @@ controls**.
       data and the transfer method are agreed.
     - **Before sharing any data with Capcom:** agree the package with the user. Replays contain
       opponents' CFNs, which could be stripped.
-  - The offline Diamond-level evidence gate still applies before ranked.
+  - The user has started ranked play (2026-10-03); the earlier offline-evidence gate was the user's own rule and
+    the user lifted it.
   - Keep the CFN in `configs/local.yaml`, never in the repo.
 - **Scraping Capcom's website is allowed:** the user explicitly authorised it on 2026-10-02,
   replacing an earlier "no scraping" rule. But the site returns 403 to scripts (from the user's
