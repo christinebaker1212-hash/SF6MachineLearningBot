@@ -388,3 +388,85 @@ def move_client_to(hwnd: int, x: int, y: int) -> tuple[int, int, int, int]:
     user32.SetWindowPos(hwnd, None, x - (cl - wr.left), y - (ct - wr.top), 0, 0,
                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
     return client_rect_screen(hwnd)
+
+
+def work_area() -> tuple[int, int, int, int]:
+    """The primary screen without the taskbar (left, top, right, bottom), physical pixels when DPI aware."""
+    _require_windows()
+    rc = wintypes.RECT()
+    SPI_GETWORKAREA = 0x0030
+    user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rc), 0)
+    return (rc.left, rc.top, rc.right, rc.bottom)
+
+
+def frame_rect(hwnd: int) -> tuple[int, int, int, int]:
+    """The window's VISIBLE frame (title bar included; Windows 11's invisible resize borders excluded)."""
+    _require_windows()
+    rc = wintypes.RECT()
+    try:
+        DWMWA_EXTENDED_FRAME_BOUNDS = 9
+        if ctypes.windll.dwmapi.DwmGetWindowAttribute(wintypes.HWND(hwnd), DWMWA_EXTENDED_FRAME_BOUNDS,
+                                                      ctypes.byref(rc), ctypes.sizeof(rc)) == 0:
+            return (rc.left, rc.top, rc.right, rc.bottom)
+    except Exception:
+        pass
+    user32.GetWindowRect(hwnd, ctypes.byref(rc))
+    return (rc.left, rc.top, rc.right, rc.bottom)
+
+
+def place_frame(hwnd: int, x: int, y: int, w: int | None = None, h: int | None = None) -> None:
+    """Move (and optionally size) a window so its VISIBLE frame's top-left is at (x, y): the title bar stays
+    on screen (user, 2026-10-03: SF6's title bar has to be visible)."""
+    _require_windows()
+    wr = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(wr))
+    fl, ft, fr, fb = frame_rect(hwnd)
+    il, it, ir, ib = fl - wr.left, ft - wr.top, wr.right - fr, wr.bottom - fb     # invisible borders
+    SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+    if w is None or h is None:
+        user32.SetWindowPos(hwnd, None, x - il, y - it, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    else:
+        user32.SetWindowPos(hwnd, None, x - il, y - it, w + il + ir, h + it + ib, SWP_NOZORDER | SWP_NOACTIVATE)
+
+
+def find_window_by_title(title: str, exes: tuple = ()) -> int | None:
+    """A visible top-level window with exactly this title (optionally of one of these programs)."""
+    ex = {e.lower() for e in exes}
+    for w in list_windows():
+        if w.title == title and (not ex or w.exe.lower() in ex):
+            return w.hwnd
+    return None
+
+
+def set_clipboard_text(text: str) -> None:
+    """Put text on the Windows clipboard (CF_UNICODETEXT)."""
+    _require_windows()
+    CF_UNICODETEXT, GMEM_MOVEABLE = 13, 0x0002
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    data = text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-16-le") + b"\x00\x00"
+    for _ in range(10):                      # another program may hold the clipboard for a moment
+        if user32.OpenClipboard(None):
+            break
+        import time
+        time.sleep(0.05)
+    else:
+        raise OSError("the clipboard is busy")
+    try:
+        user32.EmptyClipboard()
+        h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        if not h:
+            raise OSError("out of memory for the clipboard")
+        p = kernel32.GlobalLock(h)
+        ctypes.memmove(p, data, len(data))
+        kernel32.GlobalUnlock(h)
+        if not user32.SetClipboardData(CF_UNICODETEXT, h):
+            raise OSError("SetClipboardData failed")
+    finally:
+        user32.CloseClipboard()

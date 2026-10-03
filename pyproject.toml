@@ -28,5 +28,8 @@ sf6bot = "sf6bot.cli:main"
 [tool.setuptools.packages.find]
 include = ["sf6bot*"]
 
+[tool.setuptools.package-data]
+sf6bot = ["gui_web/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

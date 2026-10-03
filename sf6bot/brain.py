@@ -67,14 +67,17 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
     for ri, r in enumerate(recs):
         try:
             rows = _load(r["path"])
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, EOFError) as e:
             log(f"  skipped {r['path'].name}: {e}")
+            info.append({"file": r["path"].name, "source": r["source"], "samples": 0, "skipped": str(e)[:120]})
             continue
         s = it.samples(rows, players=r["players"], stride=2)
         for x in s:
             x["rec"], x["w"] = ri, SOURCE_WEIGHT[r["source"]]
         samples += s
-        info.append({"file": r["path"].name, "source": r["source"], "samples": len(s)})
+        made_from = _meta(r["path"]).get("recordings") if r["path"].parent.name == "merged" else None
+        info.append({"file": r["path"].name, "source": r["source"], "samples": len(s),
+                     **({"made_from": made_from} if made_from else {})})
     return samples, info
 
 
@@ -157,7 +160,10 @@ def report_md(rep: dict) -> str:
              f"- trained {rep.get('trained')} by sf6bot {rep.get('sf6bot_version')}",
              f"- decision samples: {rep.get('samples')} from {len(rep.get('recordings') or [])} recordings"]
     for r in rep.get("recordings") or []:
-        lines.append(f"  - {r['file']} ({r['source']}): {r['samples']}")
+        extra = f" (SKIPPED: {r['skipped']})" if r.get("skipped") else ""
+        if r.get("made_from"):
+            extra += " <- " + ", ".join(r["made_from"])
+        lines.append(f"  - {r['file']} ({r['source']}): {r['samples']}{extra}")
     lines.append(f"- what players chose: {rep.get('intent_counts')}")
     if rep.get("network"):
         lines.append(f"- network: {rep['network']}")

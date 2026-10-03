@@ -1882,6 +1882,62 @@ volunteers (consent verbal and implicit: no prompts), offline AND online (Capcom
   its question through the input box. Not verified on the user's PC: fonts, DPI scaling, the stop file under
   Windows, ARRANGE WINDOWS.
 
+## 0.13.1: FT5 vs the user analysed; matches hit-confirm; the panel rebuilt for 125% scaling
+### The data (user, 2026-10-03, 0.12.3): 8 replays at "8x", training, and a FT5 vs the user (Ken), bot Ryu P2
+- **Replays:** 8 saved by batch mode, 0-1 skipped fight frames each (Mai vs Ryu 401, Jamie vs Viper 46). **8x measured
+  5.7-6.3x** on the Ally X (the game cannot keep 8x up there).
+- **Brain:** 17,855 decisions from 11 recordings. Held-out top-1 0.449 vs 0.225 for always-walk-back (top-3 0.766).
+  The training list does not show JP vs Zangief or Viper vs Akuma under those names, but does show DeeJay vs Akuma and
+  a second Juri vs Juri / Jamie vs Viper. Unexplained: the report now lists each merged file's source replays and any
+  skipped file.
+- **FT5: lost 0-5, every match 0-2.** Damage dealt 11,180 / 5,820 / 3,440 / 3,000 / 6,900, taken 20,000 each.
+  - Side found by character (p2), so `input_delay_frames` was never measured. The bot played on the virtual pad
+    while the lab's timing was recorded on the keyboard.
+  - **Throws: 26 of 29 landed.** Reaction tech cannot work (0.9.0); prediction is not built.
+  - Routes in matches: about 6 completed, about 60 stopped. **"whiff" stops ~20**: a hit-confirm route started as a
+    neutral poke was pressed to the end even when its first move whiffed (the lab presses on the PREDICTED contact),
+    so a whiffed 2LK became 2LK 2LP 5LP Shoryuken.
+  - Decisions: "block" ~500-970 lines per match against ~150-200 neutral policy decisions.
+    Ken's damage came from pokes (5HK, 2MK, 2HK), jump-ins (j.MK), throws and L Shoryuken.
+  - Thoughts said "more X (x0.77)" for a factor below 1 (rising from 0.59): wording bug.
+### Fixes
+- **Hit confirm in matches** (`perform_route(confirm=True)`, `ComboRun.confirm`): a move goes out only after the
+  previous move HIT; no hit within its start-up + 6 own frames = `whiff`, the route stops. A special's motion
+  (`motion_part`) goes out on the predicted contact so only its button waits for the hit
+  (`ComboRun.presend`). The lab is unchanged. Tests: the simulator route confirms each hit; a whiffed starter
+  sends nothing more.
+- Thoughts: "more walking forward at mid range (x0.59 -> x0.77)".
+- Auto replays: the speed press threshold is 3x, not 6x. At 6x a measured 5.7x would have pressed 8x again and
+  cycled the speed.
+- Training report: skipped recordings and each merged file's source replays.
+### Control panel rebuilt (user: "definitely needs a rework"; Windows stays at 125%; SF6's title bar must stay visible)
+- The 0.13.0 tkinter window was not DPI aware: Windows stretched it 125% (blurry; 1600x450 instead of 1280x360).
+- Now `gui.bat` starts a local server (`sf6bot/gui.py`, standard library, 127.0.0.1 only, POSTs only from its own
+  page) and opens `sf6bot/gui_web/index.html` in an **Edge app window** (no tabs or address bar; Chrome or the
+  default browser if Edge is missing). It is crisp at any scaling, and tkinter is no longer needed.
+- Layout:
+  - one top row: logo, slanted tabs, status, ARRANGE, STOP
+  - cards in a horizontally scrolling grid: cards with options are two rows tall, others one, GO ▶ in the header
+  - the LIVE LOG on the right with VIDEO / CLEAR, an answer row that glows when a question is waiting, and an
+    in-page OK / Cancel box for steps that need a change in the game first
+- Designed and checked (headless Chromium, 125%) at ~1024x176 CSS px: the strip under the game minus the Edge title
+  bar. Taller windows get more rows; narrow ones put the log under the cards.
+- **ARRANGE**:
+  - SF6's visible frame goes to the top right of the work area, title bar on screen (`win32.place_frame`, DWM frame
+    bounds)
+  - the panel fills the strip under it (`panel_rect`)
+  - physical pixels: the process is DPI aware
+  - the panel's position is remembered (`configs/gui_state.json`)
+- Closing the window while a command runs stops it, like STOP. The server ends 20 s after the window is gone.
+- SEND TO CLAUDE copies via the Windows clipboard API (`win32.set_clipboard_text`).
+- Tests: `Panel` runs a command, streams it and passes the answer; a step asks first; STOP via the watchdog file;
+  HTTP refuses other origins; values persist.
+- **Not verified on the user's PC:**
+  - Edge app window placement at 125%
+  - Bahnschrift rendering
+  - the clipboard
+  - ARRANGE with the real SF6 window
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

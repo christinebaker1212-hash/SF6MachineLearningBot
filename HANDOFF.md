@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.13.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-03: code version **0.13.1**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -131,6 +131,10 @@ controls**.
 - **0.12.6:** video on/off (menu VID, `--no-video`); overlay A = F (menu confirm); teaching records real keyboard keys.
 - **0.13.0:** the control panel (`gui.bat`): every menu function as tiles in an SF6-style window for the strip under
   the game; menu.bat still works. Jump attacks are pressed only on the way down.
+- **0.13.1:** the user's FT5 (lost 0-5) analysed (CLAUDE.md 0.13.1). Matches now hit-confirm combo routes (no more
+  Shoryuken after a whiffed 2LK). The panel is rebuilt as a local page in an Edge app window: crisp at 125%, SF6's
+  title bar kept visible by ARRANGE. Proposed, not built (waiting on the user): throw defence by prediction, measuring
+  the virtual pad's input delay live, a reach table from replays, less blanket blocking, faster per-opponent learning.
 - **Next with the user:** record replays (D, at 8x) → B (train) → the user's FT20 in Versus Human (H) →
   send S. The thoughts and the per-match table show whether it improves over the set.
 - Honest scale: the network is tiny-data behaviour cloning (≈640 decisions from the two CPU fights in the

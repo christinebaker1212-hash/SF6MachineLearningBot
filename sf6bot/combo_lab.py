@@ -38,6 +38,7 @@ from .actions import Facing
 
 LEAD = 4               # measured input -> game read, frames (3-5, mostly 4)
 CONTACT_PLUS = 2       # cancels/chains: reach the game this many frames after contact
+CONFIRM_SLACK = 6      # matches (confirm): a move with no hit this many own frames after its start-up whiffed
 RUSH_AT = 11           # GUESS: frame of a Drive Rush on which the next normal is pressed
 OFFSET_RANGE = (-4, 6)
 END_TICKS = 240        # wait at most 4 s after the last move for its hits
@@ -466,8 +467,13 @@ class ComboRun:
 
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
                  movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
-                 fixed: list | None = None, learned: dict | None = None):
+                 fixed: list | None = None, learned: dict | None = None, confirm: bool = False):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        # `confirm` (matches, not the lab): the next move goes out only once the previous one has HIT. The
+        # lab presses on the predicted contact; in the user's FT5 (2026-10-03) that meant a whiffed 2LK
+        # was still followed by 2LP, 5LP and the Shoryuken ("whiff" 20+ times), and Ken punished it.
+        self.confirm = confirm
+        self._tick = None
         # `learned`: {step: its own frames until the bot was free} from earlier attempts (DI, supers on hit)
         self.learned = dict(learned or {})
         self.free_at: dict = {}
@@ -558,6 +564,7 @@ class ComboRun:
         tick = raw.get("stage_timer")
         if not isinstance(tick, int):
             return None
+        self._tick = tick
         if self.first_line is None:
             self.first_line, self.t0 = raw, tick
         self.bar.feed(raw)
@@ -712,6 +719,11 @@ class ComboRun:
                 and pr["start_id"] != pst["expect_id"]:
             return None          # still in the parry of a Parry Drive Rush: the rush itself has not started
         trig, off = st["trigger"], self._off(n)
+        if self.confirm and pst.get("hitting") and pr["contact"] is None and trig not in ("air", "landing"):
+            # a match: wait for the hit (hit confirm); no hit in time = the move whiffed: stop the route
+            if pr["moving"] > (pst.get("startup") or 8) + CONFIRM_SLACK:
+                self._finish("whiff", n - 1)
+            return None
         fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
         if fx and trig == "prev_free" and fx.get("prev_frame") is not None:
             return n if pr["moving"] >= fx["prev_frame"] else None
@@ -772,6 +784,26 @@ class ComboRun:
                 return None
             base = pr["start"] + su - 1
         return n if tick >= base + CONTACT_PLUS + off - self.lead - st["prefix"] else None
+
+    def presend(self) -> int | None:
+        """Confirm mode: the next step's MOTION (its directions, harmless without the button) may go out on
+        the predicted contact, so only the button waits for the hit; otherwise a special cancel would arrive
+        a whole motion late. Returns the step whose motion is due, or None."""
+        if not self.confirm or self.done or self.pending is not None or self._tick is None:
+            return None
+        n = next((k for k, r in enumerate(self.rt) if r["sent"] is None), None)
+        if not n or self.rt[n].get("motion_sent") is not None:
+            return None
+        st, pr, pst = self.steps[n], self.rt[n - 1], self.steps[n - 1]
+        if not st.get("prefix") or pr["start"] is None or pr["contact"] is not None or not pst.get("hitting"):
+            return None
+        if st["trigger"] in ("air", "landing", "own_frame", "prev_neutral", "prev_free", "first"):
+            return None
+        su = pst.get("startup")
+        if su is None:
+            return None
+        base = pr["start"] + su - 1
+        return n if self._tick >= base + CONTACT_PLUS + self._off(n) - self.lead - st["prefix"] else None
 
     def observe(self, raw: dict) -> None:
         """After the run is decided (a super connected): only keep the lowest health / gauges, so the
@@ -1939,12 +1971,14 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
-                  gravity: float | None = None, fixed: list | None = None, learned: dict | None = None) -> dict:
+                  gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
+                  confirm: bool = False) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
-    `abort()` (fighter) is polled between lines; a truthy value stops the route."""
+    `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
+    move waits for the previous one's hit, and a whiff ends the route (ComboRun)."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed, learned=learned)
+                   fixed=fixed, learned=learned, confirm=confirm)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout
@@ -1962,15 +1996,28 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
             if not st.ready:
                 continue
             k = run.feed(st.raw)
-            if k is None:
-                continue
             # mirror by POSITIONS (the facing flag lags through cross-ups; fighter.py, 0.8.0)
             bx, dx = num((st.raw.get(me) or {}).get("x")), num((st.raw.get(op) or {}).get("x"))
-            if bx is not None and dx is not None and (side is None or abs(dx - bx) >= 0.15):
+            if k is None:
+                m = run.presend()
+                if m is None:
+                    continue
+                if bx is not None and dx is not None and (side is None or abs(dx - bx) >= 0.15):
+                    side = Facing.RIGHT if dx > bx else Facing.LEFT
+                    sess.controller.set_facing(side)
+                run.rt[m]["motion_sent"] = st.raw.get("stage_timer")
+                runner.run(parse_sequence(motion_part(steps[m]["sequence"]), steps[m]["name"] + " motion"),
+                           stop_event=sess.stop_event, end_neutral=False)
+                continue
+            if bx is not None and dx is not None and (side is None or abs(dx - bx) >= 0.15) \
+                    and run.rt[k].get("motion_sent") is None:
                 side = Facing.RIGHT if dx > bx else Facing.LEFT
                 sess.controller.set_facing(side)
+            seq = steps[k]["sequence"]
+            if run.rt[k].get("motion_sent") is not None:
+                seq = seq.split()[-1]            # the motion is already in: only the button (and its direction)
             run.sent(k, facing="right" if side == Facing.RIGHT else "left" if side == Facing.LEFT else None)
-            _, ok = runner.run(parse_sequence(steps[k]["sequence"], steps[k]["name"]), stop_event=sess.stop_event)
+            _, ok = runner.run(parse_sequence(seq, steps[k]["name"]), stop_event=sess.stop_event)
             if not ok:
                 break
         if run.super_connected is not None:
@@ -1993,6 +2040,14 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     if aborted:
         res["aborted"] = aborted
     return res
+
+
+def motion_part(seq: str) -> str:
+    """The directions of a sequence without its button, ending on the button step's direction (held):
+    '2@3 3@3 6+HP@3' -> '2@3 3@3 6@1'."""
+    toks = seq.split()
+    last = toks[-1].split("@")[0].split("+")[0]
+    return " ".join(toks[:-1] + [f"{last}@1"])
 
 
 def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,

@@ -183,7 +183,7 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         if changes:
             out.append(("learned", "Next match: " + "; ".join(
                 f"{'more' if w > b else 'less'} {NICE.get(k.split('|')[1], k)} {ZONE_NICE.get(k.split('|')[0], '')} "
-                f"(x{w:.2f})" for k, b, w in changes) + "."))
+                f"(x{b:.2f} -> x{w:.2f})" for k, b, w in changes) + "."))
         n_total = sum(e["n"] for e in exp.d["neutral"].values())
         out.append(("learned", f"All of this rests on {n_total} scored decisions against {opp} so far; "
                                "one match is noisy, the averages settle over many."))

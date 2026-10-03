@@ -92,7 +92,7 @@ ACTIONS: list[Action] = [
            [Option("what", "What", choices=[("Old versions", "old"), ("Runs", "runs"), ("Training data", "training"),
                                             ("Fight data", "fights")], default="old")], menu="E"),
     # ---- TOOLS -------------------------------------------------------------------------------------------
-    Action("arrange", "tools", "Arrange windows", "SF6 to the top right (640, 0), this panel under it.",
+    Action("arrange", "tools", "Arrange windows", "SF6 to the top right with its title bar visible; this panel in the strip under it.",
            special="arrange"),
     Action("refw", "tools", "Game-state script", "Needs administrator rights; restart SF6 afterwards.",
            special="admin", menu="T R"),

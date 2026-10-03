@@ -26,7 +26,8 @@ from .dataset import DatasetBuilder
 
 ROUTINES = {"play": "replay_play", "next": "replay_next", "speed": "replay_8x", "skip": "replay_skip"}
 INTRO_IDS = {400, 401}
-TARGET_SPEED = 6.0          # x real time; 8x playback measures ~8
+TARGET_SPEED = 3.0          # x real time. 8x playback measured 5.7-6.3 on the Ally X (user, 2026-10-03: the
+                            # game cannot keep 8x up there); 6.0 would have pressed 8x again and cycled the speed
 START_TIMEOUT_S = 40.0
 LEAVE_TIMEOUT_S = 20.0
 

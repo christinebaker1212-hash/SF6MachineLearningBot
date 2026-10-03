@@ -1,496 +1,289 @@
 """SF6 BOT control panel: a window for everything menu.bat does (user, 2026-10-03: "a user friendly GUI version
 with the exact same functionality, and SF6's design philosophy for the interface").
 
-Layout for a 1920x1080 screen with the game at 1280x720: the game at the top right (640, 0), the bot's overlay in
-the 640-pixel column on the left, this panel in the 1280x360 strip under the game ("Arrange windows" puts them
-there). Style after SF6's menus: near-black panels, bold slanted uppercase headings, hot magenta / yellow / cyan
-accents, big tiles. No Capcom logos or artwork.
+0.13.1 rework (user's screenshot of 0.13.0: the tkinter window was blurry and stretched, because Windows scaled
+it to 125% (the user's display setting, which stays); the space was mostly empty; "definitely needs a rework").
+Now the panel is a small local web page (sf6bot/gui_web/index.html) in its own Edge app window: crisp at any
+Windows scaling, and drawn with real slanted tabs, gradients and SF6-style type. Python's standard library
+only: a local HTTP server on 127.0.0.1 (nothing is reachable from outside this PC) runs the same `sf6bot`
+commands as menu.bat (gui_actions.build) in a background process, streams their output to the page, and
+passes the answers typed in the page to them.
 
-The panel runs the same `sf6bot` commands as menu.bat (gui_actions.build) in a background process, shows their
-output live, and answers their questions through the input box (Enter / YES / S buttons). STOP asks the running
-command to stop like F8 does (a stop file the safety watchdog checks), then ends it if it does not.
-Standard library only (tkinter), so nothing new has to be installed.
+Layout ("Arrange"): SF6 at the top right of the screen with its TITLE BAR VISIBLE (user: the title bar has to
+stay on screen), the bot's overlay in the column on the left, this panel in the strip under the game. All
+positions are in physical pixels (the process is DPI aware), so 125% scaling does not move anything.
+
+STOP asks the running command to stop like F8 does (a stop file the safety watchdog checks), then ends it if
+it does not. Closing the window while a command runs stops that command.
 """
 from __future__ import annotations
 
 import json
 import os
-import queue
 import subprocess
 import sys
 import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
-import tkinter as tk
-from tkinter import font as tkfont
+from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .gui_actions import ACTIONS, TABS, BadInput, build
+from .gui_actions import ACTIONS, BY_ID, TABS, BadInput, build
 
 ROOT = Path(__file__).resolve().parent.parent
-STATE = ROOT / "configs" / "gui_state.json"
-STOP_FILE = ROOT / "runs" / ".gui_stop"
-
-# SF6-style palette (own values, no Capcom assets)
-BG = "#0a0a0e"
-PANEL = "#15151d"
-PANEL_HI = "#1f1f2a"
-INK = "#f4f4f6"
-MUTED = "#8b8b9c"
-MAGENTA = "#ff2d8a"
-YELLOW = "#ffd400"
-CYAN = "#19e3ff"
-GREEN = "#38f28c"
-TAB_COLORS = {"fight": MAGENTA, "record": CYAN, "train": YELLOW, "combos": MAGENTA, "buttons": CYAN,
-              "results": YELLOW, "tools": CYAN}
+WEB = Path(__file__).resolve().parent / "gui_web"
+TITLE = "SF6 BOT"
+TAB_COLORS = {"fight": "magenta", "record": "cyan", "train": "yellow", "combos": "magenta", "buttons": "cyan",
+              "results": "yellow", "tools": "violet"}
+MAX_CHUNKS = 20000
+IDLE_EXIT_S = 20.0          # no page has asked for news this long and nothing runs: the window was closed
+CLOSE_STOP_S = 5.0          # the window was closed while a command ran: stop it (a reload comes back sooner)
 
 
-def _pick(families, *names, default="TkDefaultFont"):
-    for n in names:
-        if n in families:
-            return n
-    return default
+def tag_line(line: str) -> str | None:
+    low = line.lower()
+    return ("measured" if "[measured]" in low else "learned" if "[learned]" in low else
+            "policy" if "[policy]" in low else
+            "bad" if ("fail" in low or "error" in low or "warning" in low or "traceback" in low) else
+            "good" if (" true " in low or line.startswith(("Saved", "- TRUE", "Done"))) else None)
 
 
-class App:
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        self.state = self._load_state()
-        fam = set(tkfont.families(root))
-        head = _pick(fam, "Bahnschrift SemiBold Condensed", "Bahnschrift Condensed", "Bahnschrift",
-                     "Segoe UI Black", "Arial Black", "DejaVu Sans Condensed", "Helvetica")
-        body = _pick(fam, "Bahnschrift", "Segoe UI", "DejaVu Sans", "Helvetica")
-        mono = _pick(fam, "Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Courier")
-        self.f_logo = tkfont.Font(family=head, size=17, weight="bold", slant="italic")
-        self.f_tab = tkfont.Font(family=head, size=12, weight="bold", slant="italic")
-        self.f_title = tkfont.Font(family=head, size=12, weight="bold")
-        self.f_body = tkfont.Font(family=body, size=9)
-        self.f_small = tkfont.Font(family=body, size=8)
-        self.f_btn = tkfont.Font(family=head, size=11, weight="bold", slant="italic")
-        self.f_mono = tkfont.Font(family=mono, size=9)
+class Panel:
+    """The panel's state and the commands it runs (no HTTP here: tested directly)."""
+
+    def __init__(self, root: Path = ROOT, command=None, on_special=None):
+        self.root = Path(root)
+        self.lock = threading.RLock()
+        self.chunks: list[dict] = []          # {"n", "text", "tag"}
+        self.base = 0                         # number of the first chunk kept
         self.proc = None
-        self.queue: queue.Queue = queue.Queue()
-        self.steps: list = []
+        self.steps: list[dict] = []
         self.current: dict = {}
-        self.running_title = ""
-        self.values: dict = self.state.get("values", {})
-        self.widgets: dict = {}
-        self.tab = self.state.get("tab", "fight")
+        self.title = ""
+        self.stopping = False
+        self.ask: dict | None = None
+        self._ask_n = 0
+        self.prompt = False
+        self.last_poll = time.monotonic()
+        self.closing_at: float | None = None
+        self.state = self._load_state()
+        self.command = command or self._command
+        self.on_special = on_special or (lambda aid: None)
+        self.stop_file = self.root / "runs" / ".gui_stop"
 
-        root.title("SF6 BOT")
-        root.configure(bg=BG)
-        root.geometry(self.state.get("geometry") or "1280x360+640+720")
-        root.minsize(1000, 330)
-        root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self._build()
-        self.show_tab(self.tab)
-        self.refresh_video()
-        root.after(50, self._pump)
+    # ---- persistent state ---------------------------------------------------------------------------
+    def _state_path(self) -> Path:
+        return self.root / "configs" / "gui_state.json"
 
-    # ---- state -------------------------------------------------------------------------------------
     def _load_state(self) -> dict:
         try:
-            return json.loads(STATE.read_text(encoding="utf-8"))
+            st = json.loads(self._state_path().read_text(encoding="utf-8"))
+            return st if isinstance(st, dict) else {}
         except (OSError, ValueError):
             return {}
 
-    def _save_state(self) -> None:
+    def save_state(self, **kw) -> None:
+        with self.lock:
+            self.state.update(kw)
+            try:
+                p = self._state_path()
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(json.dumps(self.state, indent=1), encoding="utf-8")
+            except OSError:
+                pass
+
+    # ---- log ----------------------------------------------------------------------------------------
+    def say(self, text: str, tag: str | None = None) -> None:
+        self.write(text + "\n", tag)
+
+    def write(self, text: str, tag: str | None = None) -> None:
+        with self.lock:
+            for line in text.splitlines(keepends=True):
+                n = self.base + len(self.chunks)
+                self.chunks.append({"n": n, "text": line, "tag": tag if tag is not None else tag_line(line)})
+            if len(self.chunks) > MAX_CHUNKS:
+                drop = len(self.chunks) - MAX_CHUNKS
+                self.chunks = self.chunks[drop:]
+                self.base += drop
+            if self.proc is not None and text:
+                self.prompt = not text.endswith("\n")       # a question waiting on the same line
+
+    def poll(self, since: int) -> dict:
+        with self.lock:
+            self.last_poll = time.monotonic()
+            self.closing_at = None
+            reset = since < self.base or since > self.base + len(self.chunks)
+            start = 0 if reset else since - self.base
+            out = [{"text": c["text"], "tag": c["tag"]} for c in self.chunks[start:]]
+            running = self.proc is not None
+            return {"chunks": out, "next": self.base + len(self.chunks), "reset": reset and since > 0,
+                    "running": running, "stopping": self.stopping and running,
+                    "status": ("STOPPING" if self.stopping and running else
+                               f"RUNNING: {self.title.upper()}" if running else "READY"),
+                    "command": "sf6bot " + " ".join(self.current.get("args") or []) if running else "",
+                    "action": self.current.get("action") if running else None,
+                    "prompt": bool(self.prompt and running), "ask": self.ask, "video": self.video()}
+
+    def video(self) -> str:
         try:
-            STATE.parent.mkdir(parents=True, exist_ok=True)
-            STATE.write_text(json.dumps({"geometry": self.root.geometry(), "tab": self.tab,
-                                         "values": self._collect_all()}, indent=1), encoding="utf-8")
-        except OSError:
-            pass
+            from .config import load_config
+            return "ON" if load_config()["recording"].get("record_video", True) else "OFF"
+        except Exception:                            # noqa: BLE001
+            return "?"
 
-    # ---- layout ------------------------------------------------------------------------------------
-    def _build(self) -> None:
-        top = tk.Frame(self.root, bg=BG, height=40)
-        top.pack(side="top", fill="x")
-        logo = tk.Canvas(top, width=210, height=40, bg=BG, highlightthickness=0)
-        logo.pack(side="left")
-        logo.create_polygon(0, 0, 196, 0, 180, 40, 0, 40, fill=MAGENTA, outline="")
-        logo.create_polygon(184, 0, 198, 0, 182, 40, 168, 40, fill=YELLOW, outline="")
-        logo.create_text(14, 20, text="SF6 BOT", anchor="w", font=self.f_logo, fill=BG)
-        tk.Label(top, text=f"v{__version__}", font=self.f_small, fg=MUTED, bg=BG).pack(side="left", padx=(4, 16))
-        self.status = tk.Label(top, text="READY", font=self.f_title, fg=GREEN, bg=BG)
-        self.status.pack(side="left")
-        self.stop_btn = self._button(top, "STOP  (F8)", self.stop, MAGENTA, INK)
-        self.stop_btn.pack(side="right", padx=8, pady=5)
-        self.video_btn = self._button(top, "VIDEO: ?", lambda: self.run_action("video"), PANEL_HI, INK)
-        self.video_btn.pack(side="right", padx=4, pady=5)
-        self._button(top, "ARRANGE WINDOWS", lambda: self.run_action("arrange"), PANEL_HI, INK).pack(
-            side="right", padx=4, pady=5)
+    def init(self) -> dict:
+        return {"version": __version__, "tab": self.state.get("tab", "fight"), "values": self.state.get("values", {}),
+                "tabs": [{"label": l, "key": k, "color": TAB_COLORS[k]} for l, k in TABS],
+                "actions": [{"id": a.id, "tab": a.tab, "title": a.title, "desc": a.desc, "special": a.special,
+                             "options": [{"key": o.key, "label": o.label, "kind": o.kind,
+                                          "choices": [list(c) for c in o.choices], "default": o.default,
+                                          "hint": o.hint} for o in a.options]} for a in ACTIONS]}
 
-        body = tk.Frame(self.root, bg=BG)
-        body.pack(side="top", fill="both", expand=True)
-        self.nav = tk.Canvas(body, width=140, bg=BG, highlightthickness=0)
-        self.nav.pack(side="left", fill="y")
-        self.nav.bind("<Button-1>", self._nav_click)
-        self.nav.bind("<Configure>", lambda e: self._draw_nav())
-
-        # tiles (scrollable)
-        mid = tk.Frame(body, bg=BG)
-        mid.pack(side="left", fill="both", expand=True)
-        self.canvas = tk.Canvas(mid, bg=BG, highlightthickness=0)
-        sb = tk.Scrollbar(mid, orient="vertical", command=self.canvas.yview, width=10, bg=PANEL,
-                          troughcolor=BG, activebackground=MAGENTA)
-        self.canvas.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.tiles = tk.Frame(self.canvas, bg=BG)
-        self._tiles_win = self.canvas.create_window(0, 0, window=self.tiles, anchor="nw")
-        self.tiles.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self._tiles_win, width=e.width))
-        self.canvas.bind_all("<MouseWheel>", self._wheel)
-
-        # log + input
-        right = tk.Frame(body, bg=PANEL, width=470)
-        right.pack(side="right", fill="both")
-        right.pack_propagate(False)
-        hdr = tk.Frame(right, bg=PANEL)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="LIVE LOG", font=self.f_tab, fg=CYAN, bg=PANEL).pack(side="left", padx=8, pady=(4, 0))
-        self._button(hdr, "CLEAR", self.clear_log, PANEL_HI, MUTED, small=True).pack(side="right", padx=6, pady=3)
-        self.log = tk.Text(right, bg="#07070a", fg=INK, insertbackground=INK, font=self.f_mono, wrap="word",
-                           relief="flat", padx=6, pady=4, height=10)
-        self.log.pack(fill="both", expand=True, padx=6)
-        for tag, col in (("measured", CYAN), ("learned", YELLOW), ("policy", MAGENTA), ("bad", MAGENTA),
-                         ("good", GREEN), ("me", MUTED)):
-            self.log.tag_configure(tag, foreground=col)
-        row = tk.Frame(right, bg=PANEL)
-        row.pack(fill="x", padx=6, pady=6)
-        self.entry = tk.Entry(row, bg="#07070a", fg=INK, insertbackground=INK, relief="flat", font=self.f_mono)
-        self.entry.pack(side="left", fill="x", expand=True, ipady=4)
-        self.entry.bind("<Return>", lambda e: self.send(self.entry.get()))
-        for label, text in (("SEND", None), ("ENTER", ""), ("YES", "yes"), ("S", "S")):
-            self._button(row, label, (lambda t=text: self.send(self.entry.get() if t is None else t)),
-                         YELLOW if label == "SEND" else PANEL_HI, BG if label == "SEND" else INK,
-                         small=True).pack(side="left", padx=(4, 0))
-        self.say(f"SF6 BOT v{__version__}. Pick a tab, set the options, press START. The bot's own hotkeys still "
-                 "work: F8 stop, F7 pause, F9 'that combo try worked', F10 skip a combo route.", "me")
-
-    def _button(self, parent, text, cmd, bg, fg, small=False):
-        b = tk.Label(parent, text=text, font=self.f_small if small else self.f_btn, bg=bg, fg=fg,
-                     padx=10 if not small else 7, pady=3 if not small else 2, cursor="hand2")
-        b.bind("<Button-1>", lambda e: cmd())
-        b.bind("<Enter>", lambda e: b.configure(bg=YELLOW if bg != YELLOW else INK, fg=BG))
-        b.bind("<Leave>", lambda e: b.configure(bg=bg, fg=fg))
-        return b
-
-    def _draw_nav(self) -> None:
-        c = self.nav
-        c.delete("all")
-        h = 34
-        for i, (label, key) in enumerate(TABS):
-            y = 6 + i * (h + 4)
-            on = key == self.tab
-            col = TAB_COLORS[key] if on else PANEL
-            c.create_polygon(0, y, 136, y, 124, y + h, 0, y + h, fill=col, outline="")
-            c.create_text(14, y + h / 2, text=label, anchor="w", font=self.f_tab, fill=BG if on else INK)
-            c.create_rectangle(0, y, 4, y + h, fill=TAB_COLORS[key], outline="")
-
-    def _nav_click(self, e) -> None:
-        i = (e.y - 6) // 38
-        if 0 <= i < len(TABS):
-            self._collect_all()
-            self.show_tab(TABS[i][1])
-
-    def _wheel(self, e) -> None:
-        self.canvas.yview_scroll(int(-e.delta / 120), "units")
-
-    # ---- tiles -------------------------------------------------------------------------------------
-    def show_tab(self, key: str) -> None:
-        self.tab = key
-        self._draw_nav()
-        for w in self.tiles.winfo_children():
-            w.destroy()
-        self.widgets = {}
-        acts = [a for a in ACTIONS if a.tab == key]
-        for i, a in enumerate(acts):
-            self._tile(a, i)
-        for col in (0, 1):
-            self.tiles.grid_columnconfigure(col, weight=1, uniform="tiles")
-        self.canvas.yview_moveto(0)
-
-    def _tile(self, a, i: int) -> None:
-        accent = TAB_COLORS[a.tab]
-        t = tk.Frame(self.tiles, bg=PANEL, highlightthickness=0)
-        t.grid(row=i // 2, column=i % 2, sticky="nsew", padx=(0, 6), pady=(0, 6))
-        tk.Frame(t, bg=accent, width=5).pack(side="left", fill="y")
-        inner = tk.Frame(t, bg=PANEL)
-        inner.pack(side="left", fill="both", expand=True, padx=8, pady=5)
-        head = tk.Frame(inner, bg=PANEL)
-        head.pack(fill="x")
-        go = self._button(head, "START ▶", lambda a=a: self.run_action(a.id), YELLOW, BG, small=False)
-        go.pack(side="right")                  # packed first: a long title can never push it out
-        tk.Label(head, text=a.title.upper(), font=self.f_title, fg=INK, bg=PANEL, anchor="w", justify="left",
-                 wraplength=190).pack(side="left", fill="x", expand=True)
-        tk.Label(inner, text=a.desc, font=self.f_small, fg=MUTED, bg=PANEL, justify="left", anchor="w",
-                 wraplength=300).pack(fill="x")
-        vals = self.values.get(a.id, {})
-        self.widgets[a.id] = {}
-        for o in a.options:
-            row = tk.Frame(inner, bg=PANEL)
-            row.pack(fill="x", pady=(3, 0))
-            tk.Label(row, text=o.label.upper(), font=self.f_small, fg=accent, bg=PANEL, width=10, anchor="w").pack(
-                side="left")
-            cur = vals.get(o.key, o.default)
-            if o.kind == "choice":
-                var = tk.StringVar(value=str(cur))
-                seg = tk.Frame(row, bg=PANEL)
-                seg.pack(side="left")
-                if len(o.choices) > 3:
-                    self._dropdown(seg, o.choices, var, accent)
-                else:
-                    self._segments(seg, o.choices, var, accent)
-            else:
-                var = tk.StringVar(value="" if cur is None else str(cur))
-                e = tk.Entry(row, textvariable=var, bg="#07070a", fg=INK, insertbackground=INK, relief="flat",
-                             font=self.f_body, width=6 if o.kind == "int" else 24, highlightthickness=1,
-                             highlightbackground=PANEL_HI, highlightcolor=accent)
-                e.pack(side="left", ipady=1)
-                if o.hint:
-                    tk.Label(row, text=o.hint, font=self.f_small, fg=MUTED, bg=PANEL, anchor="w",
-                             wraplength=150 if o.kind == "int" else 110, justify="left").pack(side="left", padx=4)
-            self.widgets[a.id][o.key] = var
-
-    def _segments(self, parent, choices, var, accent) -> None:
-        labels = []
-
-        def paint():
-            for lab, val in labels:
-                on = var.get() == str(val)
-                lab.configure(bg=accent if on else PANEL_HI, fg=BG if on else INK)
-        for shown, val in choices:
-            lab = tk.Label(parent, text=shown, font=self.f_small, padx=6, pady=1, cursor="hand2")
-            lab.pack(side="left", padx=(0, 2))
-            lab.bind("<Button-1>", lambda e, v=val: (var.set(str(v)), paint()))
-            labels.append((lab, val))
-        paint()
-
-    def _dropdown(self, parent, choices, var, accent) -> None:
-        shown = {str(v): s for s, v in choices}
-        lab = tk.Label(parent, text=f"{shown.get(var.get(), var.get())}  ▼", font=self.f_small, bg=accent, fg=BG,
-                       padx=8, pady=1, cursor="hand2")
-        lab.pack(side="left")
-        menu = tk.Menu(lab, tearoff=0, bg=PANEL_HI, fg=INK, activebackground=accent, activeforeground=BG,
-                       font=self.f_body, relief="flat", bd=0)
-        for s, v in choices:
-            menu.add_command(label=s, command=lambda v=v, s=s: (var.set(str(v)), lab.configure(text=f"{s}  ▼")))
-        lab.bind("<Button-1>", lambda e: menu.tk_popup(e.x_root, e.y_root))
-
-    def _collect_all(self) -> dict:
-        for aid, ws in self.widgets.items():
-            self.values.setdefault(aid, {}).update({k: v.get() for k, v in ws.items()})
-        return self.values
-
-    # ---- running -----------------------------------------------------------------------------------
-    def run_action(self, aid: str) -> None:
-        if self.proc is not None:
-            self.say("A command is still running: STOP it first (or wait for it to finish).", "bad")
-            return
-        vals = self._collect_all().get(aid, {})
-        if aid == "arrange":
-            return self.arrange()
-        if aid == "open_runs":
-            return self.open_path(ROOT / "runs")
-        if aid == "refw":
-            return self.run_admin()
-        try:
-            steps = build(aid, vals)
-        except BadInput as e:
-            self.say(str(e), "bad")
-            return
-        self._save_state()
-        self.running_title = next(a.title for a in ACTIONS if a.id == aid)
-        self.steps = [dict(s, action=aid) for s in steps]
+    # ---- running ------------------------------------------------------------------------------------
+    def run_action(self, aid: str, values: dict | None = None) -> dict:
+        with self.lock:
+            if aid not in BY_ID:
+                return {"ok": False, "error": "unknown action"}
+            if aid in ("arrange", "open_runs", "refw"):
+                self.on_special(aid)
+                return {"ok": True}
+            if self.proc is not None or self.steps:
+                self.say("A command is still running: STOP it first (or wait for it to finish).", "bad")
+                return {"ok": False, "error": "busy"}
+            try:
+                steps = build(aid, values or {})
+            except BadInput as e:
+                self.say(str(e), "bad")
+                return {"ok": False, "error": str(e)}
+            self.title = BY_ID[aid].title
+            self.steps = [dict(s, action=aid) for s in steps]
         self._next_step()
+        return {"ok": True}
+
+    def _command(self, step: dict) -> list[str]:
+        py = _python()
+        return [py, "-u"] + (step["args"] if step.get("python") else ["-m", "sf6bot"] + step["args"])
 
     def _next_step(self) -> None:
-        if not self.steps:
-            self.set_status("READY", GREEN)
-            return
-        step = self.steps.pop(0)
-        if step.get("before") and not self.confirm(step["before"]):
-            self.steps = []
-            self.set_status("READY", GREEN)
-            return
-        py = _python()
-        args = [py, "-u"] + (step["args"] if step.get("python") else ["-m", "sf6bot"] + step["args"])
-        try:
-            STOP_FILE.unlink()
-        except OSError:
-            pass
-        STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ, SF6BOT_STOP_FILE=str(STOP_FILE), PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
-        flags = 0x08000000 if os.name == "nt" else 0              # CREATE_NO_WINDOW
-        self.say(f"\n▶ {self.running_title}: sf6bot {' '.join(step['args'])}", "me")
-        try:
-            self.proc = subprocess.Popen(args, cwd=str(ROOT), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, creationflags=flags)
-        except OSError as e:
-            self.say(f"Could not start: {e}", "bad")
-            self.proc = None
-            return
-        self.current = step
-        self.set_status(f"RUNNING: {self.running_title.upper()}", YELLOW)
-        threading.Thread(target=self._reader, args=(self.proc,), daemon=True).start()
+        with self.lock:
+            if not self.steps:
+                self.stopping = False
+                return
+            step = self.steps[0]
+            if step.get("before") and not step.get("confirmed"):
+                self._ask_n += 1
+                self.ask = {"id": self._ask_n, "text": step["before"]}
+                return
+            self.steps.pop(0)
+            try:
+                self.stop_file.unlink()
+            except OSError:
+                pass
+            self.stop_file.parent.mkdir(parents=True, exist_ok=True)
+            env = dict(os.environ, SF6BOT_STOP_FILE=str(self.stop_file), PYTHONIOENCODING="utf-8",
+                       PYTHONUNBUFFERED="1")
+            flags = 0x08000000 if os.name == "nt" else 0              # CREATE_NO_WINDOW
+            self.say(f"\n▶ {self.title}: sf6bot {' '.join(step['args'])}", "me")
+            try:
+                proc = subprocess.Popen(self.command(step), cwd=str(self.root), env=env, stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=flags)
+            except OSError as e:
+                self.say(f"Could not start: {e}", "bad")
+                self.steps = []
+                return
+            self.proc, self.current, self.prompt = proc, step, False
+        threading.Thread(target=self._reader, args=(proc, step), daemon=True).start()
 
-    def _reader(self, proc) -> None:
+    def confirm(self, ask_id: int, ok: bool) -> None:
+        with self.lock:
+            if not self.ask or self.ask["id"] != ask_id:
+                return
+            self.ask = None
+            if not ok:
+                self.steps = []
+                self.say("Cancelled.", "me")
+                return
+            self.steps[0]["confirmed"] = True
+        self._next_step()
+
+    def _reader(self, proc, step) -> None:
         import codecs
         dec = codecs.getincrementaldecoder("utf-8")("replace")
         while True:
             data = proc.stdout.read1(4096) if hasattr(proc.stdout, "read1") else proc.stdout.read(1)
             if not data:
                 break
-            self.queue.put(("out", dec.decode(data)))
-        proc.wait()
-        self.queue.put(("exit", proc.returncode))
-
-    def _pump(self) -> None:
-        try:
-            while True:
-                kind, val = self.queue.get_nowait()
-                if kind == "out":
-                    self.write(val)
-                else:
-                    self.proc = None
-                    self.say(f"■ finished (exit code {val})", "good" if val == 0 else "bad")
-                    self._after_step(self.current, val)
-                    self._next_step()
-        except queue.Empty:
-            pass
-        self.root.after(50, self._pump)
+            self.write(dec.decode(data))
+        code = proc.wait()
+        with self.lock:
+            self.proc, self.prompt = None, False
+            self.say(f"■ finished (exit code {code})", "good" if code == 0 else "bad")
+        self._after_step(step, code)
+        self._next_step()
 
     def _after_step(self, step: dict, code: int) -> None:
-        aid = step.get("action")
-        if aid == "share" and code == 0:
-            p = ROOT / "runs" / "for_claude.txt"
+        if step.get("action") == "share" and code == 0:
+            p = self.root / "runs" / "for_claude.txt"
             try:
                 text = p.read_text(encoding="utf-8", errors="replace")
-                self.root.clipboard_clear()
-                self.root.clipboard_append(text)
+                set_clipboard(text)
                 self.say(f"COPIED ({len(text) // 1024} KB): paste it in the chat with Claude (Ctrl+V).", "good")
-            except OSError as e:
-                self.say(f"Could not copy: {e}", "bad")
-        if aid == "video":
-            self.refresh_video()
+            except Exception as e:                   # noqa: BLE001 - shown to the user
+                self.say(f"Could not copy it ({e}): open runs\\for_claude.txt and copy it by hand.", "bad")
 
     def send(self, text: str) -> None:
-        if self.proc is None or self.proc.stdin is None:
-            self.say("Nothing is waiting for an answer.", "me")
-            return
-        try:
-            self.proc.stdin.write((text + "\n").encode("utf-8"))
-            self.proc.stdin.flush()
-            self.say(f"> {text or '(Enter)'}", "me")
-            self.entry.delete(0, "end")
-        except OSError:
-            pass
+        with self.lock:
+            proc = self.proc
+            if proc is None or proc.stdin is None:
+                self.say("Nothing is waiting for an answer.", "me")
+                return
+            try:
+                proc.stdin.write((text + "\n").encode("utf-8"))
+                proc.stdin.flush()
+                self.say(f"> {text or '(Enter)'}", "me")
+                self.prompt = False
+            except OSError:
+                pass
 
     def stop(self) -> None:
-        if self.proc is None:
-            self.say("Nothing is running.", "me")
-            return
-        self.steps = []
-        try:
-            STOP_FILE.write_text("stop", encoding="utf-8")
-        except OSError:
-            pass
-        self.say("STOP: asking the bot to stop (like F8) ...", "bad")
-        proc = self.proc
-        self.root.after(6000, lambda: proc.poll() is None and proc.terminate())
+        with self.lock:
+            self.steps, self.ask = [], None
+            proc = self.proc
+            if proc is None:
+                self.say("Nothing is running.", "me")
+                return
+            self.stopping = True
+            try:
+                self.stop_file.write_text("stop", encoding="utf-8")
+            except OSError:
+                pass
+            self.say("STOP: asking the bot to stop (like F8) ...", "bad")
 
-    # ---- specials ----------------------------------------------------------------------------------
-    def arrange(self) -> None:
-        try:
-            from . import win32
-            from .config import load_config
-            g = load_config()["game"]
-            w = win32.find_game_window(g["exe_name"], g["title_contains"])
-            if w is None:
-                self.say("SF6 is not running (or its window was not found).", "bad")
-            else:
-                r = win32.move_client_to(w.hwnd, 640, 0)
-                self.say(f"SF6 game area moved to {r}.", "good")
-        except Exception as e:                       # noqa: BLE001 - shown to the user
-            self.say(f"Could not move the SF6 window: {e}", "bad")
-        self.root.geometry("1280x360+640+720")
+        def later():
+            time.sleep(6.0)
+            if proc.poll() is None:
+                proc.terminate()
+        threading.Thread(target=later, daemon=True).start()
 
-    def run_admin(self) -> None:
-        if os.name != "nt":
-            self.say("Installing the game-state script needs Windows.", "bad")
-            return
-        import ctypes
-        py = _python(console=True)
-        r = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe",
-                                                f'/k ""{py}" -m sf6bot refw-install"', str(ROOT), 1)
-        self.say("Opened an administrator window for the install; restart SF6 afterwards." if r > 32 else
-                 "Windows did not allow the administrator window.", "good" if r > 32 else "bad")
+    def closing(self) -> None:
+        with self.lock:
+            self.closing_at = time.monotonic()
 
-    def open_path(self, p: Path) -> None:
-        p.mkdir(parents=True, exist_ok=True)
-        try:
-            if os.name == "nt":
-                os.startfile(str(p))                 # noqa: S606
-            else:
-                subprocess.Popen(["xdg-open", str(p)])
-        except OSError as e:
-            self.say(f"Could not open {p}: {e}", "bad")
-
-    def refresh_video(self) -> None:
-        try:
-            from .config import load_config
-            on = bool(load_config()["recording"].get("record_video", True))
-            self.video_btn.configure(text=f"VIDEO: {'ON' if on else 'OFF'}")
-        except Exception:                            # noqa: BLE001
-            self.video_btn.configure(text="VIDEO: ?")
-
-    # ---- small helpers -----------------------------------------------------------------------------
-    def confirm(self, text: str) -> bool:
-        d = tk.Toplevel(self.root, bg=BG)
-        d.title("SF6 BOT")
-        d.transient(self.root)
-        res = {"ok": False}
-        tk.Label(d, text=text, font=self.f_title, fg=INK, bg=BG, wraplength=420, justify="left").pack(padx=16, pady=12)
-        row = tk.Frame(d, bg=BG)
-        row.pack(pady=(0, 12))
-        self._button(row, "OK", lambda: (res.update(ok=True), d.destroy()), YELLOW, BG).pack(side="left", padx=6)
-        self._button(row, "CANCEL", d.destroy, PANEL_HI, INK).pack(side="left", padx=6)
-        d.grab_set()
-        self.root.wait_window(d)
-        return res["ok"]
-
-    def write(self, text: str) -> None:
-        for line in text.splitlines(keepends=True):
-            low = line.lower()
-            tag = ("measured" if "[measured]" in low else "learned" if "[learned]" in low else
-                   "policy" if "[policy]" in low else "bad" if ("fail" in low or "error" in low or "warning" in low)
-                   else "good" if (" true " in low or line.startswith(("Saved", "- TRUE"))) else None)
-            self.log.insert("end", line, tag)
-        self.log.see("end")
-
-    def say(self, text: str, tag: str | None = None) -> None:
-        self.log.insert("end", text + "\n", tag)
-        self.log.see("end")
-
-    def clear_log(self) -> None:
-        self.log.delete("1.0", "end")
-
-    def set_status(self, text: str, col: str) -> None:
-        self.status.configure(text=text, fg=col)
-
-    def on_close(self) -> None:
-        if self.proc is not None and not self.confirm("A command is still running. Stop it and close?"):
-            return
-        if self.proc is not None:
-            self.stop()
-        self._save_state()
-        self.root.destroy()
+    def should_exit(self) -> bool:
+        """The window is gone: stop what runs, then end the server."""
+        with self.lock:
+            now = time.monotonic()
+            if self.closing_at is not None and now - self.closing_at > CLOSE_STOP_S and self.proc is not None \
+                    and not self.stopping:
+                self.closing_at = None
+                threading.Thread(target=self.stop, daemon=True).start()
+                return False
+            return self.proc is None and not self.steps and now - self.last_poll > IDLE_EXIT_S
 
 
 def _python(console: bool = False) -> str:
-    """The venv's python.exe (pythonw.exe runs this window; commands need the console one for their output)."""
+    """The venv's python.exe (pythonw.exe runs the panel; commands need the console one for their output)."""
     exe = Path(sys.executable)
     if exe.name.lower() == "pythonw.exe":
         cand = exe.with_name("python.exe")
@@ -499,10 +292,230 @@ def _python(console: bool = False) -> str:
     return str(exe)
 
 
-def main() -> None:
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+def set_clipboard(text: str) -> None:
+    if os.name != "nt":
+        raise RuntimeError("the clipboard is only set on Windows")
+    from . import win32
+    win32.set_clipboard_text(text)
+
+
+# ---- HTTP -------------------------------------------------------------------------------------------------
+def make_handler(panel: Panel):
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):            # quiet
+            pass
+
+        def _json(self, obj, code=200):
+            data = json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _body(self) -> dict:
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                b = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                return b if isinstance(b, dict) else {}
+            except ValueError:
+                return {}
+
+        def do_GET(self):                      # noqa: N802
+            u = urlparse(self.path)
+            if u.path in ("/", "/index.html"):
+                data = (WEB / "index.html").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            elif u.path == "/api/init":
+                self._json(panel.init())
+            elif u.path == "/api/poll":
+                try:
+                    since = int((parse_qs(u.query).get("since") or ["0"])[0] or 0)
+                except ValueError:
+                    since = 0
+                self._json(panel.poll(since))
+            else:
+                self._json({"error": "not found"}, 404)
+
+        def do_POST(self):                     # noqa: N802
+            # only the panel's own page may drive it (another web page in a browser cannot start commands)
+            if self.headers.get("Origin") not in (None, "null", f"http://{self.headers.get('Host')}"):
+                return self._json({"error": "forbidden"}, 403)
+            b = self._body()
+            p = urlparse(self.path).path
+            if p == "/api/run":
+                return self._json(panel.run_action(str(b.get("id")), b.get("values") or {}))
+            if p == "/api/send":
+                panel.send(str(b.get("text") or ""))
+            elif p == "/api/stop":
+                panel.stop()
+            elif p == "/api/confirm":
+                panel.confirm(int(b.get("id") or 0), bool(b.get("ok")))
+            elif p == "/api/values":
+                panel.save_state(tab=str(b.get("tab") or "fight"), values=b.get("values") or {})
+            elif p == "/api/closing":
+                panel.closing()
+            else:
+                return self._json({"error": "not found"}, 404)
+            self._json({"ok": True})
+    return H
+
+
+def serve(panel: Panel, port: int = 0) -> ThreadingHTTPServer:
+    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(panel))
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+# ---- the window -------------------------------------------------------------------------------------------
+def _browser() -> str | None:
+    """Edge (part of Windows 11) or Chrome, for a window without tabs or address bar (--app)."""
+    for env, rel in (("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
+                     ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
+                     ("LOCALAPPDATA", r"Microsoft\Edge\Application\msedge.exe"),
+                     ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+                     ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+                     ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe")):
+        base = os.environ.get(env)
+        if base and (Path(base) / rel).exists():
+            return str(Path(base) / rel)
+    return None
+
+
+def panel_rect() -> list[int] | None:
+    """Where the panel goes [x, y, w, h] (physical pixels): the strip under the SF6 window (game at the top
+    right, title bar visible), else the bottom right of the screen's work area."""
+    from . import win32
+    from .config import load_config
+    if not win32.IS_WINDOWS:
+        return None
+    wl, wt, wr, wb = win32.work_area()
+    g = load_config()["game"]
+    w = win32.find_game_window(g["exe_name"], g["title_contains"])
+    if w is not None:
+        fl, ft, fr, fb = win32.frame_rect(w.hwnd)
+        if wb - fb >= 160:
+            return [fl, fb, wr - fl, wb - fb]
+    h = max(240, (wb - wt) // 4)
+    return [wl + (wr - wl) // 3, wb - h, (wr - wl) * 2 // 3, h]
+
+
+def arrange(panel: Panel, hwnd_box: dict) -> None:
+    """SF6 to the top right with its title bar on screen; the panel in the strip under it."""
+    try:
+        from . import win32
+        from .config import load_config
+        g = load_config()["game"]
+        w = win32.find_game_window(g["exe_name"], g["title_contains"])
+        if w is None:
+            panel.say("SF6 is not running (or its window was not found): only the panel was placed.", "bad")
+        else:
+            wl, wt, wr, wb = win32.work_area()
+            fl, ft, fr, fb = win32.frame_rect(w.hwnd)
+            win32.place_frame(w.hwnd, wr - (fr - fl), wt)
+            cl, ct, cr, cb = win32.client_rect_screen(w.hwnd)
+            panel.say(f"SF6 moved: game area {cr - cl}x{cb - ct} at ({cl}, {ct}), title bar visible.", "good")
+        r = panel_rect()
+        hwnd = hwnd_box.get("hwnd")
+        if r and hwnd:
+            win32.place_frame(hwnd, *r)
+            panel.save_state(window=r)
+            panel.say(f"Panel placed under the game: {r[2]}x{r[3]} at ({r[0]}, {r[1]}).", "good")
+    except Exception as e:                       # noqa: BLE001 - shown to the user
+        panel.say(f"Could not arrange the windows: {e}", "bad")
+
+
+def special(panel: Panel, hwnd_box: dict, aid: str) -> None:
+    if aid == "arrange":
+        threading.Thread(target=arrange, args=(panel, hwnd_box), daemon=True).start()
+    elif aid == "open_runs":
+        p = panel.root / "runs"
+        p.mkdir(parents=True, exist_ok=True)
+        try:
+            if os.name == "nt":
+                os.startfile(str(p))                 # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", str(p)])
+        except OSError as e:
+            panel.say(f"Could not open {p}: {e}", "bad")
+    elif aid == "refw":
+        if os.name != "nt":
+            panel.say("Installing the game-state script needs Windows.", "bad")
+            return
+        import ctypes
+        py = _python(console=True)
+        r = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe",
+                                                f'/k ""{py}" -m sf6bot refw-install"', str(panel.root), 1)
+        panel.say("Opened an administrator window for the install; restart SF6 afterwards." if r > 32 else
+                  "Windows did not allow the administrator window.", "good" if r > 32 else "bad")
+
+
+def open_window(url: str, panel: Panel, hwnd_box: dict) -> None:
+    from . import win32
+    exe = _browser()
+    if exe is None:
+        import webbrowser
+        panel.say("Edge was not found: the panel opened in your browser instead.", "me")
+        webbrowser.open(url)
+        return
+    rect = panel.state.get("window") or panel_rect() or [640, 760, 1280, 260]
+    profile = Path(os.environ.get("LOCALAPPDATA") or panel.root) / "sf6bot" / "gui_window"
+    subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--no-first-run",
+                      "--no-default-browser-check", "--disable-features=Translate",
+                      f"--window-position={rect[0]},{rect[1]}", f"--window-size={rect[2]},{rect[3]}"])
+    if not win32.IS_WINDOWS:
+        return
+    # then exactly where it belongs, in physical pixels (the browser's own flags are scaled by Windows)
+    for _ in range(150):
+        time.sleep(0.1)
+        h = win32.find_window_by_title(TITLE, ("msedge.exe", "chrome.exe"))
+        if h:
+            hwnd_box["hwnd"] = h
+            win32.place_frame(h, *rect)
+            break
+    while True:                              # remember where the user puts it
+        time.sleep(2.0)
+        h = hwnd_box.get("hwnd")
+        if not h or not win32.is_window(h):
+            continue
+        r = win32.frame_rect(h)
+        now = [r[0], r[1], r[2] - r[0], r[3] - r[1]]
+        if now[2] > 200 and now[3] > 100 and now != panel.state.get("window"):
+            panel.save_state(window=now)
+
+
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+    ap = argparse.ArgumentParser(prog="sf6bot gui")
+    ap.add_argument("--port", type=int, default=0)
+    ap.add_argument("--no-window", action="store_true", help="only serve the page (open the printed address)")
+    a = ap.parse_args(argv)
+    from . import win32
+    win32.set_dpi_aware()
+    hwnd_box: dict = {}
+    panel = Panel(on_special=lambda aid: special(panel, hwnd_box, aid))
+    srv = serve(panel, a.port)
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    print(f"SF6 BOT panel at {url}", flush=True)
+    panel.say(f"SF6 BOT v{__version__}. Pick a tab, set the options, press GO. The bot's own hotkeys still "
+              "work: F8 stop, F7 pause, F9 'that combo try worked', F10 skip a combo route.", "me")
+    if not a.no_window:
+        threading.Thread(target=open_window, args=(url, panel, hwnd_box), daemon=True).start()
+    try:
+        while not panel.should_exit():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    if panel.proc is not None:
+        panel.stop()
+    srv.shutdown()
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ class Sim:
         self.guard_all = False
         self.bar_on = False       # emit the Training Mode frame bar (exporter v9)
         self.block = 0
+        self.whiffs = set()       # moves that miss (out of range)
 
     def send(self, k, prefix):
         self.arrivals.append((self.t + self.lead + prefix, k))
@@ -64,10 +65,12 @@ class Sim:
             m, cur = self.moves[k], self.cur
             if cur is None:
                 self._start(k)
-            elif m["conn"] in (">", "~") and cur["hit"] is not None and self.t <= cur["hit"] + self.HITSTOP + 3:
+            elif m["conn"] in (">", "~") and isinstance(cur["hit"], int) and self.t <= cur["hit"] + self.HITSTOP + 3:
                 self._start(k)
             # else: dropped (no buffer)
         c = self.cur
+        if c is not None and c["frame"] == c["m"]["su"] - 1 and c["hit"] is None and c["k"] in self.whiffs:
+            c["hit"] = "whiff"               # out of range: no hit, no hitstop
         if c is not None and c["frame"] == c["m"]["su"] - 1 and c["hit"] is None:
             c["hit"] = self.t                # startup s: hits on its frame s-1 (measured, Ryu 5HP)
             self.hitstop = self.HITSTOP
@@ -1120,3 +1123,40 @@ def test_policy_allows_air_attacks_only_falling_and_low():
     assert not pol.allowed(me, 2.0, lambda a: True, falling=False)[ai]          # rising
     assert pol.allowed(me, 2.0, lambda a: True, falling=True)[ai]               # falling, low enough
     assert not pol.allowed(dict(me, y=1.8), 2.0, lambda a: True, falling=True)[ai]   # still too high
+
+
+def _run_confirm(sim, steps, ticks=400):
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True)
+    sent = []
+    for _ in range(ticks):
+        line = sim.tick()
+        k = run.feed(line)
+        if k is None:
+            m = run.presend()
+            if m is not None:
+                run.rt[m]["motion_sent"] = line["stage_timer"]
+            continue
+        sent.append(k)
+        run.sent(k)
+        sim.send(k, 0 if run.rt[k].get("motion_sent") is not None else steps[k]["prefix"])
+        if run.done:
+            break
+    return run, sent
+
+
+def test_matches_confirm_each_hit_and_send_the_motion_early():
+    """0.13.1 (user's FT5): in a match each move waits for the previous hit; the special's motion goes out on
+    the predicted contact so only its button waits."""
+    run, sent = _run_confirm(Sim(MOVES, lead=4), _steps(MOVES))
+    res = run.result()
+    assert res["success"] and res["hits"] == 3, res
+    assert sent == [0, 1, 2] and run.rt[2]["motion_sent"] is not None
+    assert run.rt[2]["sent"] >= run.rt[1]["contact"]          # the button only after the hit was seen
+
+
+def test_matches_stop_a_route_whose_starter_whiffed():
+    """The FT5 showed 'whiff' routes: a whiffed 2LK was still followed by the rest and a Shoryuken."""
+    sim = Sim(MOVES, lead=4)
+    sim.whiffs = {0}
+    run, sent = _run_confirm(sim, _steps(MOVES))
+    assert sent == [0] and run.result()["fail"]["kind"] == "whiff" and run.result()["fail"]["step"] == 0

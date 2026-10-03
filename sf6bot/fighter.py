@@ -838,7 +838,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=6.0,
                                         abort=urgent if neutral else None,
                                         lead=lead or pl.get("lead") or 4,
-                                        fixed=pl.get("recorded_timing") if not lead or lead == pl.get("lead") else None)
+                                        fixed=pl.get("recorded_timing") if not lead or lead == pl.get("lead") else None,
+                                        confirm=True)
                     c.apply(InputState(), tag="fighter_route_end")
                     rk = "routes_completed" if res.get("success") else "routes_stopped"
                     summary.setdefault(rk, {})
