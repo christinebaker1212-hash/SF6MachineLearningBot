@@ -78,6 +78,8 @@ class DatasetBuilder:
         src = raw.get("src", "v5 (per render)")
         self.src_counts[src] = self.src_counts.get(src, 0) + 1
         row = {"t": round(t, 4), "round": rnd, "seg": self._segment, "frame": timer, "fight": self._fighting}
+        if isinstance(raw.get("f"), int):
+            row["f"] = raw["f"]          # 0.18.3: the exporter's render counter (game ticks per render = its frame rate)
         for i, pk in enumerate(("p1", "p2")):
             p = raw.get(pk) or {}
             q = {k: p.get(k) for k in PLAYER_FIELDS}

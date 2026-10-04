@@ -340,9 +340,15 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     sa = summary.get("state_arrival") or {}
     if sa:
         late = sa["lines_per_arrival"] > 1.5
+        fps = sa.get("game_fps")
+        why = ""
+        if late and fps is not None:
+            why = (f" The game drew {fps} frames a second ({sa['ticks_per_render']} game frames per drawn frame): the game "
+                   "was rendering slowly, not me reading late." if fps < 50 else
+                   f" The game drew {fps} frames a second, so the delay was on my side (reading the state file).")
         out.append(("measured", f"Game state reached me {sa['arrivals_per_s']} times a second ({sa['lines_per_arrival']} "
                                 f"frames at a time, gap {sa['gap_ms_p50']} ms typical)"
-                                + ("; I was seeing the game late." if late else ".")))
+                                + ("; I was seeing the game late." if late else ".") + why))
     idl = summary.get("input_delay") or {}
     if idl.get("median") is not None:
         out.append(("measured", f"My input delay this session: {idl['median']} frames (median of {idl['n']} presses "

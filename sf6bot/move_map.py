@@ -29,6 +29,46 @@ LEVELS = ["low", "medium", "high"]
 _PUNCH, _KICK = {"LP", "MP", "HP"}, {"LK", "MK", "HK"}
 
 
+# ---- 0.18.3: a name must fit the KIND of action id -----------------------------------------------
+# MEASURED action id ranges (Ken's catalog: all 67 attacks fit; the user's fights with 15 characters): parry / Drive moves
+# 480-519 (Ken's Drive Rush 500 / 501), normals and command normals 600-714, throws 715-729, Drive Impact 850-869, specials 900-1199, supers
+# 1200-1299. The 0.18.1 ranked session named E. Honda's 480 (a parry id) "Standing Heavy Punch", Luke's 717 (a throw id)
+# "Scrapper" and Guile's 668 (a normal's id) "H Sonic Boom": names from inputs alone, for charge characters above all.
+# An id outside these ranges is not named.
+ID_KINDS = ((480, 520, "system"), (600, 715, "normal"), (715, 730, "throw"), (850, 870, "di"),
+            (900, 1200, "special"), (1200, 1300, "super"))
+
+
+def id_kind(aid) -> str | None:
+    if not isinstance(aid, int):
+        return None
+    return next((k for lo, hi, k in ID_KINDS if lo <= aid < hi), None)
+
+
+def row_kind(move: dict | None) -> str | None:
+    """Capcom's section -> kind: Normal Moves / Unique Attacks = normal, Throws = throw, Special Moves = special (command
+    grabs included), Super Arts = super; Common Moves: Drive Impact = di, the rest (parry, rush, reversal) = system."""
+    if not move:
+        return None
+    sec, name = (move.get("section") or "").lower(), move.get("name") or ""
+    if "normal" in sec or "unique" in sec:
+        return "normal"
+    if "throw" in sec:
+        return "throw"
+    if "special" in sec:
+        return "special"
+    if "super" in sec:
+        return "super"
+    if "common" in sec:
+        return "di" if name.startswith("Drive Impact") else "system"
+    return None
+
+
+def kind_ok(aid, kind: str | None) -> bool:
+    k = id_kind(aid)
+    return k is not None and kind is not None and k == kind
+
+
 # ---- Capcom input -> requirement -----------------------------------------------------------------
 
 def requirement(move: dict) -> dict | None:
@@ -47,7 +87,7 @@ def requirement(move: dict) -> dict | None:
     if not m:
         return None
     dirs, buttons = m.group(1), m.group(2).split("+")
-    return {"name": move["name"], "dirs": dirs, "buttons": buttons, "jump": jump}
+    return {"name": move["name"], "dirs": dirs, "buttons": buttons, "jump": jump, "kind": row_kind(move)}
 
 
 def _buttons_ok(req_buttons: list[str], pressed: set[str]) -> bool:
@@ -99,11 +139,15 @@ def _specificity(req: dict) -> int:
     return 10 * len(d.replace("[", "").replace("]", "")) + 3 * len(req["buttons"]) + (2 if req["jump"] else 0)
 
 
-def match(reqs: list[dict], pressed: set[str], press_dir: int | None, history: list[int], airborne: bool):
-    """Most specific Capcom move consistent with the observed press, or None."""
+def match(reqs: list[dict], pressed: set[str], press_dir: int | None, history: list[int], airborne: bool,
+          aid: int | None = None):
+    """Most specific Capcom move consistent with the observed press, or None. With `aid`, only moves of the id's
+    kind (0.18.3)."""
     best = None
     for r in reqs:
         if r["jump"] != airborne:
+            continue
+        if aid is not None and not kind_ok(aid, r.get("kind")):
             continue
         if not _buttons_ok(r["buttons"], pressed) or not _dirs_ok(r["dirs"], press_dir, history):
             continue
@@ -138,7 +182,7 @@ def observe(rows: list[dict], pk: str, reqs: list[dict], votes: dict) -> int:
             press_dir = dirs[-1] if dirs else None
             airborne = (num(p.get("y")) or 0.0) > 0.05
             if pressed:
-                m = match(reqs, pressed, press_dir, dedup[:-1], airborne)
+                m = match(reqs, pressed, press_dir, dedup[:-1], airborne, aid=a)
                 if m is not None:
                     votes[a][m["name"]] += 1
                     n += 1

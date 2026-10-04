@@ -72,8 +72,10 @@ def test_defense_follows_what_this_opponent_does_after_pressure(tmp_path):
 
 def test_pressure_moment_commits_early_and_stands_against_an_overhead():
     f = ScriptedFighter(FCFG, {925: {"name": "Gorai Axe Kick", "guard": "overhead", "block_adv": -3}}, seed=1)
-    d = f.decide(state(me={"blockstun": 15}, op={"x": 0.9, "action_id": 925}), 0.0, 0)
-    assert d.rule == "block"                              # too early: keep blocking
+    # too early: keep blocking (0.18.3: the moment fires up to pad + input delay + 1 frames ahead, pad 15 since a super
+    # reversal's motion must fit before the first free frame)
+    d = f.decide(state(me={"blockstun": 30}, op={"x": 0.9, "action_id": 925}), 0.0, 0)
+    assert d.rule == "block"
     d = f.decide(state(me={"blockstun": 6}, op={"x": 0.9, "action_id": 925}), 0.1, 0)
     assert d.rule.startswith("defense:") and not d.seq.startswith("1@")     # never crouch vs an overhead
     d = f.decide(state(me={"blockstun": 4}, op={"x": 0.9, "action_id": 925}), 0.12, 0)

@@ -241,7 +241,12 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.2 (latest):** C can now measure counter hits and punish counters (C → 5 / 6), saved apart from the normal hits
+**0.18.3 (latest):** the six fixes from the 0.18.1 session (CLAUDE.md "0.18.1 session" and "0.18.3"). Next session:
+check `state_arrival.game_fps` (30 = the game drew slowly: try ranked.bat without the panel), defence reversals (OD
+Shoryuken / SA1 / SA3 results), `defense.their_wakeup` (meaty / throw / shimmy), sweep counts, live names for charge
+characters. Suggest catalogues (C) of frequent opponents: E. Honda, Guile, Luke.
+
+**0.18.2:** C can now measure counter hits and punish counters (C → 5 / 6), saved apart from the normal hits
 (CLAUDE.md "0.18.2"). The user plans to run them; check `hit_bonus` in the catalog file and the run's Training Mode
 check. Proposed and waiting on the user: whiff punishes chosen by combo damage (2MK > Hadoken / 5HP > Shoryuken
 instead of a lone sweep; 0.18.0 session: 71 sweeps, 16 of 35 hits in 2MK / 5HP range, 10,100 damage taken after the

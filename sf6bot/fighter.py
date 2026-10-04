@@ -106,7 +106,9 @@ def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dic
     """action_id -> {"name", "block_adv", "di", "source": "inferred"} from the inferred move map
     (move_map.py: replay inputs matched to Capcom inputs). Only ids at or above the configured
     confidence; Capcom's on-block value gets a safety margin (fewer, safer punishes)."""
-    from .move_map import LEVELS, load_map
+    from . import framedata as fd
+    from .move_map import LEVELS, kind_ok, load_map, row_kind
+    rows = {m["name"]: m for m in (fd.load(chara_name, Path(datasets_root) / "framedata") or {}).get("moves") or []}
     icfg = fcfg.get("inferred") or {}
     floor = LEVELS.index(icfg.get("min_confidence", "medium"))
     margin = int(icfg.get("block_adv_margin", 2))
@@ -117,6 +119,8 @@ def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dic
         unanimous = not e.get("alternatives") and (e.get("votes") or 0) >= 2     # 0.18.0: two agreeing sightings
         if LEVELS.index(e.get("confidence", "low")) < floor and not unanimous:
             continue
+        if rows and not kind_ok(int(a), row_kind(rows.get(e["name"]))):
+            continue        # 0.18.3: a name that does not fit the id's kind (saved before the check existed)
         ob = (e.get("capcom") or {}).get("on_block")
         out[int(a)] = {"name": e["name"], "block_adv": ob + margin if isinstance(ob, int) else None,
                        "di": e["name"].startswith("Drive Impact"), "source": "inferred"}
@@ -563,7 +567,8 @@ class ScriptedFighter:
         if t < self.block_until:
             return Decision("hold", direction=block_dir, facing=block_face, reason="holding block", rule="block")
         # 6b. the opponent getting up next to the bot, or walking into throw range (0.18.0)
-        ap = self._their_wakeup(raw, me, op, dist, t) or self._approach(raw, me, op, dist, t)
+        ap = (self._their_wakeup(raw, me, op, dist, t) or self._approach(raw, me, op, dist, t)
+              or self._oki_walk(me, op, dist))
         if ap is not None:
             return ap
         # 7. neutral
@@ -748,7 +753,8 @@ class ScriptedFighter:
 
     def _commit_defense(self, sit: str, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision:
         dc = self.c.get("defense") or {}
-        ch = self.defense.choose(sit, lambda a: self.can_spend(me, a))
+        ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
+                                 lambda name, oc: self._resolve_option(me, op, oc))
         opt = ch["option"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
         # did 58% of the user's damage against a crouch block)
@@ -764,8 +770,37 @@ class ScriptedFighter:
             self.exp.defended(t, sit, opt, me.get("hp"), op.get("hp"))
         odds = ", ".join(f"{k} {v:.0%}" for k, v in sorted(ch["odds"].items(), key=lambda kv: -kv[1]))
         from .defense import NICE, SITUATIONS
-        return Decision("seq", f"defence: {NICE.get(opt, opt)}", ch["seq"], rule=f"defense:{opt}",
+        kind = "oki" if sit in self.defense.offense_situations else "defence"
+        return Decision("seq", f"{kind}: {ch.get('label') or NICE.get(opt, opt)}", ch["seq"], rule=f"defense:{opt}",
                         reason=f"{SITUATIONS[sit]} at {dist:.2f}; the opponent's odds: {odds}")
+
+    def _resolve_option(self, me: dict, op: dict, oc: dict) -> dict | None:
+        """The first candidate of an option the bot can afford now (0.18.3: the reversal = SA3 when it kills, else OD
+        Shoryuken with 2 Drive bars to spare, else SA1, else SA3), or None."""
+        meter, ophp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+        for c in oc.get("pick") or []:
+            if c.get("super") and meter < int(c["super"]):
+                continue
+            if c.get("drive") and not self.can_spend(me, c["drive"]):
+                continue
+            if c.get("lethal_only") and (c.get("damage") or 0) < ophp:
+                continue
+            return c
+        return None
+
+    def _oki_walk(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.18.3: the opponent is knocked down (grounded knockdown / get-up actions 300-349) and out of reach: walk in,
+        so that its get-up becomes the bot's pressure moment (meaty / throw / shimmy) instead of a reset to neutral.
+        0.18.1 ranked: after 35 sweep knockdowns the bot dealt nothing on the wake-up in 21."""
+        oc = self.c.get("oki") or {}
+        oa = op.get("action_id")
+        if not oc.get("enabled", True) or not isinstance(oa, int) or not 300 <= oa < 350:
+            return None
+        if (_num(op.get("y")) or 0.0) > 0.05 or self.busy(me) is not None:
+            return None
+        if not float(oc.get("walk_until", 0.9)) < dist <= float(oc.get("max_dist", 3.2)):
+            return None
+        return Decision("hold", direction=6, reason=f"opponent knocked down at {dist:.2f}: walking in", rule="oki:walk")
 
     def _track_self(self, me: dict, op: dict, tmr) -> None:
         """When the bot's current action began (game clock) and the opponent's action when the latest hit landed.
@@ -915,7 +950,7 @@ class ScriptedFighter:
             return None
         if not self._ok("di_punish"):
             return None
-        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0):
+        if self.busy(me) is not None:         # 0.18.3: not a chance while the bot cannot act (no count, no mark)
             return None
         poke = max([v for k, v in self.own_reach.items() if isinstance(k, int) and 600 <= k < 715] or [0.0])
         if move_class(info, op, dist, self.lead, max(poke, self.c["ranges"]["poke"]), self.di_range) != "di_punish":
@@ -965,7 +1000,9 @@ class ScriptedFighter:
         remaining = _remaining(op, info)
         if remaining is None:
             return None
-        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0):
+        # 0.18.3: not while the bot cannot act. Before, a whiff punish decided in a hit reaction was held back by the busy
+        # gate after it had been counted as taken (0.18.1 ranked: 26 held, "51 whiff punishes of 25 whiffs")
+        if self.busy(me) is not None:
             return None
         best = None
         for m in self.own:
@@ -976,7 +1013,17 @@ class ScriptedFighter:
                 continue
             if m["startup"] + self.lead + 1 > remaining:
                 continue
-            key = (m.get("damage") or 0, -m["startup"])
+            # 0.18.3: ranked by what it leads to, not its own hit: the best TRUE combo from it (combo lab) when there is
+            # one. Before, the single-hit damage picked the sweep (900, no follow-up) over 2MK (500, cancels into a
+            # Hadoken or a super): 0.18.1 ranked, 16 of the 35 sweeps that hit were within 2MK's or 5HP's reach
+            dmg = m.get("damage") or 0
+            if self.book:
+                from .route_book import choose
+                e = choose(self.book, me, op, starter=m["name"], hit_types=("punish_counter", "normal"),
+                           learned=None, reserve=self.c.get("drive_reserve", 0))
+                if e is not None and isinstance(e.get("damage"), (int, float)):
+                    dmg = max(dmg, e["damage"])
+            key = (dmg, -m["startup"])
             if best is None or key > best[0]:
                 best = (key, m)
         if dist <= max(list(self.own_reach.values()) or [0]) + 0.5 and not self.op_move["chance"]:
@@ -1290,10 +1337,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     # nothing in the run said which condition it was waiting on). Written to fight_status.json (in S).
 
     def status(text: str, detail: dict | None = None) -> None:
+        # 0.18.3: a change is a change of the REASON, numbers aside: "round clock 88 < 190" and "... 90 < 190" are the
+        # same wait. Before, every clock tick of the round intro was a new entry, printed and narrated (~30 a second
+        # into the panel's live log)
         now = clock.now()
-        if text != wait["status"] or now - wait["last_beat"] > 15.0:
-            changed = text != wait["status"]
-            wait["status"], wait["last_beat"] = text, now
+        key = re.sub(r"\d+", "#", text)
+        if key != wait.get("key") or now - wait["last_beat"] > 15.0:
+            changed = key != wait.get("key")
+            wait["status"], wait["key"], wait["last_beat"] = text, key, now
             entry = {"t": round(now - t_start, 1), "status": text, **(detail or {})}
             wait["log"].append(entry)
             del wait["log"][:-200]
@@ -1446,7 +1497,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             for i, st in enumerate(batch):
                 cur["data"].add(st.raw, st.t_recv)
                 if fight_on:
-                    cur["arrival"].add(st.t_recv)
+                    cur["arrival"].add(st.t_recv, st.raw.get("f"))
                 t = st.t_recv
                 for e in tracker.update(st.raw, t):
                     if e["event"] == "round_end":

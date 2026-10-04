@@ -61,12 +61,21 @@ def own_moves(character: str, ds_root: Path) -> list[dict]:
         if air:
             seq = seq.split()[-1]               # the button only: the bot is already in the air
         row = rows.get(name) or {}
-        out.append({"name": name, "id": mid, "intent": intent, "seq": seq,
+        ga = m.get("guard_all") or {}
+        block_adv = ga.get("advantage") if isinstance(ga.get("advantage"), int) else row.get("on_block_n")
+        out.append({"name": name, "id": mid, "intent": intent, "seq": seq, "block_adv": block_adv,
                     "startup": g.get("startup") or row.get("startup_n"), "damage": row.get("damage_n"),
                     "total": g.get("total") if isinstance(g.get("total"), int) else row.get("total_n"),
                     "projectile": "projectile" in (row.get("properties") or "").lower(),
                     "super_cost": next((v for k, v in SUPER_COST.items() if name.startswith(k)), 0)})
     return out
+
+
+# 0.18.3: a poke this unsafe on block (Ryu's sweep -12: Capcom and the catalog) is chosen in neutral this much less
+# often. 0.18.1 ranked: the sweep was the bot's most used move (78), 10 of them blocked and 20 whiffed; whiff punishes
+# and combos still use it where it is the move that reaches.
+UNSAFE_BLOCK_ADV = -10
+UNSAFE_POKE_FACTOR = 0.3
 
 
 def _prior(m: dict, zone: str) -> float:
@@ -229,6 +238,8 @@ class NeutralPolicy:
             v = _prior(m, zone) + 3.0 * seen.get(m["id"], 0) / max(1.0, sum(seen.values()) or 1.0) * len(cands)
             if self.exp is not None:
                 v *= self.exp.move_factor(zone, m["name"])
+            if intent == "poke" and isinstance(m.get("block_adv"), int) and m["block_adv"] <= UNSAFE_BLOCK_ADV:
+                v *= UNSAFE_POKE_FACTOR
             w.append(max(v, 1e-3))
         w = np.asarray(w) / sum(w)
         return cands[int(self.rng.choice(len(cands), p=w))]

@@ -301,8 +301,16 @@ class ArrivalMeter:
         self.arrivals = 0
         self.gaps: list[float] = []
         self.t0 = self.t_last = None
+        # 0.18.3: the exporter's render counter `f` on each line. Game ticks per render > 1 = the GAME rendered fewer
+        # frames than it simulated (0.18.1 ranked: lines came in exact pairs every 33 ms, i.e. 30 fps, after 16.7 ms
+        # single lines in the 0.18.0 session); lines of different renders arriving together = the bot read late.
+        self.renders: set = set()
+        self.f_lines = 0
 
-    def add(self, t_recv: float) -> None:
+    def add(self, t_recv: float, f=None) -> None:
+        if isinstance(f, int):
+            self.renders.add(f)
+            self.f_lines += 1
         self.lines += 1
         if self.t_last is None:
             self.t0 = self.t_last = t_recv
@@ -326,7 +334,9 @@ class ArrivalMeter:
         g = sorted(self.gaps)
         return {"lines_per_s": round(self.lines / dur, 1), "arrivals_per_s": round(self.arrivals / dur, 1),
                 "lines_per_arrival": round(self.lines / self.arrivals, 2),
-                "gap_ms_p50": round(1000 * g[len(g) // 2], 1), "gap_ms_p90": round(1000 * g[int(len(g) * 0.9)], 1)}
+                "gap_ms_p50": round(1000 * g[len(g) // 2], 1), "gap_ms_p90": round(1000 * g[int(len(g) * 0.9)], 1),
+                **({"ticks_per_render": round(self.f_lines / len(self.renders), 2),
+                    "game_fps": round(60.0 * len(self.renders) / self.f_lines, 1)} if self.renders else {})}
 
 
 def fix_action_frames(rows: list[dict]) -> list[dict]:

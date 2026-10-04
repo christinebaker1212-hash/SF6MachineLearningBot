@@ -22,7 +22,8 @@ from pathlib import Path
 
 from . import framedata as fd
 from .game_state import decode_input_relative, file_stem, num
-from .move_map import MAX_GAP, MIN_ACTION_ID, MOTION_LOOKBACK, PRESS_LOOKBACK, confidence, match, requirement
+from .move_map import (MAX_GAP, MIN_ACTION_ID, MOTION_LOOKBACK, PRESS_LOOKBACK, confidence, kind_ok, match, requirement,
+                       row_kind)
 
 # 0.18.0: a name from the opponent's inputs is USED only after MIN_VOTES sightings that agree (share >= MIN_SHARE).
 # MEASURED 0.17.5 ranked: single online sightings named A.K.I.'s 600 and 601 both "L Serpent Lash", 740 "Standing
@@ -117,7 +118,7 @@ class LiveMoveLearner:
         if not dmg or dmg < 0:
             return None
         cands = [m for d in {dmg, round(dmg / 1.2)} for m in self.by_damage.get(d, [])
-                 if ("jump" in (m.get("input") or "").lower()) == p["air"]]
+                 if ("jump" in (m.get("input") or "").lower()) == p["air"] and kind_ok(a, row_kind(m))]
         names = {m["name"] for m in cands}
         if len(names) > 1:                             # several moves do that damage: the closest length decides
             dur = fr - p["t0"]
@@ -156,7 +157,7 @@ class LiveMoveLearner:
             return None
         dirs = [x[1] for x in h if isinstance(x[1], int)]
         dedup = [x for i, x in enumerate(dirs) if i == 0 or x != dirs[i - 1]]
-        m = match(self.reqs, pressed, dirs[-1] if dirs else None, dedup[:-1], airborne)
+        m = match(self.reqs, pressed, dirs[-1] if dirs else None, dedup[:-1], airborne, aid=a)
         if m is None:
             self.unmatched[a] += 1
             return None

@@ -15,8 +15,18 @@ it reaches the game on the first free frame:
   jab         2LP (4 frames)                       beats throws and slow buttons; loses to strikes, shimmies
   back_dash   escapes throws                       loses to strikes
   jump        escapes throws                       loses to strikes / anti-air
-  reversal    Shoryuken (invincible)               beats throws and strikes; a block or a shimmy punishes it
+  reversal    an INVINCIBLE move the bot can afford beats throws and strikes; a block or a shimmy punishes it
+              (0.18.3: OD Shoryuken, SA1 or SA3. Before, H Shoryuken, which Capcom lists as invincible only to
+              airborne attacks: 55 tries in the 0.18.1 ranked session lost 300-700 hp each)
   parry       Drive Parry                          beats strikes; loses to throws (costs Drive)
+
+OFFENCE (0.18.3): with the opponent getting up next to the bot, the bot is the one with the advantage, so that
+situation has its own options (configs: defense.offense), timed to the opponent's first free frame:
+
+  meaty       a normal whose active frames cover that frame   beats throws and mashed buttons; loses to reversals
+  throw       a throw on that frame                           beats blocking; loses to strikes and back-offs
+  shimmy      walk back, then punish a whiffed throw          beats throws; loses to strikes
+  block       hold down-back                                  beats reversals
 
 How it chooses (a small game against this opponent): what the opponent did after earlier pressure moments
 (throw / strike / back off = shimmy / wait) is counted per situation (learning.Experience, decaying so a
@@ -35,13 +45,22 @@ RESPONSES = ("throw", "strike", "shimmy", "wait")
 SITUATIONS = {"after_block": "after blocking", "after_hit": "after being hit", "wakeup": "getting up",
               "approach": "with the opponent walking in", "their_wakeup": "with the opponent getting up next to me"}
 NICE = {"block": "block", "delay_tech": "delay tech", "tech": "tech", "jab": "jab", "back_dash": "back dash",
-        "jump": "jump", "reversal": "Shoryuken", "parry": "Drive Parry"}
+        "jump": "jump", "reversal": "reversal", "parry": "Drive Parry", "meaty": "meaty", "throw": "throw",
+        "shimmy": "shimmy"}
 RESP_NICE = {"throw": "threw", "strike": "attacked", "shimmy": "backed off (shimmy)", "wait": "waited"}
 
 
 def _prefix(seq: str) -> int:
     toks = seq.split()
     return sum(int(t.split("@")[1]) for t in toks[:-1] if "@" in t)
+
+
+def _seqs(oc: dict) -> list[tuple[str, int]]:
+    """(seq, early) of an option: its own, or each candidate's (an option resolved at the moment, e.g. reversal)."""
+    early = int(oc.get("early", 0))
+    if oc.get("pick"):
+        return [(c["seq"], early) for c in oc["pick"] if c.get("seq")]
+    return [(oc["seq"], early)] if oc.get("seq") else []
 
 
 class Defense:
@@ -51,8 +70,20 @@ class Defense:
         self.rng = random.Random(seed)
         self.options = dcfg.get("options") or {}
         self.payoff = dcfg.get("payoff") or {}
-        self.pad = max((_prefix(o["seq"]) for o in self.options.values()), default=0)
+        off = dcfg.get("offense") or {}
+        self.offense_situations = set(off.get("situations") or [])
+        self.offense = off.get("options") or {}
+        self.offense_payoff = off.get("payoff") or {}
+        # every option's decisive input lands on the same frame (the first free frame, or `early` frames before it):
+        # the moment fires at least `pad` frames ahead
+        self.pad = max((_prefix(s) + e for oc in list(self.options.values()) + list(self.offense.values())
+                        for s, e in _seqs(oc)), default=0)
         self.last: dict = {}
+
+    def _set(self, situation: str) -> tuple[dict, dict]:
+        if situation in self.offense_situations and self.offense:
+            return self.offense, self.offense_payoff
+        return self.options, self.payoff
 
     def odds(self, situation: str) -> dict:
         prior = self.c.get("prior") or {k: 1.0 for k in RESPONSES}
@@ -61,24 +92,28 @@ class Defense:
         tot = sum(w.values()) or 1.0
         return {k: v / tot for k, v in w.items()}
 
-    def values(self, situation: str, can_spend=lambda a: True) -> dict:
+    def values(self, situation: str, can_spend=lambda a: True, resolve=None) -> dict:
         p = self.odds(situation)
         k_model = float(self.c.get("model_weight", 4))
         out = {}
-        for name, oc in self.options.items():
+        options, payoff = self._set(situation)
+        for name, oc in options.items():
             if oc.get("drive") and not can_spend(oc["drive"]):
                 continue
-            pay = self.payoff.get(name) or {}
+            if oc.get("pick") and (resolve is None or resolve(name, oc) is None):
+                continue                       # nothing the bot can afford right now (e.g. no meter for a reversal)
+            pay = payoff.get(name) or {}
             model = sum(p[k] * float(pay.get(k, 0.0)) for k in RESPONSES)
             s, n = self.exp.defense_value(situation, name) if self.exp is not None else (0.0, 0.0)
             out[name] = (model * k_model + s) / (k_model + n)
         return out
 
-    def choose(self, situation: str, can_spend=lambda a: True) -> dict:
-        """{option, seq, probs, odds}: one option drawn from exp(value / temperature)."""
-        vals = self.values(situation, can_spend)
+    def choose(self, situation: str, can_spend=lambda a: True, resolve=None) -> dict:
+        """{option, seq, label, probs, odds}: one option drawn from exp(value / temperature). `resolve(name, option)`
+        gives the move for an option with candidates ("pick"): a dict with seq / name, or None when unaffordable."""
+        vals = self.values(situation, can_spend, resolve)
         if not vals:
-            return {"option": "block", "seq": "1@12", "probs": {}, "odds": self.odds(situation)}
+            return {"option": "block", "seq": "1@12", "label": "block", "probs": {}, "odds": self.odds(situation)}
         temp = max(0.05, float(self.c.get("temperature", 0.35)))
         top = max(vals.values())
         w = {k: math.exp((v - top) / temp) for k, v in vals.items()}
@@ -91,11 +126,17 @@ class Defense:
                 pick = k
                 break
         pick = pick or max(probs, key=probs.get)
-        seq = self.options[pick]["seq"]
-        pad = self.pad - _prefix(seq)
+        oc = self._set(situation)[0][pick]
+        label = NICE.get(pick, pick)
+        if oc.get("pick"):
+            cand = resolve(pick, oc)
+            seq, label = cand["seq"], f"{label} ({cand.get('name', pick)})"
+        else:
+            seq = oc["seq"]
+        pad = self.pad - _prefix(seq) - int(oc.get("early", 0))
         if pad > 0:
             seq = f"1@{pad} " + seq          # every option's decisive input lands on the same frame
-        self.last = {"option": pick, "seq": seq, "probs": probs, "odds": self.odds(situation),
+        self.last = {"option": pick, "seq": seq, "label": label, "probs": probs, "odds": self.odds(situation),
                      "values": vals}
         return self.last
 

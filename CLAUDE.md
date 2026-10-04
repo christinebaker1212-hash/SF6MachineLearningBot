@@ -2351,6 +2351,48 @@ All MOCK-tested (`tests/test_ranked_baseline_fixes.py`); not verified in game.
 - Not used by the fighter yet: per-move counter-hit advantage (e.g. links after a counter-hit poke) needs its own
   change. MOCK-tested (simulated exporter); not run in game.
 
+## 0.18.1 session (user, 2026-10-03): 15 ranked matches, 5-10
+- Record 5-10 (Ken 4-2, Ryu 1-2, E. Honda 0-2, Luke 0-2, Guile 0-2); damage dealt / taken 0.80 (0.18.0: 1.02). Ally plugged
+  in, maximum performance (user). User: "we're training to beat Legends like Daigo."
+- **Worked:** Drive Impact crumples are cashed out (16: SA3 avg 2,819 x4, H Shoryuken avg 1,529 x7; before: a throw or a
+  jab). About 10 SA3s landed for ~3,000-3,400 (crumples, punishes, 2MK confirms).
+- **The game ran at 30 fps:** in every recording lines arrived in exact pairs 33 ms apart (0.18.0 session: one line every
+  16.7 ms). Regular pairs = the game drawing one frame per two game frames, not the bot reading late. Cause not known;
+  suspected the control panel (its live log got the intro status ~30 times a second) competing for the iGPU.
+- **Defence "reversal" was H Shoryuken:** Capcom lists it as invincible only to airborne attacks. 55 tries on wake-up /
+  after a hit / after a block, -300 to -700 hp each.
+- **Live move names were wrong for charge characters:** E. Honda's 480 (a parry id) "Standing Heavy Punch", Luke's 717 (a
+  throw id) "Scrapper", Guile's 668 "H Sonic Boom". Honda's big specials (999, 994: 12,800 damage) stayed unnamed, so 0
+  punish chances in both Honda matches.
+- Whiff punishes decided in a hit reaction were held back by the busy gate after being counted (26; "51 of 25").
+- Throws: 24 of 27 throws within 25 frames of the bot's own move followed a WHIFFED move (Shoryukens, point-blank
+  Hadokens): punishes of its own bad moves.
+- Sweep still the most used move (78, 48 hits, 10 blocked, 20 whiffed).
+
+## 0.18.3: real reversals, oki, names that fit, fewer sweeps (user: "build all of those")
+All MOCK / replay-tested (`tests/test_ranked_0181_fixes.py`; `decide()` over the 15 recordings: reversals OD Shoryuken 40
+and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verified in game.
+1. **Reversal** (`defense.options.reversal.pick`, `ScriptedFighter._resolve_option`): SA3 when its damage kills, else OD
+   Shoryuken (completely invincible 1-8) with 2 Drive bars to spare, else SA1 (strike and throw invincible 1-8), else SA3
+   (1-16). None affordable = no reversal option. Defence options land on the first free frame; the moment now fires up to
+   15 + input delay + 1 frames ahead (a super's motion).
+2. **Oki** (`defense.offense`): the opponent getting up next to the bot uses offensive options: meaty 2MK timed so its
+   active frames cover the first free frame (`early: 7`), throw, shimmy (walk back; a whiffed throw is then
+   whiff-punished), block. Payoffs are estimates; the opponent's answers and each option's results take over.
+   **Walk in after a knockdown** (`oki`, rule `oki:walk`): the opponent grounded in a knockdown / get-up (ids 300-349) and
+   0.9-3.2 away -> walk forward so its get-up becomes that moment.
+3. **Move names fit the id** (`move_map.id_kind / row_kind / kind_ok`): parry / Drive 480-519, normals 600-714, throws
+   715-729, Drive Impact 850-869, specials 900-1199, supers 1200-1299 (Ken's catalog: all 67 attacks fit). Live names,
+   menu X and saved move maps only use a name of the same kind; ids outside the ranges are not named.
+4. **Whiff / DI punishes** only when the bot can act (not counted, not marked otherwise).
+5. **Status log** changes only when the reason changes (numbers ignored). **Render counter:** recordings keep the
+   exporter's `f`; `state_arrival` adds `ticks_per_render` and `game_fps`, and the thoughts say whether the game drew
+   slowly or the bot read late.
+6. **Sweeps:** whiff punishes are ranked by the best TRUE combo from the move (2MK > Hadoken 1,560 over a lone sweep 900);
+   in neutral a poke at -10 or worse on block is chosen 0.3x as often (`neutral_policy.UNSAFE_POKE_FACTOR`).
+- To do by the user (biggest single gain against charge characters): C with E. Honda / Guile / Luke as P1 in Training
+  Mode catalogues that character's real ids; the bot then punishes them from measured data.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

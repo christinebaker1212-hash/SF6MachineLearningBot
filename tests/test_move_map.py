@@ -36,7 +36,8 @@ def _ds(tmp_path, ryu):
 
 def test_requirements_from_capcom_inputs(reqs):
     by = {r["name"]: r for r in reqs}
-    assert by["OD Hadoken"] == {"name": "OD Hadoken", "dirs": "236", "buttons": ["P", "P"], "jump": False}
+    assert by["OD Hadoken"] == {"name": "OD Hadoken", "dirs": "236", "buttons": ["P", "P"], "jump": False,
+                                "kind": "special"}
     assert by["Shoulder Throw"]["buttons"] == ["LP", "LK"] and by["Somersault Throw"]["dirs"] == "4"
     assert by["Drive Parry"]["buttons"] == ["MP", "MK"]
     assert by["Jumping Heavy Kick"]["jump"] and by["Aerial Tatsumaki Senpu-kyaku"]["jump"]
