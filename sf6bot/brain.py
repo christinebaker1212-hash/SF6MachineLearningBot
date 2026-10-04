@@ -42,6 +42,17 @@ def _meta(path: Path) -> dict:
         return {}
 
 
+def bot_side_ok(meta: dict, bot: int) -> bool:
+    """0.18.11: does the recorded bot side hold the bot's character? (Before 0.18.11 the side could be decided from a
+    previous match's character ids: the user's ranked session had a Blanka match saved with the bot as P1 = Blanka.)
+    Mirrors can't be checked this way and pass. Files from before the field existed: the bot played Ryu."""
+    chars = meta.get("characters") or []
+    bc = meta.get("bot_character") or "Ryu"
+    if len(chars) == 2 and chars[0] != chars[1] and bc in chars:
+        return chars[bot] == bc
+    return True
+
+
 def recordings(ds_root: Path) -> list[dict]:
     """[{path, players, source}] without counting the same replay twice (merged replays replace the
     recordings they were made from)."""
@@ -56,7 +67,7 @@ def recordings(ds_root: Path) -> list[dict]:
     for p in sorted((ds_root / "fights").glob("*.jsonl.gz")):
         notes = (_meta(p).get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
-        if bot is None:
+        if bot is None or not bot_side_ok(_meta(p), bot):
             continue
         src = "ranked" if "vs human ranked" in notes else "human" if "vs human" in notes else "cpu"
         out.append({"path": p, "players": (1 - bot,), "source": src, "bot": bot})

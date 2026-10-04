@@ -24,10 +24,10 @@ PLAYER_FIELDS = ("chara", "hp", "hp_max", "hp_recoverable", "drive", "drive_wait
 
 
 class DatasetBuilder:
-    def __init__(self, bits: dict | None = None) -> None:
+    def __init__(self, bits: dict | None = None, need_match_start: bool = False) -> None:
         self.bits = bits or load_input_bits()
         self.rows: list[dict] = []
-        self.tracker = EpisodeTracker()
+        self.tracker = EpisodeTracker(need_match_start=need_match_start)     # live fights: rounds from a match start
         self.events: list[dict] = []
         self._seen: set = set()
         self.duplicates = 0
@@ -39,12 +39,21 @@ class DatasetBuilder:
         self.lines_without_input = 0
         self.characters = [None, None]
         self._last_key = None
+        self.extra_meta: dict = {}   # e.g. the fighter's configured character ("bot_character")
+        self.prior_lines_dropped = 0 # 0.18.11: a previous match's lines before this match's start (live fights)
         self.src_counts: dict = {}   # exporter v6: lines written per game tick ("tick") vs per render ("frame")
 
     def add(self, raw: dict, t: float) -> None:
         for e in self.tracker.update(raw, t):
             e["t"] = t
             self.events.append(e)
+            if e["event"] == "match_start" and self.rows:
+                # 0.18.11 (live fights): the lines before this match's start are the previous match's (its result
+                # screen after a rematch); they share round / frame keys with this match and hid its frames as
+                # "duplicates" (the user's session: 1,779 lines of a Blanka round lost)
+                self.prior_lines_dropped = len(self.rows)
+                self.rows, self._seen, self._segment, self._last_key = [], set(), 0, None
+                self.characters = [None, None]
             if e["event"] == "fight_start":
                 self._fighting = True
             elif e["event"] in ("round_end", "round_start"):
@@ -103,6 +112,7 @@ class DatasetBuilder:
             "sf6bot_version": __import__("sf6bot").__version__,
             "characters": [character_name(c) for c in self.characters], "character_ids": self.characters,
             "frames": len(self.rows), "duplicate_lines_dropped": self.duplicates,
+            "previous_match_lines_dropped": self.prior_lines_dropped,
             "skipped_game_frames": self.skipped_frames,
             "skipped_after_ko": self.skipped_after_ko,
             "skipped_during_fight": self.skipped_in_fight,
@@ -112,6 +122,7 @@ class DatasetBuilder:
             "match": ({"winner": match[-1]["winner"], "score": match[-1]["score"]} if match else None),
             "input_encoding": "dir = numpad relative to facing (6 forward); buttons from measured bits; "
                               "raw mask kept in 'input' (screen-absolute)",
+            **self.extra_meta,
         }
 
     def save(self, root: str | Path, kind: str, source: str, notes: str = "") -> Path:

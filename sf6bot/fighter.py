@@ -38,6 +38,10 @@ from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 
 INTRO_IDS = {400, 401}
+
+
+class _SkipProgress(Exception):
+    """A match that is not entered in the progress report (joined after it started)."""
 RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741): cancelable into normals
 # 0.18.5 (user, 2026-10-04): a normal done out of a Drive Rush is +4 on hit and on block (SF6 rule; community value, also
 # combo_gen.RUSH_BONUS). 0.18.1 ranked: Ken's rushed normals landed 5 of 8; after blocking one the bot was hit within
@@ -1432,7 +1436,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     from .route_book import build as build_book
     from .side_probe import by_character, probe
     lines: queue.Queue = queue.Queue()
-    cur = {"data": DatasetBuilder(), "arrival": ArrivalMeter()}
+    cur = {"data": DatasetBuilder(need_match_start=True), "arrival": ArrivalMeter()}
     reader = open_state_reader(cfg, on_state=lines.put)
     if reader is None:
         return {}
@@ -1510,7 +1514,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     keys = lambda: (f"p{side['i'] + 1}", f"p{2 - side['i']}") if side["i"] is not None else (None, None)  # noqa: E731
     done: list[dict] = []
     summary = _new_match_summary(keys()[0])
-    tracker = EpisodeTracker(self_index=player)
+    tracker = EpisodeTracker(self_index=player, need_match_start=True)
     fighter = None
     exp = None
     learner = None       # live_moves.LiveMoveLearner: opponent moves learned from one sighting (0.16.0)
@@ -1576,7 +1580,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
 
     def finish_match() -> None:
         nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0, learner
-        data, cur["data"] = cur["data"], DatasetBuilder()
+        data, cur["data"] = cur["data"], DatasetBuilder(need_match_start=True)
         arrival, cur["arrival"] = cur["arrival"].summary(), ArrivalMeter()
         if arrival:
             summary["state_arrival"] = arrival
@@ -1644,6 +1648,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 print(f"  [{s_}] {t_}")
                 sess.narrate(t_, source=s_)
             if data.rows:
+                data.extra_meta["bot_character"] = fcfg.get("character")
+                if summary.get("partial"):
+                    data.extra_meta["partial"] = summary["partial"]
                 who = f"vs human{' ' + versus if versus else ''}" if versus else "vs cpu"
                 summary["dataset"] = str(data.save(ds_root, "fights", "scripted_fight",
                                                    f"bot={keys()[0]}, {who}, learned policy" if brain else
@@ -1658,16 +1665,21 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             sess.recorder.write_json("fight_summary.json", _overall(done))
             try:
                 from .progress import record_match
+                if summary.get("partial"):        # 0.18.11: joined after its start: neither a result nor a takeover
+                    raise _SkipProgress()
                 prog = record_match(ds_root, sess.recorder.dir, summary, session_rows, models_info(ds_root))
                 h = prog["history"].get("last_20") or {}
                 if h.get("win_rate") is not None:
                     print(f"  Progress: last {min(20, prog['history']['matches'])} matches {h['won']}-{h['lost']} "
                           f"({h['win_rate']:.0%}); this session {record['won']}-{record['lost']}.")
+            except _SkipProgress:
+                pass
             except Exception as e:                   # noqa: BLE001 - progress is a report, never stops a session
                 print(f"(progress file not written: {e})")
         if fixed_side is None:
             side.update(i=None, how=None, lag=None)
-        summary, tracker, fighter, pending = _new_match_summary(keys()[0]), EpisodeTracker(self_index=side["i"]), None, []
+        summary, tracker, fighter, pending = _new_match_summary(keys()[0]), EpisodeTracker(self_index=side["i"], need_match_start=True), \
+            None, []
         match_end_t, was_active, exp, learner = None, False, None, None
 
     try:
@@ -1718,7 +1730,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if fight_on:
                     cur["arrival"].add(st.t_recv, st.raw.get("f"))
                 t = st.t_recv
+                split_ = False
                 for e in tracker.update(st.raw, t):
+                    if e["event"] == "match_start" and (was_active or summary["decisions"]):
+                        # 0.18.11: a new match starts while the bot was playing one it joined after its start (no
+                        # result can be known): close that one as unfinished; this line starts the new match
+                        summary["partial"] = "joined after the match had started"
+                        split_ = True
+                        break
                     if e["event"] == "round_end":
                         won = side["i"] is not None and e.get("winner") == side["i"]
                         summary["rounds"].append({"round": e.get("round"), "reason": e.get("reason"), "bot_won": won})
@@ -1754,6 +1773,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         sess.narrate("Fight!", source="measured")
                         if rmenu is not None:
                             rmenu.new_match()
+                if split_:
+                    match_over, end_i = True, i - 1
+                    break
                 if meter is not None and st.in_battle and me_key:
                     meter.player = me_key
                     meter.on_line(st.raw)
@@ -1869,18 +1891,22 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     side.update(i=None, how=None, lag=None)
                     fighter, exp, learner = None, None, None
                     summary = _new_match_summary(None)
-                    tracker = EpisodeTracker(self_index=None)
+                    tracker = EpisodeTracker(self_index=None, need_match_start=True)
                     if side_check is not None:
                         side_check.reset()
                 set_panel(False)
                 continue
             timer = st.raw.get("stage_timer")
             p1r, p2r = st.raw.get("p1") or {}, st.raw.get("p2") or {}
-            fight_on = (match_end_t is None and isinstance(timer, int) and timer >= FIGHT_START_FRAME
+            # 0.18.11: and in a round this match's tracker saw start (not a previous match's result screen)
+            fight_on = (match_end_t is None and tracker.round_live and isinstance(timer, int)
+                        and timer >= FIGHT_START_FRAME
                         and (_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0
                         and p1r.get("action_id") not in INTRO_IDS and p2r.get("action_id") not in INTRO_IDS)
             if c.armed and not fight_on:
                 why = ("the match is over" if match_end_t is not None else
+                       "the round started before I was watching (a previous match's screen, or joined late)"
+                       if not tracker.round_live and isinstance(timer, int) and timer >= FIGHT_START_FRAME else
                        "intro" if p1r.get("action_id") in INTRO_IDS or p2r.get("action_id") in INTRO_IDS else
                        "a player at 0 hp" if not ((_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0) else
                        f"round clock {timer} < {FIGHT_START_FRAME}" if isinstance(timer, int) else "no round clock")

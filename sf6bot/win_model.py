@@ -60,7 +60,7 @@ TRUST_FULL = 0.10           # a 10% better held-out loss than the per-choice ave
 
 def recordings(ds_root: Path) -> list[dict]:
     """[{path, weights: {player: weight}, source}] for the win model."""
-    from .brain import _meta
+    from .brain import _meta, bot_side_ok
     from .brain import recordings as bc_recordings
     ds_root = Path(ds_root)
     out = []
@@ -72,7 +72,7 @@ def recordings(ds_root: Path) -> list[dict]:
         meta = _meta(p)
         notes = (meta.get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
-        if bot is not None:
+        if bot is not None and bot_side_ok(meta, bot):
             old = _version(meta.get("sf6bot_version")) < CURRENT_SINCE
             fights.append((p, bot, "ranked" if "ranked" in notes else "human" if "vs human" in notes else "cpu", old))
     fights = fights[-FIGHTS_MAX:]

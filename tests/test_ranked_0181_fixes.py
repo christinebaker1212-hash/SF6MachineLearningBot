@@ -404,3 +404,44 @@ def test_side_check_notices_presses_on_the_other_players_inputs():
     assert not sc.wrong()                             # not enough evidence yet
     run("p1", 1)
     assert sc.wrong() and sc.seen["other"] == 6
+
+
+def _round_lines(rnd, ko_player, start=0, n=600, chara=(1, 22)):
+    """A synthetic round: the clock from `start`, the fight from 190, `ko_player` at 0 hp on the last 30 lines."""
+    out = []
+    for k in range(n):
+        st = start + k
+        hp = [10000, 10000]
+        if k >= n - 30:
+            hp[ko_player] = 0
+        out.append({"in_battle": True, "ready": True, "round": rnd, "stage_timer": st,
+                    "p1": {"hp": hp[0], "chara": chara[0], "action_id": 1, "input": 0, "facing_right": True},
+                    "p2": {"hp": hp[1], "chara": chara[1], "action_id": 1, "input": 0, "facing_right": False}})
+    return out
+
+
+def test_a_match_counts_only_rounds_after_its_start():
+    # 0.18.11, the user's session: a tracker that began inside the previous match counted its last round, closed the
+    # next match a round early, and the shift ran through every rematch after it
+    from sf6bot.dataset import DatasetBuilder
+    from sf6bot.episodes import EpisodeTracker
+    prev_match_round = _round_lines(1, 0)                                  # joined: the previous match's round 1
+    match = _round_lines(0, 1) + _round_lines(1, 1)                        # this match: P1 wins 2-0
+    events = []
+    old, new = EpisodeTracker(), EpisodeTracker(need_match_start=True)
+    old_ends, new_ends = [], []
+    for k, raw in enumerate(prev_match_round + match):
+        old_ends += [e for e in old.update(raw, k / 60) if e["event"] == "match_end"]
+        ev = new.update(raw, k / 60)
+        events += ev
+        new_ends += [e for e in ev if e["event"] == "match_end"]
+    assert old_ends and tuple(old_ends[0]["score"]) != (2, 0)                    # the old way: closed after one real round
+    assert [e["event"] for e in events].count("match_start") == 1
+    assert len(new_ends) == 1 and new_ends[0]["winner"] == 0 and tuple(new_ends[0]["score"]) == (2, 0)
+    assert not EpisodeTracker(need_match_start=True).round_live
+    # the recording drops the previous match's lines at this match's start: same round / frame keys, no "duplicates"
+    b = DatasetBuilder(bits={"UP": 1, "DOWN": 2, "LEFT": 4, "RIGHT": 8, "LP": 16, "MP": 32, "HP": 64, "LK": 128,
+                             "MK": 256, "HK": 512}, need_match_start=True)
+    for k, raw in enumerate(prev_match_round + match):
+        b.add(raw, k / 60)
+    assert b.duplicates == 0 and len(b.rows) == len(match) and b.prior_lines_dropped == len(prev_match_round)

@@ -2503,6 +2503,25 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   HIGHEST priority and polls with `time.sleep` (high-resolution timer) instead of `Event.wait`. Not verified under a
   stream; the thoughts line now names another busy program as the likely cause.
 
+## 0.18.12: match boundaries after rematches (same session)
+- **The second run's results were shifted by a round.** The bot was restarted inside a Ryu mirror; the new match tracker
+  counted that match's last round as a round of the next match, closed the next match one round early, and with
+  rematches (no menus between) every following match was cut the same way: each file held the previous match's last
+  round + this match's first. Side by character was then decided from the previous match's ids (a battle's first lines
+  carry them): the first Blanka match was played and saved with the bot as P1 = Blanka, and recorded as a WIN; it was a
+  0-2 loss. Its real round 1 was dropped as "duplicates" (1,779 lines) of the Akuma round 1 earlier in the same file.
+  Run 2 really went: mirror lost 0-2, Akuma lost 0-2 twice, Blanka lost 0-2, Blanka won 2-1 (S said L, L, L, W, W).
+  Run 1 (18 matches, menus or clean closes between) was not affected.
+- **Fix:** `EpisodeTracker(need_match_start=True)` (live fights) counts rounds only after a `match_start` (round 0
+  with the clock back before 190); `round_live` = a round it saw start. `fight_on` needs it, so the bot never fights a
+  previous match's result screen. A match joined after its start is closed as unfinished (`partial`) at the next match
+  start and left out of progress (not a takeover). Fight recordings drop the lines before the match start
+  (`previous_match_lines_dropped`) and record `bot_character`. Training skips fight files whose recorded bot side does
+  not hold the bot's character (`brain.bot_side_ok`; mirrors pass). Test: a joined round + a 2-0 match (old: closed
+  after one real round; new: 2-0) and no duplicate drops. Replaying the user's run 2 through the new tracker gives the
+  real boundaries (where the recordings still hold the lines).
+- The progress report on the user's PC keeps the one false win from run 2 (datasets/ladder is not rewritten).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

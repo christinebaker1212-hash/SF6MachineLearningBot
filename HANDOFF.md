@@ -241,7 +241,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.11 (latest):** rematch F presses stop at the next match; side re-checked (stale characters, abandoned battles,
+**0.18.12 (latest):** match boundaries after rematches (a joined match's round no longer counts for the next one;
+results and recordings were shifted by a round in the user's second run, one false win). CLAUDE.md "0.18.12".
+
+**0.18.11:** rematch F presses stop at the next match; side re-checked (stale characters, abandoned battles,
 own presses on the other player's mask); process / reader priority against lag while streaming (CLAUDE.md "0.18.11").
 The user sent 24 matches instead of 100 ("it needs work now"): the to-do items below are being built from them.
 

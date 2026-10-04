@@ -45,9 +45,14 @@ class RoundResult:
 class EpisodeTracker:
     """Feed GameState-like dicts in order with `update(raw, t)`; returns a list of events."""
 
-    def __init__(self, rounds_to_win: int = 2, self_index: int | None = None) -> None:
+    def __init__(self, rounds_to_win: int = 2, self_index: int | None = None, need_match_start: bool = False) -> None:
         self.rounds_to_win = rounds_to_win
         self.self_index = self_index      # which player the bot controls, if known
+        # 0.18.11: count rounds only once a match has visibly started (round 0 with the clock at its start). The user's
+        # ranked session (2026-10-04): after rematches each new tracker began inside the previous match (its last round
+        # or result screen), counted that round as this match's, closed the match a round early, and the shift carried
+        # through every rematch after it. Live fights use this; replays and recordings keep the old behaviour.
+        self.match_started = not need_match_start
         self.rounds: list[RoundResult] = []
         self.wins = [0, 0]
         self.match_over = False
@@ -153,15 +158,18 @@ class EpisodeTracker:
         new_round = rnd != self._round
         if not new_round and self._prev is not None and isinstance(st, int) and \
                 isinstance(self._prev.get("stage_timer"), int) and st + 100 < self._prev["stage_timer"] and \
-                not self._fight_started:
-            new_round = True  # intro -> round start reset (same round index)
+                (not self._fight_started or not self.match_started):
+            new_round = True  # intro -> round start reset (same round index); or a new match after a joined one
         if new_round:
-            if self._round is not None and not self._round_ended and self._fight_started:
+            if self._round is not None and not self._round_ended and self._fight_started and self.match_started:
                 # Round changed without an observed KO: timeout or missed data.
                 h0, h1 = self._hp(self._prev or raw, 0), self._hp(self._prev or raw, 1)
                 winner = None if h0 is None or h1 is None or h0 == h1 else (0 if h0 > h1 else 1)
                 out += self._end_round(self._prev or raw, "unknown", winner, "low",
                                        ["round number changed without a KO being observed"])
+            if not self.match_started and rnd == 0 and isinstance(st, int) and st < FIGHT_START_FRAME:
+                self.match_started = True          # (after the check above: the round before it is not counted)
+                out.append({"event": "match_start", "round": rnd, "stage_timer": st})
             if self.match_over:  # a new match started
                 self.wins = [0, 0]
                 self.match_over = False
@@ -182,7 +190,7 @@ class EpisodeTracker:
             self._fight_started = True
             self._fight_start_timer = st
             out.append({"event": "fight_start", "round": rnd, "stage_timer": st})
-        if self._fight_started and not self._round_ended:
+        if self._fight_started and not self._round_ended and self.match_started:
             if self._hist:
                 for i, k in enumerate(("p1", "p2")):
                     d0 = (self._hist[-1][1].get(k) or {}).get("drive")
@@ -205,6 +213,12 @@ class EpisodeTracker:
                                            ["99 s x 60 frames assumed; no timeout observed yet"])
         self._prev = raw
         return out
+
+    @property
+    def round_live(self) -> bool:
+        """A round this tracker saw start (fight start at its clock) is being fought: False on a previous match's
+        result screen or a round joined after its start."""
+        return self._fight_started and not self._round_ended
 
     def agent_result(self) -> str | None:
         if self.self_index is None or not self.match_over:
