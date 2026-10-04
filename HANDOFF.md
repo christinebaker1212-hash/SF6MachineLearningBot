@@ -241,7 +241,18 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.9 (latest):** result screen F every 2 s until back on Fighting Ground; communication-error steps up to 6 in a row.
+**Waiting: the user's 100-match ranked set (2026-10-04, 0.18.10).** Analyse it before building anything else (win rate
+with takeovers both ways, `game_fps`, reversals, oki / rush pressure, command grabs, result-menu timings, communication
+errors, per character).
+
+**Planned AFTER that analysis (user, 2026-10-04): the opponent's ranked LP and MR.** Not read today (no field known).
+Routes to find it: a REFramework field (look for the match's player info / rank data; memory reading is within the
+disclosed method), else screen reading of the VS / loading screen (rank, LP, MR are shown there). LP is per character;
+MR exists only at Master. Uses: win rate per opponent rank band in `progress.md` and the ladder history; an opponent
+strength input for the win model and the opponent assessment (CLAUDE.md "Requirement: opponent assessment"); weighting
+data by the strength of who it came from.
+
+**0.18.9:** result screen F every 2 s until back on Fighting Ground; communication-error steps up to 6 in a row.
 
 **0.18.8:** unattended ranked: result screen F from the game state, communication errors on Fighting Ground by
 screen reading (CLAUDE.md "0.18.8"); 0.18.6 user punish rules (Ingrid's teleport), 0.18.7 takeovers in progress. First
