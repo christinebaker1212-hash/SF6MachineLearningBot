@@ -41,13 +41,17 @@ from __future__ import annotations
 import math
 import random
 
-RESPONSES = ("throw", "strike", "shimmy", "wait")
+# 0.18.4: "cmd_grab" = a command grab (a special or super Capcom marks "Throw"). Before, it counted as a strike (its id
+# is a special's), so every command grab taught the bot to block or parry MORE, the two answers that lose to it. The
+# bot was grabbed by every command grab it ever saw (user, 2026-10-04).
+RESPONSES = ("throw", "strike", "shimmy", "wait", "cmd_grab")
 SITUATIONS = {"after_block": "after blocking", "after_hit": "after being hit", "wakeup": "getting up",
               "approach": "with the opponent walking in", "their_wakeup": "with the opponent getting up next to me"}
 NICE = {"block": "block", "delay_tech": "delay tech", "tech": "tech", "jab": "jab", "back_dash": "back dash",
         "jump": "jump", "reversal": "reversal", "parry": "Drive Parry", "meaty": "meaty", "throw": "throw",
         "shimmy": "shimmy"}
-RESP_NICE = {"throw": "threw", "strike": "attacked", "shimmy": "backed off (shimmy)", "wait": "waited"}
+RESP_NICE = {"throw": "threw", "strike": "attacked", "shimmy": "backed off (shimmy)", "wait": "waited",
+             "cmd_grab": "command-grabbed"}
 
 
 def _prefix(seq: str) -> int:
@@ -79,6 +83,7 @@ class Defense:
         self.pad = max((_prefix(s) + e for oc in list(self.options.values()) + list(self.offense.values())
                         for s, e in _seqs(oc)), default=0)
         self.last: dict = {}
+        self.has_cmd_grab = False      # the opponent has a ground command grab (set by the fighter from its move data)
 
     def _set(self, situation: str) -> tuple[dict, dict]:
         if situation in self.offense_situations and self.offense:
@@ -86,7 +91,9 @@ class Defense:
         return self.options, self.payoff
 
     def odds(self, situation: str) -> dict:
-        prior = self.c.get("prior") or {k: 1.0 for k in RESPONSES}
+        prior = dict(self.c.get("prior") or {k: 1.0 for k in RESPONSES})
+        if not self.has_cmd_grab:
+            prior["cmd_grab"] = 0.0           # no command grab in this opponent's move list: only what is seen counts
         seen = self.exp.responses(situation) if self.exp is not None else {}
         w = {k: float(prior.get(k, 0.0)) + float(seen.get(k, 0.0)) for k in RESPONSES}
         tot = sum(w.values()) or 1.0
@@ -149,6 +156,8 @@ def classify_response(watch: dict, raw: dict, me_key: str, op_key: str, ids: dic
     oa, ma = op.get("action_id"), me.get("action_id")
     if oa in ids["throw"] or ma in ids["thrown"]:
         return "throw"
+    if oa in ids.get("cmd_grab", ()):
+        return "cmd_grab"
     stunned = (me.get("hitstun") or 0) > 0 or (me.get("blockstun") or 0) > 0
     if not stunned and not (isinstance(ma, int) and 200 <= ma < 400):
         watch["free_seen"] = True              # the bot is free: a new block / hit from here is a strike

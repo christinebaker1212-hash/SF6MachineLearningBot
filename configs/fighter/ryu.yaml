@@ -163,6 +163,10 @@ defense:
   approach: true           # 0.18.0: the opponent walking in to within approach_dist in neutral is a moment too
   approach_dist: 1.15
   approach_reset: 1.6      # a new approach once the opponent was this far away again
+  # 0.18.4: against an opponent with a ground command grab (Capcom "Throw" property on a special / super), walking in
+  # is a moment from farther out. ESTIMATES: command grab ranges are not in Capcom's data or measured yet.
+  approach_dist_cmd_grab: 1.6
+  approach_reset_cmd_grab: 2.0
   watch_frames: 30         # nothing within this many frames after it = the opponent "waited"
   # MEASURED (0.17.5, 13 recordings: Ryu, Ken, Akuma, Jamie, Viper): the last get-up action lasts 30 frames, then the
   # player is free (the exported action length says 42-50: the animation). Only these ids are wake-up moments.
@@ -170,7 +174,8 @@ defense:
   temperature: 0.35        # lower = lean harder on the best-looking option (still a mix)
   model_weight: 4          # tries of an option before its own measured result outweighs the payoff table
   # starting odds of the opponent's answer (counts are added per opponent, learning.Experience)
-  prior: {throw: 1.5, strike: 1.5, shimmy: 0.5, wait: 1.5}
+  # cmd_grab counts only against opponents that have a ground command grab (0.18.4)
+  prior: {throw: 1.5, strike: 1.5, shimmy: 0.5, wait: 1.5, cmd_grab: 1.0}
   options:
     block:      {seq: "1@12"}
     delay_tech: {seq: "1@4 4+LP+LK@3 1@8"}     # hold down-back, then back + throw: late enough to block a strike
@@ -192,14 +197,14 @@ defense:
   # ESTIMATES from game knowledge (NOT measured), thousands of hp for the bot when the opponent answers with
   # each option. What each option actually scores against an opponent replaces these as tries accumulate.
   payoff:
-    block:      {throw: -1.2, strike: 0.0, shimmy: 0.0, wait: 0.0}
-    delay_tech: {throw: 0.0, strike: -0.2, shimmy: -1.6, wait: -0.3}
-    tech:       {throw: 0.0, strike: -0.9, shimmy: -1.6, wait: -0.3}
-    jab:        {throw: 0.3, strike: -0.9, shimmy: -0.6, wait: 0.2}
-    back_dash:  {throw: 0.0, strike: -1.0, shimmy: -0.2, wait: 0.0}
-    jump:       {throw: 0.6, strike: -1.2, shimmy: -0.4, wait: -0.3}
-    reversal:   {throw: 1.2, strike: 1.2, shimmy: -2.5, wait: -2.5}   # a blocked Shoryuken is a full punish
-    parry:      {throw: -1.5, strike: 0.6, shimmy: -0.4, wait: -0.2}
+    block:      {throw: -1.2, strike: 0.0, shimmy: 0.0, wait: 0.0, cmd_grab: -2.5}
+    delay_tech: {throw: 0.0, strike: -0.2, shimmy: -1.6, wait: -0.3, cmd_grab: -2.5}
+    tech:       {throw: 0.0, strike: -0.9, shimmy: -1.6, wait: -0.3, cmd_grab: -2.5}
+    jab:        {throw: 0.3, strike: -0.9, shimmy: -0.6, wait: 0.2, cmd_grab: 0.3}
+    back_dash:  {throw: 0.0, strike: -1.0, shimmy: -0.2, wait: 0.0, cmd_grab: 0.3}
+    jump:       {throw: 0.6, strike: -1.2, shimmy: -0.4, wait: -0.3, cmd_grab: 1.5}
+    reversal:   {throw: 1.2, strike: 1.2, shimmy: -2.5, wait: -2.5, cmd_grab: 1.5}   # a blocked Shoryuken is a full punish
+    parry:      {throw: -1.5, strike: 0.6, shimmy: -0.4, wait: -0.2, cmd_grab: -3.0}
   # 0.18.3: the opponent getting up next to the bot is the bot's OFFENCE (oki), not a defence: its own options, timed to
   # the opponent's first free frame (the 30-frame get-up, MEASURED). `early`: the decisive input lands that many frames
   # before it, so a meaty's active frames cover it (2MK start-up 8, active 8-10: Capcom). Payoffs are ESTIMATES (thousands
@@ -213,10 +218,16 @@ defense:
       shimmy: {seq: "4@14"}
       block:  {seq: "1@12"}
     payoff:
-      meaty:  {throw: 1.0, strike: 0.2, shimmy: 0.0, wait: 0.4}
-      throw:  {throw: 0.0, strike: -0.8, shimmy: -0.6, wait: 1.2}
-      shimmy: {throw: 1.5, strike: -0.2, shimmy: 0.0, wait: -0.1}
-      block:  {throw: -1.2, strike: 0.5, shimmy: 0.0, wait: 0.0}
+      meaty:  {throw: 1.0, strike: 0.2, shimmy: 0.0, wait: 0.4, cmd_grab: 1.0}
+      throw:  {throw: 0.0, strike: -0.8, shimmy: -0.6, wait: 1.2, cmd_grab: -0.5}
+      shimmy: {throw: 1.5, strike: -0.2, shimmy: 0.0, wait: -0.1, cmd_grab: 1.5}
+      block:  {throw: -1.2, strike: 0.5, shimmy: 0.0, wait: 0.0, cmd_grab: -2.5}
+# 0.18.4: a ground command grab that whiffed under the airborne bot: a jump attack on the way down (j.HK), then the
+# landing is a whiff punish. Payoffs for "cmd_grab" (above) are ESTIMATES: a neutral jump / back dash / invincible
+# reversal beats a command grab, a block / tech never does, and a grabbed parry is a punish counter.
+cmd_grab:
+  jump_attack: "5+HK@3"
+  max_dist: 1.6
 # 0.18.3: after knocking the opponent down, walk in so their get-up is a pressure moment of the bot's (above)
 oki:
   enabled: true

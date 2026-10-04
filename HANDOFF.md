@@ -241,7 +241,12 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.3 (latest):** the six fixes from the 0.18.1 session (CLAUDE.md "0.18.1 session" and "0.18.3"). Next session:
+**0.18.4 (latest):** command grabs (CLAUDE.md "0.18.4"). The user is cataloguing the cast with C (guard None), then
+B; a major game patch is ~10 days away (2026-10-14): the user will paste Capcom's patch notes and every dataset gets
+updated together (Capcom frame data, catalogs marked stale per changed move, combo routes to retest, config values).
+Next ranked check: `command_grabs` in S against Zangief / Manon / Lily, plus the 0.18.3 checks below.
+
+**0.18.3:** the six fixes from the 0.18.1 session (CLAUDE.md "0.18.1 session" and "0.18.3"). Next session:
 check `state_arrival.game_fps` (30 = the game drew slowly: try ranked.bat without the panel), defence reversals (OD
 Shoryuken / SA1 / SA3 results), `defense.their_wakeup` (meaty / throw / shimmy), sweep counts, live names for charge
 characters. Suggest catalogues (C) of frequent opponents: E. Honda, Guile, Luke.

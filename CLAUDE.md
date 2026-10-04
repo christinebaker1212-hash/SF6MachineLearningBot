@@ -2393,6 +2393,29 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
 - To do by the user (biggest single gain against charge characters): C with E. Honda / Guile / Luke as P1 in Training
   Mode catalogues that character's real ids; the bot then punishes them from measured data.
 
+## 0.18.4: command grabs (user, 2026-10-04: "it got hit with every command grab it's ever seen")
+- **Why it never adapted:** the defence game sorted the opponent's answer into throw / strike / shimmy / wait, and a command
+  grab's id is a special's, so it counted as a STRIKE: every command grab taught the bot to block or parry more, the two
+  answers that lose to it. A command grab can't be jumped on reaction either (Screw Piledriver start-up 5, Capcom; the bot
+  sees + inputs in ~4-5 frames), so the answer has to be a prediction at the moments grabs come.
+- **Recognition** (`fighter.cmd_grab_kind`, from Capcom): a special / super with the property "Throw" (ordinary throws are
+  in the Throws section). "ground" = Screw Piledriver, Russian Suplex, Siberian Express, Bolshoi Storm Buster ...; "air" =
+  only hits airborne opponents (Borscht Dynamite, Aerial Russian Slam: jumping is what they catch; not answered by
+  jumping). Entries from catalogs, move maps and live names carry `cmd_grab`; the ids need the opponent's catalog (C) or a
+  good move map.
+- **Fifth answer `cmd_grab`** in `defense.RESPONSES` / `classify_response`: counted only against opponents with a ground
+  command grab (prior 1.0, else 0). Payoffs (ESTIMATES): neutral jump +1.5, invincible reversal +1.5, back dash / jab +0.3,
+  block / tech / delay tech -2.5, parry -3.0 (a grabbed parry is a punish counter); on the opponent's wake-up meaty +1.0,
+  shimmy +1.5, throw -0.5, block -2.5. Learned per opponent like the rest: a Zangief who grabs a lot gets jumped a lot.
+- **Approach range:** against a grappler the walk-in moment fires from 1.6 (reset 2.0) instead of 1.15 (ESTIMATES; grab
+  ranges are not in Capcom's data).
+- **Punish** (rule 1a, `cmd_grab_punish`): a ground command grab whiffing under the falling bot (below 1.3, within 1.6) -> j.HK
+  once; the landing is a whiff punish with the grab's Capcom total.
+- Round review: command grabs >= 15% of a round's damage -> "expect command grabs" for the next round. `fight_summary.
+  command_grabs` {seen, grabbed, jump_punish, ids} and a thoughts line.
+- MOCK-tested (`tests/test_ranked_0181_fixes.py`, real Zangief Capcom page); not verified in game. The user is running C for
+  the cast (opponent ids), then B.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

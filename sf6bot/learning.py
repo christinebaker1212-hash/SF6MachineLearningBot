@@ -324,6 +324,10 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                    if cr else "")
                                 + f"2MK confirmed into a super x{su.get('confirms', 0)}; Super Art punishes "
                                   f"x{su.get('punishes', 0)}."))
+    cg = summary.get("command_grabs") or {}
+    if cg.get("seen") or cg.get("grabbed"):
+        out.append(("measured", f"{opp}'s command grabs: started {cg.get('seen', 0)}, landed on me {cg.get('grabbed', 0)}; "
+                                f"I jump-punished {cg.get('jump_punish', 0)} that whiffed under me."))
     oi = summary.get("opponent_inputs_seen") or {}
     if oi.get("lines"):
         out.append(("measured", f"{opp}'s input bits in game memory: set on {oi['with_input']:,} of {oi['lines']:,} lines"

@@ -143,6 +143,22 @@ def guard_of(properties: str | None) -> str | None:
     return None
 
 
+def cmd_grab_kind(row: dict | None) -> str | None:
+    """0.18.4: a COMMAND GRAB = a special or super whose Capcom property is "Throw" (ordinary throws are in the Throws
+    section). "ground" grabs a standing / crouching bot (Screw Piledriver, Russian Suplex, Bolshoi Storm Buster): a neutral
+    jump, a back dash or an invincible reversal beats it, a block never does. "air" only hits airborne opponents
+    (Borscht Dynamite, Aerial Russian Slam: Capcom notes "Only hits airborne" / "Can only ... airborne"): jumping is what
+    it punishes."""
+    if not row or not (row.get("properties") or "").lower().startswith("throw"):
+        return None
+    if "throw" in (row.get("section") or "").lower():
+        return None
+    notes = (row.get("notes") or "").lower()
+    if "only hits airborne" in notes or ("can only" in notes and "airborne" in notes):
+        return "air"
+    return "ground"
+
+
 def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: dict) -> int:
     """Add Capcom's data to known ids by move name: block type, projectile, start-up, damage, and
     on-block advantage where the catalog has no measured guard-All value (a catalog run with the
@@ -159,6 +175,7 @@ def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: 
         if not row:
             continue
         info.setdefault("guard", guard_of(row.get("properties")))
+        info.setdefault("cmd_grab", cmd_grab_kind(row))
         info.setdefault("projectile", "projectile" in (row.get("properties") or "").lower())
         info.setdefault("startup", row.get("startup_n"))
         info.setdefault("total", row.get("total_n"))
@@ -212,6 +229,9 @@ class ScriptedFighter:
         self._approach_fired = False
         self._their_wake_fired = None
         self._crumple_t0, self._crumple_done = None, False
+        self._cg_n, self._cg, self._cg_punished, self._me_y_prev = -1, set(), None, 0.0
+        self.cmd_grab_stats = {"seen": 0, "grabbed": 0, "jump_punish": 0}
+        self.cmd_grab_ids()
         self.super_stats: dict = {"crumple": {}, "confirm": 0, "punish": 0}
         # 0.18.0 round review: what opened up the damage the bot took this round, and what to change next round
         self.round_taken: dict = {}
@@ -448,6 +468,10 @@ class ScriptedFighter:
         if (_num(me.get("hitstun")) or 0) > 0:
             self.blocked_id = None
             return Decision("release", reason="in hitstun", rule="hitstun")
+        # 1a. a command grab whiffed under the airborne bot: punish it (0.18.4)
+        cg = self._cmd_grab_punish(me, op, dist)
+        if cg is not None:
+            return cg
         # 1b. the opponent crumpled (the bot's Drive Impact connected): cash out (0.18.1)
         cf = self._crumple_followup(raw, me, op, dist)
         if cf is not None:
@@ -646,11 +670,14 @@ class ScriptedFighter:
         dc = self.c.get("defense") or {}
         if self.defense is None or not dc.get("approach", True):
             return None
-        if dist > float(dc.get("approach_reset", 1.6)):
+        reset_ = dc.get("approach_reset_cmd_grab", 2.0) if self.cmd_grab_ids() else dc.get("approach_reset", 1.6)
+        if dist > float(reset_):
             self._approach_fired = False
             return None
         mx, ox = _num(me.get("x")), _num(op.get("x"))
-        if (self._approach_fired or mx is None or ox is None or dist > float(dc.get("approach_dist", 1.15))
+        # 0.18.4: a grappler's command grab reaches farther than a throw (an ESTIMATE in the config, not measured)
+        reach_ = dc.get("approach_dist_cmd_grab", 1.6) if self.cmd_grab_ids() else dc.get("approach_dist", 1.15)
+        if (self._approach_fired or mx is None or ox is None or dist > float(reach_)
                 or (_num(op.get("y")) or 0.0) > 0.05 or self.busy(me) is not None or not self.vel_ok):
             return None
         toward = (mx - ox) * self.op_vx > 0.004              # walking or dashing at the bot
@@ -658,6 +685,35 @@ class ScriptedFighter:
             return None
         self._approach_fired = True
         return self._commit_defense("approach", raw, me, op, dist, t)
+
+    def cmd_grab_ids(self) -> set:
+        """The opponent's GROUND command grab ids (catalog / move map / live names + Capcom's "Throw" property), refreshed
+        when its move knowledge grows. Tells the defence game whether this opponent has one at all."""
+        if len(self.opp) != self._cg_n:
+            self._cg_n = len(self.opp)
+            self._cg = {a for a, v in self.opp.items() if v.get("cmd_grab") == "ground"}
+            if self.defense is not None:
+                self.defense.has_cmd_grab = bool(self._cg)
+        return self._cg
+
+    def _cmd_grab_punish(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.18.4: the opponent's ground command grab whiffed under the airborne bot (a jump the defence game chose, or any
+        jump): its recovery is long, so press a jump attack on the way down; the landing is then a whiff punish
+        (rule 6, with the grab's Capcom total). Once per grab."""
+        cc = self.c.get("cmd_grab") or {}
+        oa, y = op.get("action_id"), _num(me.get("y")) or 0.0
+        falling = y < self._me_y_prev
+        self._me_y_prev = y
+        if oa not in self.cmd_grab_ids() or self._cg_punished == self.op_onset or y <= 0.05:
+            return None
+        from .neutral_policy import AIR_ATTACK_MAX_Y
+        if not falling or y > AIR_ATTACK_MAX_Y or dist > float(cc.get("max_dist", 1.6)):
+            return None
+        self._cg_punished = self.op_onset
+        self.cmd_grab_stats["jump_punish"] += 1
+        name = (self.opp.get(oa) or {}).get("name") or f"action {oa}"
+        return Decision("seq", "jump attack (command grab whiffed)", cc.get("jump_attack", "5+HK@3"), rule="cmd_grab_punish",
+                        reason=f"{name} whiffed under me at {dist:.2f}: jump attack on the way down, then punish the landing")
 
     def _super(self, key: str) -> dict | None:
         m = (self.c.get("moves") or {}).get(key)
@@ -819,7 +875,9 @@ class ScriptedFighter:
         aid = me.get("action_id")
         if rr["hp"] is not None and hp is not None and hp < rr["hp"]:
             if rr["free"]:
-                rr["cat"] = opener_category(op, aid)
+                rr["cat"] = "command grab" if op.get("action_id") in self.cmd_grab_ids() else opener_category(op, aid)
+                if rr["cat"] == "command grab":
+                    self.cmd_grab_stats["grabbed"] += 1
                 self.round_taken.setdefault(rr["cat"], [0, 0])[0] += 1
             self.round_taken.setdefault(rr["cat"], [0, 0])[1] += int(rr["hp"] - hp)
         rr["hp"] = hp
@@ -842,6 +900,9 @@ class ScriptedFighter:
         if share.get("throw", 0) >= 0.2:
             out["changes"].append("expect throws at pressure moments")
             out["throws"] = True
+        if share.get("command grab", 0) >= 0.15:
+            out["changes"].append("expect command grabs at pressure moments")
+            out["cmd_grabs"] = True
         return out
 
     def _track_own_attack(self, me: dict, op: dict) -> None:
@@ -880,6 +941,8 @@ class ScriptedFighter:
         self._track_damage_taken(me, op)
         if oa != self.op_move["id"]:
             self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False}
+            if oa in self.cmd_grab_ids():
+                self.cmd_grab_stats["seen"] += 1
             if (self.opp.get(oa) or {}).get("projectile"):
                 d_ = player_distance(me, op)
                 if d_ is not None and isinstance(tmr, int):
@@ -902,7 +965,7 @@ class ScriptedFighter:
         if self.watch is not None:
             from .defense import classify_response
             kind = classify_response(self.watch, raw, me_key, op_key,
-                                     {"throw": self.throw_ids, "thrown": self.thrown_ids})
+                                     {"throw": self.throw_ids, "thrown": self.thrown_ids, "cmd_grab": self.cmd_grab_ids()})
             if kind is not None:
                 st = self.defense_stats.setdefault(self.watch["sit"], {"moments": 0, "options": {}, "responses": {}})
                 st["responses"][kind] = st["responses"].get(kind, 0) + 1
@@ -1389,6 +1452,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["supers"] = {"crumple_followups": dict(fighter.super_stats["crumple"]),
                                      "confirms": fighter.super_stats["confirm"],
                                      "punishes": fighter.super_stats["punish"]}
+                if fighter.cmd_grab_ids():
+                    summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()))
                 summary["input_delay_used"] = fighter.lead
             if learner is not None:
                 try:
@@ -1514,6 +1579,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                 if rv.get("throws"):
                                     for sit_ in ("after_block", "after_hit", "wakeup", "approach", "their_wakeup"):
                                         exp.response(sit_, "throw")
+                                if rv.get("cmd_grabs"):
+                                    for sit_ in ("after_block", "after_hit", "wakeup", "approach", "their_wakeup"):
+                                        exp.response(sit_, "cmd_grab")
                             top = sorted(rv["taken"].items(), key=lambda kv: -kv[1]["damage"])[:2]
                             if top:
                                 sess.narrate("Round review: most damage from " + ", ".join(

@@ -149,3 +149,68 @@ def test_recordings_keep_the_render_counter():
     p = {"x": 0.0, "y": 0.0, "hp": 10000, "action_id": 1}
     b.add({"ready": True, "in_battle": True, "stage_timer": 300, "round": 0, "f": 1234, "p1": p, "p2": p}, 1.0)
     assert b.rows and b.rows[-1].get("f") == 1234
+
+
+# ---- 0.18.4: command grabs ---------------------------------------------------------------------------------------------
+
+def test_command_grabs_are_recognised_from_capcom_data():
+    import gzip
+    from sf6bot import framedata as fd
+    from sf6bot.fighter import cmd_grab_kind
+    rows = {m["name"]: m for m in fd.parse_frame_page(gzip.open(
+        Path(__file__).parent / "data" / "capcom_zangief_frame_table.html.gz", "rt", encoding="utf-8").read())}
+    assert cmd_grab_kind(rows["L Screw Piledriver"]) == "ground"
+    assert cmd_grab_kind(rows["SA3 Bolshoi Storm Buster"]) == "ground"
+    assert cmd_grab_kind(rows["Russian Suplex"]) == "ground"
+    assert cmd_grab_kind(rows["Borscht Dynamite"]) == "air"            # only hits airborne: jumping is what it catches
+    assert cmd_grab_kind(rows["SA1 Aerial Russian Slam"]) == "air"
+    assert cmd_grab_kind(rows["Bodyslam"]) is None                      # an ordinary throw
+    assert cmd_grab_kind(rows["Standing Light Punch"]) is None
+
+
+GRAB = {950: {"name": "L Screw Piledriver", "cmd_grab": "ground", "startup": 5, "total": 60}}
+
+
+def test_a_command_grab_is_its_own_answer_and_shifts_the_defence():
+    from sf6bot.defense import classify_response
+    ids = {"throw": {715}, "thrown": {721}, "cmd_grab": {950}}
+    w = {"t0": 100, "ox0": 1.0, "mx0": 0.0, "oa0": 1, "frames": 30}
+    assert classify_response(dict(w), state(op={"x": 1.0, "action_id": 950}, timer=103), "p1", "p2", ids) == "cmd_grab"
+    plain = _fighter()
+    assert plain.defense.odds("after_block")["cmd_grab"] == 0.0           # no grappler: no command grabs expected
+    f = _fighter(opp_moves=dict(GRAB))
+    assert f.defense.has_cmd_grab and f.defense.odds("after_block")["cmd_grab"] > 0
+    # this Zangief grabs at every moment
+    f.defense.c["prior"] = {"throw": 0.1, "strike": 0.1, "shimmy": 0.1, "wait": 0.1, "cmd_grab": 5.0}
+    v = f.defense.values("after_block", lambda a: True, lambda n, oc: {"seq": "x"})
+    assert v["jump"] > v["block"] and v["reversal"] > v["delay_tech"] and v["parry"] < v["block"]
+
+
+def test_a_grappler_walking_in_is_a_moment_from_farther_out():
+    f = _fighter(opp_moves=dict(GRAB))
+    f.decide(state(op={"x": 2.1, "action_id": 9}, timer=400), 0.0, 0)
+    d = f.decide(state(op={"x": 1.5, "action_id": 9}, timer=402), 0.0, 0)
+    assert d.rule.startswith("defense:") and f.watch["sit"] == "approach"
+    g = _fighter()
+    g.decide(state(op={"x": 2.1, "action_id": 9}, timer=400), 0.0, 0)
+    assert not g.decide(state(op={"x": 1.5, "action_id": 9}, timer=402), 0.0, 0).rule.startswith("defense:")
+
+
+def test_a_whiffed_command_grab_under_a_jump_is_punished_once():
+    f = _fighter(opp_moves=dict(GRAB))
+    f.decide(state(me={"y": 1.2, "action_id": 36}, op={"x": 1.0, "action_id": 950}, timer=500), 0.0, 0)
+    d = f.decide(state(me={"y": 1.1, "action_id": 36}, op={"x": 1.0, "action_id": 950}, timer=501), 0.0, 0)
+    assert d.rule == "cmd_grab_punish" and d.seq == "5+HK@3" and f.cmd_grab_stats["jump_punish"] == 1
+    d = f.decide(state(me={"y": 0.9, "action_id": 36}, op={"x": 1.0, "action_id": 950}, timer=502), 0.0, 0)
+    assert d.rule != "cmd_grab_punish"
+
+
+def test_damage_from_command_grabs_is_reviewed_between_rounds():
+    f = _fighter(opp_moves=dict(GRAB))
+    me = {"x": 0.0, "y": 0.0, "hp": 10000, "hitstun": 0, "action_id": 1}
+    for hp, op in ((10000, {"x": 0.8, "action_id": 950}), (7500, {"x": 0.8, "action_id": 950}),
+                   (7500, {"x": 0.8, "action_id": 1})):
+        f.observe_line({"stage_timer": 1, "p1": dict(me, hp=hp), "p2": op}, 0)
+    rv = f.round_review()
+    assert rv["taken"]["command grab"]["damage"] == 2500 and rv.get("cmd_grabs")
+    assert f.cmd_grab_stats["grabbed"] == 1 and f.cmd_grab_stats["seen"] == 1
