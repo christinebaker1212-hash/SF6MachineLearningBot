@@ -47,7 +47,7 @@ RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741)
 # combo_gen.RUSH_BONUS). 0.18.1 ranked: Ken's rushed normals landed 5 of 8; after blocking one the bot was hit within
 # 45 frames 3 times of 8; the bot never used the +4 itself.
 RUSH_BONUS = 4
-GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry"}
+GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -304,6 +304,17 @@ class ScriptedFighter:
         self.throw_ids = _ids(ids.get("throw_startup"))
         self.hit_ids = _ids(ids.get("hit_reaction"))
         self.thrown_ids = _ids(ids.get("thrown"))
+        # 0.19.0 (22 ranked matches on 0.18.10, user's to-do list): parries thrown, Drive Impact at the wall, airborne
+        # moves anti-aired, a later anti-air decision when the opponent is overhead
+        self.parry_ids = _ids(ids.get("parry")) or set(range(480, 490))
+        self.parry_throw_stats = {"chances": 0, "taken": 0}
+        self._parry_seen = None
+        self.di_wall_stats: dict = {"chances": 0, "taken": 0, "after_ids": {}}
+        self._di_wall_next = 0.0
+        self._di_wall_chance_t = -99.0
+        self._di_wall_watch: dict | None = None
+        self.aa_stats = {"anti_air": 0, "air_moves": 0, "held_overhead": 0}
+        self._aa_overhead_for = None
         self.prev_op: tuple | None = None    # (stage_timer, x, y) of the opponent at the last state
         self.op_vx = 0.0                     # opponent horizontal speed, units per game frame
         self.op_vy = 0.0
@@ -401,6 +412,20 @@ class ScriptedFighter:
         a = op.get("action_id")
         return (_num(op.get("y")) or 0.0) > 0.05 and a in self.jump_ids and a not in self.hit_ids
 
+    def _air_move(self, op: dict) -> bool:
+        """0.19.0 (user: "many moves leave a character airborne, like Cammy's hooligan startup, Akuma's demon flip, Ingrid's
+        teleport, these moves must be punished with a DP"). An opponent attack (not a jump, hit reaction, projectile,
+        parry or Drive Impact) with the opponent off the ground counts as a jump-in for the anti-air rule. MEASURED in
+        22 ranked matches on 0.18.10: 26 such actions (Blanka 635/636/959/967, Yasmine 1014/988/1007, Juri 965/991,
+        Akuma 1011 ...); the anti-air never looked at them."""
+        a = op.get("action_id")
+        if not isinstance(a, int) or a < self.c["attack_id_min"] or a in self.jump_ids or a in self.hit_ids:
+            return False
+        if a in self.parry_ids or a in self.throw_ids or (_num(op.get("y")) or 0.0) <= 0.4:
+            return False
+        info = self.opp.get(a, {})
+        return not (info.get("projectile") or info.get("di") or info.get("cmd_grab"))
+
     def _throw_coming(self, op: dict, dist: float) -> bool:
         return op.get("action_id") in self.throw_ids and dist <= self.c["throw_tech"]["max_dist"]
 
@@ -414,7 +439,7 @@ class ScriptedFighter:
             return "opponent throw"
         if self.opp.get(op.get("action_id"), {}).get("di") and dist < 3.0:
             return "opponent Drive Impact"
-        if self._jumping(op) and dist <= self.c["anti_air"]["max_dist"] + 0.6:
+        if (self._jumping(op) or self._air_move(op)) and dist <= self.c["anti_air"]["max_dist"] + 0.6:
             return "opponent jumping in"
         return None
 
@@ -527,6 +552,11 @@ class ScriptedFighter:
             return self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
         if op_act not in self.throw_ids:
             self.tech_handled = None
+        # 2b. the opponent holding Drive Parry within throw range: throw them (0.19.0, user: "grabs enemies who parry when
+        #     close"). MEASURED, 22 ranked matches: 21 parries within 1.2, ~34 frames long; the bot threw 2
+        pt = self._parry_throw(me, op, dist)
+        if pt is not None:
+            return pt
         # 3. Drive Impact reaction (shared id 855, or the opponent's catalog)
         if (info.get("di") and op_act != self.di_handled_id and dist < 3.0 and me_y <= 0.05
                 and self.can_spend(me, "drive_impact") and self._ok("di")):
@@ -538,7 +568,8 @@ class ScriptedFighter:
         #    that landed near the bot, 2 met a Shoryuken in time; the old rule waited for the opponent to fall (apex)
         #    and then needed motion + input delay + start-up, ~20 frames, which is about all of the fall.
         aa = self.c["anti_air"]
-        if (self._jumping(op) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
+        air_move = not self._jumping(op) and self._air_move(op)
+        if ((self._jumping(op) or air_move) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
                 and not (_num(me.get("blockstun")) or 0) and self._ok("anti_air")):
             t_land = landing_frames(op_y, self.op_vy, float(aa.get("gravity", 0.0123)))
             mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
@@ -548,6 +579,21 @@ class ScriptedFighter:
             need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
             early = int(aa.get("early_frames", 6)) + self.aa_extra   # active this many frames before they land
             if abs(pdx) <= aa["max_dist"] + 0.6 and t_land <= need + early:
+                # 0.19.0 (user: "the bot seems to be whiffing DPs as soon as an opponent goes over its head - the bot should
+                # make a DP decision at a later time"). MEASURED, 22 ranked matches: 41 Shoryukens against airborne
+                # opponents; all 26 that hit had them land on the same side, all 11 cross-overs whiffed (9 then punished),
+                # and every cross-over started with the opponent within 0.5 sideways and 1.4-1.9 high. Nearly overhead, or
+                # landing too close to call: block toward the landing side and decide again on the next line.
+                land_side = (Facing.RIGHT if pdx > 0 else Facing.LEFT) if abs(pdx) > 0.05 else self.side
+                overhead = abs(dx) < float(aa.get("overhead_dx", 0.5)) and op_y > float(aa.get("overhead_min_y", 0.9))
+                unclear = dx * pdx <= 0 or abs(pdx) < float(aa.get("min_dist", 0.25))
+                if overhead or (unclear and not (dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3)))):
+                    if self._aa_overhead_for != self.op_onset:
+                        self._aa_overhead_for = self.op_onset
+                        self.aa_stats["held_overhead"] += 1
+                    return Decision("hold", direction=4, facing=land_side, rule="block_overhead",
+                                    reason=f"opponent overhead ({dx:+.2f} now, lands {pdx:+.2f}): too close to call, "
+                                           "blocking toward the landing side")
                 if dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3)):
                     # cross-up: a 623 input now would come out for the wrong side; block toward where they land.
                     # MEASURED 0.18.0 (99 jump-ins, 3 checks each): predicted >= 0.3 past the bot = a real cross-up 54
@@ -557,8 +603,11 @@ class ScriptedFighter:
                                     reason=f"opponent crossing over (lands {abs(pdx):.2f} {'right' if pdx > 0 else 'left'})")
                 if abs(pdx) <= aa["max_dist"]:
                     why = f"opponent jumping in (height {op_y:.2f}, lands in {t_land:.0f}f {abs(pdx):.2f} away)"
+                    if air_move:
+                        why = f"opponent airborne in a move (action {op_act}, height {op_y:.2f}, lands in {t_land:.0f}f)"
                     if t_land >= need - 2:
                         self.aa_done_for_jump = True
+                        self.aa_stats["air_moves" if air_move else "anti_air"] += 1
                         return Decision("seq", srk["name"], srk["seq"], reason=why, rule="anti_air")
                     if nrm is not None and t_land >= self.lead + self.stale + int(nrm.get("startup", 9)) - 3:
                         self.aa_done_for_jump = True    # too late for the Shoryuken: the anti-air normal
@@ -650,6 +699,10 @@ class ScriptedFighter:
               or self._oki_walk(me, op, dist))
         if ap is not None:
             return ap
+        # 6c. Drive Impact against an opponent with its back to the wall (0.19.0)
+        dw = self._di_wall(me, op, dist, t)
+        if dw is not None:
+            return dw
         # 7. neutral
         if t < self.next_neutral_t:
             return Decision("none")
@@ -852,7 +905,10 @@ class ScriptedFighter:
         its last button lands on the bot's first free frame: SA3 with 3 bars, SA1 when it kills, else H Shoryuken."""
         sc = self.c.get("supers") or {}
         oa, tmr = op.get("action_id"), raw.get("stage_timer")
-        if oa not in set(sc.get("crumple_ids") or [276]) or not isinstance(tmr, int):
+        # 0.19.0: after a wall Drive Impact also a stun-range reaction (250-299, where the crumple 276 is): the wall splat's
+        # id is not known yet (ESTIMATE); `di_wall.after_ids` in the summary will show it
+        wall_stun = (self._di_wall_watch is not None and isinstance(oa, int) and 250 <= oa < 300)
+        if (oa not in set(sc.get("crumple_ids") or [276]) and not wall_stun) or not isinstance(tmr, int):
             self._crumple_t0 = None
             return None
         if self._crumple_t0 is None:
@@ -870,7 +926,7 @@ class ScriptedFighter:
         if pick is None:
             return None
         aid = me.get("action_id")
-        if aid in (855, 856, 857):                       # still in the bot's own Drive Impact
+        if isinstance(aid, int) and 850 <= aid < 870:    # still in the bot's own Drive Impact
             rem = int(sc.get("di_recovery_frames", 85)) - (tmr - self._crumple_t0)
         elif self.busy(me) is None:
             rem = 0
@@ -882,6 +938,67 @@ class ScriptedFighter:
         self.super_stats["crumple"][pick["name"]] = self.super_stats["crumple"].get(pick["name"], 0) + 1
         return Decision("seq", pick["name"], pick["seq"], rule="crumple_followup",
                         reason=f"opponent crumpled at {dist:.2f} (super meter {int(meter)}): {pick['name']}")
+
+    def _parry_throw(self, me: dict, op: dict, dist: float) -> Decision | None:
+        pc = self.c.get("parry_throw") or {}
+        a = op.get("action_id")
+        if a not in self.parry_ids or not pc.get("enabled", True):
+            self._parry_seen = None
+            return None
+        if (_num(op.get("y")) or 0.0) > 0.05 or (_num(me.get("y")) or 0.0) > 0.05 or dist > float(pc.get("max_dist", 1.0)):
+            return None
+        if self._parry_seen != self.op_onset:
+            self._parry_seen = self.op_onset
+            self.parry_throw_stats["chances"] += 1
+            self._parry_thrown = False
+        if getattr(self, "_parry_thrown", False) or self.busy(me) is not None or not self._ok("throw"):
+            return None
+        self._parry_thrown = True
+        self.parry_throw_stats["taken"] += 1
+        return self._move("throw", "parry_throw", f"opponent holding Drive Parry at {dist:.2f}: a throw beats a parry")
+
+    def _di_wall(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.19.0 (user: "will not attempt to DI stun enemies who are close in proximity to the corner"). A Drive Impact
+        the opponent blocks with its back near the wall still stuns it against the wall (game rule, user / community
+        knowledge; the wall distance is an ESTIMATE, `di_wall.max_back`). MEASURED, 22 ranked matches: 2 of the bot's
+        35 Drive Impacts came with the opponent near its wall, against ~26 s of open chances (bot free, 1-3 apart, 2+
+        Drive bars). A chance is taken at random (`chance` per decision, `cooldown_s` between tries) so it stays a mix;
+        never into burnout unless the assessment says the damage kills."""
+        dc = self.c.get("di_wall") or {}
+        if not dc.get("enabled", True) or t < self._di_wall_next:
+            return None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None:
+            return None
+        from .intents import WALL
+        op_back = WALL - ox if ox > mx else ox + WALL
+        if op_back > float(dc.get("max_back", 1.5)) or not (float(dc.get("min_dist", 0.8)) <= dist <= min(
+                self.di_range, float(dc.get("max_dist", 2.6)))):
+            return None
+        oa = op.get("action_id")
+        if (_num(op.get("y")) or 0.0) > 0.05 or (_num(me.get("y")) or 0.0) > 0.05 or (isinstance(oa, int) and (
+                oa in self.hit_ids or oa in self.parry_ids or self.opp.get(oa, {}).get("di"))):
+            return None
+        if self.busy(me) is not None:
+            return None
+        lethal = bool((self.assessment.get("damage") or {}).get("lethal"))
+        if (_num(me.get("drive")) or 0) < float(dc.get("min_drive", 20000)) and not lethal:
+            return None
+        if not self.can_spend(me, "drive_impact", lethal=lethal):
+            return None
+        if t - self._di_wall_chance_t > 1.0:
+            self.di_wall_stats["chances"] += 1
+        self._di_wall_chance_t = t
+        if t - getattr(self, "_di_wall_roll_t", -99.0) < float(dc.get("roll_every_s", 0.5)):
+            return None                                   # one roll per half second of chance, not one per state line
+        self._di_wall_roll_t = t
+        if self.rng.random() > float(dc.get("chance", 0.15)):
+            return None
+        self._di_wall_next = t + float(dc.get("cooldown_s", 4.0))
+        self.di_wall_stats["taken"] += 1
+        self._di_wall_watch = {"t": t, "ids": []}
+        return self._move("drive_impact", "di_wall", f"opponent's back {op_back:.2f} from the wall at {dist:.2f}: Drive "
+                                                     "Impact (blocked or not, it stuns against the wall)")
 
     def _super_punish(self, me: dict, op: dict, dist: float, adv, bs) -> Decision | None:
         """A blocked move that leaves time for SA3 (start-up 5): with 3 bars, SA3 instead of a small punish. Its motion
@@ -1055,6 +1172,16 @@ class ScriptedFighter:
         self._track_own_attack(me, op)
         self._track_damage_taken(me, op)
         self._op_hist.append((tmr, _num(op.get("drive")), _num(op.get("x"))))
+        w_ = self._di_wall_watch
+        if w_ is not None:
+            # what the opponent did after the bot's wall Drive Impact (the wall-splat reaction id is not known yet)
+            if oa != (w_["ids"][-1] if w_["ids"] else None):
+                w_["ids"].append(oa)
+            w_["n"] = w_.get("n", 0) + 1
+            if w_["n"] >= 150:
+                k_ = " ".join(str(x) for x in w_["ids"][:6])
+                self.di_wall_stats["after_ids"][k_] = self.di_wall_stats["after_ids"].get(k_, 0) + 1
+                self._di_wall_watch = None
         if oa != self.op_move["id"]:
             rushed = isinstance(oa, int) and 600 <= oa < 715 and (self.op_move["id"] in RUSH_IDS
                                                                     or self._rushed_by_gauge(me, op))
@@ -1200,6 +1327,20 @@ class ScriptedFighter:
                 self.op_move["punished"] = True
                 self.whiff_stats["taken"] += 1
                 return self._move(ov, "whiff_punish", f"{info.get('name')} missed me: your rule, {m_['name']}")
+        # 0.19.0 (user: "when the opponent has whiffed a high recovery move, like a whiffed DP, or a whiffed command grab,
+        # or a whiffed DI, to use its highest damaging punish"): with 3 bars and the time for it, SA3 (4000, Capcom)
+        sa3 = self._super("sa3")
+        if (sa3 is not None and (_num(me.get("super")) or 0) >= int(sa3.get("super", 30000))
+                and dist <= float((self.c.get("supers") or {}).get("sa3_max_dist", 1.3))
+                and int(sa3.get("startup", 5)) + seq_prefix(sa3["seq"]) + self.lead + self.stale + 1 <= remaining):
+            if not self.op_move["chance"]:
+                self.op_move["chance"] = True
+                self.whiff_stats["chances"] += 1
+            self.op_move["punished"] = True
+            self.whiff_stats["taken"] += 1
+            self.super_stats["whiff_sa3"] = self.super_stats.get("whiff_sa3", 0) + 1
+            return Decision("seq", sa3["name"], sa3["seq"], rule="whiff_punish",
+                            reason=f"{info.get('name') or op.get('action_id')} whiffed with {remaining}F left: SA3")
         best = None
         for m in self.own:
             if m["intent"] != "poke" or m.get("projectile") or not isinstance(m.get("startup"), int):
@@ -1610,6 +1751,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                      "confirms": fighter.super_stats["confirm"],
                                      "punishes": fighter.super_stats["punish"]}
                 summary["drive_rush"] = dict(fighter.rush_stats)
+                summary["anti_air"] = dict(fighter.aa_stats)
+                summary["parry_throws"] = dict(fighter.parry_throw_stats)
+                summary["di_wall"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in fighter.di_wall_stats.items()}
                 if fighter.cmd_grab_ids():
                     summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()))
                 summary["input_delay_used"] = fighter.lead

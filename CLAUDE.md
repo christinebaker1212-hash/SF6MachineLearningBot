@@ -2522,6 +2522,39 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   real boundaries (where the recordings still hold the lines).
 - The progress report on the user's PC keeps the one false win from run 2 (datasets/ladder is not rewritten).
 
+## 0.19.0: the to-do list from the 22 ranked matches (user's requests, 2026-10-04)
+MEASURED on the 22 correctly-sided recordings of 0.18.10 (the mirror and the first Blanka match excluded); all changes are
+MOCK / replay-tested (`tests/test_0190.py`; `decide()` replayed over the recordings), not verified in game.
+- **Jumps** (user: "it jumps WAY too much"): 270 jumps, 6.3 per minute of fighting; 24% hit in the air, 13% landed a
+  hit; neutral jumps broke even over 2.3 s, jumps out of blockstun lost 390-730 hp each. Neutral policy: jump intents x0.25
+  (`neutral_policy.INTENT_FACTOR`, `policy.intent_factor`), never in exploration. Defence option "jump" payoffs lowered
+  (still the answer to a command grab).
+- **Cornering** (user: "it tends to corner itself"): the bot's back within 1.5 of the wall 15% of fight time (opponents
+  8%), 25% more damage taken a second there; entries: hit 44, blocking pushback 13, walking back 10, jumps 6, back dash 3.
+  Walking / dashing / jumping back x0.15 with <= 1.5 of room behind, x0.4 with <= 2.5 (`neutral_policy.style`).
+- **Drive Impact at the wall** (user): 2 of 35 bot Drive Impacts with the opponent cornered (most were DI-backs: the
+  opponent's DI answered, crumple, 960 each), ~26 s of open chances. Rule `di_wall` (`configs/fighter/ryu.yaml: di_wall`):
+  the opponent's back <= 1.5 from its wall, 0.8-2.6 away, 2+ Drive bars, the bot free: one roll per 0.5 s at 15%, 4 s
+  cooldown (ESTIMATES); replayed ~0.5 per match. The cash-out after it also follows a stun-range reaction (250-299; the
+  wall splat's id is not known: `di_wall.after_ids` in the summary records it).
+- **Parry -> throw** (user): 21 opponent parries within 1.2 (~34 frames each), the bot threw 2. Rule `parry_throw`: the
+  opponent in a parry id (480-489) within 1.0, both grounded, the bot free -> throw (human limits apply).
+- **Later anti-air** (user: "whiffing DPs as soon as an opponent goes over its head"): 41 Shoryukens vs airborne
+  opponents, 26 hit (all landed on the same side), 11 cross-overs all whiffed (9 punished); every cross-over started with
+  the opponent within 0.5 sideways, 1.4-1.9 high. Now: overhead (|dx| < 0.5, height > 0.9) or a landing too close to call
+  -> `block_overhead` toward the landing side, decided again each line. Replayed: all 60 Shoryuken decisions on
+  same-side landings; 28 real cross-overs blocked instead; 29 same-side jumps blocked rather than anti-aired.
+- **Airborne moves -> DP** (user: Hooligan, Demon Flip, Ingrid's teleport): any opponent attack id (not a jump, reaction,
+  projectile, parry, DI or command grab) with the opponent above 0.4 is anti-aired like a jump (`_air_move`). Measured
+  26 such actions in the matches; replayed 57 air-move anti-airs.
+- **Biggest punish on a long whiff** (user: whiffed DP / command grab / DI): with 3 bars and the frames for it (start-up +
+  motion + input delay), SA3 before the poke / combo-lab route. Needs the move's Capcom total (catalog or move map); an
+  unknown id still gets nothing. Long whiffs near the bot were rare in these matches (~12).
+- **Perfect parry of projectiles:** not changed. The bot parried 48 times right after an opponent special and was rarely
+  hit; whether those were PERFECT parries is unknown (the Perfect Parry action id is not known;
+  `assessment.perfect_parry.after_ids` records the ids after each timed try).
+- Thoughts lines for anti-air (jumps / air moves / held overhead), parry throws and wall Drive Impacts.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

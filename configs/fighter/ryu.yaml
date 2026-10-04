@@ -38,6 +38,10 @@ anti_air:
   early_frames: 6
   crossup_past: 0.3    # MEASURED: predicted landing this far past the bot = a cross-up (54/72, no false alarms)
   min_dist: 0.25       # predicted closer than this, or on the other side = cross-up -> block instead
+  # 0.19.0 MEASURED (22 ranked matches): every cross-over that the Shoryuken whiffed (11 of 11) started with the opponent
+  # within 0.5 sideways and 1.4-1.9 high; the 26 that hit mostly started 0.55+ away. Overhead = block, decide later.
+  overhead_dx: 0.5
+  overhead_min_y: 0.9
   max_dist: 1.30
   max_height: 1.70
   block_lead_frames: 6 # blocking an airborne attack: hold back from where they will be in ~our input latency
@@ -104,6 +108,7 @@ ids:
   throw_startup: [715, 716, 717]      # Ryu forward 715 / back 716 (catalog); Ken 715 / 717
   thrown: [721, 725]                  # the bot being thrown by Ken's forward / back throw
   hit_reaction: ["200-399"]           # hit, juggle, knockdown and wake-up (2xx/3xx in the fights)
+  parry: ["480-489"]                  # Drive Parry (480 start, 482/484 seen after it: Ryu and the ranked opponents)
 attack_id_min: 450     # heuristic: opponent action ids >= this are attacks (Ryu: normals 600+, specials 900+, DI 855, parry 480)
 # 0.18.6: the user's punishes for specific moves, used whenever that move is blocked or whiffs near the bot, whatever the
 # frame data says. Keyed by character; `match` is a regex over Capcom's move name and notes (the bot says at match start
@@ -210,7 +215,9 @@ defense:
     tech:       {throw: 0.0, strike: -0.9, shimmy: -1.6, wait: -0.3, cmd_grab: -2.5}
     jab:        {throw: 0.3, strike: -0.9, shimmy: -0.6, wait: 0.2, cmd_grab: 0.3}
     back_dash:  {throw: 0.0, strike: -1.0, shimmy: -0.2, wait: 0.0, cmd_grab: 0.3}
-    jump:       {throw: 0.6, strike: -1.2, shimmy: -0.4, wait: -0.3, cmd_grab: 1.5}
+    # 0.19.0 MEASURED (22 ranked matches): jumps out of blockstun lost 390-730 hp each over the next 2.3 s (lowered from
+    # throw 0.6, strike -1.2, shimmy -0.4, wait -0.3); still the answer to a command grab
+    jump:       {throw: 0.3, strike: -2.0, shimmy: -1.0, wait: -0.6, cmd_grab: 1.5}
     reversal:   {throw: 1.2, strike: 1.2, shimmy: -2.5, wait: -2.5, cmd_grab: 1.5}   # a blocked Shoryuken is a full punish
     parry:      {throw: -1.5, strike: 0.6, shimmy: -0.4, wait: -0.2, cmd_grab: -3.0}
   # 0.18.3: the opponent getting up next to the bot is the bot's OFFENCE (oki), not a defence: its own options, timed to
@@ -265,6 +272,22 @@ defense:
 cmd_grab:
   jump_attack: "5+HK@3"
   max_dist: 1.6
+# 0.19.0: the opponent holding Drive Parry within throw range -> throw (a throw beats a parry). MEASURED, 22 ranked
+# matches: 21 parries within 1.2, ~34 frames long on average; the bot threw 2 of them.
+parry_throw:
+  enabled: true
+  max_dist: 1.0            # throw range 0.8 (SuperCombo) + the gap between the players' positions (estimate)
+# 0.19.0: Drive Impact against an opponent with its back to the wall: blocked or not it stuns against the wall. ESTIMATES:
+# the wall distance for the stun (max_back), and how often a chance is taken (chance per decision, cooldown).
+di_wall:
+  enabled: true
+  max_back: 1.5            # the opponent's back this close to its wall
+  min_dist: 0.8
+  max_dist: 2.6            # Drive Impact's travel (also capped by the measured reach)
+  min_drive: 20000         # 2 bars: one left after it (never into burnout unless the damage kills)
+  chance: 0.15             # per roll; one roll per roll_every_s while the chance lasts
+  roll_every_s: 0.5
+  cooldown_s: 4.0
 # 0.18.3: after knocking the opponent down, walk in so their get-up is a pressure moment of the bot's (above)
 oki:
   enabled: true

@@ -28,6 +28,16 @@ SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 # 0.18.0: resource and reaction moves never come from random sampling (MEASURED 0.17.5 ranked: SA1 8 times, 8 whiffs;
 # Drive Impact 11, 6 whiffs; Drive Parry 47, 23 with nothing to parry; OD Hadoken 18). They need a reason:
 SPEND = {"super", "drive_impact", "parry", "drive_rush"}
+# 0.19.0 (user: "it jumps WAY too much ... jumping is too committal"). MEASURED, 22 ranked matches on 0.18.10: 270 jumps,
+# 6.3 a minute; 24% were hit in the air, 13% landed a hit; neutral jumps broke even over the next 2.3 s, jumps out of
+# blockstun lost 390-730 hp each. Jumps stay possible (a read on a fireball) but much rarer, and never exploratory.
+JUMPS = ("jump_fwd", "jump_neutral", "jump_back")
+INTENT_FACTOR = {"jump_fwd": 0.25, "jump_neutral": 0.25, "jump_back": 0.25}
+# 0.19.0 (user: "it tends to corner itself"). MEASURED: the bot's back was within 1.5 of the wall 15% of the fight
+# time (its opponents' 8%) and it took 25% more damage a second there; 13 of 99 entries came from its own walking
+# back, back dashes or back jumps. Retreating weighs less the less room is behind it.
+BACK_INTENTS = ("walk_back", "dash_back", "jump_back")
+WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, factor for retreating)
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
 DI_WHEN = {"special"}                       # a Drive Impact read on a special (a fireball) from DI_MIN_DIST
@@ -103,6 +113,7 @@ class NeutralPolicy:
         c = cfg or {}
         self.temperature = float(c.get("temperature", 0.8))
         self.explore = float(c.get("explore", 0.08))
+        self.intent_factor = {**INTENT_FACTOR, **(c.get("intent_factor") or {})}
         # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
         # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
         self.win = win
@@ -142,6 +153,19 @@ class NeutralPolicy:
                 ok[i] = False
         return ok
 
+    def style(self, me: dict, op: dict) -> np.ndarray:
+        """Fixed factors on the choices: fewer jumps; less retreating with the wall close behind (0.19.0)."""
+        f = np.array([self.intent_factor.get(n, 1.0) for n in it.INTENTS])
+        mx, ox = num(me.get("x")), num(op.get("x"))
+        if mx is not None and ox is not None:
+            behind = it.WALL - mx if mx > ox else mx + it.WALL      # room between the bot and the wall behind it
+            for lim, fac in WALL_STEPS:
+                if behind <= lim:
+                    for n in BACK_INTENTS:
+                        f[it.INTENTS.index(n)] *= fac
+                    break
+        return f
+
     def _lethal_super(self, me: dict, op: dict | None) -> bool:
         """A Super Art from neutral only when it kills: affordable and its listed damage >= the opponent's hp."""
         hp = num((op or {}).get("hp"))
@@ -169,12 +193,14 @@ class NeutralPolicy:
         py, y = num((prev_me or {}).get("y")), num(me.get("y"))
         falling = None if py is None or y is None else y < py
         ok = self.allowed(me, dist, can_spend, falling, op)
+        p = p * self.style(me, op)
         p = np.where(ok, p, 0.0)
         if p.sum() <= 0:
             p = ok.astype(float)
         p = p ** (1.0 / self.temperature)
         p = p / p.sum()
-        cheap = ok & np.array([n not in SPEND for n in it.INTENTS])     # exploration never spends resources
+        # exploration never spends resources, and never jumps (0.19.0)
+        cheap = ok & np.array([n not in SPEND and n not in JUMPS for n in it.INTENTS])
         q = (1 - self.explore) * p + (self.explore * cheap / cheap.sum() if cheap.any() else 0.0)
         q = q / q.sum()
         k = int(self.rng.choice(len(it.INTENTS), p=q))

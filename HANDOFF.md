@@ -241,7 +241,13 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.12 (latest):** match boundaries after rematches (a joined match's round no longer counts for the next one;
+**0.19.0 (latest):** the to-do list built from the 22 ranked matches: fewer jumps, less retreating into the corner,
+Drive Impact at the wall, throws on close parries, a later anti-air decision when the opponent is overhead, anti-air on
+airborne moves, SA3 on long whiffs. Not done: perfect parry (its id is unknown), opponent LP / MR (planned). CLAUDE.md "0.19.0".
+Next ranked session: check the new thoughts lines and `anti_air`, `parry_throws`, `di_wall` (with `after_ids`: the wall
+splat id) in the fight summaries.
+
+**0.18.12:** match boundaries after rematches (a joined match's round no longer counts for the next one;
 results and recordings were shifted by a round in the user's second run, one false win). CLAUDE.md "0.18.12".
 
 **0.18.11:** rematch F presses stop at the next match; side re-checked (stale characters, abandoned battles,

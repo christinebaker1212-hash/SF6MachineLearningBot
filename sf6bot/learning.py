@@ -330,6 +330,19 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{dr.get('opp_rushed_blocked', 0)}; punishes not tried because the +4 made the move safe: "
                                 f"{dr.get('punish_skipped', 0)}; my own blocked rush normals turned into pressure: "
                                 f"{dr.get('own_moments', 0)}."))
+    aa = summary.get("anti_air") or {}
+    if any(aa.values()):
+        out.append(("scripted", f"Anti-air: Shoryukens on jumps {aa.get('anti_air', 0)}, on airborne moves "
+                                f"{aa.get('air_moves', 0)}; held block with {opp} overhead (too close to call) "
+                                f"{aa.get('held_overhead', 0)}."))
+    pt = summary.get("parry_throws") or {}
+    if pt.get("chances"):
+        out.append(("scripted", f"{opp} held Drive Parry within throw range {pt['chances']} times; I threw {pt.get('taken', 0)}."))
+    dw = summary.get("di_wall") or {}
+    if dw.get("chances") or dw.get("taken"):
+        out.append(("scripted", f"Drive Impact with {opp}'s back to the wall: {dw.get('taken', 0)} of {dw.get('chances', 0)} "
+                                "chances" + (f"; what followed: {', '.join(dw['after_ids'])}" if dw.get("after_ids") else "")
+                                + "."))
     cg = summary.get("command_grabs") or {}
     if cg.get("seen") or cg.get("grabbed"):
         out.append(("measured", f"{opp}'s command grabs: started {cg.get('seen', 0)}, landed on me {cg.get('grabbed', 0)}; "
