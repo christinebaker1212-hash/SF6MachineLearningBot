@@ -58,8 +58,8 @@ def test_their_wake_up_is_offence_with_a_meaty_timed_early():
         if (d.rule or "").startswith("defense:"):
             break
     assert d.rule == "defense:meaty" and d.name == "oki: meaty"
-    pad = f.defense.pad
-    assert d.seq == f"1@{pad - 7} 2+MK@3"               # active frames (8-10) cover the first free frame
+    rem = 30 - k                                          # frames until the opponent's first free frame
+    assert d.seq == f"1@{rem - f.lead - 7} 2+MK@3"       # active frames (8-10) cover the first free frame
     assert set(f.defense.values("their_wakeup")) == {"meaty", "throw", "shimmy", "block"}
     assert "reversal" in f.defense.values("after_block", lambda a: True, lambda n, oc: {"seq": "x"})
 
@@ -214,3 +214,62 @@ def test_damage_from_command_grabs_is_reviewed_between_rounds():
     rv = f.round_review()
     assert rv["taken"]["command grab"]["damage"] == 2500 and rv.get("cmd_grabs")
     assert f.cmd_grab_stats["grabbed"] == 1 and f.cmd_grab_stats["seen"] == 1
+
+
+# ---- 0.18.5: Drive Rush +4 -----------------------------------------------------------------------------------------------
+
+def _line(f, me=None, op=None, timer=500):
+    raw = state(me=me, op=op, timer=timer)
+    f.observe_line(raw, 0)
+    return f.decide(raw, timer / 60, 0)
+
+
+def test_a_rushed_normal_is_four_frames_safer_and_not_punished():
+    opp = {739: {"name": "Drive Rush"}, 605: {"name": "Standing Medium Punch", "block_adv": -5}}
+    f = _fighter(opp_moves=dict(opp))
+    _line(f, op={"x": 1.0, "action_id": 739}, timer=500)
+    _line(f, op={"x": 1.0, "action_id": 605}, timer=501)
+    d = _line(f, me={"blockstun": 3, "action_id": 155}, op={"x": 1.0, "action_id": 605}, timer=510)
+    assert f.op_move["rushed"] and f._block_adv(605) == -1
+    assert d.rule != "punish" and f.rush_stats["punish_skipped"] == 1 and f.watch["sit"] == "after_rush_block"
+    g = _fighter(opp_moves=dict(opp))                                     # the same move without a rush: punished
+    _line(g, op={"x": 1.0, "action_id": 1}, timer=500)
+    _line(g, op={"x": 1.0, "action_id": 605}, timer=501)
+    assert _line(g, me={"blockstun": 3, "action_id": 155}, op={"x": 1.0, "action_id": 605}, timer=510).rule == "punish"
+
+
+def test_after_blocking_a_rushed_normal_pressing_buttons_is_worth_less():
+    f = _fighter(opp_moves={739: {"name": "Drive Rush"}, 605: {"name": "Standing Medium Punch", "block_adv": 1}})
+    _line(f, op={"x": 0.9, "action_id": 739}, timer=500)
+    _line(f, op={"x": 0.9, "action_id": 605}, timer=501)
+    d = _line(f, me={"blockstun": 4, "action_id": 155}, op={"x": 0.9, "action_id": 605}, timer=505)
+    assert d.rule.startswith("defense:") and f.watch["sit"] == "after_rush_block"
+    a, b = f.defense.values("after_block"), f.defense.values("after_rush_block")
+    assert b["jab"] < a["jab"] and b["tech"] < a["tech"] and b["block"] >= a["block"]
+
+
+def test_a_rush_without_a_known_id_is_seen_from_the_drive_gauge_and_speed():
+    f = _fighter(opp_moves={605: {"name": "Standing Medium Punch", "block_adv": -1}})
+    for k in range(12):                                   # Drive -1 bar, 0.9 closer in 12 frames, then a normal
+        _line(f, op={"x": 2.0 - 0.075 * k, "action_id": 777, "drive": 60000 if k < 2 else 50000}, timer=600 + k)
+    _line(f, op={"x": 1.1, "action_id": 605, "drive": 50000}, timer=612)
+    assert f.op_move["rushed"]
+    g = _fighter(opp_moves={605: {"name": "Standing Medium Punch", "block_adv": -1}})
+    for k in range(12):                                   # walking in, no Drive spent: not a rush
+        _line(g, op={"x": 2.0 - 0.03 * k, "action_id": 9, "drive": 60000}, timer=600 + k)
+    _line(g, op={"x": 1.6, "action_id": 605, "drive": 60000}, timer=612)
+    assert not g.op_move["rushed"]
+
+
+def test_the_bots_own_blocked_rush_normal_becomes_a_frame_trap():
+    own = [{"name": "Standing Medium Punch", "id": 605, "intent": "poke", "seq": "5+MP@3", "startup": 6, "total": 23,
+            "block_adv": -1}]
+    f = _fighter(own=own)
+    f.defense.c["temperature"] = 0.05
+    f.defense.sets["own_rush_block"][1]["frame_trap"] = {"throw": 9, "strike": 9, "shimmy": 9, "wait": 9}
+    _line(f, me={"action_id": 740}, op={"x": 0.9}, timer=700)
+    _line(f, me={"action_id": 605, "action_frame": 1}, op={"x": 0.9}, timer=701)
+    d = _line(f, me={"action_id": 605, "action_frame": 6}, op={"x": 0.9, "blockstun": 15}, timer=706)
+    assert d.rule == "defense:frame_trap" and d.name == "pressure: frame trap (2MP)"     # +3: start-up <= 6
+    # sent when its arrival (+ input delay 5) is the bot's first free frame: 23 - 6 = 17 frames left -> wait 12
+    assert d.seq == "1@12 2+MP@3" and f.rush_stats["own_moments"] == 1

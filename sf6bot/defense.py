@@ -46,10 +46,14 @@ import random
 # bot was grabbed by every command grab it ever saw (user, 2026-10-04).
 RESPONSES = ("throw", "strike", "shimmy", "wait", "cmd_grab")
 SITUATIONS = {"after_block": "after blocking", "after_hit": "after being hit", "wakeup": "getting up",
-              "approach": "with the opponent walking in", "their_wakeup": "with the opponent getting up next to me"}
+              "approach": "with the opponent walking in", "their_wakeup": "with the opponent getting up next to me",
+              # 0.18.5: a normal out of a Drive Rush is +4 on block (and hit): the opponent is plus, pressing is riskier
+              "after_rush_block": "after blocking a Drive Rush normal",
+              # 0.18.5: the bot's own Drive Rush normal was blocked: the bot is plus, its pressure
+              "own_rush_block": "with my Drive Rush normal blocked"}
 NICE = {"block": "block", "delay_tech": "delay tech", "tech": "tech", "jab": "jab", "back_dash": "back dash",
         "jump": "jump", "reversal": "reversal", "parry": "Drive Parry", "meaty": "meaty", "throw": "throw",
-        "shimmy": "shimmy"}
+        "shimmy": "shimmy", "frame_trap": "frame trap"}
 RESP_NICE = {"throw": "threw", "strike": "attacked", "shimmy": "backed off (shimmy)", "wait": "waited",
              "cmd_grab": "command-grabbed"}
 
@@ -74,21 +78,27 @@ class Defense:
         self.rng = random.Random(seed)
         self.options = dcfg.get("options") or {}
         self.payoff = dcfg.get("payoff") or {}
-        off = dcfg.get("offense") or {}
-        self.offense_situations = set(off.get("situations") or [])
-        self.offense = off.get("options") or {}
-        self.offense_payoff = off.get("payoff") or {}
+        # option sets of their own for some situations (0.18.3 offense = the opponent's wake-up; 0.18.5 rush_pressure =
+        # the bot's own blocked Drive Rush normal): {situation: (options, payoff)}
+        self.sets: dict = {}
+        for key in ("offense", "rush_pressure"):
+            st = dcfg.get(key) or {}
+            for sit in st.get("situations") or []:
+                self.sets[sit] = (st.get("options") or {}, st.get("payoff") or {})
+        self.offense_situations = set(self.sets)
+        self.offense = (dcfg.get("offense") or {}).get("options") or {}
+        self.offense_payoff = (dcfg.get("offense") or {}).get("payoff") or {}
+        # per-situation payoff changes on top of the table (0.18.5: pressing buttons after a +4 rushed normal)
+        self.situation_payoff = dcfg.get("situation_payoff") or {}
         # every option's decisive input lands on the same frame (the first free frame, or `early` frames before it):
         # the moment fires at least `pad` frames ahead
-        self.pad = max((_prefix(s) + e for oc in list(self.options.values()) + list(self.offense.values())
-                        for s, e in _seqs(oc)), default=0)
+        all_opts = list(self.options.values()) + [oc for o, _ in self.sets.values() for oc in o.values()]
+        self.pad = max((_prefix(s) + e for oc in all_opts for s, e in _seqs(oc)), default=0)
         self.last: dict = {}
         self.has_cmd_grab = False      # the opponent has a ground command grab (set by the fighter from its move data)
 
     def _set(self, situation: str) -> tuple[dict, dict]:
-        if situation in self.offense_situations and self.offense:
-            return self.offense, self.offense_payoff
-        return self.options, self.payoff
+        return self.sets.get(situation) or (self.options, self.payoff)
 
     def odds(self, situation: str) -> dict:
         prior = dict(self.c.get("prior") or {k: 1.0 for k in RESPONSES})
@@ -109,13 +119,13 @@ class Defense:
                 continue
             if oc.get("pick") and (resolve is None or resolve(name, oc) is None):
                 continue                       # nothing the bot can afford right now (e.g. no meter for a reversal)
-            pay = payoff.get(name) or {}
+            pay = {**(payoff.get(name) or {}), **((self.situation_payoff.get(situation) or {}).get(name) or {})}
             model = sum(p[k] * float(pay.get(k, 0.0)) for k in RESPONSES)
             s, n = self.exp.defense_value(situation, name) if self.exp is not None else (0.0, 0.0)
             out[name] = (model * k_model + s) / (k_model + n)
         return out
 
-    def choose(self, situation: str, can_spend=lambda a: True, resolve=None) -> dict:
+    def choose(self, situation: str, can_spend=lambda a: True, resolve=None, wait: int | None = None) -> dict:
         """{option, seq, label, probs, odds}: one option drawn from exp(value / temperature). `resolve(name, option)`
         gives the move for an option with candidates ("pick"): a dict with seq / name, or None when unaffordable."""
         vals = self.values(situation, can_spend, resolve)
@@ -140,7 +150,9 @@ class Defense:
             seq, label = cand["seq"], f"{label} ({cand.get('name', pick)})"
         else:
             seq = oc["seq"]
-        pad = self.pad - _prefix(seq) - int(oc.get("early", 0))
+        # `wait`: frames from now until the decisive input should be sent (the caller's remaining frames minus the input
+        # delay); without it every option lands `pad` frames from now
+        pad = (self.pad if wait is None else wait) - _prefix(seq) - int(oc.get("early", 0))
         if pad > 0:
             seq = f"1@{pad} " + seq          # every option's decisive input lands on the same frame
         self.last = {"option": pick, "seq": seq, "label": label, "probs": probs, "odds": self.odds(situation),

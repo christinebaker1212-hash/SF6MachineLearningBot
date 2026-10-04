@@ -324,6 +324,12 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                    if cr else "")
                                 + f"2MK confirmed into a super x{su.get('confirms', 0)}; Super Art punishes "
                                   f"x{su.get('punishes', 0)}."))
+    dr = summary.get("drive_rush") or {}
+    if dr.get("opp_rushed_normals") or dr.get("own_moments"):
+        out.append(("measured", f"{opp}'s normals out of a Drive Rush (+4): {dr.get('opp_rushed_normals', 0)}, I blocked "
+                                f"{dr.get('opp_rushed_blocked', 0)}; punishes not tried because the +4 made the move safe: "
+                                f"{dr.get('punish_skipped', 0)}; my own blocked rush normals turned into pressure: "
+                                f"{dr.get('own_moments', 0)}."))
     cg = summary.get("command_grabs") or {}
     if cg.get("seen") or cg.get("grabbed"):
         out.append(("measured", f"{opp}'s command grabs: started {cg.get('seen', 0)}, landed on me {cg.get('grabbed', 0)}; "

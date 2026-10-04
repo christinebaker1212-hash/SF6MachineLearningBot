@@ -222,6 +222,35 @@ defense:
       throw:  {throw: 0.0, strike: -0.8, shimmy: -0.6, wait: 1.2, cmd_grab: -0.5}
       shimmy: {throw: 1.5, strike: -0.2, shimmy: 0.0, wait: -0.1, cmd_grab: 1.5}
       block:  {throw: -1.2, strike: 0.5, shimmy: 0.0, wait: 0.0, cmd_grab: -2.5}
+  # 0.18.5: after blocking a normal out of a Drive Rush (+4: the opponent is plus) pressing a button is a counter-hit risk
+  # (frame trap); blocking is safer. Changes on top of the payoff table, this situation only. ESTIMATES.
+  situation_payoff:
+    after_rush_block:
+      jab:        {strike: -1.6}
+      tech:       {strike: -1.6}
+      delay_tech: {strike: -0.6}
+      block:      {strike: 0.2}
+  # 0.18.5: the bot's own Drive Rush normal was blocked and leaves it plus (on-block + 4): its pressure. frame_trap = the
+  # first of these normals active before the opponent's 4-frame jab (start-up <= the bot's advantage + 3: Capcom
+  # start-ups, Ryu), so a button press from the opponent becomes a counter hit. Payoffs are ESTIMATES.
+  rush_pressure:
+    situations: [own_rush_block]
+    options:
+      frame_trap:
+        pick:
+          - {name: "5HP", seq: "5+HP@3", startup: 10}
+          - {name: "2MK", seq: "2+MK@3", startup: 8}
+          - {name: "2MP", seq: "2+MP@3", startup: 6}
+          - {name: "5MP", seq: "5+MP@3", startup: 6}
+          - {name: "2LP", seq: "2+LP@3", startup: 4}
+      throw:  {seq: "5+LP+LK@3"}
+      shimmy: {seq: "4@14"}
+      block:  {seq: "1@12"}
+    payoff:
+      frame_trap: {throw: 0.8, strike: 1.2, shimmy: 0.0, wait: -0.1, cmd_grab: 0.8}
+      throw:      {throw: 0.0, strike: -0.8, shimmy: -0.6, wait: 1.2, cmd_grab: -0.5}
+      shimmy:     {throw: 1.5, strike: -0.3, shimmy: 0.0, wait: -0.1, cmd_grab: 1.5}
+      block:      {throw: -1.2, strike: 0.1, shimmy: 0.0, wait: -0.2, cmd_grab: -2.5}
 # 0.18.4: a ground command grab that whiffed under the airborne bot: a jump attack on the way down (j.HK), then the
 # landing is a whiff punish. Payoffs for "cmd_grab" (above) are ESTIMATES: a neutral jump / back dash / invincible
 # reversal beats a command grab, a block / tech never does, and a grabbed parry is a punish counter.

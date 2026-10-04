@@ -39,6 +39,10 @@ from .session import Session
 
 INTRO_IDS = {400, 401}
 RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741): cancelable into normals
+# 0.18.5 (user, 2026-10-04): a normal done out of a Drive Rush is +4 on hit and on block (SF6 rule; community value, also
+# combo_gen.RUSH_BONUS). 0.18.1 ranked: Ken's rushed normals landed 5 of 8; after blocking one the bot was hit within
+# 45 frames 3 times of 8; the bot never used the +4 itself.
+RUSH_BONUS = 4
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
@@ -232,6 +236,12 @@ class ScriptedFighter:
         self._cg_n, self._cg, self._cg_punished, self._me_y_prev = -1, set(), None, 0.0
         self.cmd_grab_stats = {"seen": 0, "grabbed": 0, "jump_punish": 0}
         self.cmd_grab_ids()
+        from collections import deque
+        self._op_hist: deque = deque(maxlen=50)     # (clock, drive, x) of the opponent: Drive Rush without a known id
+        self._blocked_rush = False
+        self._prev_me_bs = 0
+        self._frame_trap_adv = 0
+        self.rush_stats = {"opp_rushed_normals": 0, "opp_rushed_blocked": 0, "punish_skipped": 0, "own_moments": 0}
         self.super_stats: dict = {"crumple": {}, "confirm": 0, "punish": 0}
         # 0.18.0 round review: what opened up the damage the bot took this round, and what to change next round
         self.round_taken: dict = {}
@@ -239,6 +249,7 @@ class ScriptedFighter:
         self.aa_extra = 0                 # extra anti-air frames after losing a round to jump-ins
         self.stale = 0                    # frames the newest state is probably old (state arrival bursts, 0.18.0)
         self.own_total = {m["id"]: m.get("total") for m in self.own if isinstance(m.get("total"), int)}
+        self._own_block_adv = {m["id"]: m["block_adv"] for m in self.own if isinstance(m.get("block_adv"), int)}
         self.busy_stats: dict = {}        # rule -> {why: count}: decisions held back because the bot could not act
         # 0.18.0: own attacks and whether they connected, fed to reach.LiveReach (the policy's reach) when they end
         self.live_reach = None
@@ -254,6 +265,7 @@ class ScriptedFighter:
         self.exp = experience             # learning.Experience: what worked against this opponent
         self.punish_stats = {"chances": 0, "taken": 0}
         self._chance_for = None
+        self._skip_for = None
         self.prev_raw: dict | None = None
         self.rng = random.Random(seed)
         ids = fcfg.get("ids") or {}
@@ -461,7 +473,7 @@ class ScriptedFighter:
         self._assess(me, op)
         # 0. a pressure moment: about to be free with the opponent close -> commit to a defensive option
         #    now (defense.py: throws can't be teched on reaction, 26 of 29 landed in the user's FT5)
-        d = self._pressure(raw, me, op, dist, t)
+        d = self._pressure(raw, me, op, dist, t) or self._own_rush_pressure(raw, me, op, dist, t)
         if d is not None:
             return d
         # 1. being hit: nothing to do
@@ -532,7 +544,11 @@ class ScriptedFighter:
                 if self.blocked_id != op_act:
                     self.punished = False
                 self.blocked_id = op_act
-            adv = self.opp.get(self.blocked_id, {}).get("block_adv")
+            adv = self._block_adv(self.blocked_id)
+            base_ = self.opp.get(self.blocked_id, {}).get("block_adv")
+            if base_ is not None and base_ <= -4 < adv and self._skip_for != self.blocked_id:
+                self._skip_for = self.blocked_id
+                self.rush_stats["punish_skipped"] += 1       # punishable normally, safe out of a Drive Rush (0.18.5)
             if adv is not None and adv <= -4 and self._chance_for != self.blocked_id:
                 self._chance_for = self.blocked_id
                 self.punish_stats["chances"] += 1
@@ -628,7 +644,7 @@ class ScriptedFighter:
         tmr, oa = raw.get("stage_timer"), op.get("action_id")
         self._track_self(me, op, tmr)
         if bs > 0:
-            sit, rem = "after_block", bs
+            sit, rem = ("after_rush_block" if self._blocked_rush else "after_block"), bs
         elif hs > 0:
             # 0.17.5: after a hit too (the user's ranked match: 5 of Jamie's 6 throws started while the bot was still
             # reeling from the same hit and landed on its first free frame; before, hitstun was never a moment). Not
@@ -656,12 +672,16 @@ class ScriptedFighter:
             return None
         if dist > float(dc.get("max_dist", 1.4)) or (_num(op.get("y")) or 0.0) > 0.3:
             return None
-        if sit == "after_block":
-            adv = self.opp.get(op.get("action_id"), {}).get("block_adv")
+        if sit in ("after_block", "after_rush_block"):
+            adv = self._block_adv(op.get("action_id"))
+            base_ = self.opp.get(op.get("action_id"), {}).get("block_adv")
+            if base_ is not None and base_ <= -4 < adv and self._skip_for != op.get("action_id"):
+                self._skip_for = op.get("action_id")
+                self.rush_stats["punish_skipped"] += 1       # punishable normally, safe out of a Drive Rush (0.18.5)
             if adv is not None and adv <= -4 and not self.punished:
                 return None                          # punishable: the punish rule acts on this one
         self._pressure_fired = True
-        return self._commit_defense(sit, raw, me, op, dist, t)
+        return self._commit_defense(sit, raw, me, op, dist, t, rem=rem)
 
     def _approach(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
         """0.18.0: the opponent walking into throw range in neutral is a pressure moment too (0.17.5 ranked: 9 of 26
@@ -685,6 +705,52 @@ class ScriptedFighter:
             return None
         self._approach_fired = True
         return self._commit_defense("approach", raw, me, op, dist, t)
+
+    def _rushed_by_gauge(self, me: dict, op: dict) -> bool:
+        """A Drive Rush whose id is not known (RUSH_IDS has Ken's and Ryu's): the opponent's Drive dropped by a bar or
+        more in the last 45 frames AND it closed >= 0.6 toward the bot in the last 20 (a rush is fast; ESTIMATES)."""
+        h = [x for x in self._op_hist if isinstance(x[0], int)]
+        if len(h) < 5:
+            return False
+        t1 = h[-1][0]
+        dr = [d for t, d, _ in h if d is not None and t1 - t <= 45]
+        xs = [(t, x) for t, _, x in h if x is not None and t1 - t <= 20]
+        mx = _num(me.get("x"))
+        if len(dr) < 2 or len(xs) < 2 or mx is None or max(dr) - dr[-1] < 9000:
+            return False
+        toward = (xs[-1][1] - xs[0][1]) * (1.0 if mx > xs[0][1] else -1.0)
+        return toward >= 0.6
+
+    def _block_adv(self, aid) -> int | None:
+        """The blocked move's on-block advantage for the opponent, +4 when it came out of a Drive Rush (0.18.5)."""
+        adv = self.opp.get(aid, {}).get("block_adv")
+        if adv is not None and self.op_move.get("rushed") and self.op_move.get("id") == aid:
+            return adv + RUSH_BONUS
+        return adv
+
+    def _own_rush_pressure(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.18.5: the bot's own normal out of a Drive Rush was blocked and leaves it plus (its on-block + 4): a pressure
+        moment of the bot's: frame trap (a normal fast enough that the opponent's 4-frame jab can't beat it, so a press
+        becomes a counter hit), throw, shimmy or block, from the same per-opponent game, timed to the bot's first free
+        frame."""
+        a = self._own_atk
+        if self.defense is None or a is None or not a.get("rush") or not a.get("blocked") or a.get("pressed"):
+            return None
+        if me.get("action_id") != a["id"] or dist > float((self.c.get("defense") or {}).get("max_dist", 1.4)):
+            return None
+        total, fr = self.own_total.get(a["id"]), _num(me.get("action_frame"))
+        base = self._own_block_adv.get(a["id"])
+        if not isinstance(total, int) or fr is None or base is None:
+            return None
+        adv = base + RUSH_BONUS
+        if adv < 0:
+            return None                                   # still minus: not the bot's turn
+        if total - fr > self.lead + self.stale + self.defense.pad + 1:
+            return None
+        a["pressed"] = True
+        self._frame_trap_adv = adv
+        self.rush_stats["own_moments"] += 1
+        return self._commit_defense("own_rush_block", raw, me, op, dist, t, rem=int(total - fr))
 
     def cmd_grab_ids(self) -> set:
         """The opponent's GROUND command grab ids (catalog / move map / live names + Capcom's "Throw" property), refreshed
@@ -805,12 +871,17 @@ class ScriptedFighter:
         if rem > self.lead + self.stale + self.defense.pad + 1 or rem < 0 or self.busy(me) is not None:
             return None
         self._their_wake_fired = self.op_onset
-        return self._commit_defense("their_wakeup", raw, me, op, dist, t)
+        return self._commit_defense("their_wakeup", raw, me, op, dist, t, rem=rem)
 
-    def _commit_defense(self, sit: str, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision:
+    def _commit_defense(self, sit: str, raw: dict, me: dict, op: dict, dist: float, t: float,
+                        rem: int | None = None) -> Decision:
+        """`rem`: frames until the first free frame (the bot's, or the waking opponent's). 0.18.5: the decisive input is
+        timed from it (minus the input delay and the state's staleness) rather than a fixed pad, so a moment noticed
+        a few frames later than its earliest point still lands on time (a late frame trap leaves a gap)."""
         dc = self.c.get("defense") or {}
+        wait = None if rem is None else max(0, int(rem) - self.lead - self.stale)
         ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
-                                 lambda name, oc: self._resolve_option(me, op, oc))
+                                 lambda name, oc: self._resolve_option(me, op, oc), wait=wait)
         opt = ch["option"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
         # did 58% of the user's damage against a crouch block)
@@ -826,7 +897,7 @@ class ScriptedFighter:
             self.exp.defended(t, sit, opt, me.get("hp"), op.get("hp"))
         odds = ", ".join(f"{k} {v:.0%}" for k, v in sorted(ch["odds"].items(), key=lambda kv: -kv[1]))
         from .defense import NICE, SITUATIONS
-        kind = "oki" if sit in self.defense.offense_situations else "defence"
+        kind = {"their_wakeup": "oki", "own_rush_block": "pressure"}.get(sit, "defence")
         return Decision("seq", f"{kind}: {ch.get('label') or NICE.get(opt, opt)}", ch["seq"], rule=f"defense:{opt}",
                         reason=f"{SITUATIONS[sit]} at {dist:.2f}; the opponent's odds: {odds}")
 
@@ -835,6 +906,8 @@ class ScriptedFighter:
         Shoryuken with 2 Drive bars to spare, else SA1, else SA3), or None."""
         meter, ophp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
         for c in oc.get("pick") or []:
+            if isinstance(c.get("startup"), int) and c["startup"] > self._frame_trap_adv + int(c.get("gap", 3)):
+                continue                  # 0.18.5 frame trap: must be active before the opponent's 4-frame jab
             if c.get("super") and meter < int(c["super"]):
                 continue
             if c.get("drive") and not self.can_spend(me, c["drive"]):
@@ -925,6 +998,8 @@ class ScriptedFighter:
             hs0, bs0, hp0 = a["op"]
             if (hs > 0 and not hs0) or (bs > 0 and not bs0) or (hp is not None and hp0 is not None and hp < hp0):
                 a["contact"] = True
+                if bs > 0 and not bs0:
+                    a["blocked"] = True
             a["op"] = (hs, bs, hp)
         self._own_last = aid
 
@@ -939,14 +1014,25 @@ class ScriptedFighter:
         self._track_self(me, op, tmr)
         self._track_own_attack(me, op)
         self._track_damage_taken(me, op)
+        self._op_hist.append((tmr, _num(op.get("drive")), _num(op.get("x"))))
         if oa != self.op_move["id"]:
-            self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False}
+            rushed = isinstance(oa, int) and 600 <= oa < 715 and (self.op_move["id"] in RUSH_IDS
+                                                                    or self._rushed_by_gauge(me, op))
+            self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False, "rushed": rushed}
+            if rushed:
+                self.rush_stats["opp_rushed_normals"] += 1
             if oa in self.cmd_grab_ids():
                 self.cmd_grab_stats["seen"] += 1
             if (self.opp.get(oa) or {}).get("projectile"):
                 d_ = player_distance(me, op)
                 if d_ is not None and isinstance(tmr, int):
                     self.pt.thrown(oa, tmr, d_)
+        bs_ = _num(me.get("blockstun")) or 0
+        if bs_ > 0 and self._prev_me_bs <= 0:
+            self._blocked_rush = bool(self.op_move.get("rushed"))
+            if self._blocked_rush:
+                self.rush_stats["opp_rushed_blocked"] += 1
+        self._prev_me_bs = bs_
         stun = (_num(me.get("blockstun")) or 0) + (_num(me.get("hitstun")) or 0)
         if stun > 0 and self._prev_me_stun <= 0 and self.pt.flight is not None:
             self.pt.contact(tmr)                       # the projectile arrived: one timing sample
@@ -1452,6 +1538,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["supers"] = {"crumple_followups": dict(fighter.super_stats["crumple"]),
                                      "confirms": fighter.super_stats["confirm"],
                                      "punishes": fighter.super_stats["punish"]}
+                summary["drive_rush"] = dict(fighter.rush_stats)
                 if fighter.cmd_grab_ids():
                     summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()))
                 summary["input_delay_used"] = fighter.lead

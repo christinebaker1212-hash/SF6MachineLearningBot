@@ -241,7 +241,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.4 (latest):** command grabs (CLAUDE.md "0.18.4"). The user is cataloguing the cast with C (guard None), then
+**0.18.5 (latest):** Drive Rush +4 for both sides and pressure timing from the frames left (CLAUDE.md "0.18.5"). Check
+`drive_rush` in S. Not built: Drive Rush as a neutral approach for the bot.
+
+**0.18.4:** command grabs (CLAUDE.md "0.18.4"). The user is cataloguing the cast with C (guard None), then
 B; a major game patch is ~10 days away (2026-10-14): the user will paste Capcom's patch notes and every dataset gets
 updated together (Capcom frame data, catalogs marked stale per changed move, combo routes to retest, config values).
 Next ranked check: `command_grabs` in S against Zangief / Manon / Lily, plus the 0.18.3 checks below.

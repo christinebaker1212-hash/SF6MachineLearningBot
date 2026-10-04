@@ -2416,6 +2416,25 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
 - MOCK-tested (`tests/test_ranked_0181_fixes.py`, real Zangief Capcom page); not verified in game. The user is running C for
   the cast (opponent ids), then B.
 
+## 0.18.5: Drive Rush +4 (user, 2026-10-04: "drive rushes add +4 frames to any normal, which can force counter hit scenarios")
+- Before: only the combo generator used the +4 (`combo_gen.RUSH_BONUS`, links after a rush). MEASURED 0.18.1 ranked: Ken's
+  rushed normals landed 5 of 8; after blocking a rushed normal the bot was hit within 45 frames 3 times of 8; the bot never
+  rushed into a normal itself.
+- **The opponent's rushed normals** (`fighter.RUSH_BONUS`, `op_move.rushed`): a normal whose previous action was a Drive
+  Rush id (`RUSH_IDS`: Ken 500/501, Ryu and most others 739-741), or, for an unknown rush id, the opponent's Drive dropping a
+  bar in the last 45 frames while closing >= 0.6 in 20 (ESTIMATES). Its on-block value counts +4 (`_block_adv`) in the
+  punish rule, the SA3 punish and the pressure moment: a normally -5 move is -1, not punished (`drive_rush.punish_skipped`).
+- **After blocking one:** its own situation `after_rush_block` (learned per opponent apart from ordinary blocks), with
+  `defense.situation_payoff` making a jab / tech / delay tech worse and a block better against a strike (frame traps).
+- **The bot's own rushed normal blocked** (`_own_rush_pressure`, set `defense.rush_pressure`): when its on-block + 4 leaves it
+  plus, a pressure moment of its own: frame trap (the first of 5HP / 2MK / 2MP / 5MP / 2LP whose start-up <= its advantage + 3,
+  Capcom start-ups, so the opponent's 4-frame jab can't beat it and a press becomes a counter hit), throw, shimmy, block.
+- **Pressure timing:** every defence / oki / pressure option is now timed from the frames actually left (minus input delay
+  and stale frames), not a fixed pad: a moment noticed late still lands on the first free frame.
+- `fight_summary.drive_rush` {opp_rushed_normals, opp_rushed_blocked, punish_skipped, own_moments} and a thoughts line.
+- MOCK-tested (`tests/test_ranked_0181_fixes.py`); not verified in game. The bot still rushes only inside combo-lab routes
+  (Parry Drive Rush routes); Drive Rush as a neutral approach is not built.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
