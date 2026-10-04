@@ -145,7 +145,7 @@ def test_ranked_confirms_the_result_screen_and_never_presses_in_menus(cfg, tmp_p
     monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
     cfg["datasets"] = {"root": str(ds)}
     cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
-    cfg["result_menu"] = {"first_s": 0.0, "retry_after_s": 999, "max_presses": 1}     # one press per result screen
+    cfg["result_menu"] = {"first_s": 0.0, "retry_after_s": 0.0, "retry_every_s": 999, "max_presses": 1}  # one per screen
     with Session(cfg, "ranked_menu_test", mock=True) as s:
         fi.run_fight(s, cfg, 60.0, player=None, matches=2, versus="ranked")
         status = json.loads((s.recorder.dir / "fight_status.json").read_text())

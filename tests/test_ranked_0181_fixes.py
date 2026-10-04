@@ -315,10 +315,11 @@ def test_progress_counts_takeovers_both_ways():
 
 def test_the_result_screen_is_confirmed_on_schedule_and_never_outside_a_battle():
     from sf6bot.result_menu import ResultMenu
-    m = ResultMenu({"first_s": 8, "retry_after_s": 30, "retry_every_s": 12, "max_presses": 3, "stuck_s": 45})
+    m = ResultMenu()                                          # defaults: from 5 s, every 2 s, until out of the battle
     m.match_ended(100.0)
-    presses = [t for t in [100 + k * 0.5 for k in range(200)] if m.tick(t, True, True, True, True)]
-    assert presses == [108.0, 130.0, 142.0]                  # rematch, then "Return to Previous Mode" (twice at most 3)
+    presses = [t for t in [100 + k * 0.5 for k in range(30)] if m.tick(t, True, True, True, True)]
+    assert presses == [105.0, 107.0, 109.0, 111.0, 113.0]
+    assert m.tick(115.0, False, False, False, True) is None and m.t_end is None     # back on Fighting Ground: stop
     m2 = ResultMenu()
     m2.match_ended(0.0)
     assert m2.tick(9.0, False, False, False, True) is None   # Fighting Ground / menus: never
@@ -341,7 +342,7 @@ def test_a_communication_error_on_fighting_ground_is_cleared_and_nothing_else_is
     assert contains("A cornmunication error has occurred", "A communication error has occurred")   # one OCR slip
     assert not contains("FIGHTING GROUND Ranked Match Casual Match Searching for opponent... F Confirm Esc Back",
                         "A communication error has occurred")
-    w = MenuWatch({"every_s": 2.0, "cooldown_s": 20, "max_tries": 3})
+    w = MenuWatch({"every_s": 2.0, "cooldown_s": 20, "max_tries": 3})    # (defaults: 5 s apart, 6 tries)
     searching = "FIGHTING GROUND ARCADE PRACTICE VERSUS ONLINE Ranked Match Searching for opponent..."
     assert all(w.tick(t, False, True, lambda: searching) is None for t in range(0, 60))      # normal search: nothing
     steps = w.tick(60.0, False, True, lambda: err)
@@ -351,5 +352,8 @@ def test_a_communication_error_on_fighting_ground_is_cleared_and_nothing_else_is
     assert w.tick(102.0, False, True, lambda: err) is not None
     assert w.tick(125.0, False, True, lambda: err) is None                                 # 3 tries: stop and log
     assert w.tick(130.0, True, True, lambda: err) is None and w.tries == 0                  # a battle: reset
+    d = MenuWatch()                                                                         # the error comes back 3 times
+    tries = [t for t in range(0, 40, 2) if d.tick(float(t), False, True, lambda: err)]
+    assert tries == [0, 6, 12, 18, 24, 30] and d.tick(40.0, False, True, lambda: err) is None
     assert MenuWatch().tick(0.0, False, False, lambda: err) is None                         # SF6 not focused
     assert MenuWatch().tick(0.0, True, True, lambda: err) is None                           # never in a battle

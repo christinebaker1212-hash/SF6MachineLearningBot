@@ -241,7 +241,9 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.8 (latest):** unattended ranked: result screen F from the game state, communication errors on Fighting Ground by
+**0.18.9 (latest):** result screen F every 2 s until back on Fighting Ground; communication-error steps up to 6 in a row.
+
+**0.18.8:** unattended ranked: result screen F from the game state, communication errors on Fighting Ground by
 screen reading (CLAUDE.md "0.18.8"); 0.18.6 user punish rules (Ingrid's teleport), 0.18.7 takeovers in progress. First
 unattended night: check `result_menu_presses` timings and `communication_errors` in fight_status.json, and that the
 session start said screen reading works.

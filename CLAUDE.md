@@ -2469,6 +2469,10 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   allows, else Tesseract if installed); only the phrase "A communication error has occurred" (one OCR slip per 8 letters
   tolerated) triggers the F, F, Esc steps; 20 s apart, at most 3 in a row (then it waits and logs). The session start logs
   whether screen reading works ("Screen reading: Windows OCR" or why not).
+- **0.18.9 (user correction):** "Return to Previous Mode" is the result screen's only option whatever the opponent picks:
+  F from 5 s after the match end, every 2 s (at most 60), until the game reports no battle (Fighting Ground). A
+  communication error can repeat up to 3 times before Ranked Match + Esc works: the F, F, Esc steps repeat 5 s apart, up to
+  6 in a row.
 - `mss` joined the `windows` extra. MOCK-tested (`tests/test_ranked_0181_fixes.py`, `tests/test_fight_session.py`: two real
   matches with menus between, one F per result screen, none in menus); the OCR and the menus are NOT verified in game.
 

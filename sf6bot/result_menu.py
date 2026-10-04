@@ -1,21 +1,21 @@
 """Result screen in ranked: rematch, or back to Fighting Ground, without a human (0.18.8).
 
-User (2026-10-04): after a ranked match the result screen's FIRST option is what we always want: "Request Rematch", or,
-once the opponent declined and the rematch timer ran out, "Return to Previous Mode" (back to Fighting Ground, where the
-game keeps "Searching for opponent..." by itself). On Fighting Ground the bot must never press anything.
+User (2026-10-04): after a ranked match the result screen's only real option is "Return to Previous Mode" (back to
+Fighting Ground, where the game keeps "Searching for opponent..." by itself), whatever the opponent picks: "the bot
+should just keep pressing F until it reaches the main menu again". On Fighting Ground the bot must never press anything
+(except for a communication error: MenuWatch below).
 
 Decided from the GAME STATE only, no screen reading:
   - a match has ended and the game still reports the battle = the result screen: press the menu confirm key (F)
   - the game reports no battle (Fighting Ground, menus) = never press; a new battle loading / starting = stop
-  - one press when the result menu should be up (`first_s` after the match ended), then, if no new battle has started,
-    presses after the rematch timer should have run out (`retry_after_s`, then every `retry_every_s`, at most
-    `max_presses`): whether a second press on "Request Rematch" would cancel the request is not known, so it waits
+  - F from `first_s` after the match ended, then every `retry_every_s` (at most `max_presses`), until the game reports
+    no battle (Fighting Ground) or a new battle loading
   - a battle stuck with a player at 0 hp for `stuck_s` without a recognised match end (a disconnect) counts as ended
 Every press is logged with its timing (fight_status.json, narration) so the first unattended session calibrates these.
 """
 from __future__ import annotations
 
-DEFAULTS = {"enabled": True, "first_s": 8.0, "retry_after_s": 30.0, "retry_every_s": 12.0, "max_presses": 5,
+DEFAULTS = {"enabled": True, "first_s": 5.0, "retry_after_s": 5.0, "retry_every_s": 2.0, "max_presses": 60,
             "stuck_s": 45.0}
 
 
@@ -56,11 +56,10 @@ class ResultMenu:
         since = now - self.t_end
         if self.presses == 0:
             due = since >= float(self.c["first_s"])
-            why = "result menu: first option (Request Rematch)"
         else:
             due = (since >= float(self.c["retry_after_s"])
                    and now - (self.last or 0.0) >= float(self.c["retry_every_s"]))
-            why = "still on the result screen: first option (Return to Previous Mode once the rematch timer ran out)"
+        why = "result screen: Return to Previous Mode (pressing until back on Fighting Ground)"
         if not due:
             return None
         self.presses += 1
@@ -70,14 +69,15 @@ class ResultMenu:
 
 
 MENU_DEFAULTS = {"enabled": True, "every_s": 2.0, "error_phrase": "A communication error has occurred",
-                 "steps": [["F", 0.0], ["F", 1.5], ["ESC", 1.5]], "cooldown_s": 20.0, "max_tries": 3}
+                 "steps": [["F", 0.0], ["F", 1.5], ["ESC", 1.5]], "cooldown_s": 5.0, "max_tries": 6}
 
 
 class MenuWatch:
     """0.18.8 (user, 2026-10-04): outside a battle the bot presses nothing, except when SF6 shows "A communication error
-    has occurred." Then, once: F (OK), F (Ranked Match), Esc (back to Fighting Ground, searching again). Read from the
-    screen (screen_text.py): the game state shows no difference. At most `max_tries` in a row (then it waits for a
-    battle and logs it), `cooldown_s` apart."""
+    has occurred." Then: F (OK), F (Ranked Match), Esc (back to Fighting Ground, searching again), repeated while the error
+    keeps coming back (user: it can take up to three errors before Ranked Match + Esc works), `cooldown_s` apart, at most
+    `max_tries` in a row (then it waits for a battle and logs it). Read from the screen (screen_text.py): the game state
+    shows no difference."""
 
     def __init__(self, cfg: dict | None = None):
         self.c = {**MENU_DEFAULTS, **(cfg or {})}
