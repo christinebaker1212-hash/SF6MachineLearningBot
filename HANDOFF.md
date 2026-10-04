@@ -268,6 +268,11 @@ first (what the bot did in those moments), then build.
    anti-air LATER in the jump, once the landing side is clear (predicted landing past the bot = cross-up: block the
    other way or DP the right way), instead of committing early. Measure in the 100 matches: DPs started while the
    opponent was overhead, and which way they landed.
+6. **Far fewer jumps** (user: "it jumps WAY too much ... jumping is too committal"). Measure in the 100 matches: jumps
+   per match, by source (neutral policy / exploration / defence option / command-grab answer), and what each jump led
+   to (anti-aired, landed a hit, blocked, nothing). Then cut them: a low cap on jumping in the neutral policy (a jump
+   only as a read, e.g. on a fireball from the right range or a predicted command grab), less weight from the
+   copy-a-player counts, no jumps in exploration.
 
 **0.18.9:** result screen F every 2 s until back on Fighting Ground; communication-error steps up to 6 in a row.
 
