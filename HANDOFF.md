@@ -273,6 +273,14 @@ first (what the bot did in those moments), then build.
    to (anti-aired, landed a hit, blocked, nothing). Then cut them: a low cap on jumping in the neutral policy (a jump
    only as a read, e.g. on a fireball from the right range or a predicted command grab), less weight from the
    copy-a-player counts, no jumps in exploration.
+7. **Stop cornering itself.** Measure in the 100 matches: time with the bot's back near its wall, how it got there
+   (walking back, back dashes, blocking pushback, knockdowns) and the damage taken there. Then: wall distance weighs on
+   neutral choices (less walk back / back dash with little space behind, more ground held or a jump-out only as a read),
+   and getting out when cornered (a reversal, a well-timed throw, a forward move at the right moment).
+8. **Drive Impact against a cornered opponent.** Near the wall a Drive Impact the opponent blocks still stuns them
+   against the wall (game rule, user / community knowledge; the exact wall distance is to measure in the data) and it
+   leads to a big combo. Add it as a choice when the opponent's back is close to the wall and the bot has the Drive to
+   spare (never into burnout unless it kills), with the follow-up cash-out like the 0.18.1 crumple (SA3 / H Shoryuken).
 
 **0.18.9:** result screen F every 2 s until back on Fighting Ground; communication-error steps up to 6 in a row.
 
