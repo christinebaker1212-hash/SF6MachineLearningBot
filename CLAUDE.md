@@ -2446,7 +2446,11 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   move is not known here: the match line at her first match will show it. Needs her ids (catalog C, or move map).
 - **Operator takeovers (user):** the user sometimes takes over from the bot against gimmicky players. STOP / F8 ends the run:
   the match is saved up to there as unfinished (no win / loss) and nothing after is recorded. F7 (pause) or a focus loss
-  keeps recording: the user's play would be saved as the bot's (round results, win-model data). Not fixed yet; offered.
+  keeps recording: the user's play would be saved as the bot's (round results, win-model data). The user only uses F8
+  (2026-10-04), so the data is clean.
+- **0.18.7: takeovers in the progress report.** The user doesn't track which matches were taken over: every unfinished
+  match counts as a takeover (user's rule). `progress.py` reports `takeovers` and `win_rate_takeovers_lost` (the
+  pessimistic bound) next to the plain win rate (finished matches only), for the session and the last 20 / 50 / 200.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

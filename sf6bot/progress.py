@@ -57,17 +57,28 @@ def _rate(rows: list[dict]) -> tuple[int, int, float | None]:
     return w, len(dec) - w, (w / len(dec) if dec else None)
 
 
+def _takeovers(rows: list[dict]) -> dict:
+    """0.18.6 (user, 2026-10-04): the operator takes over with F8 against gimmicky players, which leaves the match
+    unfinished; which ones were takeovers isn't recorded, so every unfinished match counts as one. The win rate with them
+    counted as losses is the pessimistic bound; the plain win rate (finished matches only) the optimistic one."""
+    u = sum(1 for r in rows if not r.get("finished"))
+    w = sum(1 for r in rows if r.get("finished") and r.get("won"))
+    return {"takeovers": u, "win_rate_takeovers_lost": round(w / len(rows), 3) if rows else None}
+
+
 def summarize(session: list[dict], history: list[dict]) -> dict:
     out = {"updated": time.strftime("%Y-%m-%d %H:%M:%S"), "session": {}, "history": {}, "by_opponent": {},
            "damage_ratio_blocks": []}
     w, l, r = _rate(session)
     out["session"] = {"matches": len(session), "won": w, "lost": l, "win_rate": None if r is None else round(r, 3),
-                      "dealt": sum(x.get("dealt", 0) for x in session), "taken": sum(x.get("taken", 0) for x in session)}
+                      "dealt": sum(x.get("dealt", 0) for x in session), "taken": sum(x.get("taken", 0) for x in session),
+                      **_takeovers(session)}
     out["history"]["matches"] = len(history)
     for n in (20, 50, 200):
         if len(history) >= min(n, 5):
             w, l, r = _rate(history[-n:])
-            out["history"][f"last_{n}"] = {"won": w, "lost": l, "win_rate": None if r is None else round(r, 3)}
+            out["history"][f"last_{n}"] = {"won": w, "lost": l, "win_rate": None if r is None else round(r, 3),
+                                           **_takeovers(history[-n:])}
     for x in history:
         k = x.get("opponent") or "?"
         e = out["by_opponent"].setdefault(k, {"won": 0, "lost": 0})
@@ -91,12 +102,16 @@ def markdown(p: dict) -> str:
     lines = ["# Progress", "", f"updated {p['updated']}", "",
              f"- this session: {s['matches']} matches, won {s['won']}, lost {s['lost']}"
              + (f" ({s['win_rate']:.0%})" if s.get("win_rate") is not None else "")
+             + (f"; taken over by you (unfinished): {s['takeovers']}, win rate counting those as losses "
+                f"{s['win_rate_takeovers_lost']:.0%}" if s.get("takeovers") else "")
              + f"; damage dealt {s['dealt']:,}, taken {s['taken']:,}",
              f"- all recorded matches: {p['history'].get('matches', 0)}"]
     for k in ("last_20", "last_50", "last_200"):
         e = p["history"].get(k)
         if e and e.get("win_rate") is not None:
-            lines.append(f"- win rate, {k.replace('_', ' ')} matches: {e['win_rate']:.0%} ({e['won']}-{e['lost']})")
+            lines.append(f"- win rate, {k.replace('_', ' ')} matches: {e['win_rate']:.0%} ({e['won']}-{e['lost']})"
+                         + (f"; {e['takeovers']} taken over: {e['win_rate_takeovers_lost']:.0%} counting them as losses"
+                            if e.get("takeovers") else ""))
     if p.get("blind"):
         lines.append(f"- blind evaluation: the participant guessed 'human' {p['blind']['guessed_human']} of "
                      f"{p['blind']['guessed']} matches")

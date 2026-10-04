@@ -300,3 +300,12 @@ def test_your_punish_rule_finds_ingrids_teleport_and_punishes_it(tmp_path):
     assert d.rule == "whiff_punish" and d.name == "L Shoryuken (punish)"
     assert apply_punish_overrides({}, "Ingrid", tmp_path, FCFG) == [
         "Sun Strike -> L Shoryuken (punish) (its id is not known yet: catalogue the character, menu C)"]
+
+
+def test_progress_counts_takeovers_both_ways():
+    from sf6bot.progress import markdown, summarize
+    rows = [{"finished": True, "won": True}, {"finished": True, "won": False}, {"finished": False}, {"finished": False}]
+    p = summarize(rows, rows)
+    assert p["session"]["win_rate"] == 0.5 and p["session"]["takeovers"] == 2
+    assert p["session"]["win_rate_takeovers_lost"] == 0.25
+    assert "taken over by you (unfinished): 2, win rate counting those as losses 25%" in markdown(p)
