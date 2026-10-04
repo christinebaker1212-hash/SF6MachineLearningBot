@@ -252,6 +252,23 @@ MR exists only at Master. Uses: win rate per opponent rank band in `progress.md`
 strength input for the win model and the opponent assessment (CLAUDE.md "Requirement: opponent assessment"); weighting
 data by the strength of who it came from.
 
+**Also planned AFTER the analysis (user, 2026-10-04: "right now it does nothing"):** check each against the 100 matches
+first (what the bot did in those moments), then build.
+1. **Throw a parrying opponent up close.** An opponent who Drive Parries within throw range gets thrown (a parry loses to
+   a throw). Learned per opponent: how often they parry close.
+2. **Perfect parry projectiles.** 0.16.0 rule 4b exists (arrival fit per projectile id); find out from the data why it
+   doesn't fire or doesn't land (samples, busy gate, timing), then fix.
+3. **Biggest punish on a whiffed high-recovery move:** a whiffed Shoryuken / DP, command grab, Drive Impact (and similar
+   long recoveries) -> the highest-damage TRUE combo / super that fits the frames left and the distance (walk or Drive
+   Rush in if needed), not a lone poke or nothing. Check why the whiff-punish and DI-punish rules stayed silent.
+4. **Airborne moves punished by DP:** moves that leave the opponent in the air (Cammy's Hooligan Combination start-up,
+   Akuma's Demon Flip, Ingrid's teleport, similar) -> Shoryuken as an anti-air, from the move's id / Capcom data
+   (airborne property), not only from jump ids. Extends the 0.18.6 punish overrides (Ingrid teleport -> L Shoryuken).
+5. **Later anti-air decision for cross-ups:** the bot whiffs DPs as soon as an opponent goes over its head. Decide the
+   anti-air LATER in the jump, once the landing side is clear (predicted landing past the bot = cross-up: block the
+   other way or DP the right way), instead of committing early. Measure in the 100 matches: DPs started while the
+   opponent was overhead, and which way they landed.
+
 **0.18.9:** result screen F every 2 s until back on Fighting Ground; communication-error steps up to 6 in a row.
 
 **0.18.8:** unattended ranked: result screen F from the game state, communication errors on Fighting Ground by
