@@ -63,6 +63,27 @@ input:
     LB: null
     LT: null
 
+# 0.18.8: ranked only. After a match the result screen's first option is confirmed with input.menu_keys.A (F):
+# "Request Rematch", or "Return to Previous Mode" once the opponent declined and the rematch timer ran out. Nothing is
+# pressed while the game reports no battle (Fighting Ground keeps searching for the next opponent by itself).
+# Timings are ESTIMATES (seconds after the match ended); the first unattended session's log calibrates them.
+result_menu:
+  enabled: true
+  first_s: 8          # the result menu is up (KO, win pose and quote skipped or over)
+  retry_after_s: 30   # the rematch timer has run out: the first option is "Return to Previous Mode"
+  retry_every_s: 12
+  max_presses: 5
+  stuck_s: 45         # a battle with a player at 0 hp this long without a match end (disconnect): treat as ended
+# 0.18.8: outside a battle (Fighting Ground) the bot presses nothing, except for "A communication error has occurred."
+# (read from the screen: screen_text.py). Then: F (OK), F (Ranked Match), Esc (back: searching again). User, 2026-10-04.
+menu_watch:
+  enabled: true
+  every_s: 2.0
+  error_phrase: "A communication error has occurred"
+  steps: [["F", 0.0], ["F", 1.5], ["ESC", 1.5]]   # key, seconds to wait before it
+  cooldown_s: 20
+  max_tries: 3        # in a row without a battle in between; then it waits and the status log says so
+
 training:
   reset_key: SLASH        # Training Mode "reset position" on the user's keyboard (user-reported: "/")
 

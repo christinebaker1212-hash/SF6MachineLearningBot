@@ -2452,6 +2452,26 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   match counts as a takeover (user's rule). `progress.py` reports `takeovers` and `win_rate_takeovers_lost` (the
   pessimistic bound) next to the plain win rate (finished matches only), for the session and the last 20 / 50 / 200.
 
+## 0.18.8: unattended ranked (result screen, communication errors)
+- **User (2026-10-04):** run ranked "completely autonomously while I sleep and gather hundreds of ranked matches". After a
+  match the result screen's FIRST option is always the one wanted (screenshots: "Request Rematch"; after the opponent
+  declined and the timer ran out, "Return to Previous Mode"). Fighting Ground ("Searching for opponent...", the game keeps
+  searching by itself) must never get a button press, except for "A communication error has occurred." (photo): then F
+  (OK), F (Ranked Match), Esc (back, searching again).
+- **Result screen** (`result_menu.ResultMenu`, `configs/default.yaml: result_menu`), from the GAME STATE only: a match ended
+  and the game still reports the battle -> F (input.menu_keys.A) `first_s` 8 s after the match end; then, if no new battle is
+  loading, F after `retry_after_s` 30 s and every 12 s (at most 5): whether a second F on "Request Rematch" cancels the
+  request is unknown, so it waits for the rematch timer. A battle stuck with a player at 0 hp for 45 s counts as ended
+  (disconnect). Nothing while the game reports no battle; only when SF6 has focus (the controller is armed). ESTIMATED
+  timings: the presses are logged (`fight_status.json: result_menu_presses`, status log, narration) to calibrate them.
+- **Communication errors** (`result_menu.MenuWatch`, `screen_text.py`, `menu_watch`): outside a battle the SF6 window is
+  read every 2 s (mss capture; Windows' built-in OCR via pywinrt, which update.bat / setup.bat install when the Python
+  allows, else Tesseract if installed); only the phrase "A communication error has occurred" (one OCR slip per 8 letters
+  tolerated) triggers the F, F, Esc steps; 20 s apart, at most 3 in a row (then it waits and logs). The session start logs
+  whether screen reading works ("Screen reading: Windows OCR" or why not).
+- `mss` joined the `windows` extra. MOCK-tested (`tests/test_ranked_0181_fixes.py`, `tests/test_fight_session.py`: two real
+  matches with menus between, one F per result screen, none in menus); the OCR and the menus are NOT verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

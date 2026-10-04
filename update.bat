@@ -20,6 +20,9 @@ powershell -NoProfile -Command "Expand-Archive -Force '%TMPZ%' '%TMPD%'"
 for /d %%D in ("%TMPD%\*") do robocopy "%%D" "%~dp0." /E /XD .venv runs /XF local.yaml /NFL /NDL /NJH /NJS /NP >nul
 echo Updating packages ...
 ".venv\Scripts\python.exe" -m pip install -q -e ".[windows,dev]"
+echo Installing Windows' screen reading (OCR) for ranked menus ...
+".venv\Scripts\python.exe" -m pip install -q winrt-runtime winrt-Windows.Foundation winrt-Windows.Foundation.Collections winrt-Windows.Media.Ocr winrt-Windows.Graphics.Imaging winrt-Windows.Storage winrt-Windows.Storage.Streams winrt-Windows.Globalization
+if errorlevel 1 echo   (not available for this Python: ranked runs without screen reading; communication errors then need you)
 echo.
 echo Update finished.
 pause

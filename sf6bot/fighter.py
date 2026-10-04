@@ -1451,6 +1451,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     pc = fcfg.get("policy") or {}
     retrainer = Retrainer(pc.get("retrain_every", 20) if (versus == "ranked" or pc.get("retrain_in_all_modes"))
                           else 0, sess.recorder.dir, enabled=not sess.mock and brain is not None)
+    # 0.18.8: ranked runs on their own between matches: the result screen's first option (rematch, or back to Fighting
+    # Ground) is confirmed from the game state; nothing is ever pressed outside a battle (result_menu.py)
+    from .result_menu import MenuWatch, ResultMenu
+    rmenu = ResultMenu(cfg.get("result_menu")) if versus == "ranked" else None
+    menu_key = ((cfg.get("input") or {}).get("menu_keys") or {}).get("A") or "F"
+    # outside a battle: only "A communication error has occurred" on Fighting Ground is answered (read from the screen)
+    mwatch = MenuWatch(cfg.get("menu_watch")) if versus == "ranked" else None
+    screen_reader = None
+    if mwatch is not None and not sess.mock and mwatch.c.get("enabled", True):
+        from . import screen_text
+        eng_, note_ = screen_text.engine()
+        print(f"Screen reading (for communication errors on Fighting Ground): "
+              + (note_ if eng_ else f"NOT available ({note_}); such errors will need you"))
+        sess.narrate("Screen reading: " + (note_ if eng_ else "not available, communication errors will need you."),
+                     source="scripted")
+        if eng_:
+            screen_reader = lambda: screen_text.read_game_screen(cfg)          # noqa: E731
     brain_mtime = [None]
     if not sess.mock and brain is not None and (brain.stale or (win is not None and win.stale)):
         # 0.17.5 changed a model input (the opponent's move progress): retrain now, in the background; the new
@@ -1724,6 +1741,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                             "bot_won": won, "score": e.get("score")}
                         sess.narrate(f"Match over: {'WON' if won else 'lost'} {e.get('score')}.", source="measured")
                         match_end_t = t
+                        if rmenu is not None:
+                            rmenu.match_ended(clock.now())
                     elif e["event"] == "fight_start":
                         sess.narrate("Fight!", source="measured")
                 if meter is not None and st.in_battle and me_key:
@@ -1790,6 +1809,32 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             st = batch[-1]
             t = st.t_recv
             p1d, p2d = st.raw.get("p1") or {}, st.raw.get("p2") or {}
+            if mwatch is not None and (screen_reader is not None or sess.mock):
+                steps_ = mwatch.tick(clock.now(), bool(st.in_battle), c.armed, screen_reader or (lambda: None))
+                if steps_:
+                    for key_, wait_ in steps_:
+                        clock.precise_sleep_until(clock.now() + float(wait_))
+                        c.backend.send([(key_, True)])
+                        clock.precise_sleep_until(clock.now() + 0.06)
+                        c.backend.send([(key_, False)])
+                    entry_ = {"t": round(clock.now() - t_start, 1), "status": "communication error: pressed "
+                              + ", ".join(k for k, _ in steps_), **mwatch.log[-1]}
+                    wait["log"].append(entry_)
+                    print(f"[menu] communication error on screen (try {mwatch.tries}): pressed "
+                          + ", ".join(k for k, _ in steps_))
+                    sess.narrate("Communication error: OK, Ranked Match, back (searching again).", source="scripted")
+            if rmenu is not None:
+                hp_zero = (_num(p1d.get("hp")) or 0) <= 0 or (_num(p2d.get("hp")) or 0) <= 0
+                why_ = rmenu.tick(clock.now(), bool(st.in_battle), bool(st.ready), hp_zero, c.armed)
+                if why_:
+                    c.backend.send([(menu_key, True)])
+                    clock.precise_sleep_until(clock.now() + 0.06)
+                    c.backend.send([(menu_key, False)])
+                    entry_ = {"t": round(clock.now() - t_start, 1), "status": f"pressed {menu_key}: {why_}",
+                              **rmenu.log[-1]}
+                    wait["log"].append(entry_)
+                    print(f"[menu] pressed {menu_key} {rmenu.log[-1]['after_s']} s after the match: {why_}")
+                    sess.narrate(f"Result screen: pressed {menu_key} ({why_}).", source="scripted")
             detail = {"stage_timer": st.raw.get("stage_timer"), "round": st.raw.get("round"),
                       "chara": [p1d.get("chara"), p2d.get("chara")], "hp": [p1d.get("hp"), p2d.get("hp")],
                       "actions": [p1d.get("action_id"), p2d.get("action_id")], "armed": c.armed,
@@ -2050,6 +2095,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     finally:
         try:
             sess.recorder.write_json("fight_status.json", {"status_log": wait["log"], "matches_played": len(done),
+                                                          "result_menu_presses": rmenu.log if rmenu else None,
+                                                          "communication_errors": mwatch.log if mwatch else None,
                                                            "record": record})
         except Exception:
             pass

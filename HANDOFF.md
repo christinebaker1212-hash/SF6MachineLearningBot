@@ -241,7 +241,12 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.5 (latest):** Drive Rush +4 for both sides and pressure timing from the frames left (CLAUDE.md "0.18.5"). Check
+**0.18.8 (latest):** unattended ranked: result screen F from the game state, communication errors on Fighting Ground by
+screen reading (CLAUDE.md "0.18.8"); 0.18.6 user punish rules (Ingrid's teleport), 0.18.7 takeovers in progress. First
+unattended night: check `result_menu_presses` timings and `communication_errors` in fight_status.json, and that the
+session start said screen reading works.
+
+**0.18.5:** Drive Rush +4 for both sides and pressure timing from the frames left (CLAUDE.md "0.18.5"). Check
 `drive_rush` in S. Not built: Drive Rush as a neutral approach for the bot.
 
 **0.18.4:** command grabs (CLAUDE.md "0.18.4"). The user is cataloguing the cast with C (guard None), then

@@ -16,7 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Windows game integration. dxcam = DXGI Desktop Duplication capture with present timestamps.
-windows = ["dxcam[cv2]>=0.3.0", "pywin32>=306", "vgamepad>=0.1.0"]
+windows = ["dxcam[cv2]>=0.3.0", "pywin32>=306", "vgamepad>=0.1.0", "mss>=9.0"]
 # Cross-platform fallback capture (no present timestamps). Also usable on Linux for dev.
 mss = ["mss>=9.0"]
 # torch is installed separately (CUDA build): see CLAUDE.md

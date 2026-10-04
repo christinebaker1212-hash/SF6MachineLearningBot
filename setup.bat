@@ -38,6 +38,9 @@ if not exist ".venv\Scripts\python.exe" (
 echo Installing packages (this can take a few minutes) ...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
 ".venv\Scripts\python.exe" -m pip install -e ".[windows,dev]"
+echo Installing Windows' screen reading (OCR) for ranked menus ...
+".venv\Scripts\python.exe" -m pip install -q winrt-runtime winrt-Windows.Foundation winrt-Windows.Foundation.Collections winrt-Windows.Media.Ocr winrt-Windows.Graphics.Imaging winrt-Windows.Storage winrt-Windows.Storage.Streams winrt-Windows.Globalization
+if errorlevel 1 echo   (not available for this Python: ranked runs without screen reading; communication errors then need you)
 if errorlevel 1 (
     echo.
     echo INSTALL FAILED. Copy everything above this line and send it to Claude.

@@ -309,3 +309,47 @@ def test_progress_counts_takeovers_both_ways():
     assert p["session"]["win_rate"] == 0.5 and p["session"]["takeovers"] == 2
     assert p["session"]["win_rate_takeovers_lost"] == 0.25
     assert "taken over by you (unfinished): 2, win rate counting those as losses 25%" in markdown(p)
+
+
+# ---- 0.18.8: the ranked result screen ------------------------------------------------------------------------------------
+
+def test_the_result_screen_is_confirmed_on_schedule_and_never_outside_a_battle():
+    from sf6bot.result_menu import ResultMenu
+    m = ResultMenu({"first_s": 8, "retry_after_s": 30, "retry_every_s": 12, "max_presses": 3, "stuck_s": 45})
+    m.match_ended(100.0)
+    presses = [t for t in [100 + k * 0.5 for k in range(200)] if m.tick(t, True, True, True, True)]
+    assert presses == [108.0, 130.0, 142.0]                  # rematch, then "Return to Previous Mode" (twice at most 3)
+    m2 = ResultMenu()
+    m2.match_ended(0.0)
+    assert m2.tick(9.0, False, False, False, True) is None   # Fighting Ground / menus: never
+    assert m2.t_end is None and m2.tick(20.0, True, True, True, True) is None
+    m3 = ResultMenu()
+    m3.match_ended(0.0)
+    assert m3.tick(9.0, True, True, True, False) is None     # SF6 not focused: no press
+    assert m3.tick(10.0, True, False, False, True) is None   # the next battle is loading (rematch accepted): stop
+    m4 = ResultMenu({"stuck_s": 45})                          # a disconnect: no match end, a player at 0 hp
+    assert all(m4.tick(t, True, True, True, True) is None for t in range(0, 45))
+    assert m4.tick(45.0, True, True, True, True) is not None
+
+
+def test_a_communication_error_on_fighting_ground_is_cleared_and_nothing_else_is_pressed():
+    from sf6bot.result_menu import MenuWatch
+    from sf6bot.screen_text import contains
+    # OCR text as Windows might read the user's photo (slips included)
+    err = "FIGHTING GROUND Caution A communication error has occurred. Error code: 50709-10005 R3152-AAA-AAEA:B1E OK"
+    assert contains(err, "A communication error has occurred")
+    assert contains("A cornmunication error has occurred", "A communication error has occurred")   # one OCR slip
+    assert not contains("FIGHTING GROUND Ranked Match Casual Match Searching for opponent... F Confirm Esc Back",
+                        "A communication error has occurred")
+    w = MenuWatch({"every_s": 2.0, "cooldown_s": 20, "max_tries": 3})
+    searching = "FIGHTING GROUND ARCADE PRACTICE VERSUS ONLINE Ranked Match Searching for opponent..."
+    assert all(w.tick(t, False, True, lambda: searching) is None for t in range(0, 60))      # normal search: nothing
+    steps = w.tick(60.0, False, True, lambda: err)
+    assert steps == [("F", 0.0), ("F", 1.5), ("ESC", 1.5)] and w.log[-1]["try"] == 1
+    assert w.tick(70.0, False, True, lambda: err) is None                                  # cooldown
+    assert w.tick(81.0, False, True, lambda: err) is not None
+    assert w.tick(102.0, False, True, lambda: err) is not None
+    assert w.tick(125.0, False, True, lambda: err) is None                                 # 3 tries: stop and log
+    assert w.tick(130.0, True, True, lambda: err) is None and w.tries == 0                  # a battle: reset
+    assert MenuWatch().tick(0.0, False, False, lambda: err) is None                         # SF6 not focused
+    assert MenuWatch().tick(0.0, True, True, lambda: err) is None                           # never in a battle
