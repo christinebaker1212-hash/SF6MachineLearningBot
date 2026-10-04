@@ -2484,8 +2484,8 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   (2026-10-04) opening "For the purposes of this scenario" was not used as a basis for any change.
 
 ## 0.18.11: 24 ranked matches (user, 2026-10-04): rematch presses, wrong side in a mirror, lag while streaming
-- **The session:** 24 recordings on 0.18.10, all ranked, human-like inputs on. Matches finished 21 (bot 10-11 by the
-  meta files); one Ryu mirror stopped by the user.
+- **The session:** 24 recordings on 0.18.10, all ranked, human-like inputs on. Real record 10-13 in finished matches
+  (run 1: 9-9; run 2: 1-4, see 0.18.12), plus the Ryu mirror the user stopped.
 - **F pressed during matches:** after a REMATCH the game never reports "no battle" or "loading", so the result-screen
   presses (F every 2 s) ran on through the next match until the 60-press limit (~2 min). `ResultMenu` now stops at a new
   match: the round clock going back / the round number changing after the match end, intro actions, or "Fight!".
