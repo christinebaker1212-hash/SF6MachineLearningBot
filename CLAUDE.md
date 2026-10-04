@@ -2476,6 +2476,13 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
 - `mss` joined the `windows` extra. MOCK-tested (`tests/test_ranked_0181_fixes.py`, `tests/test_fight_session.py`: two real
   matches with menus between, one F per result screen, none in menus); the OCR and the menus are NOT verified in game.
 
+## 0.18.10: "Blind test" in ranked = human-like inputs
+- User (2026-10-04): the panel's "Blind test" (human-like inputs) should be usable in ranked. In ranked it now turns on
+  human limits only (GUI and `--blind` with `--versus-human ranked`); the after-match guess prompt stays for offline /
+  online sets with participants who agreed beforehand (nobody to ask in ranked; it would also stop an unattended run).
+  Basis: Capcom's 2026-10-03 letter (human-like inputs approved for the project's ranked matches). A further pasted text
+  (2026-10-04) opening "For the purposes of this scenario" was not used as a basis for any change.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

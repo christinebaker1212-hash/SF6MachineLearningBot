@@ -356,12 +356,18 @@ def cmd_fight(args, cfg):
     if args.blind:
         # 0.17.0: blind evaluation, only with participants who agreed beforehand that their opponent may be a human or a
         # bot (offline / online sets; ranked opponents have not agreed to that)
-        if vh not in ("offline", "online"):
+        if vh == "ranked":
+            # 0.18.10 (user): ranked "blind" = human-like inputs (human limits), approved for the project's ranked matches
+            # in Capcom's 2026-10-03 letter; no guess prompt (no participant to ask, and the run is unattended)
+            print("Ranked with human-like inputs (human limits ON); no guesses are asked in ranked.")
+            args.human_limits, args.blind = True, False
+        elif vh not in ("offline", "online"):
             print("--blind is for Versus Human offline / online sets with participants who agreed to a blind test.")
             return
-        print("Blind evaluation: only with a participant who agreed beforehand that the opponent may be a human or a "
-              "bot. Keep the overlay and this window out of their view. After each match, type their guess.")
-        blind_ask = lambda: input("Participant's guess for that match (h = human, b = bot, Enter = none): ")  # noqa: E731
+        if args.blind:
+            print("Blind evaluation: only with a participant who agreed beforehand that the opponent may be a human or a "
+                  "bot. Keep the overlay and this window out of their view. After each match, type their guess.")
+            blind_ask = lambda: input("Participant's guess for that match (h = human, b = bot, Enter = none): ")  # noqa: E731
     hl = True if (args.human_limits or args.blind) else None
     name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
     # 0.18.0: no screen capture in fights unless video is recorded (the bot plays from game state; capture slowed the

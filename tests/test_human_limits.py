@@ -3,12 +3,11 @@ opponent's move without its inputs (online: the user reports the opponent's inpu
 memory has them is counted). Synthetic states; not measured against the game."""
 from pathlib import Path
 
-import pytest
 
 from sf6bot import progress
 from sf6bot.fighter import ScriptedFighter, load_fighter_config
 from sf6bot.game_state import load_input_bits
-from sf6bot.gui_actions import BadInput, build
+from sf6bot.gui_actions import build
 from sf6bot.human_limits import HumanLimits, thoughts
 from sf6bot.live_moves import LiveMoveLearner
 from tests.test_defense import state
@@ -51,11 +50,11 @@ def test_limits_and_blind_guesses_are_recorded():
     assert "Human limits ON (disclosed setting)" in text and "guess after this match: human" in text
 
 
-def test_blind_tests_only_for_sets_with_consenting_participants(tmp_path):
+def test_blind_tests_ask_guesses_only_in_sets_and_are_human_limits_in_ranked(tmp_path):
     assert build("versus", {"mode": "offline", "first_to": "2", "limits": "blind"})[0]["args"][-1] == "--blind"
     assert build("versus", {"mode": "ranked", "limits": "on"})[0]["args"][-1] == "--human-limits"
-    with pytest.raises(BadInput):
-        build("versus", {"mode": "ranked", "limits": "blind"})
+    a = build("versus", {"mode": "ranked", "limits": "blind"})[0]["args"]     # 0.18.10: human-like inputs, no prompts
+    assert a[-1] == "--human-limits" and "--blind" not in a
     rows: list = []
     for g in ("human", "bot", "human"):
         prog = progress.record_match(tmp_path / "ds", tmp_path, {"match": {"bot_won": True}, "blind": {"guess": g}}, rows)

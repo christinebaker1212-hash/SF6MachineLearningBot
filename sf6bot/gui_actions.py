@@ -152,9 +152,10 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             args += ["--opponent", str(v["opponent"]).strip()]
         lim = v.get("limits") or "off"
         if lim == "blind":
-            if v["mode"] == "ranked":
-                raise BadInput("Blind tests are for offline / online sets with a participant who agreed to one.")
-            args += ["--blind"]
+            # 0.18.10 (user): in ranked, "Blind test" = the human-like inputs only (Capcom's 2026-10-03 letter approved
+            # them for the project's ranked matches); no guess prompt after each match (nobody to ask, and it would stop an
+            # unattended run)
+            args += ["--human-limits"] if v["mode"] == "ranked" else ["--blind"]
         elif lim == "on":
             args += ["--human-limits"]
         return [one(*args)]
