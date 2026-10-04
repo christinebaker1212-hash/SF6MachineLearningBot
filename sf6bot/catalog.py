@@ -26,6 +26,7 @@ Caveats (stated in the output too):
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -163,6 +164,7 @@ INPUT_LEAD_FRAMES = 5   # measured: input -> game reads it 3-5 frames (mostly 4)
 
 
 def _earlier_result(cfg: dict, name: str, guard: str, move: str | None) -> dict | None:
+    # guard: the saved key without "guard_" (none / all / none_counter_hit ...)
     """A move's result from an earlier catalog run (so `--only <follow-up>` still knows its parent)."""
     if not move:
         return None
@@ -171,7 +173,7 @@ def _earlier_result(cfg: dict, name: str, guard: str, move: str | None) -> dict 
         m = json.loads(p.read_text(encoding="utf-8"))["moves"].get(move) or {}
     except (OSError, ValueError, KeyError):
         return None
-    return m.get(f"guard_{guard}") or m.get("guard_none") or m.get("guard_all")
+    return m.get(guard if guard.startswith("guard_") else f"guard_{guard}") or m.get("guard_none") or m.get("guard_all")
 
 
 def _bar_of_move(states: list[dict], r: dict) -> dict | None:
@@ -417,8 +419,30 @@ def _move_plan(name: str, cfg: dict, generic: bool):
     return moves, [], "generic"
 
 
+def guard_key(guard: str, hit: str = "normal") -> str:
+    """Where a run's results are saved per move: guard_none / guard_all (normal hits), or
+    guard_none_counter_hit / guard_none_punish_counter (0.18.2: the dummy set to Counter Hit / Punish Counter)."""
+    return f"guard_{guard}" + ("" if hit == "normal" else f"_{hit}")
+
+
+def hit_bonus(moves: dict, hit: str) -> dict:
+    """0.18.2: the extra on-hit advantage a counter hit / punish counter gives, MEASURED per move as the frame
+    meter's advantage with the dummy on that setting minus the normal-hit advantage (knockdowns left out: their
+    numbers are knockdown advantage, not a link window). {"per_move": {name: frames}, "median": frames or None}."""
+    per = {}
+    for name, m in moves.items():
+        a, b = m.get("guard_none") or {}, m.get(guard_key("none", hit)) or {}
+        if a.get("result") != "hit" or b.get("result") != "hit":
+            continue
+        x, y = a.get("advantage"), b.get("advantage")
+        if isinstance(x, int) and isinstance(y, int) and y >= x and x < 30 and y < 30:
+            per[name] = y - x
+    vals = sorted(per.values())
+    return {"per_move": per, "median": vals[len(vals) // 2] if vals else None}
+
+
 def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = None,
-                generic: bool = False) -> Path | None:
+                generic: bool = False, hit: str = "normal") -> Path | None:
     name, chara = "Unknown", None
     reader = open_state_reader(cfg)
     if reader is None:
@@ -445,7 +469,16 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                   f"({len(skipped)} rows skipped: stances, follow-ups, variants, dashes).")
         else:
             print("No Capcom frame data for this character (menu F) - using the generic inputs.")
-        print(f"Cataloguing P1 = {name} (id {chara}), dummy guard = {guard}. {len(plan)} moves, ~4 s each.")
+        print(f"Cataloguing P1 = {name} (id {chara}), dummy guard = {guard}"
+              + ("" if hit == "normal" else f", dummy counter-hit setting = {hit.replace('_', ' ').upper()}")
+              + f". {len(plan)} moves, ~4 s each.")
+        from . import framedata as _fd
+        _cap = _fd.load(name, Path(cfg.get("datasets", {}).get("root", "datasets")) / "framedata") or {}
+        capcom_dmg = {}
+        for row in _cap.get("moves") or []:
+            dm = re.match(r"\s*(\d+)", str(row.get("damage") or ""))
+            if dm and row.get("name"):
+                capcom_dmg[row["name"]] = int(dm.group(1))
         if not sess.start_inputs():
             return None
 
@@ -462,7 +495,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             # means our input was misread (0.4.0: SA1 came out as H Shoryuken). Retry up to twice.
             # Follow-ups / target combos / stance moves (0.10.0) retry with their other timings.
             variants = [seq_text] + list(mv.get("alternatives") or [])
-            parent_res = results.get(mv.get("parent") or "") or _earlier_result(cfg, name, guard, mv.get("parent"))
+            parent_res = (results.get(mv.get("parent") or "")
+                          or _earlier_result(cfg, name, guard_key(guard, hit), mv.get("parent")))
             parent_ids = set((parent_res or {}).get("action_ids") or [])
             attempts = max(3, len(variants)) if source == "capcom_movelist" else 1
             stopped = False
@@ -534,7 +568,15 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     # Early catalogs recorded 0 damage on every hit: the dummy's health did not go down.
                     from .combo_lab import evaluate_preflight
                     checked = True
-                    pf = evaluate_preflight(pre + post, None, None, guard)
+                    # the counter-hit setting is checked from this move's damage vs Capcom's (hits.py; 0.18.2)
+                    pf = evaluate_preflight(pre + post, capcom_dmg.get(mname) if hit != "normal" else None,
+                                            hit if hit != "normal" else None, guard)
+                    if (hit == "punish_counter" and pf["stop"] and (pf.get("seen") or {}).get("hit_kind") == "counter"):
+                        # a punish counter is told from a counter hit by the dummy's Drive dropping; an infinite
+                        # Drive gauge in Training Mode can hide that, so 1.2x damage is accepted here
+                        pf["stop"] = None
+                        pf["warnings"].append("counted as a counter hit (damage 1.2x, no Drive drop seen): fine if "
+                                              "the dummy is on PUNISH COUNTER with an infinite Drive gauge")
                     print("  Training Mode check: " + ("STOP: " + pf["stop"] if pf["stop"] else
                                                       "OK" if not pf["warnings"] else "warnings"))
                     for w in pf["warnings"]:
@@ -600,9 +642,15 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
     if skipped:
         data["skipped_capcom_rows"] = skipped
     for k, v in results.items():
-        data["moves"].setdefault(k, {})[f"guard_{guard}"] = v
+        data["moves"].setdefault(k, {})[guard_key(guard, hit)] = v
+    if hit != "normal":
+        data.setdefault("hit_bonus", {})[hit] = hit_bonus(data["moves"], hit)
+        hb = data["hit_bonus"][hit]
+        print(f"{hit.replace('_', ' ').capitalize()} advantage over a normal hit (frame meter, {len(hb['per_move'])} "
+              f"moves): median {hb['median']}F" if hb["median"] is not None else
+              f"No move had both a normal-hit and a {hit.replace('_', ' ')} measurement yet (run C guard None too).")
     data["caveats"] = __doc__.split("Caveats (stated in the output too):")[1].strip()
-    data.setdefault("runs", []).append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "guard": guard,
+    data.setdefault("runs", []).append({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "guard": guard, "hit": hit,
                                         "moves": len(results), "sf6bot_version": __import__("sf6bot").__version__,
                                         "training_mode_check": training_check})
     try:

@@ -241,7 +241,13 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.18.1 (latest):** supers and range from the 0.18.0 session (CLAUDE.md "0.18.0 session" and "0.18.1"). Next ranked
+**0.18.2 (latest):** C can now measure counter hits and punish counters (C → 5 / 6), saved apart from the normal hits
+(CLAUDE.md "0.18.2"). The user plans to run them; check `hit_bonus` in the catalog file and the run's Training Mode
+check. Proposed and waiting on the user: whiff punishes chosen by combo damage (2MK > Hadoken / 5HP > Shoryuken
+instead of a lone sweep; 0.18.0 session: 71 sweeps, 16 of 35 hits in 2MK / 5HP range, 10,100 damage taken after the
+36 that didn't hit), fewer neutral sweeps, and pressure on the opponent's wake-up.
+
+**0.18.1:** supers and range from the 0.18.0 session (CLAUDE.md "0.18.0 session" and "0.18.1"). Next ranked
 session: compare with 0.18.0 (4-5, dealt/taken ~1.02) and the baseline; check in S `supers` (crumple follow-ups,
 confirms, SA3 punishes), whether a confirmed 2MK > SA3 completes online (`routes_completed`), and that no punish
 starts from beyond 1.6. The user restored the fights folder from uploads (35 recordings); `datasets/learning` and

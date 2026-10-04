@@ -1808,6 +1808,12 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
             print(f"No community combos for {name}: save its SuperCombo Combos page and import (menu T, A).")
         lab = load_lab(ds, name)
         rules = load_rules()
+        # 0.18.2: a counter-hit / punish-counter bonus the catalog MEASURED (C with the dummy on that setting) fills
+        # a bonus the user's rules leave unset
+        hb_ = rules["hit_bonus"] = dict(rules.get("hit_bonus") or {})
+        for k_, v_ in ((catalog or {}).get("hit_bonus") or {}).items():
+            if hb_.get(k_) is None and isinstance((v_ or {}).get("median"), int):
+                hb_[k_] = v_["median"]
         guard_text = {"after_first_hit": "guard AFTER FIRST HIT (a block = not a true combo)",
                       "none": "guard NONE (gaps can go unnoticed: results are not marked true combos)"}[guard]
         ids = None

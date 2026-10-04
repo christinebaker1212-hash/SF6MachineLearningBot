@@ -2334,6 +2334,23 @@ All MOCK-tested (`tests/test_ranked_baseline_fixes.py`); not verified in game.
 - **Older fights count less in the win model:** recordings made before 0.18.0 weigh 0.3 (`win_model.OLD_FIGHT_WEIGHT`):
   they show a bot with input bugs and late state.
 
+## 0.18.2: counter-hit and punish-counter catalogs
+- **User (2026-10-04):** "I should run C on Counter Hits and Punish counters ... so the bot has no context." Before
+  0.18.2 the catalog saved results only per guard mode (guard_none / guard_all): a run with the dummy on Counter Hit
+  would have overwritten the normal-hit numbers.
+- `catalog --guard none --hit counter_hit|punish_counter` (menu C → 5 / 6, panel Move catalog → Counter hit / Punish
+  counter): results go to `guard_none_counter_hit` / `guard_none_punish_counter`; the normal-hit keys are untouched,
+  and everything that reads the catalog still reads guard_none / guard_all. Guard All is refused for these (counter
+  hits only change hits).
+- Settings check on the first connecting move: its damage vs Capcom's (hits.py) must be 1.2x. A punish counter is
+  told apart by the dummy's Drive dropping; with an infinite Drive gauge that drop may not show, so 1.2x is accepted
+  for the punish-counter run with a warning.
+- `hit_bonus` in the catalog file: the meter's on-hit advantage with that setting minus the normal-hit advantage, per
+  move (knockdowns left out) and the median. The combo lab uses the median when `configs/combo_rules.yaml: hit_bonus`
+  is unset (null), to send unlabelled routes whose first link only works with the extra frames to that pass.
+- Not used by the fighter yet: per-move counter-hit advantage (e.g. links after a counter-hit poke) needs its own
+  change. MOCK-tested (simulated exporter); not run in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

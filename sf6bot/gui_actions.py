@@ -64,7 +64,8 @@ ACTIONS: list[Action] = [
            menu="T Y"),
     Action("catalog", "train", "Move catalog", "Training Mode, bot = P1, dummy standing.",
            [Option("guard", "Dummy guard", choices=[("None", "none"), ("All", "all"), ("Both (asks)", "both"),
-                                                    ("Re-test some", "some")], default="none"),
+                                                    ("Re-test some", "some"), ("Counter hit", "counter_hit"),
+                                                    ("Punish counter", "punish_counter")], default="none"),
             Option("moves", "Moves", kind="text", default="", hint="re-test: names, comma separated")], menu="C"),
     # ---- COMBOS ------------------------------------------------------------------------------------------
     Action("combo_lab", "combos", "Combo lab",
@@ -182,6 +183,9 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             if not moves:
                 raise BadInput("Type the move names to re-test (comma separated).")
             return [one("catalog", "--guard", "none", "--only", moves)]
+        if g in ("counter_hit", "punish_counter"):
+            # 0.18.2: dummy guard None + Training Mode's counter-hit setting; saved apart from the normal hits
+            return [one("catalog", "--guard", "none", "--hit", g)]
         return [one("catalog", "--guard", g)]
     if action_id == "combo_lab":
         w = v["what"]

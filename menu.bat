@@ -86,9 +86,14 @@ echo.
 echo  Move catalog: set Training Mode with the dummy standing, then choose its guard setting:
 echo    1  Guard NONE (moves hit)   2  Guard ALL (moves are blocked)   3  Both, one after the other
 echo    4  Re-test only some moves (you type their names), dummy guard NONE
+echo    5  Counter hits: dummy guard NONE, dummy's counter-hit setting COUNTER HIT
+echo    6  Punish counters: dummy guard NONE, dummy's counter-hit setting PUNISH COUNTER
+echo       (5 and 6 are saved apart from the normal hits; run 1 first)
 set "GC="
 set /p GC=Choose: 
 if "%GC%"=="4" goto catalog_some
+if "%GC%"=="5" (%BOT% catalog --guard none --hit counter_hit & goto done)
+if "%GC%"=="6" (%BOT% catalog --guard none --hit punish_counter & goto done)
 if "%GC%"=="1" (%BOT% catalog --guard none & goto done)
 if "%GC%"=="2" (%BOT% catalog --guard all & goto done)
 if "%GC%"=="3" (

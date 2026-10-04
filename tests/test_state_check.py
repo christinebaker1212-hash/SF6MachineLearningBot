@@ -1,3 +1,4 @@
+import pytest
 """MOCK end-to-end test of state-check: a simulated exporter writes JSONL that reacts to the
 mock input backend (walk, crouch, jab, jump, hit). Not the game; tests our logic only."""
 import json
@@ -323,3 +324,66 @@ def test_combo_lab_smoke_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     assert one["verified"] and one["successes"] == 2 and one["damage"] == 600
     assert not two["verified"] and two["failed_at"]["step"] == 1
     assert (run_dir / "combo_lab.md").exists() and (run_dir / "combo_lab_result.json").exists()
+
+
+@pytest.mark.parametrize("hit", ["counter_hit", "punish_counter"])
+def test_counter_hit_catalog_is_saved_apart_and_checks_the_setting(cfg, tmp_path, monkeypatch, hit):
+    """MOCK, 0.18.2: C with the dummy on Counter Hit / Punish Counter saves under guard_none_<hit> and leaves the
+    normal-hit results alone. The simulator's 2MK does 600 vs Capcom's 500 = 1.2x, a counter hit (hits.py); a punish
+    counter without a Drive drop is accepted with a warning (an infinite Drive gauge hides the drop)."""
+    import gzip
+    import sf6bot.catalog as cat
+    import sf6bot.session as sm
+    from sf6bot.framedata import parse_frame_page
+    from sf6bot.game_state import STATE_FILE
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "data").mkdir(parents=True)
+    fdir = tmp_path / "datasets" / "framedata"
+    fdir.mkdir(parents=True)
+    html = gzip.open(Path(__file__).parent / "data" / "capcom_ryu_frame_table.html.gz", "rt", encoding="utf-8").read()
+    (fdir / "ryu.json").write_text(json.dumps({"slug": "ryu", "character": "Ryu", "moves": parse_frame_page(html)}))
+    normal = {"result": "hit", "advantage": 0, "move_id": 102}
+    (tmp_path / "datasets" / "catalog").mkdir(parents=True)
+    (tmp_path / "datasets" / "catalog" / "Ryu_movelist.json").write_text(json.dumps(
+        {"character": "Ryu", "id": 1, "moves": {"Crouching Medium Kick": {"guard_none": normal}}}))
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(__import__("sf6bot.game_state", fromlist=["x"]), "find_sf6_dir", lambda cfg: game)
+    cfg["datasets"] = {"root": str(tmp_path / "datasets")}
+    sim = SimExporter(game / STATE_FILE, inp)
+    sim.chara = 1
+    sim.start()
+    try:
+        with Session(cfg, f"catalog_{hit}", mock=True) as s:
+            out = cat.run_catalog(s, cfg, "none", only=["Crouching Medium Kick"], hit=hit)
+    finally:
+        sim.stop.set()
+    data = json.loads(out.read_text())
+    mk = data["moves"]["Crouching Medium Kick"]
+    assert mk["guard_none"] == normal                                 # untouched
+    assert mk[f"guard_none_{hit}"]["result"] == "hit" and mk[f"guard_none_{hit}"]["advantage"] == 2
+    assert data["hit_bonus"][hit]["median"] == 2                      # simulator numbers, not the game's
+    run = data["runs"][-1]
+    assert run["hit"] == hit and not run["training_mode_check"]["stop"]
+    assert (hit == "punish_counter") == any("Drive" in w for w in run["training_mode_check"]["warnings"])
+
+
+def test_counter_hit_bonus_is_measured_per_move_without_knockdowns():
+    from sf6bot.catalog import guard_key, hit_bonus
+    moves = {"5MP": {"guard_none": {"result": "hit", "advantage": 4}, "guard_none_counter_hit": {"result": "hit", "advantage": 6}},
+             "2MK": {"guard_none": {"result": "hit", "advantage": 1}, "guard_none_counter_hit": {"result": "hit", "advantage": 3}},
+             "5HP": {"guard_none": {"result": "hit", "advantage": 1}, "guard_none_counter_hit": {"result": "hit", "advantage": 4}},
+             "2HK": {"guard_none": {"result": "hit", "advantage": 35}, "guard_none_counter_hit": {"result": "hit", "advantage": 45}},
+             "5LP": {"guard_none": {"result": "hit", "advantage": 4}}}
+    hb = hit_bonus(moves, "counter_hit")
+    assert hb == {"per_move": {"5MP": 2, "2MK": 2, "5HP": 3}, "median": 2}
+    assert guard_key("none") == "guard_none" and guard_key("none", "punish_counter") == "guard_none_punish_counter"
+
+
+def test_menu_and_panel_run_counter_hit_catalogs():
+    from sf6bot import gui_actions as ga
+    cmds = ga.build("catalog", {"guard": "counter_hit"})
+    assert cmds[0]["args"][-4:] == ["--guard", "none", "--hit", "counter_hit"]
+    bat = (Path(__file__).parent.parent / "menu.bat").read_text()
+    assert "catalog --guard none --hit punish_counter" in bat
