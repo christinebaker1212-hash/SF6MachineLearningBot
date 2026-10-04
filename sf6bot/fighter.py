@@ -204,7 +204,34 @@ def opponent_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> tuple[di
     merged = {k: dict(v) for k, v in {**_common_moves(fcfg), **inf, **cat}.items()}
     if enrich_with_capcom(merged, chara_name, datasets_root, fcfg):
         parts.append("Capcom block types")
+    ov = apply_punish_overrides(merged, chara_name, datasets_root, fcfg)
+    if ov:
+        parts.append("your punishes: " + "; ".join(ov))
     return merged, ", ".join(parts)
+
+
+def apply_punish_overrides(moves: dict, chara_name: str, datasets_root: Path, fcfg: dict) -> list[str]:
+    """0.18.6: the user's punish rules (`punish_overrides`): every known id whose Capcom move matches a rule's regex (name
+    or notes) gets `punish_with` (a key in `moves`). Returns "move -> punish" lines, also for matched moves whose id is not
+    known yet (no catalog / move map for the character), so the narration says what is missing."""
+    rules = (fcfg.get("punish_overrides") or {}).get(chara_name) or []
+    if not rules:
+        return []
+    from . import framedata as fd
+    rows = (fd.load(chara_name, Path(datasets_root) / "framedata") or {}).get("moves") or []
+    out = []
+    for r in rules:
+        rx = re.compile(r["match"], re.I)
+        names = {m["name"] for m in rows if rx.search(m.get("name") or "") or rx.search(m.get("notes") or "")}
+        pun = (fcfg.get("moves") or {}).get(r["move"], {}).get("name", r["move"])
+        for n in sorted(names):
+            ids = [a for a, v in moves.items() if v.get("name") == n]
+            for a in ids:
+                moves[a]["punish_with"] = r["move"]
+            out.append(f"{n} -> {pun}" + ("" if ids else " (its id is not known yet: catalogue the character, menu C)"))
+        if not names:
+            out.append(f"no {chara_name} move matches '{r['match']}' in Capcom's data")
+    return out
 
 
 _num = num
@@ -555,6 +582,14 @@ class ScriptedFighter:
             # 0.18.1: a punish only where it reaches (0.18.0 ranked: 5MP punishes connected up to ~1.7 and were thrown
             # from as far as 3.65 after pushback; 13 of 17 whiffed)
             in_range = dist <= float(self.c["punish"].get("max_dist", 1.6))
+            ov = self.opp.get(self.blocked_id, {}).get("punish_with")
+            if ov and not self.punished and in_range and ov in (self.c.get("moves") or {}):
+                m_ = self.c["moves"][ov]
+                if bs <= seq_prefix(m_["seq"]) + self.lead + self.stale:
+                    self.punished = True
+                    self.punish_stats["taken"] += 1
+                    return self._move(ov, "punish", f"blocked {self.opp[self.blocked_id].get('name')}: your rule, "
+                                                    f"{m_['name']}")
             sp = self._super_punish(me, op, dist, adv, bs) if (not self.punished and in_range and adv is not None) else None
             if sp is not None:
                 self.punished = True
@@ -678,8 +713,9 @@ class ScriptedFighter:
             if base_ is not None and base_ <= -4 < adv and self._skip_for != op.get("action_id"):
                 self._skip_for = op.get("action_id")
                 self.rush_stats["punish_skipped"] += 1       # punishable normally, safe out of a Drive Rush (0.18.5)
-            if adv is not None and adv <= -4 and not self.punished:
-                return None                          # punishable: the punish rule acts on this one
+            ov_ = self.opp.get(op.get("action_id"), {}).get("punish_with")
+            if ((adv is not None and adv <= -4) or ov_) and not self.punished:
+                return None                          # punishable (or the user's punish rule): the punish rule acts
         self._pressure_fired = True
         return self._commit_defense(sit, raw, me, op, dist, t, rem=rem)
 
@@ -1153,6 +1189,13 @@ class ScriptedFighter:
         # gate after it had been counted as taken (0.18.1 ranked: 26 held, "51 whiff punishes of 25 whiffs")
         if self.busy(me) is not None:
             return None
+        ov = info.get("punish_with")
+        if ov and ov in (self.c.get("moves") or {}) and dist <= float(self.c["punish"].get("max_dist", 1.6)):
+            m_ = self.c["moves"][ov]
+            if int(m_.get("startup", 5)) + seq_prefix(m_["seq"]) + self.lead + 1 <= remaining:
+                self.op_move["punished"] = True
+                self.whiff_stats["taken"] += 1
+                return self._move(ov, "whiff_punish", f"{info.get('name')} missed me: your rule, {m_['name']}")
         best = None
         for m in self.own:
             if m["intent"] != "poke" or m.get("projectile") or not isinstance(m.get("startup"), int):

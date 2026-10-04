@@ -273,3 +273,30 @@ def test_the_bots_own_blocked_rush_normal_becomes_a_frame_trap():
     assert d.rule == "defense:frame_trap" and d.name == "pressure: frame trap (2MP)"     # +3: start-up <= 6
     # sent when its arrival (+ input delay 5) is the bot's first free frame: 23 - 6 = 17 frames left -> wait 12
     assert d.seq == "1@12 2+MP@3" and f.rush_stats["own_moments"] == 1
+
+
+# ---- 0.18.6: the user's punish rules -------------------------------------------------------------------------------------
+
+def test_your_punish_rule_finds_ingrids_teleport_and_punishes_it(tmp_path):
+    import json
+    from sf6bot.framedata import SLUGS
+    from sf6bot.fighter import apply_punish_overrides
+    slug = next(s for s, n in SLUGS.items() if n == "Ingrid")
+    (tmp_path / "framedata").mkdir()
+    # stand-in rows: Capcom's real names for Ingrid are not in the repo; the rule matches "teleport" in name or notes
+    (tmp_path / "framedata" / f"{slug}.json").write_text(json.dumps({"character": "Ingrid", "moves": [
+        {"section": "Special Moves", "name": "Sun Strike", "notes": "Teleports forward and attacks from above"},
+        {"section": "Normal Moves", "name": "Standing Light Punch", "notes": ""}]}))
+    moves = {950: {"name": "Sun Strike", "block_adv": -2, "startup": 20, "total": 50}, 600: {"name": "Standing Light Punch"}}
+    lines = apply_punish_overrides(moves, "Ingrid", tmp_path, FCFG)
+    assert moves[950]["punish_with"] == "punish_l_srk" and "punish_with" not in moves[600]
+    assert lines == ["Sun Strike -> L Shoryuken (punish)"]
+    f = _fighter(opp_moves=moves)
+    _line(f, op={"x": 1.0, "action_id": 950}, timer=800)
+    d = _line(f, me={"blockstun": 8, "action_id": 155}, op={"x": 1.0, "action_id": 950}, timer=805)
+    assert d.rule == "punish" and d.name == "L Shoryuken (punish)"       # Capcom says -2; the user's rule wins
+    g = _fighter(opp_moves=dict(moves))                                   # it whiffs near the bot: punished too
+    d = _line(g, op={"x": 1.2, "action_id": 950, "action_frame": 30}, timer=900)
+    assert d.rule == "whiff_punish" and d.name == "L Shoryuken (punish)"
+    assert apply_punish_overrides({}, "Ingrid", tmp_path, FCFG) == [
+        "Sun Strike -> L Shoryuken (punish) (its id is not known yet: catalogue the character, menu C)"]

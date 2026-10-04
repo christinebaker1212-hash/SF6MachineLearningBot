@@ -105,7 +105,15 @@ ids:
   thrown: [721, 725]                  # the bot being thrown by Ken's forward / back throw
   hit_reaction: ["200-399"]           # hit, juggle, knockdown and wake-up (2xx/3xx in the fights)
 attack_id_min: 450     # heuristic: opponent action ids >= this are attacks (Ryu: normals 600+, specials 900+, DI 855, parry 480)
+# 0.18.6: the user's punishes for specific moves, used whenever that move is blocked or whiffs near the bot, whatever the
+# frame data says. Keyed by character; `match` is a regex over Capcom's move name and notes (the bot says at match start
+# which moves it matched); `move` is a key in `moves` below. User, 2026-10-04: "Ingrid's teleport, where she goes forward
+# and hits you from above the head, is punishable by a light Shoryuken."
+punish_overrides:
+  Ingrid:
+    - {match: "teleport|warp", move: punish_l_srk, why: "user: punishable by a light Shoryuken"}
 moves:
+  punish_l_srk: {name: "L Shoryuken (punish)", seq: "6@3 2@3 3+LP@3", startup: 5}
   hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}
   hadoken_hp: {name: "H Hadoken", seq: "2@3 3@3 6+HP@3"}
   low_forward_fireball: {name: "2MK > 236MP", route: "2MK > 236MP", seq: "2+MK@3 2@6 3@3 6+MP@3"}   # SuperCombo: true blockstring, DI-safe

@@ -2435,6 +2435,19 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
 - MOCK-tested (`tests/test_ranked_0181_fixes.py`); not verified in game. The bot still rushes only inside combo-lab routes
   (Parry Drive Rush routes); Drive Rush as a neutral approach is not built.
 
+## 0.18.6: the user's punish rules; operator takeovers
+- **User (2026-10-04):** "Ingrid's teleport, where she goes forward and hits you from above the head, is punishable by a
+  light Shoryuken. We should just add that to the dataset."
+- `configs/fighter/ryu.yaml: punish_overrides` {character: [{match: regex over Capcom name / notes, move: key in moves}]}:
+  matched moves get `punish_with` (`fighter.apply_punish_overrides`, run by `opponent_moves`); the opponent setup line says
+  what matched ("your punishes: X -> L Shoryuken (punish)", or that the id is not known yet / nothing matched). Used when the
+  move is blocked (rule 5, before any frame-data punish, and the pressure moment yields to it) and when it whiffs near the
+  bot (whiff punish), whatever Capcom's on-block says. Ingrid: `teleport|warp` -> L Shoryuken. Capcom's real name for the
+  move is not known here: the match line at her first match will show it. Needs her ids (catalog C, or move map).
+- **Operator takeovers (user):** the user sometimes takes over from the bot against gimmicky players. STOP / F8 ends the run:
+  the match is saved up to there as unfinished (no win / loss) and nothing after is recorded. F7 (pause) or a focus loss
+  keeps recording: the user's play would be saved as the bot's (round results, win-model data). Not fixed yet; offered.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
