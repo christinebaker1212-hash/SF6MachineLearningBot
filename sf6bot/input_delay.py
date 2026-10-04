@@ -76,3 +76,61 @@ class DelayMeter:
         with self._lock:
             n = sum(self.all.values())
             return {"n": n, "median": self.lead(None), "frames": dict(sorted(self.all.items()))}
+
+
+class SideCheck:
+    """0.18.11: is the bot really the side it thinks? (The user's session of 2026-10-04: at a battle's first lines the
+    game still reported the previous match's characters, the side was decided from them, and in the next battle, a Ryu
+    mirror, the bot read the game as P2 while its keys moved P1.) Every button the bot presses must rise on ITS input
+    mask within MAX_WAIT frames; when they keep rising on the other player's mask instead, the side is wrong."""
+
+    NEED = 6          # presses seen on the other side before calling it wrong
+
+    def __init__(self, bits: dict, latest_timer):
+        self.bits = {b: int(bits[b]) for b in BUTTONS if b in bits}
+        self.latest_timer = latest_timer
+        self.pending: list = []
+        self.prev = {"p1": 0, "p2": 0}
+        self.seen: Counter = Counter()
+        self._lock = threading.RLock()
+
+    def reset(self) -> None:
+        with self._lock:
+            self.pending, self.seen = [], Counter()
+
+    def on_press(self, t_sent: float, presses) -> None:
+        timer = self.latest_timer()
+        if not isinstance(timer, int):
+            return
+        with self._lock:
+            for b in presses:
+                if b in self.bits:
+                    self.pending.append([self.bits[b], timer])
+            del self.pending[:-50]
+
+    def on_line(self, raw: dict, me_key: str, op_key: str) -> None:
+        timer = raw.get("stage_timer")
+        masks = {k: (raw.get(k) or {}).get("input") for k in ("p1", "p2")}
+        if not isinstance(timer, int) or not all(isinstance(m, int) for m in masks.values()):
+            return
+        rise = {k: masks[k] & ~self.prev[k] for k in masks}
+        self.prev = masks
+        with self._lock:
+            keep = []
+            for bit, t0 in self.pending:
+                if timer < t0 or timer - t0 > MAX_WAIT:
+                    self.seen["none"] += 1
+                    continue
+                if rise[me_key] & bit:
+                    self.seen["me"] += 1
+                    rise[me_key] &= ~bit
+                elif rise[op_key] & bit:
+                    self.seen["other"] += 1
+                    rise[op_key] &= ~bit
+                else:
+                    keep.append([bit, t0])
+            self.pending = keep
+
+    def wrong(self) -> bool:
+        with self._lock:
+            return self.seen["other"] >= self.NEED and self.seen["other"] >= 3 * self.seen["me"]

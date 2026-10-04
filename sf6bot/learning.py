@@ -355,7 +355,8 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         if late and fps is not None:
             why = (f" The game drew {fps} frames a second ({sa['ticks_per_render']} game frames per drawn frame): the game "
                    "was rendering slowly, not me reading late." if fps < 50 else
-                   f" The game drew {fps} frames a second, so the delay was on my side (reading the state file).")
+                   f" The game drew {fps} frames a second, so the delay was on my side: most likely another program "
+                   "busy on the PC (a stream or recording), which delays the bot's reading.")
         out.append(("measured", f"Game state reached me {sa['arrivals_per_s']} times a second ({sa['lines_per_arrival']} "
                                 f"frames at a time, gap {sa['gap_ms_p50']} ms typical)"
                                 + ("; I was seeing the game late." if late else ".") + why))

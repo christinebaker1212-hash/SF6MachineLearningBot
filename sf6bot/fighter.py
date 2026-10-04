@@ -1497,6 +1497,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         c.on_press.append(meter.on_press)
     except Exception:              # no input-bit table: keep the configured delay
         meter = None
+    from .input_delay import SideCheck
+    try:
+        side_check = SideCheck(load_input_bits(), _latest_timer) if player is None else None
+        if side_check is not None:
+            c.on_press.append(side_check.on_press)
+    except Exception:              # noqa: BLE001
+        side_check = None
     meter_n0 = 0
     fixed_side = player
     side: dict = {"i": player, "how": "given" if player is not None else None, "lag": None}
@@ -1742,12 +1749,16 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         sess.narrate(f"Match over: {'WON' if won else 'lost'} {e.get('score')}.", source="measured")
                         match_end_t = t
                         if rmenu is not None:
-                            rmenu.match_ended(clock.now())
+                            rmenu.match_ended(clock.now(), st.raw.get("round"), st.raw.get("stage_timer"))
                     elif e["event"] == "fight_start":
                         sess.narrate("Fight!", source="measured")
+                        if rmenu is not None:
+                            rmenu.new_match()
                 if meter is not None and st.in_battle and me_key:
                     meter.player = me_key
                     meter.on_line(st.raw)
+                if side_check is not None and st.in_battle and me_key and side["i"] is not None:
+                    side_check.on_line(st.raw, me_key, op_key)
                 if fighter is not None and st.in_battle and side["i"] is not None:
                     fighter.observe_line(st.raw, side["i"])
                     if learner is not None:
@@ -1825,7 +1836,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     sess.narrate("Communication error: OK, Ranked Match, back (searching again).", source="scripted")
             if rmenu is not None:
                 hp_zero = (_num(p1d.get("hp")) or 0) <= 0 or (_num(p2d.get("hp")) or 0) <= 0
-                why_ = rmenu.tick(clock.now(), bool(st.in_battle), bool(st.ready), hp_zero, c.armed)
+                if p1d.get("action_id") in INTRO_IDS or p2d.get("action_id") in INTRO_IDS:
+                    rmenu.new_match()                     # a match intro: a rematch is starting
+                why_ = rmenu.tick(clock.now(), bool(st.in_battle), bool(st.ready), hp_zero, c.armed,
+                                  st.raw.get("round"), st.raw.get("stage_timer"))
                 if why_:
                     c.backend.send([(menu_key, True)])
                     clock.precise_sleep_until(clock.now() + 0.06)
@@ -1849,6 +1863,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if was_active:                         # left the battle without a match result (menus)
                     c.release_all("left battle")
                     finish_match()
+                elif fixed_side is None and side["i"] is not None and match_end_t is None and not summary["rounds"]:
+                    # 0.18.11: a battle left before "Fight!" (the user's session: an abandoned Ken rematch, then a Ryu
+                    # mirror played on the side decided in the abandoned one): decide again in the next battle
+                    side.update(i=None, how=None, lag=None)
+                    fighter, exp, learner = None, None, None
+                    summary = _new_match_summary(None)
+                    tracker = EpisodeTracker(self_index=None)
+                    if side_check is not None:
+                        side_check.reset()
                 set_panel(False)
                 continue
             timer = st.raw.get("stage_timer")
@@ -1891,6 +1914,27 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["player"] = me_key
                 summary["side_detection"] = {"side": me_key, "how": side["how"], "input_delay_frames": side["lag"]}
                 sess.narrate(f"I am {me_key.upper()} ({side['how']}).", source="measured")
+            # 0.18.11: a battle's first lines can still carry the previous match's characters; at "Fight!" they are
+            # current, so a side found by character is checked again there
+            recheck_ = (by_character(st.raw, fcfg.get("character")) if fight_on and side["how"] == "character"
+                        and side["i"] is not None else None)
+            wrong_ = side_check is not None and side["i"] is not None and side_check.wrong()
+            if (recheck_ is not None and recheck_ != side["i"]) or wrong_:
+                # the characters at "Fight!", or the bot's presses showing on the other player's inputs: other side
+                old_ = keys()[0]
+                side.update(i=1 - side["i"], how=(f"swapped: my presses showed on {('p' + str(2 - side['i'])).upper()}'s "
+                                                  "inputs" if wrong_ else "character (checked again at Fight!)"))
+                if side_check is not None:
+                    side_check.reset()
+                tracker.self_index = side["i"]
+                summary["player"] = keys()[0]
+                summary["side_detection"] = {"side": keys()[0], "how": side["how"], "input_delay_frames": side["lag"],
+                                             "was": old_}
+                c.release_all("side swapped")
+                fighter = None                         # set up again for the real side
+                print(f"[side] I am {keys()[0].upper()}, not {old_.upper()} ({side['how']})")
+                sess.narrate(f"I was reading the game as {old_.upper()} but I am {keys()[0].upper()} ({side['how']}): "
+                             "switched.", source="measured")
             me_key, op_key = keys()
             me, op = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
             if (fighter is not None and isinstance(op.get("chara"), int) and not summary["rounds"]

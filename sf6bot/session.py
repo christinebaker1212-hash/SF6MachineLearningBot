@@ -103,6 +103,9 @@ class Session:
             rect0 = self.window.client_rect
             capture = make_capture(cfg["capture"]) if self.use_capture else NullBackend()
             win32.set_timer_resolution(1)
+            self.priority = win32.prioritize_process()
+            if not all(self.priority.values()):
+                print(f"(process priority: {self.priority}; state reading may lag when the PC is busy)")
             inp = make_input(cfg["input"]["backend"])
             s = cfg["safety"]
             k_kill, k_pause, k_flip = vk(s["kill_key"]), vk(s["pause_key"]), vk(s["flip_facing_key"])

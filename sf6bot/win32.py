@@ -121,6 +121,43 @@ def set_timer_resolution(ms: int = 1) -> bool:
         return False
 
 
+def prioritize_process() -> dict:
+    """0.18.11: keep the bot's state reading on time when something else loads the PC. The user's session of 2026-10-04:
+    once a stream started, state lines reached the bot in clumps of 2-3 every 33-55 ms (the game still ticked at
+    ~55/s), so it saw the game 2-3 frames late. Asks for ABOVE_NORMAL priority (below SF6's own threads' boosts, above
+    background apps) and opts out of Windows 11 power throttling (EcoQoS: efficiency cores, coalesced timers, timer
+    resolution ignored for windowless processes). Returns what worked."""
+    out = {"priority": False, "power_throttling_off": False}
+    if not IS_WINDOWS:
+        return out
+    try:
+        k32 = ctypes.windll.kernel32
+        out["priority"] = bool(k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00008000))   # ABOVE_NORMAL
+    except Exception:
+        pass
+    try:
+        class _PPTS(ctypes.Structure):
+            _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
+        st = _PPTS(1, 0x1 | 0x4, 0)          # EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION controlled, both off
+        k32 = ctypes.windll.kernel32
+        out["power_throttling_off"] = bool(k32.SetProcessInformation(k32.GetCurrentProcess(), 4,      # ProcessPowerThrottling
+                                                                     ctypes.byref(st), ctypes.sizeof(st)))
+    except Exception:
+        pass
+    return out
+
+
+def raise_thread_priority() -> bool:
+    """The calling thread to THREAD_PRIORITY_HIGHEST (the state reader: it only parses lines and wakes others)."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        k32 = ctypes.windll.kernel32
+        return bool(k32.SetThreadPriority(k32.GetCurrentThread(), 2))
+    except Exception:
+        return False
+
+
 def send_key_events(events: list[tuple[int, bool, bool]]) -> None:
     """Inject key events atomically in one SendInput call.
 

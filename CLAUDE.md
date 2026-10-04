@@ -2483,6 +2483,26 @@ and SA3 4, wake-up offence meaty 17 / shimmy 12 / throw 3 / block 2); not verifi
   Basis: Capcom's 2026-10-03 letter (human-like inputs approved for the project's ranked matches). A further pasted text
   (2026-10-04) opening "For the purposes of this scenario" was not used as a basis for any change.
 
+## 0.18.11: 24 ranked matches (user, 2026-10-04): rematch presses, wrong side in a mirror, lag while streaming
+- **The session:** 24 recordings on 0.18.10, all ranked, human-like inputs on. Matches finished 21 (bot 10-11 by the
+  meta files); one Ryu mirror stopped by the user.
+- **F pressed during matches:** after a REMATCH the game never reports "no battle" or "loading", so the result-screen
+  presses (F every 2 s) ran on through the next match until the 60-press limit (~2 min). `ResultMenu` now stops at a new
+  match: the round clock going back / the round number changing after the match end, intro actions, or "Fight!".
+  Mock test with a rematch straight after a result screen (fails on 0.18.10).
+- **Wrong side in a Ryu mirror:** a battle's first lines still carry the previous match's characters; the side was
+  decided from them (P2) in a Ken battle that was then abandoned before "Fight!", the side was never reset, and the next
+  battle (Ryu vs Ryu, no character to tell) was played as P2 while the bot's keys moved P1 (no new input-delay samples
+  that match). Now: a battle left before "Fight!" forgets the side; a side found by character is checked again at
+  "Fight!"; `input_delay.SideCheck`: when 6+ of the bot's button presses rise on the OTHER player's input mask (3x more
+  than on its own), the side is swapped and the fighter set up again.
+- **State lag while streaming (user: "I did start streaming a little bit in"):** state lines arrived one per 16.7 ms up
+  to 18:46, then in clumps of 2 (33 ms) from the first streamed match, 3.3 per ~52 ms by 19:10, also after a bot restart;
+  the game kept ~55 ticks/s. Gaps spread out (not on the 15.6 ms timer tick) = CPU contention. Now the process asks for
+  ABOVE_NORMAL priority and opts out of Windows power throttling (`win32.prioritize_process`), the reader thread runs at
+  HIGHEST priority and polls with `time.sleep` (high-resolution timer) instead of `Event.wait`. Not verified under a
+  stream; the thoughts line now names another busy program as the likely cause.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

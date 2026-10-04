@@ -16,6 +16,7 @@ import os
 import shutil
 import queue
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -391,6 +392,11 @@ class StateReader:
         f = None
         buf = b""
         try:
+            from . import win32
+            win32.raise_thread_priority()       # 0.18.11: the reader wakes on time even when the PC is busy
+        except Exception:                       # noqa: BLE001
+            pass
+        try:
             while not self._stop.is_set():
                 if f is None:
                     if not self.path.exists():
@@ -411,7 +417,9 @@ class StateReader:
                     buf = b""
                 chunk = f.read()
                 if not chunk:
-                    self._stop.wait(self.poll_s)
+                    # 0.18.11: time.sleep (a high-resolution waitable timer on Windows, Python 3.11+), not Event.wait,
+                    # whose timeout follows the system timer tick (15.6 ms unless a resolution request is honoured)
+                    time.sleep(self.poll_s)
                     continue
                 t = clock.now()
                 buf += chunk

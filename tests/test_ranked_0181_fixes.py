@@ -333,6 +333,26 @@ def test_the_result_screen_is_confirmed_on_schedule_and_never_outside_a_battle()
     assert m4.tick(45.0, True, True, True, True) is not None
 
 
+def test_a_rematch_stops_the_result_screen_presses():
+    # 0.18.11, the user's session: after a rematch the game never reported "no battle" or "loading", and F kept being
+    # pressed every 2 s through the whole next match
+    from sf6bot.result_menu import ResultMenu
+    m = ResultMenu()
+    m.match_ended(100.0, 1, 3233)                             # final round 1, round clock 3233 at the KO
+    assert m.tick(105.0, True, True, True, True, 1, 3500)    # the result screen (clock still running)
+    assert m.tick(107.0, True, True, False, True, 0, 0) is None and m.t_end is None   # rematch: round 0, clock 0
+    assert all(m.tick(t, True, True, False, True, 0, 200 + int(t)) is None for t in range(108, 300))
+    assert m.new_matches_seen == 1
+    m2 = ResultMenu()
+    m2.match_ended(0.0, 2, 2600)
+    assert m2.tick(5.0, True, True, True, True, 2, 2700)
+    assert m2.tick(7.0, True, True, False, True, 2, 30) is None and m2.t_end is None  # same round no., clock reset
+    m3 = ResultMenu()
+    m3.match_ended(0.0, 2, 2600)
+    m3.new_match()                                            # intro ids / "Fight!" seen by the fight loop
+    assert m3.tick(9.0, True, True, True, True, 2, 2700) is None
+
+
 def test_a_communication_error_on_fighting_ground_is_cleared_and_nothing_else_is_pressed():
     from sf6bot.result_menu import MenuWatch
     from sf6bot.screen_text import contains
@@ -357,3 +377,30 @@ def test_a_communication_error_on_fighting_ground_is_cleared_and_nothing_else_is
     assert tries == [0, 6, 12, 18, 24, 30] and d.tick(40.0, False, True, lambda: err) is None
     assert MenuWatch().tick(0.0, False, False, lambda: err) is None                         # SF6 not focused
     assert MenuWatch().tick(0.0, True, True, lambda: err) is None                           # never in a battle
+
+
+# ---- 0.18.11: the bot checks its side from its own presses ---------------------------------------------------------------
+
+def test_side_check_notices_presses_on_the_other_players_inputs():
+    from sf6bot.input_delay import SideCheck
+    bits = {"LP": 0x10, "MP": 0x20, "HP": 0x40, "LK": 0x80, "MK": 0x100, "HK": 0x200}
+    now = {"t": 0}
+    sc = SideCheck(bits, lambda: now["t"])
+
+    def run(presses_on, n):
+        for k in range(n):
+            now["t"] += 30
+            sc.on_press(0.0, ["LP"])
+            for d in range(1, 8):                     # the press shows 5 frames later on `presses_on`'s mask
+                raw = {"stage_timer": now["t"] + d, "p1": {"input": 0}, "p2": {"input": 0}}
+                if d == 5:
+                    raw[presses_on]["input"] = 0x10
+                sc.on_line(raw, "p2", "p1")           # the bot believes it is P2
+            now["t"] += 8
+    run("p2", 10)
+    assert not sc.wrong() and sc.seen["me"] == 10
+    sc.reset()
+    run("p1", 5)
+    assert not sc.wrong()                             # not enough evidence yet
+    run("p1", 1)
+    assert sc.wrong() and sc.seen["other"] == 6

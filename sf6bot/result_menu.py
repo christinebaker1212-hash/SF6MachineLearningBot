@@ -11,6 +11,10 @@ Decided from the GAME STATE only, no screen reading:
   - F from `first_s` after the match ended, then every `retry_every_s` (at most `max_presses`), until the game reports
     no battle (Fighting Ground) or a new battle loading
   - a battle stuck with a player at 0 hp for `stuck_s` without a recognised match end (a disconnect) counts as ended
+  - 0.18.11: a REMATCH goes straight into the next battle without the game ever reporting "no battle" or "loading"
+    (the user's session 2026-10-04: F was pressed every 2 s for 2 minutes into the next match). A new match is now seen
+    by the round clock jumping back (or the round number changing) after the match end, intro actions, or "Fight!":
+    the presses stop there.
 Every press is logged with its timing (fight_status.json, narration) so the first unattended session calibrates these.
 """
 from __future__ import annotations
@@ -26,19 +30,34 @@ class ResultMenu:
         self.presses = 0
         self.last = None
         self.zero_since = None     # a player at 0 hp in battle since (stuck detection)
+        self.end_clock = None      # (round, round clock) when the match ended: a new match restarts the clock
         self.log: list[dict] = []
+        self.new_matches_seen = 0  # rematches recognised (presses stopped)
 
-    def match_ended(self, now: float) -> None:
+    def match_ended(self, now: float, rnd=None, clock=None) -> None:
         if self.t_end is None:
             self.t_end, self.presses, self.last = now, 0, None
+            self.end_clock = (rnd, clock) if isinstance(clock, int) else None
 
     def reset(self) -> None:
-        self.t_end, self.presses, self.last, self.zero_since = None, 0, None, None
+        self.t_end, self.presses, self.last, self.zero_since, self.end_clock = None, 0, None, None, None
 
-    def tick(self, now: float, in_battle: bool, ready: bool, hp_zero: bool, can_press: bool) -> str | None:
+    def new_match(self) -> None:
+        """A new battle started (intro, "Fight!"): stop pressing."""
+        if self.t_end is not None:
+            self.new_matches_seen += 1
+        self.reset()
+
+    def tick(self, now: float, in_battle: bool, ready: bool, hp_zero: bool, can_press: bool,
+             rnd=None, clock=None) -> str | None:
         """Call on every state line. Returns why to press the confirm key now, or None."""
         if not self.c.get("enabled", True):
             return None
+        if self.end_clock is not None and isinstance(clock, int):
+            r0, c0 = self.end_clock
+            if (rnd is not None and r0 is not None and rnd != r0) or clock + 100 < c0:
+                self.new_match()                          # a rematch: the round clock restarted
+                return None
         if not in_battle:
             self.reset()                              # Fighting Ground / menus: never press
             return None

@@ -241,7 +241,11 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**Waiting: the user's 100-match ranked set (2026-10-04, 0.18.10).** Analyse it before building anything else (win rate
+**0.18.11 (latest):** rematch F presses stop at the next match; side re-checked (stale characters, abandoned battles,
+own presses on the other player's mask); process / reader priority against lag while streaming (CLAUDE.md "0.18.11").
+The user sent 24 matches instead of 100 ("it needs work now"): the to-do items below are being built from them.
+
+**Was waiting: the user's 100-match ranked set (2026-10-04, 0.18.10).** Analyse it before building anything else (win rate
 with takeovers both ways, `game_fps`, reversals, oki / rush pressure, command grabs, result-menu timings, communication
 errors, per character).
 

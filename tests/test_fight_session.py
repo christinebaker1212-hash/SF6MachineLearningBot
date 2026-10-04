@@ -31,6 +31,7 @@ class _Reader:
         self.on_state, self.lines, self.dt = on_state, lines, dt
         self._latest, self._cond, self._stop = None, threading.Condition(), threading.Event()
         self._subs: list = []           # like StateReader.subscribe: combo routes read every line from a queue
+        self.timeline: list = []        # (time, tag) when a line's "_tag" changes (tests that check WHEN keys went out)
 
     def start(self):
         def feed():
@@ -43,8 +44,10 @@ class _Reader:
                     self._cond.notify_all()
                     for q in self._subs:
                         q.put(st)
+                if raw.get("_tag") and (not self.timeline or self.timeline[-1][1] != raw["_tag"]):
+                    self.timeline.append((time.perf_counter(), raw["_tag"]))
                 self.on_state(st)
-                time.sleep(self.dt)
+                time.sleep(raw.get("_pause", self.dt))
         threading.Thread(target=feed, daemon=True).start()
         return self
 
@@ -131,24 +134,51 @@ def test_learned_fighter_auto_side_first_to_and_thoughts(cfg, tmp_path, monkeypa
 
 
 def test_ranked_confirms_the_result_screen_and_never_presses_in_menus(cfg, tmp_path, monkeypatch):
-    """0.18.8, MOCK over two real matches with menus between: after each match the result screen's first option is
-    confirmed with F while the game still reports the battle; nothing is pressed in the menus."""
+    """0.18.8, MOCK over two real matches: after each match the result screen's first option is confirmed with F while
+    the game still reports the battle; nothing is pressed in the menus. 0.18.11: the second match is a REMATCH straight
+    after the first result screen (no menus between, as in the user's session): no F once it has started."""
     import sf6bot.session as sm
     from sf6bot.input_backend import MockInputBackend
     from tests.test_learning import _datasets, _ryu_catalog
     ds = _datasets(tmp_path)
     _ryu_catalog(ds)
-    menu = [{"in_battle": False, "ready": False}] * 300
-    lines = menu + _rows("fight_2026-10-02_cpu4_ken.jsonl.gz") + menu + _rows("fight_2026-10-02_cpu7_ken.jsonl.gz") + menu
-    monkeypatch.setattr(fi, "open_state_reader", lambda c, on_state=None: _Reader(on_state, lines, 0.00025).start())
+
+    def tag(rows, t):                         # lines after the KO (a player at 0 hp) are the result screen's start
+        return [dict(r, _tag="result" if min(r["p1"].get("hp") or 0, r["p2"].get("hp") or 0) <= 0 else t)
+                for r in rows]
+
+    def result_screen(rows):                  # the last battle line held ~4 s (the screen after the KO; the match closes 3 s on)
+        return [dict(rows[-1], _tag="result", _pause=0.02) for _ in range(200)]
+    menu = [{"in_battle": False, "ready": False, "_tag": "menu"}] * 300
+    m1, m2 = _rows("fight_2026-10-02_cpu4_ken.jsonl.gz"), _rows("fight_2026-10-02_cpu7_ken.jsonl.gz")
+    lines = menu + tag(m1, "match") + result_screen(m1) + tag(m2, "match") + result_screen(m2) + menu
+    readers = []
+
+    def open_reader(c, on_state=None):
+        readers.append(_Reader(on_state, lines, 0.00025).start())
+        return readers[-1]
+    monkeypatch.setattr(fi, "open_state_reader", open_reader)
     inp = MockInputBackend()
     monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
     cfg["datasets"] = {"root": str(ds)}
     cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
-    cfg["result_menu"] = {"first_s": 0.0, "retry_after_s": 0.0, "retry_every_s": 999, "max_presses": 1}  # one per screen
+    cfg["result_menu"] = {"first_s": 0.0, "retry_after_s": 0.0, "retry_every_s": 0.05, "max_presses": 999}
     with Session(cfg, "ranked_menu_test", mock=True) as s:
         fi.run_fight(s, cfg, 60.0, player=None, matches=2, versus="ranked")
         status = json.loads((s.recorder.dir / "fight_status.json").read_text())
     f_downs = [e for e in inp.log if e[1] == "F" and e[2]]
-    assert 1 <= len(f_downs) <= 2 and len(status["result_menu_presses"]) == len(f_downs)
+    timeline = readers[0].timeline
+
+    def tag_at(t):
+        cur = None
+        for t0, tg in timeline:
+            if t0 <= t:
+                cur = tg
+        return cur
+    assert f_downs and len(status["result_menu_presses"]) == len(f_downs)
+    # a press decided on the screen's last line may go out a moment after the mock moved on (0.25 ms per line here)
+    assert all("result" in (tag_at(e[0]), tag_at(e[0] - 0.05)) for e in f_downs), \
+        ([(tag_at(e[0]), round(e[0] - timeline[0][0], 3)) for e in f_downs],
+         [(tg, round(t0 - timeline[0][0], 3)) for t0, tg in timeline])
+    assert sum(tag_at(e[0]) == "match" for e in f_downs) <= 2
     assert any(x["status"].startswith("pressed F") for x in status["status_log"])
