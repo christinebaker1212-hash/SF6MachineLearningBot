@@ -229,7 +229,7 @@ def test_any_attack_the_bot_starts_is_continued_live_with_its_meter():
     f, d = run(30000)
     assert d.kind == "route" and d.rule == "compose_live" and d.timed
     assert d.route["route"].startswith("5HP") and d.route["route"].endswith("236236K")
-    assert d.adopt == {"start": 502, "start_id": 606, "contact": None}
+    assert d.adopt == {"start": 502, "start_id": 606, "contact": None, "dist": 1.0}
     # once per move: the next line does not start it again
     f.observe_line(line(503, 606, 0x40), 0)
     assert f.decide(line(503, 606, 0x40), 503 / 60, 0).rule != "compose_live"
@@ -293,3 +293,52 @@ def test_a_replan_to_a_shorter_combo_does_not_crash_the_route():
     res = cl.perform_route(sess, reader, runner, steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True,
                            timeout=2.0, on_step=on_step)
     assert calls and calls[0] == 1 and len(res["steps"]) == 3 and res.get("replans") and not res.get("errors")
+
+
+def test_spacing_is_learned_per_body_class_and_a_step_that_whiffs_from_here_is_left_out():
+    """User: if a move doesn't hit Dee Jay from a certain spacing it won't hit Ryu, Cammy or Akuma either; it might hit
+    Zangief (big bodies: Marisa, E. Honda, Zangief). The SA3 after a Shoryuken whiffed twice from 1.6 against standard
+    bodies: from 1.6 (or farther) it is left out against anyone standard, still tried against Zangief and from 1.0."""
+    book = _book()
+    comp = cc.build(book, CAP)
+    comp.body = cc.body_class("Jamie")
+    assert comp.body == "standard" and cc.body_class("Zangief") == "big" and cc.body_class("E. Honda") == "big"
+    e = next(x for x in book if x["route"] == "2MK > 236MK > 623HP")
+    new = comp.best_tail(e, 2, {"drive": 60000, "super": 30000, "x": 0}, {"hp": 10000, "x": 1.6}, reserve=10000)
+    assert new["route"].endswith("236236K")
+    names = [s["name"] for s in new["plan"]["steps"]]
+    whiff = {"steps": [dict(name=n, start=i * 10, contact=i * 10 + 5 if i < 3 else None, dist_start=1.6)
+                       for i, n in enumerate(names)], "fail": {"kind": "whiff", "step": 3}}
+    comp.record(new, whiff)
+    comp.record(new, whiff)
+    sa3 = comp.trans[new["edges"][2]]
+    assert comp.spacing(sa3)["miss"] == [1.6, 1.6] and comp.too_far(sa3, 1.7) and not comp.too_far(sa3, 1.0)
+    # the same spacing on another standard-bodied opponent: no SA3 from 1.6 ...
+    again = comp.best_tail(e, 2, {"drive": 60000, "super": 30000, "x": 0}, {"hp": 10000, "x": 1.6}, reserve=10000)
+    assert again is None or not again["route"].endswith("236236K")
+    # ... a route already planned with the SA3 ends on the Shoryuken instead of throwing a super that whiffs
+    stop = comp.best_tail(new, 2, {"drive": 60000, "super": 30000, "x": 0}, {"hp": 10000, "x": 1.6}, reserve=10000)
+    assert stop is not None and stop.get("stopped_for_spacing") and len(stop["plan"]["steps"]) == 3
+    # ... closer it still goes for it, and against a big body nothing is known yet
+    assert comp.best_tail(e, 2, {"drive": 60000, "super": 30000, "x": 0}, {"hp": 10000, "x": 1.0},
+                          reserve=10000)["route"].endswith("236236K")
+    comp.body = "big"
+    assert comp.best_tail(e, 2, {"drive": 60000, "super": 30000, "x": 0}, {"hp": 10000, "x": 1.6},
+                          reserve=10000)["route"].endswith("236236K")
+    # a drop (timing) is not a spacing miss
+    comp.body = "standard"
+    comp.record(new, dict(whiff, fail={"kind": "dropped", "step": 3}))
+    assert comp.spacing(sa3)["miss"] == [1.6, 1.6]
+
+
+def test_a_route_can_be_cut_short_after_the_move_running_now():
+    a = [{"name": "5HP", "trigger": "first", "min_offset": 0, "prefix": 0, "expect_id": 606, "startup": 10,
+          "hitting": True, "sequence": "5+HP@3", "connector": ""},
+         {"name": "H Shoryuken", "trigger": "contact", "min_offset": -3, "prefix": 6, "expect_id": 934, "startup": 5,
+          "hitting": True, "sequence": "6@3 2@3 3+HP@3", "connector": ">"}]
+    run = cl.ComboRun(a, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True)
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(4, 606, 0))
+    assert run.replace_tail(1, a[:1], None) and len(run.steps) == 1
+    run.feed(_line(13, 606, 9, d=210, hs=12, stun=20, hp=9000))
+    assert run.done and run.result()["success"]

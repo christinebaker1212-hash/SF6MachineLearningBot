@@ -2259,7 +2259,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         self.compose_stats["live"] = self.compose_stats.get("live", 0) + 1
         return Decision("route", e["route"], route=e, rule="compose_live", timed=True,
-                        adopt={"start": a["t0"], "start_id": a["id"], "contact": a.get("hit_t")},
+                        adopt={"start": a["t0"], "start_id": a["id"], "contact": a.get("hit_t"), "dist": a.get("dist")},
                         reason=f"{name} is out: going on with {e['route']} (about {e['damage']} if it all hits, "
                                f"{int(e['p_complete'] * 100)}% to finish; Super {int(num(me.get('super')) or 0) // 10000}, "
                                f"Drive {int(num(me.get('drive')) or 0) // 10000})")
@@ -2642,6 +2642,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if new is None:
             return None
         self.compose_stats["replans"] += 1
+        if new.get("stopped_for_spacing"):
+            self.compose_stats["stopped_for_spacing"] = self.compose_stats.get("stopped_for_spacing", 0) + 1
         rt = self.compose_stats["replanned_to"]
         rt[new["route"]] = rt.get(new["route"], 0) + 1
         self._live_route = new
@@ -3739,7 +3741,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 composer = None
                 try:
                     from .combo_compose import for_character
-                    composer = for_character(summary["character"], ds_root, book)
+                    composer = for_character(summary["character"], ds_root, book, opponent=summary["opponent"])
                 except Exception as e:                   # noqa: BLE001 - the composer is optional
                     print(f"(combo composer unavailable: {e})")
                 if composer is not None and composer.entries:

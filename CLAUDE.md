@@ -3385,6 +3385,24 @@ nothing here is verified in game.
   composer's bookkeeping is logged (`errors` in the match summary: where, the error, a short trace; a narrated line),
   the keys are released, and the match goes on.
 
+## 0.24.4: combo spacing learned per body class (user, 2026-10-05)
+- User: "a Super Art 3 that doesn't quite hit because the opponent was just spaced too much"; and "Only big-bodied characters
+  like Marisa, E. Honda, and Zangief have differing hitboxes ... if a move doesn't hit DJ from a certain spacing, it's not
+  going to hit Ryu, and it's not going to hit Cammy, and it's not going to hit Akuma. But it might hit Zangief."
+- `combo_compose`: for every step of a combo (move A then move B) the distance when A started is kept with B's result, per
+  opponent body class (`BIG_BODIES` = Marisa, E. Honda, Zangief; everyone else "standard"), last 40 each. Only a WHIFF of B
+  is a spacing miss (a drop or an eaten input is timing), and it is not also counted against the step's success rate.
+- `too_far`: B whiffed 2+ times from this distance or closer and never hit from this far -> left out of the next step of
+  every search (live composition, re-plans, first-hit extensions); a planned next step that is too far is valued at x0.05,
+  so another continuation that fits replaces it; if none fits, the route ends on the move already out
+  (`stopped_for_spacing`; `ComboRun.replace_tail` can now cut a route short). Counted in `composer.stopped_for_spacing`.
+- The distance is measured centre to centre (the exporter has no hitboxes); the body classes stand in for hurtbox width.
+  A hitbox exporter (boxes per line + each move's reach from C) would be exact; it needs a new research build and the
+  user's call on Capcom (not built).
+- Tests: `tests/test_0240.py` (two whiffs of SA3 after a Shoryuken from 1.6 against standard bodies: left out from 1.6 for
+  any standard opponent, a planned SA3 ends on the Shoryuken instead, still tried from 1.0 and against Zangief; a drop is
+  not a spacing miss; a route cut short after the running move). Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -558,7 +558,8 @@ class ComboRun:
         if adopt:
             # 0.24.0 (matches): the first move is already out (the bot pressed it for another reason); the route goes on
             # from it. `adopt` = its start tick and id, and its hit tick if it has hit already
-            self.rt[0].update(sent=adopt.get("sent", adopt["start"]), start=adopt["start"], start_id=adopt.get("start_id"))
+            self.rt[0].update(sent=adopt.get("sent", adopt["start"]), start=adopt["start"], start_id=adopt.get("start_id"),
+                              dist_start=adopt.get("dist"))
             if adopt.get("contact") is not None:
                 self.rt[0]["contact"] = adopt["contact"]
                 self.rt[0]["contacts"].append(adopt["contact"])
@@ -587,7 +588,7 @@ class ComboRun:
         planned for the resources the bot has now (combo_compose.Composer.best_tail). Only while none of them has gone
         out (not even a motion); `fixed` is the new route's recorded timing (whole route), on the same input-delay basis
         as this run's."""
-        if j < 1 or j > len(self.steps) or len(steps) <= j or self.pending is not None and self.pending >= j:
+        if j < 1 or j > len(self.steps) or len(steps) < j or self.pending is not None and self.pending >= j:
             return False
         if any(r["sent"] is not None or r.get("motion_sent") is not None for r in self.rt[j:]):
             return False
@@ -759,6 +760,9 @@ class ComboRun:
             if new:
                 r.update(start=s_tick, start_id=s_aid, moving=int(s_afr) if isinstance(s_afr, (int, float)) else 0,
                          lead_measured=s_tick - r["sent"] - st["prefix"])
+                bx_, dx_ = num(p1.get("x")), num(p2.get("x"))
+                if bx_ is not None and dx_ is not None:
+                    r["dist_start"] = round(abs(dx_ - bx_), 3)      # 0.24.4: spacing when the move started
                 if s_tick != tick and s_aid != aid:
                     r["moving"] += max(0, tick - s_tick)
                 if st.get("system") == "drive_rush" and s_aid == exp:
@@ -1114,6 +1118,7 @@ class ComboRun:
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
                           "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
                           "parry_seen": r.get("parry_seen"), "dash_sent": r.get("dash_sent"),
+                          "dist_start": r.get("dist_start"),
                           "bar_link": self._bar_link(k)
                           if k and st.get("trigger") in ("own_frame", "prev_neutral", "prev_free") and self.bar
                           and self.steps[k - 1].get("system") != "drive_rush" else None}

@@ -51,6 +51,20 @@ LEARN_K = 4             # match results per transition shrink toward the prior w
 COST_DRC, COST_PDR, COST_OD, COST_DI = 30000, 10000, 20000, 10000   # Drive (community values; 10000 = a bar)
 SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 PER_STARTER = 14        # composed book entries kept per starter
+# 0.24.4 (user, 2026-10-05): "Only big-bodied characters like Marisa, E. Honda, and Zangief have differing hitboxes that may
+# allow for different specials to hit. Every other character shares the same exact sort of combo hitbox. So if a move doesn't
+# hit DJ from a certain spacing, it's not going to hit Ryu ... But it might hit Zangief." Spacing is learned per body class.
+BIG_BODIES = {"Marisa", "E. Honda", "Zangief"}
+SPACING_KEEP = 40      # distances kept per transition, body class and outcome
+SPACING_MISSES = 2     # whiffs from this distance or closer (and never a hit from this far) before a step is left out
+SPACING_SLACK = 0.05   # game units: distances this close count as the same spacing
+OUT_OF_RANGE_P = 0.05  # a planned step the spacing says will whiff: its chance in the value of the planned rest
+
+
+def body_class(character: str | None) -> str:
+    return "big" if character in BIG_BODIES else "standard"
+
+
 MIN_EV = 150           # a continuation of a move already out must be worth this much (expected hp, score) to start
 LINK_TRIGGERS = ("own_frame", "prev_free", "prev_neutral", "landing")
 
@@ -111,6 +125,7 @@ class Composer:
         self.entries: list[dict] = []
         self._plans: dict = {}
         self.stats = Counter()
+        self.body = "standard"               # the opponent's body class (BIG_BODIES): spacing results are kept per class
         self.starters: dict = {}             # move name -> ([resolved step], [planned step]): moves a combo can start from
         self.starter_ids: dict = {}          # the bot's action id -> that move's name
 
@@ -247,6 +262,20 @@ class Composer:
             return None
         return "counter_hit" if "counter_hit" in t["first_ok"] else "punish_counter" if t["first_ok"] else None
 
+    def spacing(self, t: dict) -> dict:
+        """{"ok": [...], "miss": [...]}: the distances (when the move before it started) at which transition t hit or
+        whiffed against opponents of this body class."""
+        return ((self.learned.get(t["key"]) or {}).get("dist") or {}).get(self.body) or {}
+
+    def too_far(self, t: dict, dist: float | None) -> bool:
+        """The step whiffed SPACING_MISSES times from this distance or closer and never hit from this far out."""
+        if dist is None:
+            return False
+        sp = self.spacing(t)
+        if any(d >= dist - SPACING_SLACK for d in sp.get("ok") or ()):
+            return False
+        return sum(1 for d in sp.get("miss") or () if d <= dist + SPACING_SLACK) >= SPACING_MISSES
+
     def p(self, t: dict) -> float:
         lr = self.learned.get(t["key"]) or {}
         n, ok = lr.get("n", 0), lr.get("ok", 0)
@@ -255,7 +284,7 @@ class Composer:
     # ---- search ------------------------------------------------------------------------------------------------
     def search(self, prefix_steps: list[dict], last_key: str | None, *, drive: float, sup: float, corner: bool,
                hit_ok=("normal",), opp_hp: float | None = None, beam: int = BEAM, max_steps: int = MAX_STEPS,
-               ) -> list[dict]:
+               dist: float | None = None) -> list[dict]:
         """Every combo that continues `prefix_steps` (planned steps already performed or chosen), within `drive` /
         `sup` to spend; best first by expected value. Each result: {"path": [transition keys], "ev", "p", "damage",
         "drive", "super", "corner", "hit_req"}."""
@@ -291,6 +320,8 @@ class Composer:
                         continue
                     if s["uses"][t["key"]] >= MAX_REUSE:
                         continue
+                    if depth == 0 and self.too_far(t, dist):
+                        continue                  # the next step whiffs from this spacing (learned per body class)
                     pt = self.p(t)
                     if s["last"] is not None:
                         prev_t = self.trans.get(s["last"])
@@ -334,8 +365,8 @@ class Composer:
             v += KILL_BONUS * s["P"]
         return v
 
-    def tail_score(self, prefix_steps: list[dict], last_key: str | None, path: list[str], opp_hp: float | None = None
-                   ) -> float | None:
+    def tail_score(self, prefix_steps: list[dict], last_key: str | None, path: list[str], opp_hp: float | None = None,
+                   dist: float | None = None) -> float | None:
         """The same expected value for a given continuation (the route the bot is performing)."""
         from .combo_gen import estimate_damage
         rows = self._hit_rows(prefix_steps)
@@ -347,6 +378,8 @@ class Composer:
             if t is None:
                 return None
             pt = self.p(t)
+            if k == path[0] and self.too_far(t, dist):
+                pt *= OUT_OF_RANGE_P
             if last is not None:
                 pv = self.trans.get(last)
                 if pv is not None and not any((r, j + 1) in t["srcs"] for r, j in pv["srcs"]):
@@ -428,18 +461,30 @@ class Composer:
         drive = max(0.0, (num(me.get("drive")) or 0) - reserve - 1)
         sup = num(me.get("super")) or 0
         opp_hp = num(op.get("hp"))
-        cur = self.tail_score(prefix, last_key, list(edges[k:]), opp_hp)
+        from .game_state import player_distance
+        dist = player_distance(me, op)
+        cur = self.tail_score(prefix, last_key, list(edges[k:]), opp_hp, dist)
         cands = self.search(prefix, last_key, drive=drive, sup=sup, corner=cornered(op, me), hit_ok=hit_ok,
-                            opp_hp=opp_hp, beam=40)
+                            opp_hp=opp_hp, beam=40, dist=dist)
         for c in cands[:4]:
             if cur is not None and c["ev"] <= cur + margin:
-                return None
+                break
             if c["path"] == list(edges[k:]):
-                return None
+                break
             new = self.entry(resolved[:k + 1], prefix, dict(c, damage=c["damage"]))
             if new is not None:
                 new["edges"] = list(edges[:k]) + new["edges"]      # the whole route's transitions
                 new["replanned_at"] = k
+                return new
+        if k + 1 < len(steps) and k < len(edges) and self.trans.get(edges[k]) is not None \
+                and self.too_far(self.trans[edges[k]], dist):
+            # nothing better fits, and the planned next step whiffs from here: end the route on this move (user: "a Super
+            # Art 3 that doesn't quite hit because the opponent was just spaced too much")
+            new = self.entry(resolved[:k + 1], prefix, {"path": [], "damage": 0, "expected": 0.0, "ev": 0.0, "p": 1.0,
+                                                        "drive": 0, "super": 0, "corner": False,
+                                                        "hit_req": e.get("hit_type") or "normal"})
+            if new is not None:
+                new.update(edges=list(edges[:k]), replanned_at=k, stopped_for_spacing=True)
                 return new
         return None
 
@@ -449,10 +494,11 @@ class Composer:
         if name not in self.starters:
             return None
         from .route_book import cornered
+        from .game_state import player_distance
         res0, steps0 = self.starters[name]
         cands = self.search(steps0, None, drive=max(0.0, (num(me.get("drive")) or 0) - reserve - 1),
                             sup=num(me.get("super")) or 0, corner=cornered(op, me), hit_ok=hit_ok,
-                            opp_hp=num(op.get("hp")), beam=60)
+                            opp_hp=num(op.get("hp")), beam=60, dist=player_distance(me, op))
         for c in cands[:4]:
             if c["ev"] < min_ev:
                 return None
@@ -476,13 +522,25 @@ class Composer:
             if psteps[k].get("hitting"):
                 return s_.get("contact") is not None
             return s_.get("start") is not None
+        fail = res.get("fail") or {}
         for k in range(1, min(len(st), len(edges) + 1)):
             if not worked(k - 1):
                 break
             ok = worked(k)
             lr = self.learned.setdefault(edges[k - 1], {"n": 0, "ok": 0})
-            lr["n"] += 1
-            lr["ok"] += int(ok)
+            # 0.24.4: spacing, per body class: the distance when the move before it started; only a WHIFF of this step
+            # is a spacing miss (a drop or an eaten input is timing). A spacing miss is not also counted against the
+            # step's success rate: from closer it still works, and the spacing rule keeps it out from this far
+            d = st[k - 1].get("dist_start")
+            spacing_miss = not ok and fail.get("kind") == "whiff" and fail.get("step") == k
+            if isinstance(d, (int, float)) and (ok or spacing_miss):
+                sp = lr.setdefault("dist", {}).setdefault(self.body, {"ok": [], "miss": []})
+                lst = sp["ok" if ok else "miss"]
+                lst.append(round(float(d), 3))
+                del lst[:-SPACING_KEEP]
+            if not (spacing_miss and isinstance(d, (int, float))):
+                lr["n"] += 1
+                lr["ok"] += int(ok)
             if not ok:
                 break
 
@@ -578,7 +636,7 @@ def save_learned(ds_root: Path, bot: str, learned: dict) -> None:
     p.write_text(json.dumps({"sf6bot_version": __version__, "edges": learned}, indent=1), encoding="utf-8")
 
 
-def for_character(character: str, ds_root: Path, book: list[dict]) -> Composer | None:
+def for_character(character: str, ds_root: Path, book: list[dict], opponent: str | None = None) -> Composer | None:
     """The composer for a match: Capcom data + catalog of the bot's character, its book, what matches taught."""
     from . import framedata as fd
     ds_root = Path(ds_root)
@@ -593,7 +651,10 @@ def for_character(character: str, ds_root: Path, book: list[dict]) -> Composer |
             catalog = json.loads(p.read_text(encoding="utf-8"))
         except ValueError:
             catalog = None
-    return build(book, capcom, catalog, load_learned(ds_root, character))
+    comp = build(book, capcom, catalog, load_learned(ds_root, character))
+    if comp is not None:
+        comp.body = body_class(opponent)
+    return comp
 
 
 def lab_candidates(ds_root: Path, character: str) -> list[dict]:

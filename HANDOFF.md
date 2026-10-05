@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-05: code version **0.24.3**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.24.4**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -240,6 +240,9 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.24.4 (user):** combo spacing learned in matches per body class (Marisa / E. Honda / Zangief vs everyone else): a step
+that whiffed twice from a spacing is not tried from there again (another follow-up, or the combo ends on the hit it has).
 
 **0.24.3:** fixed the "index out of range" that ended a ranked session (a combo re-planned shorter mid-route); errors in a
 decision or a combo are now logged (`errors` in the match summary) and the match goes on.
