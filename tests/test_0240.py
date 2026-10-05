@@ -202,3 +202,56 @@ def test_the_lab_gets_the_composed_combos_from_its_own_results(tmp_path):
     assert comp is None or not comp.entries                       # nothing verified, nothing to join
     cc.save_learned(tmp_path, "Ryu", {"a|*|>|b": {"n": 2, "ok": 1}})
     assert cc.load_learned(tmp_path, "Ryu") == {"a|*|>|b": {"n": 2, "ok": 1}}
+
+
+def test_any_attack_the_bot_starts_is_continued_live_with_its_meter():
+    """User: "this should be done by Ryu live, on the fly": a 5HP chosen by any rule becomes the start of the composer's
+    best combo for the meter the bot has, performed with hit confirm from the move already out."""
+    book = _book()
+    comp = cc.build(book, CAP)
+    comp.starter_ids[606] = "Standing Heavy Punch"          # the catalogued id (no catalog in this test)
+
+    def line(t, aid, inp=0, op_hs=0, op_hp=10000, sup=30000):
+        return {"stage_timer": t, "round": 0,
+                "p1": {"action_id": aid, "action_frame": 0, "x": 0.0, "y": 0.0, "hp": 10000, "drive": 60000,
+                       "super": sup, "input": inp, "hitstop": 0},
+                "p2": {"action_id": 1, "x": 1.0, "y": 0.0, "hp": op_hp, "drive": 60000, "super": 0, "hitstop": op_hs}}
+
+    def run(sup):
+        f = ScriptedFighter(FCFG, seed=1, book=book + comp.entries)
+        f.composer = comp
+        f.lead = 3
+        for t, aid, inp in ((500, 1, 0), (501, 1, 0x40), (502, 606, 0x40)):
+            f.observe_line(line(t, aid, inp, sup=sup), 0)
+        return f, f.decide(line(502, 606, 0x40, sup=sup), 502 / 60, 0)
+
+    f, d = run(30000)
+    assert d.kind == "route" and d.rule == "compose_live" and d.timed
+    assert d.route["route"].startswith("5HP") and d.route["route"].endswith("236236K")
+    assert d.adopt == {"start": 502, "start_id": 606, "contact": None}
+    # once per move: the next line does not start it again
+    f.observe_line(line(503, 606, 0x40), 0)
+    assert f.decide(line(503, 606, 0x40), 503 / 60, 0).rule != "compose_live"
+    # no meter: a meterless continuation (or nothing), never a super
+    _, d0 = run(0)
+    assert d0.rule != "compose_live" or "236236" not in d0.route["route"]
+
+
+def test_the_executor_goes_on_from_a_move_already_out():
+    steps = [{"name": "5HP", "trigger": "first", "min_offset": 0, "prefix": 0, "expect_id": 606, "startup": 10,
+              "hitting": True, "sequence": "5+HP@3", "connector": ""},
+             {"name": "H Shoryuken", "trigger": "contact", "min_offset": -3, "prefix": 6, "expect_id": 934, "startup": 5,
+              "hitting": True, "sequence": "6@3 2@3 3+HP@3", "connector": ">"}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True, lead=3,
+                      adopt={"start": 4, "start_id": 606, "contact": None})
+    assert run.feed(_line(5, 606, 1)) is None and run.rt[0]["sent"] == 4      # nothing sent for the move already out
+    k = run.feed(_line(13, 606, 9, d=210, hs=12, stun=20, hp=9000))               # it hits: the Shoryuken goes out
+    assert k == 1 or run.presend() == 1
+    # a move that already hit
+    run2 = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True, lead=3,
+                       adopt={"start": 4, "start_id": 606, "contact": 13})
+    assert run2.feed(_line(14, 606, 9, d=210, hs=11, stun=20, hp=9000)) == 1
+    run2.sent(1)
+    run2.feed(_line(20, 934, 0, d=210, stun=20, hp=9000))
+    run2.feed(_line(24, 934, 4, d=210, hs=10, stun=20, hp=8000))
+    assert run2.done and run2.result()["success"]

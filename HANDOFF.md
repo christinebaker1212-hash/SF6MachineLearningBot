@@ -244,8 +244,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 **0.24.0 (the combo composer; user: "mix and match these combos ... maximize the damage output based on the resources"):**
 verified transitions from the lab's true combos are joined into bigger combos by expected damage and the meter the bot has
 (SA3 after a Shoryuken with 3 bars, a Drive Rush loop with Drive to spare, never into burnout); they join the route book and
-are re-planned whenever a move of the route starts. Next run: check `composer` in the summaries / thoughts (started,
-finished, re-plans). Verify the best ones with K -> 9 (combo lab, "Joined from true combos"). Not verified in game.
+are re-planned whenever a move of the route starts; ANY attack the bot starts (poke, anti-air, punish) is continued live
+from the move already out, hit-confirmed. Nothing for the user to do (user: "this should be done by Ryu live, on the fly";
+K -> 9 exists but is optional). Next run: check `composer` in the summaries / thoughts (live, started, finished, re-plans).
+Not verified in game.
 
 **0.23.0 (the diagnosis of the 0.22.5 run, built; user: "Build all of them, in that order ... Prioritize non-human levels of
 whiff punishes and reactions. Aim for a projected 80% winrate"):** the punish engine (every blocked / whiffed / falling move

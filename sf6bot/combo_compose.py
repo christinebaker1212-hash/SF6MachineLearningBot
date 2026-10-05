@@ -51,6 +51,7 @@ LEARN_K = 4             # match results per transition shrink toward the prior w
 COST_DRC, COST_PDR, COST_OD, COST_DI = 30000, 10000, 20000, 10000   # Drive (community values; 10000 = a bar)
 SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 PER_STARTER = 14        # composed book entries kept per starter
+MIN_EV = 150           # a continuation of a move already out must be worth this much (expected hp, score) to start
 LINK_TRIGGERS = ("own_frame", "prev_free", "prev_neutral", "landing")
 
 
@@ -110,6 +111,8 @@ class Composer:
         self.entries: list[dict] = []
         self._plans: dict = {}
         self.stats = Counter()
+        self.starters: dict = {}             # move name -> ([resolved step], [planned step]): moves a combo can start from
+        self.starter_ids: dict = {}          # the bot's action id -> that move's name
 
     # ---- the transition library --------------------------------------------------------------------------------
     def row(self, name: str, prev: str | None = None) -> dict | None:
@@ -440,6 +443,24 @@ class Composer:
                 return new
         return None
 
+    def best_from(self, name: str, me: dict, op: dict, *, reserve: float = 0, hit_ok=("normal",),
+                  min_ev: float = MIN_EV) -> dict | None:
+        """The biggest combo from move `name` (one the bot is doing right now) with the resources it has now."""
+        if name not in self.starters:
+            return None
+        from .route_book import cornered
+        res0, steps0 = self.starters[name]
+        cands = self.search(steps0, None, drive=max(0.0, (num(me.get("drive")) or 0) - reserve - 1),
+                            sup=num(me.get("super")) or 0, corner=cornered(op, me), hit_ok=hit_ok,
+                            opp_hp=num(op.get("hp")), beam=60)
+        for c in cands[:4]:
+            if c["ev"] < min_ev:
+                return None
+            e = self.entry(res0, steps0, c)
+            if e is not None:
+                return e
+        return None
+
     # ---- outcomes ----------------------------------------------------------------------------------------------
     def record(self, e: dict, res: dict) -> None:
         """Per-transition results of a performed route: a transition was tried once the move before it worked (hit, or
@@ -525,6 +546,12 @@ def build(book: list[dict], capcom: dict | None, catalog: dict | None = None, le
                 continue
             have.update((en["route"], sig(en["resolved"])))
             comp.entries.append(en)
+    comp.starters = starters
+    for name, (_, steps0) in starters.items():
+        s0 = steps0[0] if steps0 else {}
+        for i in [s0.get("expect_id")] + list(s0.get("known_ids") or []):
+            if isinstance(i, int):
+                comp.starter_ids.setdefault(i, name)
     comp.stats["transitions"] = len(comp.trans)
     comp.stats["composed"] = len(comp.entries)
     return comp

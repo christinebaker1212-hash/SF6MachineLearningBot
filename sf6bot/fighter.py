@@ -98,6 +98,7 @@ class Decision:
     route: dict | None = None      # a combo lab TRUE combo (route_book entry), performed move by move
     intent: str = ""               # the learned policy's intent (neutral decisions)
     timed: bool = False            # 0.23.0: sent on purpose before the bot is free (the punish engine): no busy gate
+    adopt: dict | None = None      # 0.24.0: the route's first move is the one the bot is already doing (combo_lab adopt)
 
 
 def _ids(spec) -> set:
@@ -437,6 +438,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._live_route = None
         self._live_kind = None
         self._route_basis = None              # the input delay the running route's recorded timing is replayed for
+        self._line_t = None                   # the newest line's game clock (observe_line)
         self.compose_stats = {"started": 0, "completed": 0, "first_hit_extended": 0, "replans": 0, "by_route": {},
                               "replanned_to": {}}
         self.corner_stats = {"moments": 0}
@@ -799,6 +801,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         tt = self._thrown_tech(me, op)
         if tt is not None:
             return tt
+        # 0c. 0.24.0 the bot's own attack has just started (whatever rule chose it): the combo composer's biggest
+        #     continuation for the meter it has, performed with hit confirm (nothing more goes out unless it hits)
+        cx = self._compose_live(me, op, dist)
+        if cx is not None:
+            return cx
         # 0a. 0.23.0 the punish engine (punish.py): the opponent's move can no longer hit and leaves a window -> the best
         #     punish that fits, timed to land on the first frame it can; holds block until then
         self._pe_track(raw, me, op)
@@ -2226,6 +2233,37 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             out["cmd_grabs"] = True
         return out
 
+    def _compose_live(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.24.0 (user, 2026-10-05: "Ryu catches a random poke heavy punch in neutral. Depending on its resources ... it
+        should ... maximize the damage output"; "this should be done by Ryu live, on the fly"): any attack of the bot's own
+        that has just started (a neutral poke, an anti-air Shoryuken, a whiff punish: anything not already performed as a
+        route) becomes the first move of the composer's best combo from it, with the resources the bot has now. The run
+        is hit-confirmed: on a whiff or a block nothing more goes out; a special's motion goes in on the predicted hit."""
+        comp, a = self.composer, self._own_atk
+        if comp is None or a is None or a.get("composed") or a.get("blocked") or me.get("action_id") != a["id"]:
+            return None
+        tmr = self._now
+        name = comp.starter_ids.get(a["id"])
+        if name is None or not isinstance(tmr, int) or not isinstance(a.get("t0"), int):
+            a["composed"] = True
+            return None
+        st0 = comp.starters[name][1][0]
+        su = st0.get("startup") if isinstance(st0.get("startup"), int) else 10
+        late = (tmr - a["hit_t"] > 6) if a.get("hit_t") is not None else (tmr - a["t0"] > su + 2)
+        if late or dist > 2.2:
+            a["composed"] = True
+            return None
+        a["composed"] = True
+        e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0))
+        if e is None:
+            return None
+        self.compose_stats["live"] = self.compose_stats.get("live", 0) + 1
+        return Decision("route", e["route"], route=e, rule="compose_live", timed=True,
+                        adopt={"start": a["t0"], "start_id": a["id"], "contact": a.get("hit_t")},
+                        reason=f"{name} is out: going on with {e['route']} (about {e['damage']} if it all hits, "
+                               f"{int(e['p_complete'] * 100)}% to finish; Super {int(num(me.get('super')) or 0) // 10000}, "
+                               f"Drive {int(num(me.get('drive')) or 0) // 10000})")
+
     def _track_own_attack(self, me: dict, op: dict) -> None:
         """Each own ground attack (normal or non-projectile special): its start distance and whether it touched the
         opponent (hitstop / blockstun rising or hp lost) before the bot's next action; the result goes to live_reach."""
@@ -2252,6 +2290,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             d = player_distance(me, op)
             if d is not None:
                 a = self._own_atk = {"id": aid, "dist": d, "contact": False, "rush": self._own_last in RUSH_IDS,
+                                     "t0": self._line_t,
                                      "op": (_num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp")))}
         if a is not None and not a["contact"]:
             hs, bs, hp = _num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp"))
@@ -2260,6 +2299,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 a["contact"] = True
                 if bs > 0 and not bs0:
                     a["blocked"] = True
+                else:
+                    a["hit_t"] = self._line_t
             a["op"] = (hs, bs, hp)
         self._own_last = aid
 
@@ -2274,6 +2315,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._pe_track(raw, me, op)
         self._track_grab_chain(oa, tmr)
         self._track_self(me, op, tmr)
+        self._line_t = tmr
         self._track_own_attack(me, op)
         self._track_damage_taken(me, op)
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
@@ -3917,7 +3959,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         confirm=True,
                                         on_first_hit=(lambda hit, raw_, e_=d.route: fighter.route_after_hit(
                                             e_, hit, raw_.get(me_key) or {}, raw_.get(op_key) or {}))
-                                        if d.kind == "route" and (d.route or {}).get("starter") and fighter.book else None,
+                                        if d.kind == "route" and (d.route or {}).get("starter") and fighter.book
+                                        and not d.adopt else None,
+                                        adopt=d.adopt,
                                         # 0.24.0: the combo composer re-plans the rest whenever a move starts
                                         on_step=(lambda j_, raw_: fighter.route_on_step(
                                             j_, raw_, me_key, op_key, fighter._route_basis))

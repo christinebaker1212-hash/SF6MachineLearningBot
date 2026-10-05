@@ -514,7 +514,7 @@ class ComboRun:
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
                  movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
                  fixed: list | None = None, learned: dict | None = None, confirm: bool = False,
-                 fixed_lead: int | None = None):
+                 fixed_lead: int | None = None, adopt: dict | None = None):
         self.steps, self.offsets, self.lead = steps, offsets, lead
         # 0.23.0: the recorded send points were for the input delay of the lab run (`fixed_lead`); with another delay
         # (ranked measured 3, the lab 4) every press moves by the difference, so it lands on the same game frame
@@ -555,6 +555,14 @@ class ComboRun:
         self._free_ticks = 0         # matches: ticks the bot has been neutral with the next input not due (0.22.4)
         self.super_connected = None
         self.bar = framebar.BarTrack(me)     # the Training Mode frame bar (exporter v9), if present
+        if adopt:
+            # 0.24.0 (matches): the first move is already out (the bot pressed it for another reason); the route goes on
+            # from it. `adopt` = its start tick and id, and its hit tick if it has hit already
+            self.rt[0].update(sent=adopt.get("sent", adopt["start"]), start=adopt["start"], start_id=adopt.get("start_id"))
+            if adopt.get("contact") is not None:
+                self.rt[0]["contact"] = adopt["contact"]
+                self.rt[0]["contacts"].append(adopt["contact"])
+                self.hits.append({"tick": adopt["contact"], "step": 0, "damage": None})
 
     def _off(self, k: int) -> int:
         """The step's timing offset, never under its floor (see plan_route)."""
@@ -2199,7 +2207,8 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
-                  confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None) -> dict:
+                  confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None,
+                  adopt: dict | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2207,9 +2216,10 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     0.20.5): called once the starter has hit, with its measured kind (hits.classify_hit); it returns (steps, fixed,
     verdict): "switch" continues with those steps (same starter), "stop" ends the route after the hit, else keep.
     `on_step(k, raw)` (fighter, 0.24.0): called once when step k >= 1 has started; it returns (steps, fixed) to go on
-    with steps k+1.. of another route with the same first k+1 moves (the combo composer), or None."""
+    with steps k+1.. of another route with the same first k+1 moves (the combo composer), or None. `adopt` (fighter,
+    0.24.0): step 0 is the move the bot is already doing (ComboRun)."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead)
+                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout

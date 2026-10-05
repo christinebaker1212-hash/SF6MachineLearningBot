@@ -124,7 +124,7 @@ echo    4  Only routes containing some text (e.g. DRC)
 echo    5  Only counter-hit routes   6  Only punish-counter routes  (set the dummy's counter hit first)
 echo    7  Community routes again, including ones that already passed or failed for a clear reason
 echo    8  Routes found in recordings (replays and matches; built by B = train)
-echo    9  Combos the bot joined from its true combos (verify them so matches can trust them)
+echo    9  Combos the bot joined from its true combos (optional: matches use them anyway)
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)

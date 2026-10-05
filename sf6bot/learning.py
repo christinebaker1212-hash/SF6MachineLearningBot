@@ -479,10 +479,11 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                     + (f" Punishes: plain SA3 {sv.get('sa3', 0)}, a bigger combo instead of SA3 {sv.get('route', 0)}."
                        if sv.get("sa3") or sv.get("route") else "")))
     cm = summary.get("composer") or {}
-    if cm.get("started") or cm.get("first_hit_extended") or cm.get("replans"):
+    if cm.get("started") or cm.get("live") or cm.get("first_hit_extended") or cm.get("replans"):
         top = sorted((cm.get("by_route") or {}).items(), key=lambda kv: -kv[1].get("n", 0))[:2]
         out.append(("policy", f"Joined combos (from {cm.get('transitions', 0)} verified transitions): started "
-                              f"{cm.get('started', 0)}, finished {cm.get('completed', 0)}; extended after the first hit "
+                              f"{cm.get('started', 0)} (from a move already out: {cm.get('live', 0)}), finished "
+                              f"{cm.get('completed', 0)}; extended after the first hit "
                               f"{cm.get('first_hit_extended', 0)}, re-planned mid-combo for the meter I had "
                               f"{cm.get('replans', 0)}"
                     + ("; most used: " + "; ".join(f"{r} ({v.get('ok', 0)}/{v.get('n', 0)})" for r, v in top)
