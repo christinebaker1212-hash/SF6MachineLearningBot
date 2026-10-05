@@ -283,7 +283,13 @@ splat id) in the fight summaries.
 12. **Fireball play:** Hadokens from long range with an anti-air ready for jumps over them; none from punishable ranges.
 13. **Drive discipline:** count burnouts and their causes; keep a reserve unless the spend wins the round.
 14. **Round timer / life lead:** play safe late in a round when ahead on health (the round clock is not used yet).
-15. **Find the Perfect Parry id:** a short Training Mode test (dummy throwing fireballs, the bot parrying).
+15. **Find the Perfect Parry id — the user's method (2026-10-05):** set the Training Mode dummy to Perfect Parry
+    everything, and run the bot's moves (a catalog-style pass: normals, specials, a fireball) into it. The dummy's
+    action ids right after each contact are the Perfect Parry ids (system ids, likely shared by every character like
+    parry 480, which also makes them the bot's own when IT perfect parries); the bot's own ids / freeze on the same
+    lines show what being perfect-parried looks like (so in matches it knows its attack was PP'd and can expect the
+    punish). Also record the freeze length and the frame meter's advantage. Then: the projectile perfect-parry timing
+    can be checked (hit or normal parry), and opponents' perfect parries are recognised.
 
 **0.18.12:** match boundaries after rematches (a joined match's round no longer counts for the next one;
 results and recordings were shifted by a round in the user's second run, one false win). CLAUDE.md "0.18.12".
