@@ -3308,6 +3308,51 @@ and updated older tests; `decide()` replayed open-loop over the 36 recorded 0.22
 - 80% is NOT reached on paper: it needs ~6,000 more hp of swing a match at these opponents. Open loop: the opponents don't
   adapt; better results bring stronger opponents (LP is the measure).
 
+## 0.24.0: the combo composer — bigger combos joined from verified ones, by resources (user, 2026-10-05)
+User: "teach the bot how to mix and match these combos ... to make higher damaging combos out of the combos that it already
+knows"; "shoryuken can be canceled into super art three. So, if it has the meter ... it should presumptively perform a super
+art three"; "heavy punch, drive rush cancel, heavy kick, heavy punch, drive rush cancel, heavy kick, heavy punch, medium high
+blade kick, shoryuken, super art three ... the maximum"; "maximize the damage output based on the resources that it has, not
+just based on a strict combo that it knows, but across all combos and all links that it can verify with accuracy do work
+together." MOCK-tested (`tests/test_0240.py`: real Ryu Capcom data, a synthetic lab book, the executor on synthetic lines);
+nothing here is verified in game.
+- **Transitions** (`sf6bot/combo_compose.py`): every TRUE combo in the route book is cut into "move A, then move B" with the
+  lab's planned step for B (its trigger is relative to A) and B's recorded send point (normalised to an input delay of 4).
+  - a cancel / chain (B timed from A's HIT) is used whatever came before A, and whatever the opener's hit type
+  - a link (B timed from A's own frame / recovery) only in the same context: A after a Drive Rush or not (+4), the opponent
+    juggled or not (a knockdown hit earlier in the combo: Capcom's on-hit "D")
+  - a link verified only right after a counter-hit / punish-counter opener is used only right after such an opener
+  - Capcom's cancel column adds cancels the lab never performed in that order, into moves the bot performs in a verified
+    route: a special-cancelable normal into a special some verified route cancels into from a normal; any move into a Super
+    Art its column allows. Success estimate 0.75 (ESTIMATE)
+- **Search:** a beam search from a starter joins transitions (at most 10 steps, each transition at most twice). Expected
+  damage = each move's added damage (Capcom damage x the community scaling table, calibrated by the lab's measured damages)
+  x the chance every transition up to it works: the lab's rate per transition (route rate^(1/transitions), at least 0.5),
+  x0.85 where two transitions were never verified one after the other (ESTIMATE), and each transition's results in matches
+  (`datasets/learning/<Bot>_compose.json`, shrunk toward the prior with weight 4). The search score also subtracts what the
+  meter is worth unspent (Super bar 250, Drive bar 200), a drop's risk (400) and adds a kill (2,500): ESTIMATES.
+- **Resources:** Super bars (SA1 1, SA2 2, SA3 3) and Drive (Drive Rush cancel 3 bars, Parry Drive Rush 1, OD 2: community
+  values). Never into burnout: a composed combo is not a verified kill (user rule, 0.10.0); `route_book.affordable` lets only
+  verified routes spend into burnout to kill. So the user's two-rush maximum (6 Drive bars) is found by the search but not
+  performed; with 3+ bars to spare it rushes once.
+- **In the route book:** the best composition per starter, Super / Drive cost, position and hit type (at most 14 per starter,
+  dominated ones dropped) joins the book (`composed: true`, `edges`, `splices`), ranked by expected damage, so punishes, hit
+  confirms, whiff punishes and the first hit's kind (0.20.5) all pick them where they beat a verified route. Any move the bot
+  performs inside a verified route can now start one (a neutral 5HP that hits). Example on the synthetic book: 2MK > 236MK >
+  623HP + "5HP > 623HP , SA3" -> 2MK > 236MK > 623HP > SA3 with 3 bars; 5HP with 3 bars and 3+ Drive bars to spare -> 5HP > DRC
+  5HK , 5HP > 623HP > SA3.
+- **While a route runs** (`combo_lab.perform_route(on_step=...)`, `ComboRun.replace_tail`; `fighter.route_on_step`): each time
+  a move of the route starts, the composer re-plans the rest with the gauges the bot has then; a better continuation replaces
+  the rest (nothing of it has gone out yet, not even a motion). After the first hit (`route_after_hit`) it also extends the
+  route for the hit's kind. Measured on a book of all 114 plannable Ryu community routes: re-planning takes 0.5 ms median,
+  ~5 ms p95, 11 ms worst (one per started move).
+- **Verify them:** `combo-lab --source composed` (menu K -> 9, panel Combo lab -> "Joined from true combos"): the lab tests the
+  compositions (best first); verified ones become ordinary TRUE combos.
+- Summaries: `composer` {started, completed, first_hit_extended, replans, by_route, replanned_to, routes, transitions}; a
+  thoughts line. The per-transition results are saved after every match (erased with "fights").
+- Not modelled: Drive Rush scaling beyond the calibration, juggle limits, damage of multi-hit moves hit by hit, range after
+  pushback (a spliced special may not reach). These are what the success estimates and the per-transition results absorb.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

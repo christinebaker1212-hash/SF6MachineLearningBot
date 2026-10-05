@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-05: code version **0.23.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.24.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -240,6 +240,12 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.24.0 (the combo composer; user: "mix and match these combos ... maximize the damage output based on the resources"):**
+verified transitions from the lab's true combos are joined into bigger combos by expected damage and the meter the bot has
+(SA3 after a Shoryuken with 3 bars, a Drive Rush loop with Drive to spare, never into burnout); they join the route book and
+are re-planned whenever a move of the route starts. Next run: check `composer` in the summaries / thoughts (started,
+finished, re-plans). Verify the best ones with K -> 9 (combo lab, "Joined from true combos"). Not verified in game.
 
 **0.23.0 (the diagnosis of the 0.22.5 run, built; user: "Build all of them, in that order ... Prioritize non-human levels of
 whiff punishes and reactions. Aim for a projected 80% winrate"):** the punish engine (every blocked / whiffed / falling move
@@ -664,6 +670,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
 | Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed) |
+| Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 

@@ -791,9 +791,9 @@ def main(argv=None):
     p.add_argument("--rounds", type=int, default=1,
                    help="generated routes: test, regenerate from the results (extend what worked, drop "
                         "what was blocked), test again; this many rounds")
-    p.add_argument("--source", choices=["community", "generated", "mined", "both"], default="community",
+    p.add_argument("--source", choices=["community", "generated", "mined", "composed", "both"], default="community",
                    help="community routes (menu T, A), routes worked out from Capcom data, routes found in "
-                        "recordings (built by train), or all of them")
+                        "recordings (built by train), combos joined from verified ones (composed), or all of them")
     p.add_argument("--position", choices=["any", "midscreen", "corner"], default="any")
     p.add_argument("--hit-type", dest="hit_type", default="all",
                    choices=["all", "normal", "counter_hit", "punish_counter"],

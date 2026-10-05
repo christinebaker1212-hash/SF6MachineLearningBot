@@ -574,6 +574,26 @@ class ComboRun:
         self.offsets = {}
         return True
 
+    def replace_tail(self, j: int, steps: list[dict], fixed: list | None = None) -> bool:
+        """0.24.0 (matches, the combo composer): steps j.. replaced by another continuation of the same first j moves,
+        planned for the resources the bot has now (combo_compose.Composer.best_tail). Only while none of them has gone
+        out (not even a motion); `fixed` is the new route's recorded timing (whole route), on the same input-delay basis
+        as this run's."""
+        if j < 1 or j > len(self.steps) or len(steps) <= j or self.pending is not None and self.pending >= j:
+            return False
+        if any(r["sent"] is not None or r.get("motion_sent") is not None for r in self.rt[j:]):
+            return False
+        old_fixed = self.fixed
+        self.steps = self.steps[:j] + [dict(x) for x in steps[j:]]
+        self.rt = self.rt[:j] + [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[])
+                                 for _ in steps[j:]]
+        if fixed and len(fixed) == len(steps):
+            self.fixed = list((old_fixed or [{}] * j)[:j]) + [dict(x or {}) for x in fixed[j:]]
+        elif old_fixed:
+            self.fixed = list(old_fixed[:j]) + [{} for _ in steps[j:]]
+        self.offsets = {k: v for k, v in self.offsets.items() if k < j}
+        return True
+
     def _is_free(self, p1: dict, tick: int) -> bool:
         """The bot can act: a learned idle id, or any idle / walk / crouch id (< FIGHT_IDLE_MAX, MEASURED) out of
         hitstop, or the frame bar's newest cell for the bot is 'free' (0). Before 0.20.5 only the idle ids learned
@@ -2025,6 +2045,12 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     from .combo_mining import lab_candidates
                     have = {route_key(x) for x in combos}
                     combos += [x for x in lab_candidates(ds, name, capcom) if route_key(x) not in have]
+                if source in ("composed", "both"):
+                    # 0.24.0: combos the composer joined from the true combos (combo_compose.py): verified here, they
+                    # become ordinary true combos the fighter trusts
+                    from .combo_compose import lab_candidates as composed
+                    have = {route_key(x) for x in combos}
+                    combos += [x for x in composed(ds, name) if route_key(x) not in have]
                 combos = apply_requirements(combos, capcom, rules, name)
                 todo = select_routes(combos, position, hit_pass, max_difficulty, only)
                 if not again or rnd > 0:
@@ -2173,19 +2199,22 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
-                  confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None) -> dict:
+                  confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
     move waits for the previous one's hit, and a whiff ends the route (ComboRun). `on_first_hit(hit, raw)` (fighter,
     0.20.5): called once the starter has hit, with its measured kind (hits.classify_hit); it returns (steps, fixed,
-    verdict): "switch" continues with those steps (same starter), "stop" ends the route after the hit, else keep."""
+    verdict): "switch" continues with those steps (same starter), "stop" ends the route after the hit, else keep.
+    `on_step(k, raw)` (fighter, 0.24.0): called once when step k >= 1 has started; it returns (steps, fixed) to go on
+    with steps k+1.. of another route with the same first k+1 moves (the combo composer), or None."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
                    fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout
     aborted = None
+    started: set = set()
     try:
         while not run.done and clock.now() < deadline and not sess.stop_event.is_set():
             if abort is not None:
@@ -2215,6 +2244,16 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                         k = run._due(st.raw.get("stage_timer"), st.raw.get(me) or {}, run._land_est)
                 else:
                     run.extra["hit_switch"] = {"kind": None, "verdict": "keep"}
+            if on_step is not None and not run.done:
+                for j in range(1, len(run.rt)):
+                    if run.rt[j]["start"] is None or j in started:
+                        continue
+                    started.add(j)
+                    new = on_step(j, st.raw)
+                    if new and new[0] and run.replace_tail(j + 1, new[0], new[1]):
+                        run.extra.setdefault("replans", []).append({"at": j, "to": len(new[0])})
+                        if k is None:
+                            k = run._due(st.raw.get("stage_timer"), st.raw.get(me) or {}, run._land_est)
             if run.pdr_dash_due is not None and not run.done:
                 # the parry is out: dash (66, the parry still held), then everything is released
                 j, run.pdr_dash_due = run.pdr_dash_due, None

@@ -432,6 +432,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.rush_options: dict = {}          # 0.21.0: Drive Rush follow-up name -> drive_rush_in option (set by the fight setup)
         self._switched_to = None
         self._sa3_cmp_for = None
+        # 0.24.0: the combo composer (combo_compose.py, set by the fight setup) and the route being performed
+        self.composer = None
+        self._live_route = None
+        self._live_kind = None
+        self._route_basis = None              # the input delay the running route's recorded timing is replayed for
+        self.compose_stats = {"started": 0, "completed": 0, "first_hit_extended": 0, "replans": 0, "by_route": {},
+                              "replanned_to": {}}
         self.corner_stats = {"moments": 0}
         self._rush_next = 0.0
         self._rush_roll_t = 0.0
@@ -2542,14 +2549,25 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         """0.20.5: the starter of route `e` has hit; its measured kind (hits.classify_hit) picks how it goes on:
         a counter hit / punish counter switches to the best counter-hit / punish-counter route with the same starter,
         a normal hit (a punish that came late) leaves a punish-counter-only route for a normal-hit one, or stops.
+        0.24.0: then the combo composer may extend it (the biggest continuation for that hit and the resources now).
         Returns (steps, fixed, verdict) for combo_lab.perform_route."""
-        from .route_book import after_first_hit
+        from .route_book import HIT_OK, after_first_hit
         kind = (hit or {}).get("kind")
+        self._live_kind = kind
         self.hit_switch[kind if kind in ("normal", "counter", "punish_counter") else "other"] += 1
         new, verdict = after_first_hit(self.book or [], e, kind, me, op,
                                        learned=self.exp.routes() if self.exp else None,
                                        reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
         self._switched_to = None
+        cur = new if verdict == "switch" and new is not None else e
+        if self.composer is not None:
+            # "stop": the route's own continuation would drop after this hit; compare with ending here
+            ext = self.composer.best_tail(cur if verdict != "stop" else dict(e, edges=[]), 0, me, op,
+                                          reserve=self.c.get("drive_reserve", 0),
+                                          hit_ok=HIT_OK.get(kind or "", ("normal",)))
+            if ext is not None:
+                new, verdict = ext, "switch"
+                self.compose_stats["first_hit_extended"] += 1
         if verdict == "stop":
             self.hit_switch["stopped"] += 1
         if verdict != "switch" or new is None:
@@ -2558,9 +2576,38 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         sw = self.hit_switch["switched_to"]
         sw[new["route"]] = sw.get(new["route"], 0) + 1
         self._switched_to = new["route"]
+        self._live_route = new
         pl = new["plan"]
         fixed = pl.get("recorded_timing") if pl.get("lead") == self.lead else None
+        basis = self._route_basis
+        if new.get("composed") and pl.get("recorded_timing") and isinstance(basis, int) and abs(basis - pl["lead"]) <= 2:
+            # 0.24.0: the composer's send points (input delay 4) moved to the running route's basis
+            from .combo_compose import shift_fixed
+            fixed = [shift_fixed(x, pl["lead"] - basis) for x in pl["recorded_timing"]]
         return pl["steps"], fixed, "switch"
+
+    def route_on_step(self, k: int, raw: dict, me_key: str, op_key: str, basis: int | None):
+        """0.24.0 (user, 2026-10-05: "if it has the meter, and it has the opportunity, and it has already performed
+        shoryuken, it should presumptively perform a super art three"): step k of the route being performed has started;
+        the composer re-plans the rest with the resources the bot has NOW. Returns (steps, fixed) or None. `basis` is
+        the input delay the run's recorded timing is replayed for (combo_lab.ComboRun fixed_lead)."""
+        e = self._live_route
+        if e is None or self.composer is None:
+            return None
+        from .combo_compose import REF_LEAD, shift_fixed
+        new = self.composer.best_tail(e, k, raw.get(me_key) or {}, raw.get(op_key) or {},
+                                      reserve=self.c.get("drive_reserve", 0))
+        if new is None:
+            return None
+        self.compose_stats["replans"] += 1
+        rt = self.compose_stats["replanned_to"]
+        rt[new["route"]] = rt.get(new["route"], 0) + 1
+        self._live_route = new
+        pl = new["plan"]
+        fixed = None
+        if pl.get("recorded_timing") and isinstance(basis, int) and abs(basis - REF_LEAD) <= 2:
+            fixed = [shift_fixed(x, REF_LEAD - basis) for x in pl["recorded_timing"]]
+        return pl["steps"], fixed
 
     def _step_in_punish(self, me: dict, op: dict, dist: float, remaining: int, wc: dict) -> Decision | None:
         """0.20.0 (user: "punish moves based on proximity to the enemy, as well as their last whiffed move"): the whiffed
@@ -3186,6 +3233,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["denjin"] = dict(fighter.denjin_stats, stock_at_end=fighter.denjin_stock)
                 summary["stun_followups"] = dict(fighter.stun_stats)
                 summary["route_hits"] = dict(fighter.hit_switch, sa3_vs_route=dict(fighter.sa3_vs_route))
+                if fighter.composer is not None:
+                    summary["composer"] = dict(fighter.compose_stats, routes=len(fighter.composer.entries),
+                                               transitions=len(fighter.composer.trans))
+                    try:
+                        from .combo_compose import save_learned
+                        save_learned(ds_root, summary["character"], fighter.composer.learned)
+                    except OSError as e:
+                        summary["composer"]["saved"] = f"not saved: {e}"
                 summary["neutral"] = dict(fighter.neutral_stats,
                                           style=dict(sorted(fighter.style_counts.items(), key=lambda kv: -kv[1])))
             if learner is not None:
@@ -3610,6 +3665,17 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 opp_moves, label = opponent_moves(summary["opponent"], ds_root, fcfg)
                 summary["opponent_catalog"] = label or False
                 book = build_book(summary["character"], ds_root)
+                # 0.24.0: longer combos spliced from the book's verified transitions, by resources (combo_compose.py)
+                composer = None
+                try:
+                    from .combo_compose import for_character
+                    composer = for_character(summary["character"], ds_root, book)
+                except Exception as e:                   # noqa: BLE001 - the composer is optional
+                    print(f"(combo composer unavailable: {e})")
+                if composer is not None and composer.entries:
+                    book = book + composer.entries
+                    sess.narrate(f"Combo composer: {len(composer.entries)} combos joined from {len(composer.trans)} "
+                                 f"verified transitions (estimates until they are tried).", source="learned")
                 from .learning import DECAY, DECAY_RANKED
                 exp = Experience(ds_root, summary["character"], summary["opponent"],
                                  decay=DECAY_RANKED if versus == "ranked" else DECAY)
@@ -3656,6 +3722,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                           opp_reach=opp_reach)
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
+                fighter.composer = composer
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():
@@ -3831,6 +3898,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         lead = side["lag"] if isinstance(side["lag"], int) and side["how"] == "input probe" else None
                     if lead is not None:
                         fighter.lead = lead
+                    fighter._live_route = d.route if d.kind == "route" else None
+                    fighter._live_kind = None
+                    fighter._route_basis = pl.get("lead") if isinstance(pl.get("lead"), int) else lead or 4
+                    if d.kind == "route" and (d.route or {}).get("composed"):
+                        fighter.compose_stats["started"] += 1
+                        br = fighter.compose_stats["by_route"].setdefault(d.route["route"], {"n": 0, "ok": 0})
+                        br["n"] += 1
                     res = perform_route(sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
                                         FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=6.0,
                                         abort=stop_check,
@@ -3843,7 +3917,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         confirm=True,
                                         on_first_hit=(lambda hit, raw_, e_=d.route: fighter.route_after_hit(
                                             e_, hit, raw_.get(me_key) or {}, raw_.get(op_key) or {}))
-                                        if d.kind == "route" and (d.route or {}).get("starter") and fighter.book else None)
+                                        if d.kind == "route" and (d.route or {}).get("starter") and fighter.book else None,
+                                        # 0.24.0: the combo composer re-plans the rest whenever a move starts
+                                        on_step=(lambda j_, raw_: fighter.route_on_step(
+                                            j_, raw_, me_key, op_key, fighter._route_basis))
+                                        if d.kind == "route" and fighter.composer is not None else None)
                     c.apply(InputState(), tag="fighter_route_end")
                     rk = "routes_completed" if res.get("success") else "routes_stopped"
                     summary.setdefault(rk, {})
@@ -3856,8 +3934,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         del tr_[:-15]
                     why = d.name if res.get("success") else f"{d.name}: {(res.get('fail') or {}).get('kind') or res.get('aborted')}"
                     summary[rk][why] = summary[rk].get(why, 0) + 1
+                    live_ = fighter._live_route
+                    if live_ is not None and fighter.composer is not None:
+                        fighter.composer.record(live_, res)       # 0.24.0: per transition, for the composer
+                        if live_.get("composed") and res.get("success"):
+                            fighter.compose_stats["completed"] += 1
+                            br = fighter.compose_stats["by_route"].setdefault(live_["route"], {"n": 0, "ok": 0})
+                            br["ok"] += 1
                     if d.kind == "route" and exp is not None:
-                        done_route = fighter._switched_to if (res.get("hit_switch") or {}).get("to") else d.route["route"]
+                        done_route = live_["route"] if live_ is not None else d.route["route"]
                         exp.route_done(done_route, bool(res.get("success")), res.get("damage"))
                     if res.get("aborted"):
                         summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
