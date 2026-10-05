@@ -251,7 +251,11 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.4 (latest): a cancel on the second hit of a two-hit move (Ryu 4HK > Shoryuken) is timed to the predicted hit, so
+**0.20.5 (latest): punishes compare SA3 with routes by damage; a route goes on by its starter's measured hit
+(counter / punish counter / late normal); PDR dashes once the parry is on screen; the move after a DI goes out on the
+measured free frame** (CLAUDE.md "0.20.5"). Check `route_hits` in the next batch; PDR / DI routes are retried on K.
+
+**0.20.4: a cancel on the second hit of a two-hit move (Ryu 4HK > Shoryuken) is timed to the predicted hit, so
 the motion goes in during the move** (CLAUDE.md "0.20.4"). 4HK routes are retried on the next K.
 
 **0.20.3: Denjin Charge in matches (stock tracked; on long knockdowns as a choice against oki; from far away as a

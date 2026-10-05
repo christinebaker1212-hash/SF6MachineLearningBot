@@ -1282,3 +1282,85 @@ def test_matches_cancel_the_second_hit_with_the_motion_sent_early():
     run, sent = _run_confirm(Sim(moves, lead=4), steps)
     assert run.result()["success"] and sent == [0, 1], run.result()
     assert run.rt[1]["sent"] < run.rt[0]["contacts"][1] <= run.rt[1]["start"]
+
+
+# ---- 0.20.5: Parry Drive Rush on the parry's own frame; the move after a Drive Impact --------------------------------
+
+def _pdr_steps():
+    cap = dict(_capcom("ryu"), character="Ryu")
+    route = "PDR 2MK"
+    p = cl.plan_route({"route": route, **combos.resolve(route, cap["moves"])}, cap, None)
+    assert not p["unsupported"], p
+    return p["steps"]
+
+
+def test_pdr_holds_the_parry_and_dashes_once_the_parry_is_out():
+    """User, 2026-10-05: 'routes with PDR tend to fail at the PDR'. The lab typed parry + 66 on a fixed clock; now the
+    parry goes out held and the dash only once the parry is on screen at frame PDR_DASH_AT - input delay, like the
+    catalog's verified PDR. Ryu's rush (740) is accepted though the plan expected Ken's 500."""
+    steps = _pdr_steps()
+    assert steps[0]["pdr"] and steps[0]["sequence"] == cl.PDR_PARRY and steps[0]["pdr_dash"] == cl.PDR_DASH
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    assert run.feed(_line(1, NEUTRAL, 0)) == 0
+    run.sent(0)
+    for t, f in ((5, 0), (6, 1), (7, 2), (8, 3), (9, 4), (10, 5)):
+        run.feed(_line(t, 480, f))
+        assert run.pdr_dash_due is None, (t, f)                 # parry frame < 10 - 4: not yet
+    run.feed(_line(11, 480, 6))
+    assert run.pdr_dash_due == 0                                 # parry frame 6 = 10 - input delay 4
+    run.pdr_dash_due, run.rt[0]["dash_sent"] = None, 11
+    for t in range(12, 16):
+        assert run.feed(_line(t, 480, t - 5)) is None
+    run.feed(_line(16, 740, 0))                                  # Ryu's rush
+    assert run.rt[0]["start_id"] == 740 and run.rt[0]["exp_seen"] == 16
+    k = None
+    for t in range(17, 40):
+        k = run.feed(_line(t, 740, t - 16))
+        if k is not None:
+            break
+    assert k == 1 and t - 16 >= cl.RUSH_AT - cl.LEAD - steps[1]["prefix"] - 1
+
+
+def test_pdr_with_no_rush_after_the_dash_fails_at_the_pdr():
+    steps = _pdr_steps()
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    for t in range(5, 12):
+        run.feed(_line(t, 480, t - 5))
+    run.pdr_dash_due, run.rt[0]["dash_sent"] = None, 11
+    for t in range(12, 60):
+        run.feed(_line(t, 480, t - 5))
+        if run.done:
+            break
+    res = run.result()
+    assert res["fail"]["kind"] == "not_out" and res["fail"]["step"] == 0 and "pdr" in res["fail"]
+
+
+def test_move_after_a_drive_impact_goes_out_on_the_measured_free_frame_not_the_dummys_fall():
+    """User, 2026-10-05: routes starting with DI 'wait for the enemy to fall down before inputting any moves'. MEASURED
+    (ranked recordings): the bot's DI hit animation (856) lasts 85 ticks and the bot is free right after, while the
+    crumpled opponent falls ~75 ticks later. The next press goes out DI_HIT_FREE - input delay - motion after the hit
+    animation began, even when the bot's free id is not one learned at the start."""
+    steps = [{"name": "Drive Impact", "system": "drive_impact", "trigger": "first", "min_offset": 0, "prefix": 0,
+              "expect_id": 855, "startup": 26, "hitting": True, "sequence": "5+HP+HK@3", "connector": ""},
+             {"name": "Forward Dash", "system": "dash", "trigger": "prev_free", "min_offset": -cl.JITTER, "prefix": 6,
+              "expect_id": 17, "hitting": False, "sequence": "6@3 5@3 6@3", "connector": ",", "allow_movement": True}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+    run.feed(_line(4, 855, 0))
+    run.feed(_line(29, 855, 25, d=276, hs=10, stun=100, hp=9000))     # DI hits: the dummy crumples
+    k, t = None, 30
+    for t in range(30, 200):
+        k = run.feed(_line(t, 856, t - 30, d=276, stun=100, hp=9000))
+        if k is not None:
+            break
+    assert k == 1 and t == 30 + cl.DI_HIT_FREE - cl.LEAD - 6
+
+
+def test_bot_counts_as_free_on_any_idle_id_or_a_free_bar_cell():
+    run = cl.ComboRun([{"name": "x", "trigger": "first", "prefix": 0}], {}, {1}, {DUMMY_IDLE}, set())
+    assert run._is_free({"action_id": 1}, 10)
+    assert run._is_free({"action_id": 3, "hitstop": 0}, 10)            # an idle id not learned at the start
+    assert not run._is_free({"action_id": 856}, 10)
+    run.bar.t.append((10, 0, 9))
+    assert run._is_free({"action_id": 856}, 10)

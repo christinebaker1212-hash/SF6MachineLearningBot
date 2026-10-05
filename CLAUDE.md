@@ -2723,6 +2723,34 @@ Ryu catalog and the measured reach); nothing here is verified in game. Numbers m
   simulator, NOT the game): 4HK > 623 with a 9-frame motion lands (failed on 0.20.3); a non-motion cancel still waits
   for hit 2; hit confirm in matches. Not verified in game.
 
+## 0.20.5: punishes by damage, routes by the first hit, PDR on the parry's frame, the move after a DI (user, 2026-10-05)
+User: "routes with SA3 ending with over 6700 damage"; "routes with PDR tend to fail at the PDR, and routes starting with
+DI fail completely, because the bot waits for the enemy to fall down before inputting any moves". All MOCK-tested
+(`tests/test_0205.py`, `tests/test_combo_lab.py`); not verified in game.
+- **SA3 competes with routes** (`fighter._route_beats_sa3`): on a blocked or whiffed move, a plain SA3 went out whenever
+  3 bars were there, so a punish-counter route ending in SA3 was never chosen. Now the best true combo that starts in
+  time is compared first: it wins when it kills or its expected damage (damage x lab rate x match rate,
+  `route_book.value`) is above SA3's listed 4,000. Punishes look at punish-counter, counter-hit and normal routes (a
+  punish counter gives a counter hit's frames and more). `route_hits.sa3_vs_route` counts both.
+- **The first hit decides how a route goes on** (`route_book.after_first_hit`, `ComboRun.switch`,
+  `perform_route(on_first_hit=...)`): once the starter hits, its kind (hits.py: 1.2x damage = counter, plus a Drive drop
+  = punish counter) picks the best route with the same starter: a counter hit upgrades a neutral confirm to a
+  counter-hit route; a punish that landed late (a normal hit) leaves a punish-counter-only route for a normal-hit one,
+  or stops after the hit (a punish-counter link would drop and leave the bot open). Only before any later step went out.
+  `route_hits` {normal, counter, punish_counter, switched, stopped} and a thoughts line.
+- **Parry Drive Rush on the parry's own frame** (lab and matches): the lab typed parry + 66 on a fixed clock (dash 8
+  wall-clock frames after the press). Now, like the catalog's verified PDR, the parry goes out HELD (`PDR_PARRY`) and
+  the dash (`PDR_DASH`, parry still held) once the parry is on screen at frame `PDR_DASH_AT` 10 - input delay (searched
+  per route like any timing). Any measured rush id counts (Ryu 740, Ken 500). No rush 20 ticks after the dash = the
+  PDR failed (`fail.pdr`), not the next move. The fighter's "Drive Rush in" 5MP / 2MK use the same executor
+  (`drive_rush_in.options[].route`).
+- **The move after a Drive Impact** (`prev_free`): it waited until the bot showed one of the idle ids learned at the
+  start, and the first (late) reading was kept for every later try. Now the bot counts as free on any idle / walk /
+  crouch id (< 33) or a free frame-bar cell, the press goes out `DI_HIT_FREE` 85 ticks (MEASURED, 7 ranked recordings:
+  the bot's DI hit animation) after the hit animation began, minus the input delay and the motion, and the shortest
+  measured length is kept.
+- `LAB_RULES` = 0.20.5: PDR and DI routes that failed are retried on the next K.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

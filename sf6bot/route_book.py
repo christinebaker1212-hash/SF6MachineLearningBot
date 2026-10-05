@@ -125,6 +125,32 @@ def choose(book: list[dict], me: dict, op: dict, *, frames: int | None = None, s
     return best
 
 
+# 0.20.5: which tested hit types a route may continue with, by the starter's measured first hit (hits.py). A punish
+# counter gives at least a counter hit's frames (it is a counter hit with more), so counter-hit and normal routes work
+# from it; a counter hit allows counter-hit and normal routes; a normal hit only normal routes.
+HIT_OK = {"punish_counter": ("punish_counter", "counter_hit", "normal"), "counter": ("counter_hit", "normal"),
+          "normal": ("normal",)}
+
+
+def after_first_hit(book: list[dict], e: dict, kind: str | None, me: dict, op: dict, *, learned: dict | None = None,
+                    reserve: float = 0, denjin: bool = False) -> tuple[dict | None, str]:
+    """0.20.5 (user, 2026-10-05): once the starter has HIT, the route goes on with the best route for the hit it really
+    was: a counter hit upgrades a neutral confirm to a counter-hit route, and a punish that landed late (a normal hit:
+    the opponent had already recovered) leaves a punish-counter-only route for a normal-hit one with the same starter,
+    or stops (a punish-counter link would drop and leave the bot open). Returns (entry, "switch") / (None, "keep") /
+    (None, "stop"). An unknown or unclassified hit keeps the route."""
+    ok = HIT_OK.get(kind or "")
+    if ok is None or not e.get("starter"):
+        return None, "keep"
+    best = choose(book, me, op, starter=e["starter"], hit_types=ok, learned=learned, reserve=reserve, denjin=denjin)
+    cur_ok = e.get("hit_type") in ok
+    if best is None or best["route"] == e["route"]:
+        return None, ("keep" if cur_ok or best is not None else "stop")
+    if cur_ok and value(best, learned) <= value(e, learned) and not best.get("lethal"):
+        return None, "keep"
+    return best, "switch"
+
+
 def choose_jump_in(book: list[dict], me: dict, op: dict, *, learned: dict | None = None, reserve: float = 0,
                    denjin: bool = False) -> dict | None:
     """0.20.3: the best affordable jump-in route (any hit type: the opponent is stunned, so the route's links hold) for

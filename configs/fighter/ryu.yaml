@@ -313,8 +313,10 @@ drive_rush_in:
   roll_every_s: 0.5
   cooldown_s: 5.0
   options:
-    - {name: "Drive Rush 5MP", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+MP@3", weight: 0.5}
-    - {name: "Drive Rush 2MK", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+MK@3", weight: 0.25}
+    # 0.20.5: with Capcom data the two normals run on the game clock like the combo lab's PDR (parry held, dash once the
+    # parry is out, the normal on the rush's frame); `seq` is the wall-clock fallback
+    - {name: "Drive Rush 5MP", route: "PDR 5MP", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+MP@3", weight: 0.5}
+    - {name: "Drive Rush 2MK", route: "PDR 2MK", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+MK@3", weight: 0.25}
     - {name: "Drive Rush throw", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@10 5+LP+LK@3", weight: 0.25}
 # 0.18.4: a ground command grab that whiffed under the airborne bot: a jump attack on the way down (j.HK), then the
 # landing is a whiff punish. Payoffs for "cmd_grab" (above) are ESTIMATES: a neutral jump / back dash / invincible

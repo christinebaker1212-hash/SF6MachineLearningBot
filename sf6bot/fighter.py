@@ -42,6 +42,7 @@ INTRO_IDS = {400, 401}
 
 class _SkipProgress(Exception):
     """A match that is not entered in the progress report (joined after it started)."""
+PUNISH_HIT_TYPES = ("punish_counter", "counter_hit", "normal")   # a punish is a punish counter: any of these work (0.20.5)
 RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741): cancelable into normals
 # 0.18.5 (user, 2026-10-04): a normal done out of a Drive Rush is +4 on hit and on block (SF6 rule; community value, also
 # combo_gen.RUSH_BONUS). 0.18.1 ranked: Ken's rushed normals landed 5 of 8; after blocking one the bot was hit within
@@ -363,6 +364,12 @@ class ScriptedFighter:
         self._kd_t0 = self._kd_id = self._denjin_kd_for = None
         self._denjin_roll_t = 0.0
         self.stun_stats = {"jump_in": 0, "super": 0}
+        # 0.20.5: the starter's first hit decides how a route goes on; SA3 competes with routes on damage
+        self.hit_switch = {"normal": 0, "counter": 0, "punish_counter": 0, "other": 0, "switched": 0, "stopped": 0,
+                           "switched_to": {}}
+        self.sa3_vs_route = {"sa3": 0, "route": 0}
+        self._switched_to = None
+        self._sa3_cmp_for = None
         self.corner_stats = {"moments": 0}
         self._rush_next = 0.0
         self._rush_roll_t = 0.0
@@ -753,7 +760,18 @@ class ScriptedFighter:
                     return self._move(ov, "punish", f"blocked {self.opp[self.blocked_id].get('name')}: your rule, "
                                                     f"{m_['name']}")
             sp = self._super_punish(me, op, dist, adv, bs_left) if (not self.punished and in_range and adv is not None) else None
+            if sp is not None and self.book and adv <= -4:
+                # 0.20.5 (user: routes ending in SA3 do over 6700): a true combo worth more than a plain SA3 is the punish
+                from .route_book import choose
+                alt = choose(self.book, me, op, frames=-adv, hit_types=PUNISH_HIT_TYPES, denjin=self.denjin_stock,
+                             learned=self.exp.routes() if self.exp else None, reserve=self.c.get("drive_reserve", 0))
+                if self._route_beats_sa3(alt):
+                    if self._sa3_cmp_for != ("block", self.blocked_id):
+                        self._sa3_cmp_for = ("block", self.blocked_id)
+                        self.sa3_vs_route["route"] += 1
+                    sp = None
             if sp is not None:
+                self.sa3_vs_route["sa3"] += 1
                 self.punished = True
                 self.punish_stats["taken"] += 1
                 return sp
@@ -761,7 +779,7 @@ class ScriptedFighter:
                     and adv <= -4 and self.book and in_range):
                 # the best TRUE combo whose first move starts in time (combo lab; punish = punish counter)
                 from .route_book import choose
-                e = choose(self.book, me, op, frames=-adv, hit_types=("punish_counter", "normal"),
+                e = choose(self.book, me, op, frames=-adv, hit_types=PUNISH_HIT_TYPES,
                            denjin=self.denjin_stock,
                            learned=self.exp.routes() if self.exp else None,
                            reserve=self.c.get("drive_reserve", 0))
@@ -1769,7 +1787,9 @@ class ScriptedFighter:
         sa3 = self._super("sa3")
         if (sa3 is not None and (_num(me.get("super")) or 0) >= int(sa3.get("super", 30000))
                 and dist <= float((self.c.get("supers") or {}).get("sa3_max_dist", 1.3))
-                and int(sa3.get("startup", 5)) + seq_prefix(sa3["seq"]) + self.lead + self.stale + 1 <= remaining):
+                and int(sa3.get("startup", 5)) + seq_prefix(sa3["seq"]) + self.lead + self.stale + 1 <= remaining
+                and not self._route_beats_sa3(self._whiff_route(me, op, dist, remaining, wc))):
+            self.sa3_vs_route["sa3"] += 1
             if not self.op_move["chance"]:
                 self.op_move["chance"] = True
                 self.whiff_stats["chances"] += 1
@@ -1793,7 +1813,7 @@ class ScriptedFighter:
             dmg = m.get("damage") or 0
             if self.book:
                 from .route_book import choose
-                e = choose(self.book, me, op, starter=m["name"], hit_types=("punish_counter", "normal"),
+                e = choose(self.book, me, op, starter=m["name"], hit_types=PUNISH_HIT_TYPES,
                            denjin=self.denjin_stock,
                            learned=None, reserve=self.c.get("drive_reserve", 0))
                 if e is not None and isinstance(e.get("damage"), (int, float)):
@@ -1822,12 +1842,67 @@ class ScriptedFighter:
                f"(now {dist:.2f}), starts in {m['startup']}F + {self.lead}F input delay")
         if self.book:
             from .route_book import choose
-            e = choose(self.book, me, op, starter=m["name"], hit_types=("punish_counter", "normal"),
+            e = choose(self.book, me, op, starter=m["name"], hit_types=PUNISH_HIT_TYPES,
                            denjin=self.denjin_stock,
                        learned=self.exp.routes() if self.exp else None, reserve=self.c.get("drive_reserve", 0))
             if e is not None:
                 return Decision("route", e["route"], route=e, rule="whiff_punish", reason=why + f" -> {e['route']}")
         return Decision("seq", m["name"], m["seq"], rule="whiff_punish", reason=why)
+
+    def _whiff_route(self, me: dict, op: dict, dist: float, remaining: int, wc: dict) -> dict | None:
+        """The best true combo the bot can start on this whiff (a poke that reaches and starts in time)."""
+        if not self.book:
+            return None
+        from .route_book import choose, value
+        learned = self.exp.routes() if self.exp else None
+        best, best_v = None, -1.0
+        for m in self.own:
+            if m["intent"] != "poke" or m.get("projectile") or not isinstance(m.get("startup"), int):
+                continue
+            r = self.own_reach.get(m["id"])
+            if r is None or dist > r + float(wc.get("reach_margin", 0.0)) or m["startup"] + self.lead + 1 > remaining:
+                continue
+            e = choose(self.book, me, op, starter=m["name"], hit_types=PUNISH_HIT_TYPES, denjin=self.denjin_stock,
+                       learned=learned, reserve=self.c.get("drive_reserve", 0))
+            if e is not None:
+                v = value(e, learned) + (1e6 if e.get("lethal") else 0.0)
+                if v > best_v:
+                    best, best_v = e, v
+        return best
+
+    def _route_beats_sa3(self, e: dict | None) -> bool:
+        """0.20.5: a route is the better punish than a plain SA3 when it kills or its expected damage (damage x lab rate x
+        match rate, route_book.value) is above SA3's listed damage. Before, SA3 went out whenever 3 bars were there,
+        so a punish-counter route ending in SA3 (6,700+ in the user's K run) was never chosen."""
+        if e is None:
+            return False
+        from .route_book import value
+        sa3 = self._super("sa3") or {}
+        return bool(e.get("lethal")) or value(e, self.exp.routes() if self.exp else None) > float(sa3.get("damage", 4000))
+
+    def route_after_hit(self, e: dict, hit: dict | None, me: dict, op: dict):
+        """0.20.5: the starter of route `e` has hit; its measured kind (hits.classify_hit) picks how it goes on:
+        a counter hit / punish counter switches to the best counter-hit / punish-counter route with the same starter,
+        a normal hit (a punish that came late) leaves a punish-counter-only route for a normal-hit one, or stops.
+        Returns (steps, fixed, verdict) for combo_lab.perform_route."""
+        from .route_book import after_first_hit
+        kind = (hit or {}).get("kind")
+        self.hit_switch[kind if kind in ("normal", "counter", "punish_counter") else "other"] += 1
+        new, verdict = after_first_hit(self.book or [], e, kind, me, op,
+                                       learned=self.exp.routes() if self.exp else None,
+                                       reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+        self._switched_to = None
+        if verdict == "stop":
+            self.hit_switch["stopped"] += 1
+        if verdict != "switch" or new is None:
+            return None, None, verdict
+        self.hit_switch["switched"] += 1
+        sw = self.hit_switch["switched_to"]
+        sw[new["route"]] = sw.get(new["route"], 0) + 1
+        self._switched_to = new["route"]
+        pl = new["plan"]
+        fixed = pl.get("recorded_timing") if pl.get("lead") == self.lead else None
+        return pl["steps"], fixed, "switch"
 
     def _step_in_punish(self, me: dict, op: dict, dist: float, remaining: int, wc: dict) -> Decision | None:
         """0.20.0 (user: "punish moves based on proximity to the enemy, as well as their last whiffed move"): the whiffed
@@ -2057,7 +2132,8 @@ def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
     from .combo_lab import is_true, load_lab
     lab = load_lab(ds_root, character).get("routes", {})
     out: dict = {}
-    entries = list((fcfg.get("moves") or {}).values()) + list((fcfg.get("punish") or {}).get("options") or [])
+    entries = (list((fcfg.get("moves") or {}).values()) + list((fcfg.get("punish") or {}).get("options") or [])
+               + list((fcfg.get("drive_rush_in") or {}).get("options") or []))
     for m in entries:
         if not m.get("route"):
             continue
@@ -2314,6 +2390,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["corner_pressure"] = dict(fighter.corner_stats)
                 summary["denjin"] = dict(fighter.denjin_stats, stock_at_end=fighter.denjin_stock)
                 summary["stun_followups"] = dict(fighter.stun_stats)
+                summary["route_hits"] = dict(fighter.hit_switch, sa3_vs_route=dict(fighter.sa3_vs_route))
             if learner is not None:
                 try:
                     saved = learner.save()
@@ -2850,7 +2927,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         abort=urgent if neutral else None,
                                         lead=lead or pl.get("lead") or 4,
                                         fixed=pl.get("recorded_timing") if not lead or lead == pl.get("lead") else None,
-                                        confirm=True)
+                                        confirm=True,
+                                        on_first_hit=(lambda hit, raw_, e_=d.route: fighter.route_after_hit(
+                                            e_, hit, raw_.get(me_key) or {}, raw_.get(op_key) or {}))
+                                        if d.kind == "route" and (d.route or {}).get("starter") and fighter.book else None)
                     c.apply(InputState(), tag="fighter_route_end")
                     rk = "routes_completed" if res.get("success") else "routes_stopped"
                     summary.setdefault(rk, {})
@@ -2864,7 +2944,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     why = d.name if res.get("success") else f"{d.name}: {(res.get('fail') or {}).get('kind') or res.get('aborted')}"
                     summary[rk][why] = summary[rk].get(why, 0) + 1
                     if d.kind == "route" and exp is not None:
-                        exp.route_done(d.route["route"], bool(res.get("success")), res.get("damage"))
+                        done_route = fighter._switched_to if (res.get("hit_switch") or {}).get("to") else d.route["route"]
+                        exp.route_done(done_route, bool(res.get("success")), res.get("damage"))
                     if res.get("aborted"):
                         summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
                     continue

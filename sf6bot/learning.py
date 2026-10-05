@@ -380,6 +380,14 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if sf.get("jump_in") or sf.get("super"):
         out.append(("scripted", f"After my Drive Impact stunned {opp}: jump-in combos {sf.get('jump_in', 0)}, supers "
                                 f"{sf.get('super', 0)}."))
+    rh = summary.get("route_hits") or {}
+    if any(rh.get(k) for k in ("normal", "counter", "punish_counter", "other")):
+        sv = rh.get("sa3_vs_route") or {}
+        out.append(("measured", f"Combo starters that hit: normal {rh.get('normal', 0)}, counter hit {rh.get('counter', 0)}, "
+                                f"punish counter {rh.get('punish_counter', 0)}; switched to a better route for the hit "
+                                f"{rh.get('switched', 0)}, stopped (no route for that hit) {rh.get('stopped', 0)}."
+                    + (f" Punishes: plain SA3 {sv.get('sa3', 0)}, a bigger combo instead of SA3 {sv.get('route', 0)}."
+                       if sv.get("sa3") or sv.get("route") else "")))
     cp = summary.get("corner_pressure") or {}
     if cp.get("moments"):
         out.append(("scripted", f"Corner pressure turns (cornered {opp} blocking, me not minus): {cp['moments']}."))

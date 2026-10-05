@@ -45,6 +45,18 @@ END_TICKS = 240        # wait at most 4 s after the last move for its hits
 DRIVE_BAR, SUPER_BAR = 10000, 10000   # 60000 = 6 Drive bars, 30000 = 3 Super bars (exporter)
 SYSTEM_SEQ = {"drive_rush": "6@3 5@2 6@3", "drive_impact": "5+HP+HK@3", "dash": "6@3 5@3 6@3"}
 PDR_SEQ = "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3"
+# 0.20.5: a Parry Drive Rush is performed like the catalog's (verified, 0.10.1): the parry first, HELD, then the dash
+# (66 with the parry still held) once the parry is on screen at its frame PDR_DASH_AT (- the input delay). The fixed
+# sequence above put the dash 8 wall-clock frames after the press, before the parry could be dashed out of
+# (user, 2026-10-05: "routes with PDR tend to fail at the PDR").
+PDR_PARRY = "5+MP+MK@2"
+PDR_DASH = "6+MP+MK@3 5+MP+MK@2 6+MP+MK@3"
+PDR_DASH_AT = 10       # the catalog's Parry Drive Rush press frame (never under 10); searched per route
+PARRY_IDS = range(480, 490)
+RUSH_IDS = {500, 501, 739, 740, 741}   # MEASURED Drive Rush ids (Ken 500 / 501, Ryu 740, most others 739-741)
+PDR_RUSH_WAIT = 20     # no rush this many ticks after the dash went out (+ input delay) = the PDR failed
+DI_HIT_FREE = 85       # MEASURED (7 ranked recordings): the bot's Drive Impact hit animation (856 / 857) lasts 85
+                       # ticks; the bot is free right after
 JITTER = 1             # measured input delay 3-5 frames around 4: an input may land 1 frame early
 JUMP_DEPTH = 2         # jump-ins: hit this many frames before landing (deep, so the link reaches)
 LANDING_REC = 3        # Capcom: jump attacks "3 frame(s) after landing" (row landing_n when given)
@@ -55,7 +67,7 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
                        # previous move's late hit (multi-hit special, projectile), not this move's
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
-LAB_RULES = "0.20.4"
+LAB_RULES = "0.20.5"
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
 DELAY_START = 4
@@ -282,7 +294,9 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             # Drive Rush from neutral = Parry Drive Rush: parry held, dash once the parry is out (catalog,
             # 0.10.1: verified id 500 with the dash on parry frame ~10)
             st.update(name="parry_drive_rush" if pdr else system, system=system,
-                      sequence=PDR_SEQ if pdr else SYSTEM_SEQ[system], hitting=system == "drive_impact")
+                      sequence=PDR_PARRY if pdr else SYSTEM_SEQ[system], hitting=system == "drive_impact")
+            if pdr:
+                st.update(pdr=True, pdr_dash=PDR_DASH, known_ids=list(PARRY_IDS))
             cname = {"drive_impact": "Drive Impact", "dash": "Forward Dash",
                      "drive_rush": "Parry Drive Rush" if pdr else "Cancel Drive Rush"}[system]
             cn = next((k for k in ((catalog or {}).get("moves") or {}) if k.startswith(cname)), None)
@@ -511,6 +525,8 @@ class ComboRun:
         self._vy = None                      # the bot's vertical speed (per tick): jump attacks only when < 0
         self.neutral_a, self.neutral_d, self.movement = set(neutral_a), set(neutral_d), set(movement)
         self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[]) for _ in steps]
+        self.pdr_dash_due = None             # a Parry Drive Rush step whose dash is due (perform_route sends it)
+        self.extra: dict = {}                # perform_route's notes for the result (hit_switch)
         self.hits: list[dict] = []
         self.escape = None
         self.blocked = None
@@ -530,6 +546,32 @@ class ComboRun:
         """The step's timing offset, never under its floor (see plan_route)."""
         st = self.steps[k]
         return max(self.offsets.get(k, 0) + st.get("base_offset", 0), st.get("min_offset", NO_FLOOR))
+
+    def switch(self, steps: list[dict], fixed: list | None = None) -> bool:
+        """0.20.5 (matches): after the starter's FIRST hit, continue with another route that has the same starter (a
+        counter-hit / punish-counter route when the hit was one, a normal-hit route when a punish came late). Only
+        before any later step has been sent; the starter's own record is kept."""
+        if any(r["sent"] is not None for r in self.rt[1:]) or not steps:
+            return False
+        self.steps = [self.steps[0]] + [dict(x) for x in steps[1:]]
+        self.rt = self.rt[:1] + [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[])
+                                 for _ in steps[1:]]
+        self.fixed = ([{}] + list(fixed[1:])) if fixed and len(fixed) == len(steps) else None
+        self.offsets = {}
+        return True
+
+    def _is_free(self, p1: dict, tick: int) -> bool:
+        """The bot can act: a learned idle id, or any idle / walk / crouch id (< FIGHT_IDLE_MAX, MEASURED) out of
+        hitstop, or the frame bar's newest cell for the bot is 'free' (0). Before 0.20.5 only the idle ids learned
+        at the start counted, so after a Drive Impact the bot could be free long before the lab noticed."""
+        aid = p1.get("action_id")
+        if aid in self.neutral_a:
+            return True
+        if isinstance(aid, int) and 0 <= aid < FIGHT_IDLE_MAX and not (p1.get("hitstop") or 0):
+            return True
+        if self.bar and self.bar.t and self.bar.t[-1][0] >= tick - 1 and self.bar.t[-1][1] == 0:
+            return True
+        return False
 
     def _ticks_to_land(self, p1: dict, tick: int):
         """Frames until the bot lands, from its height, fall speed and gravity, or None if it is not
@@ -607,6 +649,10 @@ class ComboRun:
         aid, afr = p1.get("action_id"), p1.get("action_frame")
         if a is not None:
             exp = self.steps[a].get("expect_id")
+            if self.steps[a].get("system") == "drive_rush" and aid in RUSH_IDS and aid != exp \
+                    and not self.rt[a].get("exp_seen") and self.rt[a]["start"] is not None:
+                # the character's rush id is not the catalogued / default one (Ryu 740, Ken 500): it is the rush
+                self.steps[a]["expect_id"] = exp = aid
             if exp is not None and aid == exp and self.rt[a]["start_id"] != exp and not self.rt[a].get("exp_seen"):
                 # the step's own id appeared after another one (a Parry Drive Rush starts with the parry,
                 # 480, then the rush, 500): its frames count from here (0.11.10; before, the rush's frames
@@ -622,9 +668,13 @@ class ComboRun:
                 self.rt[a]["moving"] = int(afr)
             elif dt > 0 and not (p1.get("hitstop") or 0):
                 self.rt[a]["moving"] += dt
-            if a not in self.free_at and aid in self.neutral_a and self.rt[a]["start"] is not None \
+            if a not in self.free_at and self._is_free(p1, tick) and self.rt[a]["start"] is not None \
                     and (self.steps[a].get("system") == "drive_impact" or self.steps[a].get("super_art")):
                 self.free_at[a] = self.rt[a]["moving"]      # the move's real length on this hit
+            if self.steps[a].get("system") == "drive_impact" and self.rt[a]["start"] is not None \
+                    and self.rt[a].get("cont_seen") is None and aid != self.rt[a]["start_id"] \
+                    and isinstance(aid, int) and 850 <= aid < 870:
+                self.rt[a]["cont_seen"] = tick              # the hit continuation (856 / 857)
         # a pending step started?
         k = self.pending
         if k is not None:
@@ -661,6 +711,26 @@ class ComboRun:
             elif tick - r["sent"] > st["prefix"] + self.lead + 15:
                 self._finish("not_out", k)
                 self.last = raw
+                return None
+        # Parry Drive Rush: the parry on screen -> the dash is due; no rush after the dash -> the PDR failed
+        for k2, (st2, r2) in enumerate(zip(self.steps, self.rt)):
+            if not st2.get("pdr") or r2["sent"] is None:
+                continue
+            if r2.get("dash_sent") is None:
+                if aid in PARRY_IDS and r2.get("parry_seen") is None:
+                    r2["parry_seen"] = tick
+                frame = None
+                if r2.get("parry_seen") is not None and aid in PARRY_IDS:
+                    frame = int(afr) if isinstance(afr, (int, float)) and p1.get("action_frame_src") != "ticks" \
+                        else tick - r2["parry_seen"]
+                late = tick - r2["sent"] > self.lead + PDR_DASH_AT + 15
+                if (frame is not None and frame >= PDR_DASH_AT + self._off(k2) - self.lead) or late:
+                    self.pdr_dash_due = k2
+            elif r2.get("exp_seen") is None and tick - r2["dash_sent"] > PDR_RUSH_WAIT + self.lead:
+                self.last = raw
+                self._finish("not_out", k2)
+                self.fail["pdr"] = {"parry_seen": r2.get("parry_seen"), "dash_sent": r2["dash_sent"],
+                                    "dash_at": PDR_DASH_AT + self._off(k2)}
                 return None
         # dummy: hits, block, escape
         d_prev = (prev or {}).get(self.op) or {}
@@ -797,11 +867,17 @@ class ComboRun:
             return n if p1.get("action_id") in self.neutral_a else None
         if trig == "prev_free":
             # learned: the previous move's length on hit (its own frames, hitstop excluded) from an earlier
-            # attempt; else press once the bot is free (and measure)
+            # attempt; else press once the bot is free (and measure). After a Drive Impact on hit the bot is free
+            # DI_HIT_FREE ticks after its hit animation began (MEASURED), so the press goes out ahead of that by
+            # the input delay instead of waiting (user, 2026-10-05: routes starting with DI "wait for the enemy
+            # to fall down before inputting any moves")
             free = self.learned.get(n - 1)
             if free is not None:
                 return n if pr["moving"] >= free - self.lead - st["prefix"] + off else None
-            return n if p1.get("action_id") in self.neutral_a else None
+            if pst.get("system") == "drive_impact" and pr.get("cont_seen") is not None \
+                    and tick - pr["cont_seen"] >= DI_HIT_FREE - self.lead - st["prefix"] + off:
+                return n
+            return n if self._is_free(p1, tick) else None
         # contact (cancel / chain / target combo)
         base = self._contact_base(n, tick, p1)
         if base is None:
@@ -951,6 +1027,7 @@ class ComboRun:
                           "facing": r.get("facing"), "bot_x": r.get("bot_x"), "dummy_x": r.get("dummy_x"),
                           "offset": self._off(k), "prev_frame": r.get("sent_moving_prev"),
                           "after_prev_start": r.get("sent_after_prev_start"), "land": r.get("land_at_send"),
+                          "parry_seen": r.get("parry_seen"), "dash_sent": r.get("dash_sent"),
                           "bar_link": self._bar_link(k)
                           if k and st.get("trigger") in ("own_frame", "prev_neutral", "prev_free") and self.bar
                           and self.steps[k - 1].get("system") != "drive_rush" else None}
@@ -1662,7 +1739,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead_now,
                        gravity=(jump or {}).get("gravity"), fixed=fixed, **extra)
         for k_, v_ in (res.get("free_at") or {}).items():
-            learned.setdefault(int(k_), v_)      # DI / super length on hit, measured once per route
+            # DI / super length on hit: the shortest seen (0.20.5: a late first reading was kept for good)
+            learned[int(k_)] = min(v_, learned.get(int(k_), v_))
         res["position_setup"] = how
         res["lead_used"] = lead_now
         res["replayed_recorded_timing"] = recorded is not None
@@ -2037,11 +2115,13 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
-                  confirm: bool = False) -> dict:
+                  confirm: bool = False, on_first_hit=None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
-    move waits for the previous one's hit, and a whiff ends the route (ComboRun)."""
+    move waits for the previous one's hit, and a whiff ends the route (ComboRun). `on_first_hit(hit, raw)` (fighter,
+    0.20.5): called once the starter has hit, with its measured kind (hits.classify_hit); it returns (steps, fixed,
+    verdict): "switch" continues with those steps (same starter), "stop" ends the route after the hit, else keep."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
                    fixed=fixed, learned=learned, confirm=confirm)
     q = reader.subscribe()
@@ -2061,6 +2141,30 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
             if not st.ready:
                 continue
             k = run.feed(st.raw)
+            if on_first_hit is not None and run.first_hit is not None and not run.done \
+                    and "hit_switch" not in run.extra:
+                before, after, src = run.first_hit
+                if src == 0:
+                    from .hits import classify_hit
+                    hit = classify_hit(before, after, run.steps[0].get("capcom_damage")) or {}
+                    new_steps, new_fixed, verdict = on_first_hit(hit, st.raw)
+                    run.extra["hit_switch"] = {"kind": hit.get("kind"), "verdict": verdict}
+                    if verdict == "stop":
+                        run._finish("hit_type", 1 if len(run.steps) > 1 else 0)
+                        break
+                    if verdict == "switch" and run.switch(new_steps, new_fixed):
+                        run.extra["hit_switch"]["to"] = len(new_steps)
+                        k = run._due(st.raw.get("stage_timer"), st.raw.get(me) or {}, run._land_est)
+                else:
+                    run.extra["hit_switch"] = {"kind": None, "verdict": "keep"}
+            if run.pdr_dash_due is not None and not run.done:
+                # the parry is out: dash (66, the parry still held), then everything is released
+                j, run.pdr_dash_due = run.pdr_dash_due, None
+                run.rt[j]["dash_sent"] = st.raw.get("stage_timer")
+                _, ok = runner.run(parse_sequence(run.steps[j]["pdr_dash"], run.steps[j]["name"] + " dash"),
+                                   stop_event=sess.stop_event)
+                if not ok:
+                    break
             # mirror by POSITIONS (the facing flag lags through cross-ups; fighter.py, 0.8.0)
             bx, dx = num((st.raw.get(me) or {}).get("x")), num((st.raw.get(op) or {}).get("x"))
             if k is None:
@@ -2071,18 +2175,20 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                     side = Facing.RIGHT if dx > bx else Facing.LEFT
                     sess.controller.set_facing(side)
                 run.rt[m]["motion_sent"] = st.raw.get("stage_timer")
-                runner.run(parse_sequence(motion_part(steps[m]["sequence"]), steps[m]["name"] + " motion"),
+                runner.run(parse_sequence(motion_part(run.steps[m]["sequence"]), run.steps[m]["name"] + " motion"),
                            stop_event=sess.stop_event, end_neutral=False)
                 continue
             if bx is not None and dx is not None and (side is None or abs(dx - bx) >= 0.15) \
                     and run.rt[k].get("motion_sent") is None:
                 side = Facing.RIGHT if dx > bx else Facing.LEFT
                 sess.controller.set_facing(side)
-            seq = steps[k]["sequence"]
+            seq = run.steps[k]["sequence"]
             if run.rt[k].get("motion_sent") is not None:
                 seq = seq.split()[-1]            # the motion is already in: only the button (and its direction)
             run.sent(k, facing="right" if side == Facing.RIGHT else "left" if side == Facing.LEFT else None)
-            _, ok = runner.run(parse_sequence(seq, steps[k]["name"]), stop_event=sess.stop_event)
+            # a Parry Drive Rush's parry stays held until its dash (0.20.5)
+            _, ok = runner.run(parse_sequence(seq, run.steps[k]["name"]), stop_event=sess.stop_event,
+                               end_neutral=not run.steps[k].get("pdr"))
             if not ok:
                 break
         if run.super_connected is not None:
@@ -2102,6 +2208,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     if not run.done:
         run._finish(None, None) if run.rt[-1]["start"] is not None else run._finish("not_out", run._next())
     res = run.result()
+    res.update(run.extra)
     if aborted:
         res["aborted"] = aborted
     return res
