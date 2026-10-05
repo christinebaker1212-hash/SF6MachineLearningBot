@@ -70,7 +70,8 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
 NORMAL_VARIANT_SPAN = 2    # 0.23.0: ... after a chained normal's own id (Ryu's chained 2LP 623 after 622)
-LAB_RULES = "0.23.0"
+LAB_RULES = "0.25.0"
+EARLIER_HIT_WINDOW = 5   # 0.25.0: frames after an earlier hit's first active frame before it counts as passed (ESTIMATE)
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
 DELAY_START = 4
@@ -826,6 +827,7 @@ class ComboRun:
                 self.rt[src]["contact"] = tick
             if src is not None:
                 self.rt[src]["contacts"].append(tick)
+                self.rt[src].setdefault("contact_frames", []).append(self.rt[src].get("moving"))
             if self.first_hit is None:
                 self.first_hit = (d_prev, p2, src)
         if self.hits and self.escape is None and p2.get("action_id") in self.neutral_d \
@@ -902,8 +904,12 @@ class ComboRun:
             return None          # still in the parry of a Parry Drive Rush: the rush itself has not started
         trig, off = st["trigger"], self._off(n)
         if self.confirm and pst.get("hitting") and pr["contact"] is None and trig not in ("air", "landing"):
-            # a match: wait for the hit (hit confirm); no hit in time = the move whiffed: stop the route
-            if pr["moving"] > (pst.get("startup") or 8) + CONFIRM_SLACK:
+            # a match: wait for the hit (hit confirm); no hit in time = the move whiffed: stop the route.
+            # 0.25.0: a multi-hit move gets until its LAST hit's active start (MEASURED 0.24.x ranked: after OD High
+            # Blade Kick only the Axe Kick's 2nd hit connects, at own frame 19; the start-up 10 + 6 deadline called it a
+            # whiff at 17, so 'HP > 236KK > 4HK > 623 > SA3' stopped at the 4HK every time)
+            hits_ = pst.get("active_hits") or []
+            if pr["moving"] > max(pst.get("startup") or 8, max(hits_) if hits_ else 0) + CONFIRM_SLACK:
                 self._finish("whiff", n - 1)
             return None
         fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
@@ -985,10 +991,17 @@ class ComboRun:
         pr, pst, st = self.rt[n - 1], self.steps[n - 1], self.steps[n]
         h = st.get("cancel_on_hit") or 1
         if h > 1:
-            if len(pr["contacts"]) >= h:
-                return pr["contacts"][h - 1]
+            seen = self._hit_n_contact(n, h)
+            if seen is not None:
+                return seen
             hits = pst.get("active_hits") or []
-            if len(pr["contacts"]) < h - 1 or h > len(hits) or pr["start"] is None:
+            if h > len(hits) or pr["start"] is None:
+                return None
+            # 0.25.0: predicted once the earlier hits connected OR their active frames passed without a connect. MEASURED
+            # (0.24.x ranked): after OD High Blade Kick only the Axe Kick's SECOND hit connects (own frame 19; the first
+            # passes over the juggled opponent), so waiting for hit 1 stopped 'HP > 236KK > 4HK > 623 > SA3' at the 4HK
+            # every time. (Before the earlier hit's window ends, its hitstop is still to come: no prediction yet.)
+            if len(pr["contacts"]) < h - 1 and pr["moving"] < hits[h - 2] - 1 + EARLIER_HIT_WINDOW:
                 return None
             own_left = max(0, hits[h - 1] - 1 - pr["moving"])
             return tick + own_left + int(p1.get("hitstop") or 0)
@@ -999,6 +1012,21 @@ class ComboRun:
                 return None
             base = pr["start"] + su - 1
         return base
+
+    def _hit_n_contact(self, n: int, h: int) -> int | None:
+        """The tick hit h of step n-1 connected, or None. 0.25.0: a connect counts as hit h when the move's own frame
+        was at or past hit h's first active frame (Capcom's active column), whatever hit came before it: in a juggle an
+        earlier hit can pass over the opponent (Ryu's Axe Kick after OD High Blade Kick: only hit 2 connects)."""
+        pr, pst = self.rt[n - 1], self.steps[n - 1]
+        if h <= 1:
+            return pr["contacts"][0] if pr["contacts"] else None
+        hits = pst.get("active_hits") or []
+        frames = pr.get("contact_frames") or []
+        if h <= len(hits):
+            for tk, fr in zip(pr["contacts"], frames):
+                if isinstance(fr, (int, float)) and fr >= hits[h - 1] - 1 - HIT_EARLY:
+                    return tk
+        return pr["contacts"][h - 1] if len(pr["contacts"]) >= h else None
 
     def presend(self) -> int | None:
         """Confirm mode: the next step's MOTION (its directions, harmless without the button) may go out on
@@ -1013,7 +1041,7 @@ class ComboRun:
         h = st.get("cancel_on_hit") or 1
         if not st.get("prefix") or pr["start"] is None or not pst.get("hitting"):
             return None
-        if len(pr["contacts"]) >= h:           # the hit the cancel needs was seen: the whole input goes out
+        if self._hit_n_contact(n, h) is not None:     # the hit the cancel needs was seen: the whole input goes out
             return None
         if st["trigger"] in ("air", "landing", "own_frame", "prev_neutral", "prev_free", "first"):
             return None

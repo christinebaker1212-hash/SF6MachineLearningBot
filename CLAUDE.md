@@ -3462,6 +3462,58 @@ ranked recordings + Capcom data. Analysis scripts were in the session scratchpad
   every time; the route cancels on its 2nd hit (`combo_rules.yaml: cancel_hit`, user rule 0.12.4), which never comes there.
 - **SA1 vs projectiles (0.23.0 "SA1 through it", an assumption):** 5 tries, all whiffed and 5 punished.
 
+## 0.25.0: the fixes from the 0.24.x run (user, 2026-10-05: "Everything." / "Aim for a 90% winrate.")
+All MOCK / replay-tested (`tests/test_0250.py`; `decide()` replayed open-loop over the 61 recordings); nothing here is
+verified in game. Values marked ESTIMATE are config guesses.
+- **Key order** (`controller.apply`): keys pressed together go out directions first, then buttons, so a Shoryuken's
+  last step 3+P is no longer read as 2+P (the 2LP / 2HP "anti-airs", 39 of 41 with the opponent on the right).
+- **Tech direction** (`fighter.throw_direction`): the `tech` / `delay_tech` options (and any LP+LK the defence game
+  sends) throw FORWARD, unless the bot's back is within `defense.back_throw_wall` 2.5 of its own wall (a back throw then
+  puts the opponent in the corner). Tech payoffs against strikes and shimmies lowered (delay tech -0.7 / -1.8, tech
+  -1.3 / -1.8, ESTIMATES): the 66 openings during the bot's back throw (38 stuffed, 28 shimmied).
+- **The user's move answers** (`configs/fighter/ryu.yaml: move_answers`, `fighter.apply_move_answers`, rule 0'):
+  - Ingrid "Vanishing Sun (Forward)" (Capcom's real name; 0.18.6's `teleport|warp` never matched) -> L Shoryuken, its
+    first active frame after her invincibility (13-27) and once she is airborne (21+)
+  - Ken's Dragonlash Kicks (L / M / H / OD, [Quick Dash] too) -> L Shoryuken timed from its first frame to hit as Ken
+    becomes airborne (frame 19+); the bot crouch-blocks until then (`answer_wait`)
+  - Ken's Jinrai Kicks -> Drive Impact once past the kick's active frames, unless Ken came from Standing Heavy Punch
+    into M Jinrai (the user's exception; `unless_after`, `unless_match`)
+  - Needs the move's id named (catalog C or the move map, as for Ken; Ingrid's ids are not known here yet).
+- **Guard hold** (`fighter._guard_hold`, `guard_hold`): after blocking a hit, the block is kept while the same move
+  can still hit (its last active frame from Capcom / move timing + 1); projectiles excluded. MEASURED: 94 openings came
+  after the bot had blocked an earlier hit of the same move (E. Honda's slaps, JP, Manon, Sagat, Tatsus).
+- **Facing during held sequences** (fight loop `stop_check`): a held block / delay tech is re-faced on every line when
+  the sides switch (17 ground cross-up openings). UNVERIFIED in game.
+- **No slow buttons inside the opponent's range** (`neutral_policy.STYLE_IN_RANGE_MAX_STARTUP` 8): with the Legend style
+  table too, a non-projectile move slower than 8 frames is not chosen within the opponent's poke range (5HP was hit in
+  its start-up 32 times).
+- **The opponent's invincible supers** (`fighter.opponent_reversal_supers`, `reversal_respect`): Super Arts / CAs whose
+  Capcom notes say invincible, by the opponent's meter (a CA only at <= 25% vitality). On their wake-up with one in the
+  bar the meaty and the throw lose 1.5 / 1.0 (ESTIMATES; 7 of 15 wake-up supers hit the bot during its meaty 2MK). A
+  throw super (Akuma's Raging Demon) within 2.0: no parry, jump +1.0, back dash +0.6.
+- **Zoning** (`zoning.py`):
+  - a charge being held (a projectile's lead-in id, Akuma's Gou Hadoken 903 / 904; `move_timing` lead_in) within 4.5:
+    block, start nothing (`fireball_charge`); a lead-in no longer starts a projectile flight (it flies only when released)
+  - no clash against a projectile faster than 11 frames a unit (`clash_min_frames_per_unit`; Akuma's charged Gou
+    Hadoken ~9.6), clash margin 5
+  - SA1 through a projectile off by default (`fireball.sa1: false`; 5 tries, all whiffed and punished)
+  - a zoner (3+ projectiles in 30 s): from 2.5+ the neutral policy walks back x0.3 and forward x1.8
+    (`ZONER_FACTOR`, ESTIMATES)
+- **Punishes:** an inferred move name voted with high confidence is exact (no frame of slack), so -4 moves can be
+  jabbed (blocked -4..-6 within 1.2: 6 of 74 punished).
+- **Axe Kick in a juggle** (combo lab executor, `LAB_RULES` 0.25.0): after OD High Blade Kick only the Axe Kick's second
+  hit connects. Hit confirm now waits for the move's LAST hit before calling a whiff, a contact counts as hit N by the
+  move's own frame, and hit N is predicted once its frame has passed (`EARLIER_HIT_WINDOW` 5) even when hit 1 missed.
+  So "5HP > OD High Blade > 4HK > 623HP > SA3" no longer stops at the 4HK.
+- **Projection (open loop, ESTIMATES on top of measured counts):** the replay credits a rule only where it fired before
+  an opening the recorded bot actually took (combo damage), x a conversion share. On 56 finished matches: ~3,160 hp
+  less taken and ~390 more dealt a match (central), mostly guard hold (~990 / match), Akuma's charge (~590), the move
+  answers (~500 + 250 dealt), the anti-air key order (~280 + 140), fewer back-throw guesses (~290), 5HP (~250). The win
+  model (147 ranked matches; on these 56 it gives 70% vs the real 73%): **~80% central** (low 78%, high 83%); zoners
+  (Akuma / JP / Sagat, 8 matches) ~40%, everyone else ~87%. Not counted: the Axe Kick route, punish slack, zoner
+  walk-in, Raging Demon. **90% is not reached on paper**; the gap is mostly the zoners. As the bot climbs, stronger
+  opponents pull the rate back toward 50%: LP is the measure.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

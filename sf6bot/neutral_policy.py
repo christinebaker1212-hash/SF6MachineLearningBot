@@ -74,6 +74,14 @@ NEUTRAL_SPECIAL_MIN_BLOCK = -3
 # theirs. Projectiles are judged by distance (FIREBALL_MIN_DIST). Combos, punishes and confirms keep every move.
 NEUTRAL_MAX_STARTUP = 12
 IN_RANGE_MAX_STARTUP = 9
+# 0.25.0: with a style table too, inside the opponent's range a button starts in at most this many frames. MEASURED (61
+# ranked matches on 0.24.x): 55% of the damage taken landed while the bot was in its own move; Standing Heavy Punch
+# (start-up 10) was hit 43 times, 32 in its start-up, mostly by 2MKs started 1.3-2.1 apart. 2MK (8) stays.
+STYLE_IN_RANGE_MAX_STARTUP = 8
+# 0.25.0 against a zoner (NeutralPolicy.zoner, set by the fighter from the projectiles thrown this match): beyond
+# ZONER_DIST, retreating is rarer and walking in more common between projectiles. ESTIMATES.
+ZONER_DIST = 2.5
+ZONER_FACTOR = {"walk_back": 0.3, "dash_back": 0.3, "jump_back": 0.3, "walk_fwd": 1.8, "idle": 0.6}
 OPP_POKE_DEFAULT = 1.5        # ESTIMATE: an opponent without a measured poke (most characters' longest normals ~1.3-1.6)
 THEIR_RANGE_MARGIN = 0.25     # they can step in as they press
 
@@ -158,8 +166,10 @@ class NeutralPolicy:
         self.fireball_min = float(c.get("fireball_min_dist", FIREBALL_MIN_DIST))
         self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
+        self.zoner = False                    # 0.25.0: the opponent throws many projectiles this match
         self.max_startup = int(c.get("neutral_max_startup", NEUTRAL_MAX_STARTUP))
         self.in_range_max_startup = int(c.get("in_range_max_startup", IN_RANGE_MAX_STARTUP))
+        self.style_in_range_max_startup = int(c.get("style_in_range_max_startup", STYLE_IN_RANGE_MAX_STARTUP))
         self.opp_poke_default = float(c.get("opp_poke_default", OPP_POKE_DEFAULT))
         self.range_margin = float(c.get("their_range_margin", THEIR_RANGE_MARGIN))
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
@@ -239,6 +249,12 @@ class NeutralPolicy:
                     for n, k in facs.items():
                         f[it.INTENTS.index(n)] *= k
                     break
+        if self.zoner and mx is not None and ox is not None and abs(ox - mx) > ZONER_DIST:
+            # 0.25.0: against a projectile-heavy opponent, close the distance between its projectiles. MEASURED (61 ranked
+            # matches on 0.24.x): 5-8 against opponents throwing > 8 projectiles a minute (36-7 against the rest); there
+            # the bot was > 3.0 apart 32% of the time and walked back as much as forward (10% / 11% of frames)
+            for n, k in ZONER_FACTOR.items():
+                f[it.INTENTS.index(n)] *= k
         if mx is not None and ox is not None:
             behind = it.WALL - mx if mx > ox else mx + it.WALL      # room between the bot and the wall behind it
             for lim, fac in WALL_STEPS:
@@ -270,6 +286,10 @@ class NeutralPolicy:
             if not (m["super_cost"] <= (num(me.get("super")) or 0) and (m.get("damage") or 0) >= (num(op.get("hp")) or 1e9)):
                 return False
         elif m["intent"] != "poke":
+            return False
+        su = m.get("startup")
+        if not m.get("projectile") and self.in_their_range(dist) and isinstance(su, int) \
+                and su > self.style_in_range_max_startup:
             return False
         r = self.reach.get(m["id"]) if self.reach else None
         return r is None or m.get("projectile") or dist <= r + REACH_MARGIN

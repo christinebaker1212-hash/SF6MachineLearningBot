@@ -10,6 +10,7 @@ from .actions import NEUTRAL, Facing, InputState, absolute_to_keys, to_absolute
 from .input_backend import InputBackend
 
 EventSink = Callable[[dict], None]
+DIRECTION_KEYS = frozenset({"UP", "DOWN", "LEFT", "RIGHT"})
 
 
 class Controller:
@@ -82,7 +83,10 @@ class Controller:
                 self.forward_t = clock.now()
             self.current = state if self._armed else NEUTRAL
             releases = sorted(self._held - target)
-            presses = sorted(target - self._held)
+            # 0.25.0: directions before buttons. MEASURED (61 ranked recordings): with the keys sorted by name, 'HP' / 'LP' /
+            # 'MP' went before 'RIGHT', and the game sometimes read the button a frame before forward: a Shoryuken's last
+            # step 3+P came out as 2+P (39 times with the opponent on the right, 2 on the left, where 'LEFT' sorts first)
+            presses = sorted(target - self._held, key=lambda k: (k not in DIRECTION_KEYS, k))
             t0 = clock.now()
             if releases or presses:
                 events = [(self.bindings[k], False) for k in releases] + \

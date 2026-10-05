@@ -4,24 +4,21 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-05: code version **0.24.4**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.25.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-05)
 
-**What is happening:** the user is running **unattended ranked** on **0.24.4** (`ranked.bat` / panel FIGHT →
-Versus Human → Ranked, human-like inputs on) and said "I'll send the results after". No code work is in progress;
-the working tree is clean and pushed (d7c26c8).
+**What is happening:** **0.25.0 is pushed**: every fix proposed from the 0.24.x run (user: "Everything." / "Aim for a
+90% winrate."). The user installs it (update.bat) and runs unattended ranked again, then sends S + the fight files.
+Open-loop projection ~80% (low 78%, high 83%; zoners ~40%, everyone else ~87%): 90% is NOT reached on paper (CLAUDE.md
+"0.25.0").
 
-**Latest result (2026-10-05):** the bot reached **Diamond (19,053 LP)**. The run's 61 recordings: **41-15** (0.24.3 73%,
-0.24.4 68%), 36-7 against non-zoners, 5-8 against projectile-heavy opponents. The user's 17 observations were measured
-(CLAUDE.md "0.24.x ranked run analysed"); findings reported, **nothing built yet: waiting for the user's pick**. Top
-findings: Shoryuken motions read as 2LP / 2HP (key order in `Controller.apply`, opponent on the right); back throws from
-the `tech` / `delay_tech` options (4+LP+LK) stuffed or shimmied; 55% of the damage taken lands during the bot's own move;
-zoners; Ingrid's override never matched ("Vanishing Sun (Forward)"); Dragonlash needs a Shoryuken from its start-up.
-DI-backs work (39 of 45 crumples; my first count was wrong).
+**Previous result (2026-10-05):** the bot reached **Diamond (19,053 LP)**. The run's 61 recordings: **41-15** (0.24.3 73%,
+0.24.4 68%), 36-7 against non-zoners, 5-8 against projectile-heavy opponents (CLAUDE.md "0.24.x ranked run analysed").
+DI-backs work (39 of 45 crumples).
 
 **What this segment built (all MOCK / replay-tested, none verified in game yet):**
 | version | what | what to look for in the results |
@@ -30,6 +27,7 @@ DI-backs work (39 of 45 crumples; my first count was wrong).
 | 0.24.0 / 0.24.1 | combo composer: verified lab transitions joined into bigger combos by the meter the bot has; any attack the bot starts is continued live, hit-confirmed | `composer` {live, started, completed, first_hit_extended, replans, by_route} |
 | 0.24.2 | no attack starts with a jump, except jump-in routes after the bot's DI stun with the opponent cornered | bot jumps / min (scorecard), `stun_followups` |
 | 0.24.3 | crash fix (a combo re-planned shorter → IndexError ended the session); errors are now logged and the match goes on | `errors` in each match summary: must be empty or explained |
+| 0.25.0 | key order (directions before buttons), forward tech, the user's move answers (Dragonlash / Ingrid → L Shoryuken, Jinrai → DI), guard hold through multi-hit moves, facing refresh in held sequences, no slow buttons in range, respect for invincible supers / Raging Demon, Akuma's charge blocked, zoner walk-in, Axe Kick juggle cancel | `answers`, `guard_hold`, `refaced_in_sequence`, `fireball_charge` / `zoner_on` in fireballs; anti-air Shoryukens vs 2LP; back throws vs forward (scorecard); Ken / Akuma / Ingrid matches |
 | 0.24.4 | combo spacing per body class (Marisa / E. Honda / Zangief vs everyone else): a step that whiffed twice from a distance is not tried from there again | `composer.stopped_for_spacing` |
 
 **When the results arrive (S paste + uploaded fight files):**
@@ -304,6 +302,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.25.0 (user: "Everything."):** all the 0.24.x fixes built (CLAUDE.md "0.25.0"). Unverified in game, most of all the
+facing refresh during held sequences and the move answers' timing. Ingrid's move answer needs her ids named (C for her, or
+the move map from more recordings). Next run: compare with the 0.24.x table (41-15, ratio 1.20-1.35) and the projection.
 
 **0.24.4 (user):** combo spacing learned in matches per body class (Marisa / E. Honda / Zangief vs everyone else): a step
 that whiffed twice from a spacing is not tried from there again (another follow-up, or the combo ends on the hit it has).
@@ -744,7 +746,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed) |
+| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers` |
 | Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |

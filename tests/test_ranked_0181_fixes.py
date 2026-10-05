@@ -285,14 +285,17 @@ def test_your_punish_rule_finds_ingrids_teleport_and_punishes_it(tmp_path):
     from sf6bot.fighter import apply_punish_overrides
     slug = next(s for s, n in SLUGS.items() if n == "Ingrid")
     (tmp_path / "framedata").mkdir()
-    # stand-in rows: Capcom's real names for Ingrid are not in the repo; the rule matches "teleport" in name or notes
+    # 0.25.0: Capcom's name for the forward teleport is "Vanishing Sun (Forward)" (the 0.18.6 'teleport|warp' never
+    # matched the real page); a stand-in row with that name
     (tmp_path / "framedata" / f"{slug}.json").write_text(json.dumps({"character": "Ingrid", "moves": [
-        {"section": "Special Moves", "name": "Sun Strike", "notes": "Teleports forward and attacks from above"},
+        {"section": "Special Moves", "name": "Vanishing Sun (Forward)",
+         "notes": "Completely invincible between frames 13 - 27 / Considered airborne from frames 21 - 46"},
         {"section": "Normal Moves", "name": "Standing Light Punch", "notes": ""}]}))
-    moves = {950: {"name": "Sun Strike", "block_adv": -2, "startup": 20, "total": 50}, 600: {"name": "Standing Light Punch"}}
+    moves = {950: {"name": "Vanishing Sun (Forward)", "block_adv": -2, "startup": 20, "total": 50},
+             600: {"name": "Standing Light Punch"}}
     lines = apply_punish_overrides(moves, "Ingrid", tmp_path, FCFG)
     assert moves[950]["punish_with"] == "punish_l_srk" and "punish_with" not in moves[600]
-    assert lines == ["Sun Strike -> L Shoryuken (punish)"]
+    assert lines == ["Vanishing Sun (Forward) -> L Shoryuken (punish)"]
     f = _fighter(opp_moves=moves)
     _line(f, op={"x": 1.0, "action_id": 950}, timer=800)
     d = _line(f, me={"blockstun": 8, "action_id": 155}, op={"x": 1.0, "action_id": 950}, timer=805)
@@ -301,7 +304,7 @@ def test_your_punish_rule_finds_ingrids_teleport_and_punishes_it(tmp_path):
     d = _line(g, op={"x": 1.2, "action_id": 950, "action_frame": 30}, timer=900)
     assert d.rule == "whiff_punish" and d.name == "L Shoryuken (punish)"
     assert apply_punish_overrides({}, "Ingrid", tmp_path, FCFG) == [
-        "Sun Strike -> L Shoryuken (punish) (its id is not known yet: catalogue the character, menu C)"]
+        "Vanishing Sun (Forward) -> L Shoryuken (punish) (its id is not known yet: catalogue the character, menu C)"]
 
 
 def test_progress_counts_takeovers_both_ways():

@@ -252,7 +252,14 @@ def test_a_far_fireball_is_walked_into_then_parried_never_blocked_early():
 
 
 def test_a_slow_fireball_from_mid_range_meets_sa1_with_a_bar():
+    # 0.25.0: off by default (0.24.x ranked: 5 tries, all whiffed and punished); still works when turned on
+    import copy
     f = _zoner()
+    raw = _throw_at(f, 3.0, 1000, aid=900, me={"super": 10000})
+    assert f.decide(raw, 1000 / 60.0, 0).rule != "fireball_sa1"
+    f = _zoner()
+    f.c = copy.deepcopy(f.c)
+    f.c["fireball"]["sa1"] = True
     raw = _throw_at(f, 3.0, 1000, aid=900, me={"super": 10000})
     d = f.decide(raw, 1000 / 60.0, 0)
     assert d.rule == "fireball_sa1" and f.zn_stats["sa1"] == 1

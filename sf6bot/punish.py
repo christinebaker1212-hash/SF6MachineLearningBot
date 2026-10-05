@@ -124,7 +124,10 @@ class PunishEngine:
         if cap_total is not None and not doubt:
             # an inferred name the recordings confirm (its total within 2 frames of the measured one) is as good as a
             # catalog's; unconfirmed, one frame of slack
-            k["slack"] = 0 if src != "inferred" or (lt_total is not None and abs(cap_total - lt_total) <= 2) else 1
+            # 0.25.0: a name voted with high confidence (3+ agreeing sightings, 70%+) is exact too. MEASURED (0.24.x
+            # ranked): blocked -4..-6 moves within 1.2 were punished 6 of 74; the frame of slack ruled out the 4-frame jab
+            k["slack"] = 0 if src != "inferred" or (lt_total is not None and abs(cap_total - lt_total) <= 2) \
+                or info.get("confidence") == "high" else 1
             su = info.get("startup") if isinstance(info.get("startup"), int) else None
             ae = info.get("active_end") if isinstance(info.get("active_end"), int) else None
             if ae is None and su is not None and not k["projectile"]:

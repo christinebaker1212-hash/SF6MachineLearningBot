@@ -82,7 +82,7 @@ def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
 
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
                "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer", "cmd_grab_jump", "fireball_jump",
-               "fireball_sa1", "fireball_clash", "fireball_jump_over"}
+               "fireball_sa1", "fireball_clash", "fireball_jump_over", "move_answer"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -174,7 +174,8 @@ def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dic
             continue        # 0.18.3: a name that does not fit the id's kind (saved before the check existed)
         ob = (e.get("capcom") or {}).get("on_block")
         out[int(a)] = {"name": e["name"], "block_adv": ob + margin if isinstance(ob, int) else None,
-                       "di": e["name"].startswith("Drive Impact"), "source": "inferred"}
+                       "di": e["name"].startswith("Drive Impact"), "source": "inferred",
+                       "confidence": e.get("confidence"), "votes": e.get("votes")}
     return out
 
 
@@ -272,6 +273,9 @@ def opponent_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> tuple[di
     ov = apply_punish_overrides(merged, chara_name, datasets_root, fcfg)
     if ov:
         parts.append("your punishes: " + "; ".join(ov))
+    ans = apply_move_answers(merged, chara_name, datasets_root, fcfg)
+    if ans:
+        parts.append("your answers: " + "; ".join(ans))
     return merged, ", ".join(parts)
 
 
@@ -296,6 +300,80 @@ def apply_punish_overrides(moves: dict, chara_name: str, datasets_root: Path, fc
             out.append(f"{n} -> {pun}" + ("" if ids else " (its id is not known yet: catalogue the character, menu C)"))
         if not names:
             out.append(f"no {chara_name} move matches '{r['match']}' in Capcom's data")
+    return out
+
+
+_FRAMES = re.compile(r"(\d+)\s*-\s*(\d+)")
+
+
+def _notes_range(notes: str, words: str) -> tuple[int, int] | None:
+    """'Considered airborne from frames 19 - 37' -> (19, 37) for words 'airborne'; the first such clause."""
+    for part in (notes or "").split("/"):
+        if re.search(words, part, re.I):
+            m = _FRAMES.search(part)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def apply_move_answers(moves: dict, chara_name: str, datasets_root: Path, fcfg: dict) -> list[str]:
+    """0.25.0: the user's answers to specific moves (`move_answers`), from the move's FIRST frame: a Shoryuken timed to be
+    active once the move is airborne and no longer invincible (Capcom notes: "Considered airborne from frames A - B",
+    "invincible ... frames C - D"), before it hits (its start-up); or a Drive Impact once the move can no longer hit
+    (a Jinrai Kick blocked or whiffed: the DI's armor takes the follow-up). Every known id whose Capcom name matches gets
+    `answer`. Returns "move -> answer" lines, also for matches whose id is not known yet."""
+    rules = (fcfg.get("move_answers") or {}).get(chara_name) or []
+    if not rules:
+        return []
+    from . import framedata as fd
+    rows = (fd.load(chara_name, Path(datasets_root) / "framedata") or {}).get("moves") or []
+    out = []
+    for r in rules:
+        rx = re.compile(r["match"], re.I)
+        hits = [m for m in rows if rx.search(m.get("name") or "")]
+        for m in hits:
+            n = m["name"]
+            notes = m.get("notes") or ""
+            air = _notes_range(notes, r"airborne")
+            inv = _notes_range(notes, r"invincib")
+            act = _FRAMES.search(m.get("active") or "")
+            info = {"do": r["do"], "move": r.get("move"), "max_dist": r.get("max_dist"), "why": r.get("why", ""),
+                    "startup": m.get("startup_n"), "airborne_from": air[0] if air else None,
+                    "inv_to": inv[1] if inv else None, "active_to": int(act.group(2)) if act else None,
+                    "unless_after": r.get("unless_after"), "unless_match": r.get("unless_match"), "name": n}
+            ids = [a for a, v in moves.items() if v.get("name") == n]
+            for a in ids:
+                moves[a]["answer"] = info
+            key = r.get("move") or ("drive_impact" if r["do"] == "drive_impact" else "")
+            what = (fcfg.get("moves") or {}).get(key, {}).get("name", key or r["do"])
+            out.append(f"{n} -> {what}" + ("" if ids else " (its id is not known yet)"))
+        if not hits:
+            out.append(f"no {chara_name} move matches '{r['match']}' in Capcom's data")
+    return out
+
+
+def opponent_reversal_supers(chara_name: str, datasets_root: Path) -> list[dict]:
+    """0.25.0: the opponent's Super Arts / Critical Arts that Capcom notes as invincible (a reversal from a get-up or out
+    of blockstun), with their bar cost, and whether they are throws (Akuma's CA Shun Goku Satsu) or need <= 25% vitality
+    (CA). MEASURED (0.24.x ranked): 15 supers started from a get-up, 7 hit the bot, all during its meaty 2MK; Akuma's
+    Raging Demon landed every time it was used (2-3), once on a Drive Parry."""
+    from . import framedata as fd
+    rows = (fd.load(chara_name, Path(datasets_root) / "framedata") or {}).get("moves") or []
+    out = []
+    for m in rows:
+        n = m.get("name") or ""
+        lvl = re.match(r"(SA[123]|CA)\b", n)
+        if not lvl:
+            continue
+        notes = (m.get("notes") or "").lower()
+        if "invincib" not in notes:
+            continue
+        k = lvl.group(1)
+        g = cmd_grab_kind(m)
+        if g == "air":
+            continue                        # only catches an airborne bot (Zangief's Aerial Russian Slam): not a reversal
+        out.append({"name": n, "cost": {"SA1": 10000, "SA2": 20000}.get(k, 30000), "ca": k == "CA",
+                    "throw": g == "ground"})
     return out
 
 
@@ -478,6 +556,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.human = None
         self.op_onset = None                 # game frame the opponent's current action began
         self._onset_act = None
+        self._prev_op_act = None             # 0.25.0 the opponent's action before its current one
+        self.op_rev_supers: list = []        # 0.25.0 opponent_reversal_supers: invincible Super Arts / Critical Arts
+        self._ma_for = None                  # 0.25.0 move answers: the opponent action (onset) already answered
+        self.answer_stats: dict = {"sent": 0, "by_move": {}, "skipped_unless": 0}
         self._now = None
         self._pe_init()                      # 0.23.0 the punish engine (punish.py)
         self._zn_init()                      # 0.23.0 fireball play (zoning.py)
@@ -613,6 +695,94 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         return t_land, pdx
 
+    def _guard_hold(self, me: dict, op: dict, block_dir: int, block_face) -> Decision | None:
+        """0.25.0: the opponent's move the bot is blocking (or just blocked) will still be active when the bot is free:
+        hold the block until past its last active frame (Capcom's active column, else measured in recordings). MEASURED
+        (61 ranked matches on 0.24.x): 94 hits came after the bot had blocked an earlier hit of the SAME move (E. Honda's
+        919, JP's Triglav, Sagat's Tiger Shots, Ken's Jinrai follow-ups): between hits its blockstun ended and it walked,
+        pressed or went for a pressure option."""
+        if not (self.c.get("guard_hold") or {}).get("enabled", True):
+            return None
+        oa = op.get("action_id")
+        if not self._attack(oa) or not isinstance(self._now, int) or self.op_onset is None:
+            return None
+        if (_num(me.get("blockstun")) or 0) > 0:
+            self._gh_onset = self.op_onset
+        if getattr(self, "_gh_onset", None) != self.op_onset:
+            return None
+        k = self._pe_know(oa)
+        ae = k.get("active_end")
+        if not isinstance(ae, int) or k.get("projectile"):
+            return None
+        fr = _num(op.get("action_frame"))
+        fr = int(fr) if fr is not None and fr < 900 else self._now - self.op_onset
+        if fr + stun_left(me) > ae + int((self.c.get("guard_hold") or {}).get("margin", 1)):
+            return None
+        self.guard_hold_stats = getattr(self, "guard_hold_stats", 0) + 1
+        return Decision("hold", direction=block_dir, facing=block_face, rule="guard_hold",
+                        reason=f"{k.get('name') or oa} still active until its frame {ae} (now {fr}): holding the block")
+
+    def _move_answer(self, raw: dict, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.25.0 the user's answers (configs: move_answers), decided on the opponent's move itself, not its height.
+        MEASURED (61 ranked matches on 0.24.x): Ken's H Dragonlash Kick (start-up 28, airborne 19-37, peak ~0.76): 13 within
+        3.0, 10 hit the bot with no answer, 3 Shoryukens all won; the airborne-move anti-air waited for height > 0.4, too
+        late to start a Shoryuken. Ingrid's "Vanishing Sun (Forward)" (start-up 36, invincible 13-27, airborne 21-46): the
+        0.18.6 rule matched 'teleport|warp' and never applied. L Jinrai Kick: 18, 13 hit the bot with no answer.
+        - anti_air: the Shoryuken's first active frame lands on max(airborne + 2, invincible end + 1), before the hit
+        - drive_impact: once the move is past its active frames (blocked or whiffed) and the bot can act, unless it came
+          out of `unless_after` and its name matches `unless_match` (user: "unless Ken starts with Heavy punch and goes
+          into medium Jinrai")"""
+        oa = op.get("action_id")
+        ans = (self.opp.get(oa) or {}).get("answer")
+        if not ans or self.op_onset is None or self._ma_for == self.op_onset or not isinstance(self._now, int):
+            return None
+        fr = _num(op.get("action_frame"))
+        fr = int(fr) if fr is not None and fr < 900 else self._now - self.op_onset
+        md = ans.get("max_dist")
+        mv = (self.c.get("moves") or {}).get(ans.get("move") or "") or {}
+        name = ans.get("name") or str(oa)
+        if ans["do"] == "anti_air":
+            hit = ans.get("startup")
+            if not mv or not isinstance(hit, int):
+                return None
+            su = int(mv.get("startup", 5))
+            target = max((ans.get("airborne_from") or 0) + 2, (ans.get("inv_to") or 0) + 1)
+            target = min(target, hit - 1)
+            due = target - (su - 1) - seq_prefix(mv["seq"]) - self.lead - self.stale
+            if fr > hit + 4:                     # too late: invincible to air attacks only once it has started
+                self._ma_for = self.op_onset
+                return None
+            if fr < due:
+                return Decision("hold", direction=1, rule="answer_wait",
+                                reason=f"{name}: Shoryuken in {due - fr} frames")
+            if md is not None and dist > float(md):
+                return None
+            self._ma_for = self.op_onset
+            self.answer_stats["sent"] += 1
+            self.answer_stats["by_move"][name] = self.answer_stats["by_move"].get(name, 0) + 1
+            return Decision("seq", mv.get("name", "Shoryuken"), mv["seq"], rule="move_answer",
+                            reason=f"your answer to {name}: active on its frame {target} ({ans.get('why', '')})")
+        if ans["do"] == "drive_impact":
+            if ans.get("unless_match") and re.search(ans["unless_match"], name, re.I) and ans.get("unless_after"):
+                prev = (self.opp.get(self._prev_op_act) or {}).get("name") or ""
+                if re.search(ans["unless_after"], prev, re.I):
+                    if self._ma_for != self.op_onset:
+                        self.answer_stats["skipped_unless"] += 1
+                    self._ma_for = self.op_onset
+                    return None
+            end = ans.get("active_to")
+            if not isinstance(end, int) or fr <= end or (md is not None and dist > float(md)):
+                return None
+            if stun_left(me) > self.lead + self.stale or not self.can_spend(me, "drive_impact"):
+                return None
+            di = (self.c.get("moves") or {}).get("drive_impact") or {"name": "Drive Impact", "seq": "5+HP+HK@3"}
+            self._ma_for = self.op_onset
+            self.answer_stats["sent"] += 1
+            self.answer_stats["by_move"][name] = self.answer_stats["by_move"].get(name, 0) + 1
+            return Decision("seq", di["name"], di["seq"], rule="move_answer", timed=True,
+                            reason=f"your answer to {name}: Drive Impact through its follow-ups ({ans.get('why', '')})")
+        return None
+
     def _thrown_tech(self, me: dict, op: dict) -> Decision | None:
         tc = self.c.get("throw_tech") or {}
         if not tc.get("after_connect", True) or me.get("action_id") not in self.thrown_ids:
@@ -685,6 +855,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 elif d.rule == "operator_answer":
                     self._oa_for = None
                     self.operator_stats["used"][d.name] -= 1
+                elif d.rule == "move_answer":
+                    self._ma_for = None
+                    self.answer_stats["sent"] -= 1
                 elif d.rule == "cmd_grab_jump":
                     self._cg_jump_for = self._cg_jump_id = None
                     self.cmd_grab_stats["jumped"] -= 1
@@ -755,6 +928,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
 
     def _note_onset(self, oa, tmr) -> None:
         if oa != self._onset_act:
+            self._prev_op_act = self._onset_act
             self._onset_act, self.op_onset = oa, tmr if isinstance(tmr, int) else None
 
     def _ok(self, kind: str) -> bool:
@@ -801,6 +975,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         tt = self._thrown_tech(me, op)
         if tt is not None:
             return tt
+        # 0'. 0.25.0 the user's answers to specific moves (configs: move_answers): Ken's Dragonlash and Ingrid's Vanishing
+        #     Sun (Forward) get a Shoryuken timed from their first frame; a blocked / whiffed Jinrai Kick gets a Drive Impact
+        ma = self._move_answer(raw, me, op, dist)
+        if ma is not None:
+            return ma
         # 0c. 0.24.0 the bot's own attack has just started (whatever rule chose it): the combo composer's biggest
         #     continuation for the meter it has, performed with hit confirm (nothing more goes out unless it hits)
         cx = self._compose_live(me, op, dist)
@@ -812,6 +991,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         pe = self._pe_decide(raw, me, op, dist, block_dir, block_face)
         if pe is not None:
             return pe
+        # 0''. 0.25.0 guard hold: the move the bot blocked is still active when the bot gets free (a multi-hit move, a
+        #      Hundred Hand Slap, a Triglav): keep blocking until its last active frame, no pressure option, no button
+        gh = self._guard_hold(me, op, block_dir, block_face)
+        if gh is not None:
+            return gh
         # 0. a pressure moment: about to be free with the opponent close -> commit to a defensive option
         #    now (defense.py: throws can't be teched on reaction, 26 of 29 landed in the user's FT5)
         d = self._pressure(raw, me, op, dist, t) or self._own_rush_pressure(raw, me, op, dist, t)
@@ -1922,6 +2106,18 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return self._move("drive_impact", "di_wall", f"opponent's back {op_back:.2f} from the wall at {dist:.2f}: Drive "
                                                      "Impact (blocked or not, it stuns against the wall)")
 
+    def op_reversal_super(self, op: dict, throws: bool | None = None) -> dict | None:
+        """0.25.0: an invincible Super Art / Critical Art the opponent can afford now (CA: at <= 25% vitality), or None.
+        `throws`: True = only throw supers (Akuma's Raging Demon), False = only strikes."""
+        meter = _num(op.get("super")) or 0
+        hp, hpm = _num(op.get("hp")) or 0, _num(op.get("hp_max")) or 10000
+        for sv in self.op_rev_supers:
+            if throws is not None and bool(sv.get("throw")) != throws:
+                continue
+            if meter >= sv["cost"] and (not sv.get("ca") or hp <= 0.25 * hpm):
+                return sv
+        return None
+
     def opp_has_super(self, op: dict) -> bool:
         """0.20.0 (user): no Drive Impact of the bot's own while the opponent has Super meter: a Super Art beats a Drive
         Impact on reaction. (The DI-back answer to the opponent's own Drive Impact is not affected.)"""
@@ -2003,6 +2199,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         g = self.opp.get(op.get("action_id"), {}).get("guard")
         if g == "overhead" or (_num(op.get("y")) or 0.0) > 0.3:
             ch["seq"] = " ".join(("4" + tok[1:]) if tok.startswith("1@") else tok for tok in ch["seq"].split())
+        ch["seq"] = throw_direction(ch["seq"], me, op, self.c)
         st = self.defense_stats.setdefault(sit, {"moments": 0, "options": {}, "responses": {}})
         st["moments"] += 1
         st["options"][opt] = st["options"].get(opt, 0) + 1
@@ -2065,6 +2262,24 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 ex.add("meaty")
             if dist > float(tc.get("oki_throw_max", 0.9)):
                 ex.add("throw")
+            # 0.25.0: an invincible super in the bar beats a meaty and a throw on its get-up (MEASURED 0.24.x ranked: 7 of
+            # 15 wake-up supers hit the bot, all during its meaty 2MK): shimmy / block instead, unless this opponent's
+            # own answers say otherwise (the per-opponent game still learns)
+            rs = self.op_reversal_super(op, throws=False)
+            if rs is not None:
+                rc = self.c.get("reversal_respect") or {}
+                bonus["meaty"] = bonus.get("meaty", 0.0) - float(rc.get("meaty_penalty", 1.5))
+                bonus["throw"] = bonus.get("throw", 0.0) - float(rc.get("throw_penalty", 1.0))
+                turn = f"they have {rs['name']} in the bar"
+        # 0.25.0: a super that is a throw (Akuma's Raging Demon, at <= 25% vitality with 3 bars) beats blocking, teching and
+        # parrying (a grabbed parry is a punish counter): no parry, and a jump or back dash gets a bonus while it is there
+        gs = self.op_reversal_super(op, throws=True) if sit != "their_wakeup" else None
+        if gs is not None and dist <= float((self.c.get("reversal_respect") or {}).get("throw_super_dist", 2.0)):
+            ex.add("parry")
+            rc = self.c.get("reversal_respect") or {}
+            bonus["jump"] = bonus.get("jump", 0.0) + float(rc.get("throw_super_jump_bonus", 1.0))
+            bonus["back_dash"] = bonus.get("back_dash", 0.0) + float(rc.get("throw_super_back_dash_bonus", 0.6))
+            turn = (turn + "; " if turn else "") + f"{gs['name']} possible"
         return ex, bonus, turn
 
     def _resolve_option(self, me: dict, op: dict, oc: dict) -> dict | None:
@@ -2353,7 +2568,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if oa in self.cmd_grab_ids() and prev_oa_ not in self.cmd_grab_ids():   # an OD switch is the same grab
                 self.cmd_grab_stats["seen"] += 1
             # 0.23.0: also a projectile learned from recordings (move_timing "proj"); where the thrower stood
-            if (self.opp.get(oa) or {}).get("projectile") or self._pe_know(oa).get("projectile"):
+            # 0.25.0: not a charge being held (a lead-in id, Akuma's 903 / 904): nothing flies until it is released
+            if ((self.opp.get(oa) or {}).get("projectile") or self._pe_know(oa).get("projectile")) \
+                    and not ((getattr(self, "mt_moves", None) or {}).get(oa) or {}).get("lead_in"):
                 d_ = player_distance(me, op)
                 if d_ is not None and isinstance(tmr, int) and (_num(op.get("y")) or 0.0) <= 0.05:
                     self.pt.thrown(oa, tmr, d_, _num(op.get("x")))
@@ -2836,6 +3053,26 @@ def stun_left(me: dict) -> int:
     return int(st + (_num(me.get("hitstop")) or 0)) if st > 0 else 0
 
 
+def throw_direction(seq: str, me: dict, op: dict, c: dict) -> str:
+    """0.25.0: which way a tech / throw input throws when nothing is there to tech. MEASURED (61 ranked matches on 0.24.x):
+    171 back throws vs 87 forward, 148 of the back throws with no throw to tech: the tech options pressed back + LP+LK
+    (`4+LP+LK`), which is a Somersault Throw when the opponent did not throw. Now forward (`5+LP+LK`), and back only when the
+    bot's own back is near its wall (`defense.back_throw_wall`), where the back throw puts the opponent in the corner."""
+    if "LP+LK" not in seq:
+        return seq
+    mx, ox = _num(me.get("x")), _num(op.get("x"))
+    from .intents import WALL
+    back = None if mx is None or ox is None else (WALL - mx if mx > ox else mx + WALL)
+    near = back is not None and back <= float(((c or {}).get("defense") or {}).get("back_throw_wall", 2.5))
+    want, other = ("4", ("5", "6")) if near else ("5", ("4",))
+    out = []
+    for tok in seq.split():
+        if "+LP+LK" in tok and tok.split("+", 1)[0] in other:
+            tok = want + tok[1:]
+        out.append(tok)
+    return " ".join(out)
+
+
 def motion_guard(seq: str, since_forward_s: float | None, clear_frames: int) -> tuple[str, int]:
     """A motion that starts with down and ends forward (236, 236236, 2363...) right after the bot held forward reads
     as forward-down-downforward: a Shoryuken (MEASURED 0.17.5 ranked: H / M Hadoken came out as H / M Shoryuken
@@ -3274,6 +3511,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["drive_rush"] = dict(fighter.rush_stats)
                 summary["anti_air"] = dict(fighter.aa_stats)
                 summary["parry_throws"] = dict(fighter.parry_throw_stats)
+                summary["answers"] = {"sent": fighter.answer_stats["sent"], "by_move": dict(fighter.answer_stats["by_move"]),
+                                      "skipped_unless": fighter.answer_stats["skipped_unless"]}
+                summary["guard_hold"] = getattr(fighter, "guard_hold_stats", 0)
+                if fighter.zn_stats.get("charge_block") and not fighter.zn_stats["thrown"]:
+                    summary["fireballs"] = {"charge_block": fighter.zn_stats["charge_block"]}
                 if fighter.burnout_stats["fireballs"]:
                     summary["burnout_fireballs"] = dict(fighter.burnout_stats)
                 if fighter.tech_stats:
@@ -3795,6 +4037,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
                 fighter.composer = composer
+                fighter.op_rev_supers = opponent_reversal_supers(summary["opponent"], ds_root)
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():
@@ -3958,11 +4201,25 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 # pressure option such as "block" (12 frames) ran on through the throw's 5-frame start-up)
                 techless = "LP+LK" not in (d.seq or "") and not d.timed
 
-                def stop_check(neutral_=neutral, techless_=techless):
+                # 0.25.0: a sequence with no motion (a block, a delay tech) follows a side switch while it runs. MEASURED
+                # (0.24.x ranked): 17 hits with the bot still blocking toward the old side after the opponent crossed under
+                # it on the ground; facing was set between decisions only, not while a held sequence ran
+                hold_like = d.kind == "seq" and d.facing is None and not _has_motion(d.seq or "")
+
+                def stop_check(neutral_=neutral, techless_=techless, hold_like_=hold_like):
                     # 0.22.0: a takeover stops any sequence between two inputs; neutral ones also stop for urgent events
                     tk_ = tk.check()
                     if tk_:
                         return tk_
+                    if hold_like_:
+                        latest_ = reader.latest()
+                        if latest_ is not None:
+                            r_ = latest_.raw
+                            me_, op_ = r_.get(f"p{side['i'] + 1}") or {}, r_.get(f"p{2 - side['i']}") or {}
+                            f_ = fighter.facing(me_, op_)
+                            if f_ is not None and f_ is not c.facing:
+                                c.set_facing(f_)
+                                summary["refaced_in_sequence"] = summary.get("refaced_in_sequence", 0) + 1
                     why_ = urgent() if (neutral_ or techless_) else None
                     return why_ if neutral_ or why_ == "opponent throw" else None
                 pl = d.route["plan"] if d.kind == "route" else plans.get(d.name)

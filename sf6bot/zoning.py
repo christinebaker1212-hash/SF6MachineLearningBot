@@ -43,6 +43,8 @@ DEF_B = 12.0           # ESTIMATE: frames a unit for a projectile nothing is kno
 DEF_R0 = 1.4           # ESTIMATE: how far from its thrower a projectile hits on its first active frame
 JUMP_HIT_BEFORE_LAND = 3   # ESTIMATE: a deep jump attack connects this many frames before the landing
 HADOKEN_STARTUP = 12   # Capcom: H Hadoken
+ZONER_WINDOW_S = 30.0  # 0.25.0: projectiles within this many seconds ...
+ZONER_MIN = 3          # ... at least this many = a zoner (NeutralPolicy.zoner). ESTIMATES
 
 
 def jump_y(tau: float) -> float:
@@ -192,13 +194,20 @@ class ZoningMixin:
             return None
         s = self._zn_state(raw, me, op)
         if s is None:
-            return None
+            return self._zn_charge(me, op, dist, block_face)
         k = self._pe_know(s["id"]) if hasattr(self, "_pe_know") else {}
         if k.get("cmd_grab") or s["id"] in self.cmd_grab_ids():
             return None                                    # a ranged grab (JP's Embrace): rule 1d's
         if self.zn_stats["seen_for"] != s["t0"]:
             self.zn_stats["seen_for"] = s["t0"]
             self.zn_stats["thrown"] += 1
+            # 0.25.0: a zoner = 3+ projectiles in the last 30 s: the neutral policy walks in between them
+            self._zn_times = [x for x in getattr(self, "_zn_times", []) if t - x <= ZONER_WINDOW_S] + [t]
+            zoner = len(self._zn_times) >= ZONER_MIN
+            if getattr(self, "policy", None) is not None and self.policy.zoner != zoner:
+                self.policy.zoner = zoner
+                if zoner:
+                    self.zn_stats["zoner_on"] = self.zn_stats.get("zoner_on", 0) + 1
         if (num(me.get("y")) or 0.0) > 0.05 or (num(me.get("hitstun")) or 0) or (num(me.get("blockstun")) or 0):
             return None
         if self.busy(me) is not None:
@@ -222,8 +231,8 @@ class ZoningMixin:
                 v = self._zn_learned("jump_punish", float(zc.get("jump_punish_value", 0.8)) * dmg / 1000.0
                                      - float(zc.get("jump_fail_cost", 0.3)))
                 cands.append((v, "jump_punish", rname, entry, jp))
-            # 2. SA1 through it
-            sa1 = self._super("sa1") if hasattr(self, "_super") else None
+            # 2. SA1 through it. 0.25.0: off by default (MEASURED 0.24.x ranked: 5 tries, all whiffed, all punished)
+            sa1 = self._super("sa1") if hasattr(self, "_super") and zc.get("sa1", False) else None
             if sa1 and (num(me.get("super")) or 0) >= int(sa1.get("super", 10000)):
                 spawn = s["k"] + L + seq_prefix(sa1["seq"]) + int(sa1.get("startup", 7))
                 hit_k = spawn + self._pe_travel(d)
@@ -233,9 +242,13 @@ class ZoningMixin:
                     cands.append((v, "sa1", sa1["name"], None, {"hit_k": hit_k}))
             # 3. cancel it with the bot's own Hadoken (no Drive needed; burnout: no chip)
             had = self.c["moves"].get(zc.get("clash_move", "hadoken_hp"))
-            if had and d >= float(zc.get("clash_min_dist", 2.5)):
+            # 0.25.0: not against a fast projectile, and with more frames to spare (MEASURED 0.24.x ranked: against
+            # Akuma's charged Gou Hadoken, ~9.6 frames a unit, the bot started a Hadoken motion - down, no back - and
+            # was hit before it came out, ~35 times in 6 matches)
+            fast = s["model"].b < float(zc.get("clash_min_frames_per_unit", 11.0))
+            if had and d >= float(zc.get("clash_min_dist", 2.5)) and not fast:
                 spawn = s["k"] + L + seq_prefix(had["seq"]) + int(zc.get("clash_startup", HADOKEN_STARTUP))
-                if spawn <= s["model"].arrival(d) - 2:
+                if spawn <= s["model"].arrival(d) - int(zc.get("clash_margin", 5)):
                     cands.append((self._zn_learned("clash", float(zc.get("clash_value_burnout" if burn else "clash_value",
                                                                          0.3 if burn else -0.05))),
                                   "clash", had["name"], None, {}))
@@ -324,6 +337,26 @@ class ZoningMixin:
                             reason=why0 + ": walking in while it is far")
         return Decision("hold", direction=1, facing=block_face, rule="fireball_block",
                         reason=why0 + ": waiting for it")
+
+    def _zn_charge(self, me: dict, op: dict, dist: float, block_face):
+        """0.25.0: the opponent holding a projectile's charge (a lead-in id: move_timing `lead_in`, whose move is a
+        projectile, e.g. Akuma's Gou Hadoken held, 903 / 904, released as 906 / 908 / 909): block, start nothing. MEASURED
+        (0.24.x ranked, 6 Akuma matches, ~35 hits): the released charge reaches 2.0 in ~9 frames, faster than the bot can
+        see it and react; the bot was walking in or starting a move when it came."""
+        from .fighter import Decision
+        zc = self.c.get("fireball") or {}
+        oa = op.get("action_id")
+        mt = self.mt_moves.get(oa) or {}
+        if not zc.get("charge_block", True) or not mt.get("lead_in"):
+            return None
+        info = self.opp.get(oa) or {}
+        if not info.get("projectile") or dist > float(zc.get("charge_block_dist", 4.5)):
+            return None
+        if (num(me.get("y")) or 0.0) > 0.05 or self.busy(me) is not None:
+            return None
+        self.zn_stats["charge_block"] = self.zn_stats.get("charge_block", 0) + 1
+        return Decision("hold", direction=1, facing=block_face, rule="fireball_charge",
+                        reason=f"{info.get('name') or oa} being charged at {dist:.2f}: blocking")
 
     def _zn_air_attack(self, me: dict, op: dict, dist: float):
         """The air button of a fireball jump without a planned route (no Capcom data): on the way down, deep."""

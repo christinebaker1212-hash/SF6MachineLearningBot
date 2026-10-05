@@ -191,7 +191,39 @@ attack_id_min: 450     # heuristic: opponent action ids >= this are attacks (Ryu
 # and hits you from above the head, is punishable by a light Shoryuken."
 punish_overrides:
   Ingrid:
-    - {match: "teleport|warp", move: punish_l_srk, why: "user: punishable by a light Shoryuken"}
+    # 0.25.0: Capcom's name is "Vanishing Sun (Forward)" (the old 'teleport|warp' never matched); answered from its first
+    # frame by move_answers below; this stays for a blocked / whiffed one
+    - {match: "^Vanishing Sun \\(Forward\\)$", move: punish_l_srk, why: "user: punishable by a light Shoryuken"}
+# 0.25.0 respecting the opponent's invincible supers (fighter.op_reversal_super; Capcom notes "invincible" on an SA / CA):
+# on its get-up a meaty and a throw lose value while the bar holds one; a THROW super (Akuma's CA Shun Goku Satsu) near the
+# bot takes the parry away and favours a jump / back dash at pressure moments. ESTIMATES (thousands of hp).
+reversal_respect:
+  meaty_penalty: 1.5
+  throw_penalty: 1.0
+  throw_super_dist: 2.0
+  throw_super_jump_bonus: 1.0
+  throw_super_back_dash_bonus: 0.6
+# 0.25.0 guard hold (fighter._guard_hold): after blocking a hit, keep blocking while that same move is still active (its last
+# active frame + margin) - no pressure option, no button. MEASURED (0.24.x ranked): 94 hits after the bot had blocked an
+# earlier hit of the same move.
+guard_hold:
+  enabled: true
+  margin: 1
+# 0.25.0 the user's answers decided on the move itself, from its first frame (fighter._move_answer, apply_move_answers).
+# `do: anti_air`: the `move` (a Shoryuken) is timed so its first active frame lands once the opponent's move is airborne and
+# no longer invincible (Capcom's notes), before it hits. `do: drive_impact`: a Drive Impact once the move is past its active
+# frames (blocked or whiffed) - its armor takes the follow-up - unless the move came out of `unless_after` and its name
+# matches `unless_match`. `max_dist`: no answer beyond it (none = any distance: a teleport).
+# User (2026-10-05): "Ingrid's forward teleport, where her legs kick, can be shoryukened"; "Ken's dragonlash must be
+# shoryukened"; "Ken's Jinrai kicks can be DI'ed, unless Ken starts with Heavy punch and goes into medium Jinrai".
+move_answers:
+  Ingrid:
+    - {match: "^Vanishing Sun \\(Forward\\)$", do: anti_air, move: punish_l_srk, why: "user: Shoryuken it"}
+  Ken:
+    - {match: "^(L|M|H|OD) Dragonlash Kick$|^\\[Quick Dash\\] Dragonlash Kick$", do: anti_air, move: punish_l_srk,
+       max_dist: 2.0, why: "user: Dragonlash must be Shoryukened"}
+    - {match: "^(L|M|H|OD) Jinrai Kick$", do: drive_impact, max_dist: 2.5, unless_after: "^Standing Heavy Punch$",
+       unless_match: "^M Jinrai", why: "user: Jinrai can be DI'ed"}
 moves:
   punish_l_srk: {name: "L Shoryuken (punish)", seq: "6@3 2@3 3+LP@3", startup: 5}
   hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}
@@ -277,11 +309,16 @@ fireball:
   jump_land_max: 0.9        # ... and not past it (the lab's jump-ins start from travel + 0.3-0.9: 0.20.3)
   jump_punish_value: 0.8    # share of the route's damage expected
   jump_fail_cost: 0.3
+  sa1: false                # 0.25.0: SA1 through a projectile is off (MEASURED 0.24.x ranked: 5 tries, 5 whiffed and punished)
   sa1_value: 0.85           # ASSUMPTION: the Shinku Hadoken beats a normal projectile
   super_bar_cost: 0.4
   clash_move: hadoken_hp
   clash_startup: 12         # Capcom: H Hadoken
   clash_min_dist: 2.5
+  clash_min_frames_per_unit: 11.0   # 0.25.0: no clash against a faster projectile (Akuma's charged Gou Hadoken ~9.6)
+  clash_margin: 5           # 0.25.0: the bot's Hadoken must be out this many frames before the projectile arrives (was 2)
+  charge_block: true        # 0.25.0: block while the opponent holds a projectile's charge (move_timing lead-in)
+  charge_block_dist: 4.5
   clash_value: -0.05        # outside burnout walking in and parrying gains ground and keeps the Drive
   clash_value_burnout: 0.3
   jump_over_value: -0.1
@@ -302,6 +339,7 @@ di_punish:
 # to one option so it reaches the game on the first free frame, drawn from what this opponent did before.
 defense:
   max_dist: 1.4            # opponent within this (game units; throw range ~0.8 + a step) = a pressure moment
+  back_throw_wall: 2.5     # 0.25.0: tech / throw options throw backwards only with the bot's back this close to its wall
   approach: true           # 0.18.0: the opponent walking in to within approach_dist in neutral is a moment too
   approach_dist: 1.15
   approach_reset: 1.6      # a new approach once the opponent was this far away again
@@ -320,7 +358,9 @@ defense:
   prior: {throw: 1.5, strike: 1.5, shimmy: 0.5, wait: 1.5, cmd_grab: 1.0}
   options:
     block:      {seq: "1@12"}
-    delay_tech: {seq: "1@4 4+LP+LK@3 1@8"}     # hold down-back, then back + throw: late enough to block a strike
+    # 0.25.0: the throw's direction is set when the option goes out (fighter.throw_direction): forward, back only with the
+    # bot's own back within back_throw_wall of its wall (MEASURED 0.24.x: 148 back throws with nothing to tech)
+    delay_tech: {seq: "1@4 4+LP+LK@3 1@8"}     # hold down-back, then throw: late enough to block a strike
     tech:       {seq: "4+LP+LK@3 1@8"}
     jab:        {seq: "2+LP@3 1@6"}
     back_dash:  {seq: "4@3 5@2 4@3"}
@@ -344,8 +384,10 @@ defense:
   # each option. What each option actually scores against an opponent replaces these as tries accumulate.
   payoff:
     block:      {throw: -1.2, strike: 0.0, shimmy: 0.0, wait: 0.0, cmd_grab: -2.5}
-    delay_tech: {throw: 0.0, strike: -0.2, shimmy: -1.6, wait: -0.3, cmd_grab: -2.5}
-    tech:       {throw: 0.0, strike: -0.9, shimmy: -1.6, wait: -0.3, cmd_grab: -2.5}
+    # 0.25.0 MEASURED (61 ranked matches on 0.24.x): the tech options' throw was hit 66 times, 38 in its start-up by a strike
+    # and 28 after it whiffed (a shimmy); lowered from strike -0.2 / -0.9
+    delay_tech: {throw: 0.0, strike: -0.7, shimmy: -1.8, wait: -0.3, cmd_grab: -2.5}
+    tech:       {throw: 0.0, strike: -1.3, shimmy: -1.8, wait: -0.3, cmd_grab: -2.5}
     jab:        {throw: 0.3, strike: -0.9, shimmy: -0.6, wait: 0.2, cmd_grab: 0.3}
     back_dash:  {throw: 0.0, strike: -1.0, shimmy: -0.2, wait: 0.0, cmd_grab: 0.3}
     # 0.19.0 MEASURED (22 ranked matches): jumps out of blockstun lost 390-730 hp each over the next 2.3 s (lowered from
