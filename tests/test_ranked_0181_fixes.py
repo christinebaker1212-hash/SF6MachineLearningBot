@@ -385,6 +385,13 @@ def test_error_boxes_are_cleared_as_they_appear_and_nothing_else_is_pressed():
     screens1 = iter([err, searching, searching, searching])
     got = [one.tick(float(t), False, True, lambda: next(screens1, searching)) for t in range(0, 8)]
     assert [g for g in got if g] == [[("F", 0.0)]]
+    # user: "sometimes it will say canceling matchmaking after only one error box. It's completely inconsistent."
+    w1 = MenuWatch()
+    screens2 = iter([err, mm, searching, searching])
+    got2 = [w1.tick(float(t), False, True, lambda: next(screens2, searching)) for t in range(0, 8)]
+    assert [[k for k, _ in g] for g in got2 if g] == [["F"], ["F", "ESC"]]
+    # on the Searching for opponent screen the game reports a battle that is not ready (0.21.x status logs): that is
+    # not a fight, so the boxes there are read (the fight loop passes fighting=False)
     # the matchmaking box is checked first even if the old box's text is still read with it
     assert MenuWatch().tick(0.0, False, True, lambda: err + " " + mm) == [("F", 0.0), ("ESC", 1.0)]
     assert MenuWatch().tick(0.0, False, False, lambda: err) is None                          # SF6 not focused

@@ -3059,7 +3059,13 @@ Otherwise, it will just die from chip damage." All MOCK / unit-tested; not verif
   - "A communication error has occurred" -> F (one box or two: each read clears what is there)
   - at most 12 in a row without a fight in between, then it waits and logs. Logged in `fight_status.json:
     communication_errors` (what, keys, the screen text) and the status log.
-- Tests: the user's sequences (one box; two boxes + the matchmaking box), the matchmaking box first when both texts read,
+- **User (2026-10-05): all of this happens on the "Searching for opponent" screen, and "sometimes it will say canceling
+  matchmaking after only one error box. It's completely inconsistent."** Confirmed in the 0.22.1 status log: on that
+  screen the game reports a battle that is loading (in battle, players not ready: "battle loading" from the result
+  screen until the next match), so 0.18.8, which read only with NO battle reported, never looked at the search screen.
+  0.22.5 reads it (not ready = not a fight), and each read reacts to the box on screen, in any order.
+- Tests: the user's sequences (one box; two boxes + the matchmaking box; one box + the matchmaking box), the matchmaking
+  box first when both texts read,
   never during a fight; a MOCK ranked session where the boxes appear while the match loads. The OCR of these boxes
   (wording, the red box) is not verified in game: the screen text of each press is logged to check it.
 
