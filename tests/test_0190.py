@@ -123,19 +123,25 @@ def test_defence_timing_includes_the_hitstop():
     # hitstop (0.19.0 used the frozen value alone: reversals went out 5-25 frames early and the game dropped them)
     from sf6bot.sequences import parse_sequence
 
+    rules = set()
+
     def first_wait(hitstop):
         f = _fighter()
         # drive 1.5 bars: no Drive Reversal (0.20.0), which is input 8 frames before the stun ends on purpose
         d = f.decide(state(me={"blockstun": 6, "hitstop": hitstop, "action_id": 160, "super": 0, "drive": 15000},
                            op={"x": 0.9, "action_id": 600}, timer=500), 0.0, 0)
         assert (d.rule or "").startswith("defense"), d
+        rules.add(d.rule)
         n = 0
         for st in parse_sequence(d.seq, "x").steps:      # frames before the first button
             if st.state.buttons:
                 break
             n += st.frames
         return n
-    assert first_wait(10) >= 8 and first_wait(12) - first_wait(10) == 2 and first_wait(0) == 0
+    # 0.21.0: whatever the option (the delay tech now leads after a block: 4 frames of block first), hitstop adds to the
+    # wait frame for frame once the stun is long enough to need a pad
+    w0 = first_wait(0)
+    assert first_wait(10) > w0 and first_wait(12) - first_wait(10) == 2 and len(rules) == 1
     f = _fighter()
     far = f.decide(state(me={"blockstun": 6, "hitstop": 30, "action_id": 160, "super": 0},
                          op={"x": 0.9, "action_id": 600}, timer=500), 0.0, 0)

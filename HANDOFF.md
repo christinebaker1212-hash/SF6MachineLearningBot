@@ -251,12 +251,16 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.7 (latest): no Drive Impact from neutral at all** (neutral policy, wall DI and DI punish off; DI-back and DI in
-combo routes stay). The user's 50-match batch (2026-10-05) runs on 0.20.6. **Proposed as 0.21.0, waiting for the user's
-go:** anti-air readiness (no neutral moves once the opponent jumps toward the bot; reversal Shoryuken on a wake-up
-jump-in), crouch-block by default inside the opponent's poke range, throw defence by default (act first on a walk-up;
-delay-tech on wake-up / after blocking), turn-taking by frame data, and the diagnosis in `scorecard` (CLAUDE.md
-"Diagnosis of 56 ranked matches").
+**0.21.0 (latest): neutral like Legend Ryu** (style table from 12 Legend replays: mostly crouch-blocking and walking,
+the Legends' buttons per distance, Drive Rush with their follow-ups), anti-air readiness and a wake-up Shoryuken,
+crouch-block inside the opponent's range, turn-taking at pressure moments (delay tech when minus, jab when plus, guesses
+rare, parry only with 3 bars), oki meaty / throw only in range, and the diagnosis rows in `scorecard` (CLAUDE.md
+"0.21.0"). The user runs 50 ranked matches on it next. Then: S (scorecard 0.21.0 vs 0.20.x: openings a minute both
+ways, opened-while, after-block pressed / thrown, anti-aired %), the thoughts' style lines, `neutral`, `defense.*.turns`.
+B rebuilds the style table from every recorded Ryu replay: ask the user to record only strong players' Ryu replays (D).
+
+**0.20.7: no Drive Impact from neutral at all** (neutral policy, wall DI and DI punish off; DI-back and DI in combo
+routes stay).
 
 **0.20.6: no punishable specials (Tatsus, L/M High Blade Kick) and no Drive Impact without a projectile
 from the neutral policy** (CLAUDE.md "0.20.6").

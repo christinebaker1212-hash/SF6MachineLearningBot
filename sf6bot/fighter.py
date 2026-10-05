@@ -32,6 +32,7 @@ from . import clock
 from .actions import Facing, InputState
 from .dataset import DatasetBuilder
 from .episodes import FIGHT_START_FRAME, EpisodeTracker
+from .intents import category as intents_category
 from .game_state import (ArrivalMeter, character_name, facing_of, file_stem, num, open_state_reader,
                          player_distance)
 from .sequences import SequenceRunner, parse_sequence
@@ -353,6 +354,7 @@ class ScriptedFighter:
         self.di_stats = {"di_back": 0, "di_back_skipped_lethal": 0, "own_di_skipped_meter": 0, "burnout_super": 0}
         self._aa_overhead_for = None
         self._aa_busy_for = None
+        self._aa_ready_for = None             # 0.21.0: the jump the bot held still for (counted once)
         self._burnout_super_for = None
         self._a2a_for = None
         self._corner_fired = None
@@ -368,6 +370,9 @@ class ScriptedFighter:
         self.hit_switch = {"normal": 0, "counter": 0, "punish_counter": 0, "other": 0, "switched": 0, "stopped": 0,
                            "switched_to": {}}
         self.sa3_vs_route = {"sa3": 0, "route": 0}
+        self.neutral_stats: dict = {}         # 0.21.0: crouch blocks inside the opponent's range instead of idle / walk in
+        self.style_counts: dict = {}          # 0.21.0: what the style table chose in neutral (readable labels)
+        self.rush_options: dict = {}          # 0.21.0: Drive Rush follow-up name -> drive_rush_in option (set by the fight setup)
         self._switched_to = None
         self._sa3_cmp_for = None
         self.corner_stats = {"moments": 0}
@@ -490,6 +495,24 @@ class ScriptedFighter:
         info = self.opp.get(a, {})
         return not (info.get("projectile") or info.get("di") or info.get("cmd_grab"))
 
+    def _jump_threat(self, me: dict, op: dict) -> tuple[float, float] | None:
+        """0.21.0: the opponent is in the air (a jump or an airborne attack) and will land within the bot's anti-air reach
+        (+ `anti_air.ready_margin`): (frames until it lands, predicted landing offset from the bot), else None. MEASURED
+        (56 ranked matches): in 96 jump-ins that landed near the bot with the bot free at take-off, the bot started a
+        normal (27) or a special (20) DURING the jump and was a Shoryuken short 86 times; the anti-air rule only looks
+        once the landing is inside the Shoryuken's window, and until then the neutral policy kept choosing moves."""
+        if not (self._jumping(op) or self._air_move(op)) or not self.vel_ok:
+            return None
+        aa = self.c["anti_air"]
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None:
+            return None
+        t_land = landing_frames(_num(op.get("y")) or 0.0, self.op_vy, float(aa.get("gravity", 0.0123)))
+        pdx = ox + self.op_vx * t_land - mx
+        if abs(pdx) > float(aa["max_dist"]) + float(aa.get("ready_margin", 0.6)):
+            return None
+        return t_land, pdx
+
     def _throw_coming(self, op: dict, dist: float) -> bool:
         return op.get("action_id") in self.throw_ids and dist <= self.c["throw_tech"]["max_dist"]
 
@@ -503,8 +526,9 @@ class ScriptedFighter:
             return "opponent throw"
         if self.opp.get(op.get("action_id"), {}).get("di") and dist < 3.0:
             return "opponent Drive Impact"
-        if (self._jumping(op) or self._air_move(op)) and dist <= self.c["anti_air"]["max_dist"] + 0.6:
-            return "opponent jumping in"
+        if (self._jumping(op) or self._air_move(op)) and (dist <= self.c["anti_air"]["max_dist"] + 0.6
+                                                          or self._jump_threat(me, op) is not None):
+            return "opponent jumping in"      # 0.21.0: from where it will LAND, not only how close it is now
         return None
 
     def decide(self, raw: dict, t: float, me_i: int) -> Decision:
@@ -732,6 +756,24 @@ class ScriptedFighter:
         pp = self._perfect_parry(raw, me, dist)
         if pp is not None:
             return pp
+        # 4c. 0.21.0 anti-air readiness: the opponent is in the air and will land within reach: start nothing (no poke,
+        #     special, walk, rush or charge: the Shoryuken must be able to come out), stand ready for rule 4's window.
+        #     Inside that window without a Shoryuken (human limits, too close to call): block toward the landing side.
+        if me_y <= 0.05 and not (_num(me.get("blockstun")) or 0) and not self.aa_done_for_jump:
+            jt = self._jump_threat(me, op)
+            if jt is not None:
+                t_land, pdx = jt
+                if self._aa_ready_for != self.op_onset:
+                    self._aa_ready_for = self.op_onset
+                    self.aa_stats["ready"] = self.aa_stats.get("ready", 0) + 1
+                srk = self.c["moves"][aa.get("move", "shoryuken")]
+                need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
+                why = f"opponent in the air, lands in {t_land:.0f}f {abs(pdx):.2f} away"
+                if t_land <= need + int(aa.get("early_frames", 6)):
+                    land_side = (Facing.RIGHT if pdx > 0 else Facing.LEFT) if abs(pdx) > 0.05 else self.side
+                    return Decision("hold", direction=4, facing=land_side, rule="aa_ready",
+                                    reason=why + ": no anti-air now, blocking toward the landing side")
+                return Decision("release", rule="aa_ready", reason=why + ": starting nothing, anti-air ready")
         # 5. blocking, maybe punish
         bs = _num(me.get("blockstun")) or 0
         if bs > 0:
@@ -902,6 +944,11 @@ class ScriptedFighter:
         # defences chosen after a block - Shoryuken, jab, delay tech - were thrown: their input came too late)
         if self._pressure_fired or rem is None or rem > self.lead + self.stale + self.defense.pad + 1:
             return None
+        if sit == "wakeup":
+            wa = self._wakeup_anti_air(me, op, rem)
+            if wa is not None:
+                self._pressure_fired = True
+                return wa
         if dist > float(dc.get("max_dist", 1.4)) or (_num(op.get("y")) or 0.0) > 0.3:
             return None
         if sit in ("after_block", "after_rush_block"):
@@ -915,6 +962,28 @@ class ScriptedFighter:
                 return None                          # punishable (or the user's punish rule): the punish rule acts
         self._pressure_fired = True
         return self._commit_defense(sit, raw, me, op, dist, t, rem=rem)
+
+    def _wakeup_anti_air(self, me: dict, op: dict, rem: int) -> Decision | None:
+        """0.21.0: the opponent jumping at the bot while it gets up (MEASURED, 56 ranked matches: 44 of 518 jumps came on
+        the bot's wake-up): a reversal anti-air Shoryuken whose button lands on the bot's first free frame. L Shoryuken
+        is invincible to airborne attacks from frame 1 to 14 (Capcom), active 5-14: only when the opponent comes down in
+        that window (`anti_air.wakeup_window`), on the same side (a cross-up is blocked by the usual rules)."""
+        aa = self.c["anti_air"]
+        jt = self._jump_threat(me, op)
+        if jt is None or not aa.get("wakeup_reversal", True):
+            return None
+        t_land, pdx = jt
+        dx = (_num(op.get("x")) or 0.0) - (_num(me.get("x")) or 0.0)
+        lo, hi = (aa.get("wakeup_window") or [3, 16])[:2]
+        if dx * pdx <= 0 or abs(pdx) < float(aa.get("min_dist", 0.25)) or not rem + int(lo) <= t_land <= rem + int(hi):
+            return None
+        srk = self.c["moves"][aa.get("move", "shoryuken")]
+        pad = max(0, int(rem) - self.lead - self.stale) - seq_prefix(srk["seq"])
+        self.aa_done_for_jump = True
+        self.aa_stats["wakeup_reversal"] = self.aa_stats.get("wakeup_reversal", 0) + 1
+        return Decision("seq", f"reversal {srk['name']}", (f"5@{pad} " if pad > 0 else "") + srk["seq"],
+                        rule="wakeup_anti_air",
+                        reason=f"getting up with the opponent jumping in (lands in {t_land:.0f}f, I am free in {rem}f)")
 
     def _approach(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
         """0.18.0: the opponent walking into throw range in neutral is a pressure moment too (0.17.5 ranked: 9 of 26
@@ -1408,8 +1477,10 @@ class ScriptedFighter:
         a few frames later than its earliest point still lands on time (a late frame trap leaves a gap)."""
         dc = self.c.get("defense") or {}
         wait = None if rem is None else max(0, int(rem) - self.lead - self.stale)
+        exclude, bonus, turn = self._turn(sit, me, op, dist)
         ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
-                                 lambda name, oc: self._resolve_option(me, op, oc), wait=wait)
+                                 lambda name, oc: self._resolve_option(me, op, oc), wait=wait,
+                                 exclude=exclude, bonus=bonus)
         opt = ch["option"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
         # did 58% of the user's damage against a crouch block)
@@ -1419,6 +1490,9 @@ class ScriptedFighter:
         st = self.defense_stats.setdefault(sit, {"moments": 0, "options": {}, "responses": {}})
         st["moments"] += 1
         st["options"][opt] = st["options"].get(opt, 0) + 1
+        if turn:
+            st.setdefault("turns", {})
+            st["turns"][turn] = st["turns"].get(turn, 0) + 1
         self.watch = {"sit": sit, "t0": raw.get("stage_timer"), "ox0": _num(op.get("x")), "mx0": _num(me.get("x")),
                       "oa0": op.get("action_id"), "frames": int(dc.get("watch_frames", 30))}
         if self.exp is not None:
@@ -1427,7 +1501,55 @@ class ScriptedFighter:
         from .defense import NICE, SITUATIONS
         kind = {"their_wakeup": "oki", "own_rush_block": "pressure", "corner": "pressure"}.get(sit, "defence")
         return Decision("seq", f"{kind}: {ch.get('label') or NICE.get(opt, opt)}", ch["seq"], rule=f"defense:{opt}",
-                        reason=f"{SITUATIONS[sit]} at {dist:.2f}; the opponent's odds: {odds}")
+                        reason=f"{SITUATIONS[sit]} at {dist:.2f}" + (f", {turn}" if turn else "")
+                               + f"; the opponent's odds: {odds}")
+
+    def _turn(self, sit: str, me: dict, op: dict, dist: float) -> tuple[set, dict, str]:
+        """0.21.0 turn-taking by frame data (configs: defense.turns): (options left out, value bonuses, a label).
+        MEASURED (56 + 7 ranked matches): ~105 throws on the bot, 35 of them while blocking or just after, and 90 of its
+        openings given up by pressing into the opponent's buttons; after a block the bot pressed 44% of the time and was
+        thrown 6%, the Legend Ryus pressed 31% and were thrown 2%. So:
+          - the bot minus or the frames unknown (after a block / a hit; its own wake-up): no jab and no instant tech (both
+            lose to the opponent's next button); the delay tech is the default (throws teched, late strikes blocked);
+            the guesses (parry, Drive Reversal, reversal, jump) start `guess_penalty` lower
+          - the bot plus (the blocked move is minus for the opponent): the jab gets the bonus
+          - the opponent walking in: no block or parry (both lose to the walk-up throw) and no reversal guess; the jab
+            gets the bonus
+          - a parry only with `parry_min_drive` (3 bars: the 7 ranked matches had 3 burnouts)
+          - on the opponent's wake-up: the meaty only within its reach (2MK whiffed 12 of 26 at median 1.44), the throw
+            only within throw range"""
+        tc = (self.c.get("defense") or {}).get("turns") or {}
+        if not tc.get("enabled", True):
+            return set(), {}, ""
+        b = float(tc.get("bonus", 0.5))
+        ex, bonus, turn = set(), {}, ""
+        if (_num(me.get("drive")) or 0) < int(tc.get("parry_min_drive", 30000)):
+            ex.add("parry")
+        if sit in ("after_block", "after_rush_block", "after_hit", "wakeup"):
+            adv = self._block_adv(op.get("action_id")) if sit in ("after_block", "after_rush_block") else None
+            mine = -adv if isinstance(adv, int) else None
+            if mine is not None and mine >= 1:
+                bonus["jab"] = float(tc.get("jab_bonus", 0.35))
+                turn = f"my turn ({mine:+d})"
+            else:
+                ex |= {"jab", "tech"}
+                bonus["delay_tech"] = b
+                # the guesses (parry, Drive Reversal, a reversal, a jump) need this opponent's own answers to support them:
+                # an open-loop replay of the 7 ranked matches through decide() had the first three at 22% of the moments
+                # after a block (jumps out of blockstun lost 390-730 hp each, 0.19.0)
+                for g in ("parry", "drive_reversal", "reversal", "jump"):
+                    bonus[g] = -float(tc.get("guess_penalty", 0.3))
+                turn = "their turn" + (f" ({mine:+d})" if mine is not None else "")
+        elif sit == "approach":
+            ex |= {"block", "parry", "reversal"}
+            bonus["jab"] = float(tc.get("jab_bonus", 0.35))
+        elif sit == "their_wakeup":
+            meaty = self.own_reach.get(int(tc.get("meaty_id", 640)))
+            if dist > float(meaty if isinstance(meaty, (int, float)) else tc.get("meaty_max_dist", 1.25)) + 0.05:
+                ex.add("meaty")
+            if dist > float(tc.get("oki_throw_max", 0.9)):
+                ex.add("throw")
+        return ex, bonus, turn
 
     def _resolve_option(self, me: dict, op: dict, oc: dict) -> dict | None:
         """The first candidate of an option the bot can afford now (0.18.3: the reversal = SA3 when it kills, else OD
@@ -1492,6 +1614,8 @@ class ScriptedFighter:
         rc = self.c.get("drive_rush_in") or {}
         if not rc.get("enabled", True) or self.safe or self.busy(me) is not None:
             return None
+        if self.policy is not None and self.policy.style_table is not None:
+            return None                                  # 0.21.0: the style table decides where to rush (neutral)
         if not float(rc.get("min_dist", 1.8)) <= dist <= float(rc.get("max_dist", 3.0)):
             return None
         if (_num(op.get("y")) or 0.0) > 0.05 or self.opp_has_super(op) or t < self._rush_next:
@@ -1992,6 +2116,36 @@ class ScriptedFighter:
             e = ch["route"]
             return Decision("route", e["route"], route=e, rule=rule, intent=intent,
                             reason=reason + f" -> {e['route']} (true combo, {e.get('damage')} dmg)")
+        # 0.21.0: inside the opponent's poke range (its longest poke + a step) the bot does not stand there or drift in.
+        # MEASURED (56 ranked matches): 84 opponent normals hit it while it stood with no direction held (37), walked
+        # forward (32) or crouched without holding back (15), 3-9 frames after the button: no time to react, so it has
+        # to be blocking already. "idle" becomes a crouch block there, and most walks in become one too (`walk_in_share`
+        # of them stay: the bot still approaches). Not while the opponent is busy (recovering, in a stun).
+        pc = self.c.get("policy") or {}
+        styled = str(ch.get("source", "")).startswith("style")
+        if styled:
+            lab = (ch.get("move") or ch.get("style_action") or intent).replace("_", " ")
+            self.style_counts[lab] = self.style_counts.get(lab, 0) + 1
+        if self.policy.in_their_range(dist) and intents_category(op) in ("idle", "walk", "crouch", "dash"):
+            # with a style table its own walks in stay (the Legends walked in and out ~20 times a minute each way)
+            if intent == "idle" or (not styled and intent == "walk_fwd"
+                                    and self.rng.random() >= float(pc.get("walk_in_share", 0.3))):
+                self.neutral_stats["crouch_block_in_range"] = self.neutral_stats.get("crouch_block_in_range", 0) + 1
+                return Decision("hold", direction=1, reason=reason + f"; inside their range ({self.policy.their_reach():.2f})"
+                                f": crouch block", rule="policy:crouch_block", intent="crouch")
+        if intent == "drive_rush" and styled:
+            o = self.rush_options.get(ch.get("rush_follow"))
+            oa = op.get("action_id")
+            if (o is not None and not self.opp_has_super(op) and (_num(op.get("y")) or 0.0) <= 0.05
+                    and not (isinstance(oa, int) and oa >= self.c["attack_id_min"]) and self.can_spend(me, "drive_parry")):
+                self.rush_stats["style_rush"] = self.rush_stats.get("style_rush", 0) + 1
+                k_ = "rush_in:" + o["name"]
+                self.rush_stats[k_] = self.rush_stats.get(k_, 0) + 1
+                return Decision("seq", o["name"], o["seq"], rule="policy:drive_rush", intent="drive_rush",
+                                reason=reason + f" -> {o['name']}")
+            self.neutral_stats["rush_held"] = self.neutral_stats.get("rush_held", 0) + 1
+            return Decision("hold", direction=1, reason=reason + "; no Drive Rush now (super meter / attack / Drive)",
+                            rule="policy:crouch_block", intent="crouch")
         if not ch.get("seq") or intent == "idle":
             return Decision("release", reason=reason, rule=rule, intent=intent)
         if intent == "crouch":
@@ -2392,6 +2546,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["denjin"] = dict(fighter.denjin_stats, stock_at_end=fighter.denjin_stock)
                 summary["stun_followups"] = dict(fighter.stun_stats)
                 summary["route_hits"] = dict(fighter.hit_switch, sa3_vs_route=dict(fighter.sa3_vs_route))
+                summary["neutral"] = dict(fighter.neutral_stats,
+                                          style=dict(sorted(fighter.style_counts.items(), key=lambda kv: -kv[1])))
             if learner is not None:
                 try:
                     saved = learner.save()
@@ -2842,6 +2998,17 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     print(f"(opponent threat data unavailable: {e})")
                 plans = route_plans(fcfg, summary["character"], ds_root)
                 summary["routes_on_game_clock"] = sorted(plans)
+                # 0.21.0: neutral from the style table of the bot's character (Legend Ryu replays ship in configs/style;
+                # B rebuilds it from the user's replays); a Drive Rush from it uses the drive_rush_in options
+                fighter.rush_options = {o["follow"]: o for o in (fcfg.get("drive_rush_in") or {}).get("options") or []
+                                        if o.get("follow") and o.get("seq")}
+                if policy is not None:
+                    from . import style as style_
+                    policy.style_table = style_.load(summary["character"], ds_root)
+                    policy.rush_follows = dict(fighter.rush_options)
+                    st_ = policy.style_table
+                    summary["style_table"] = ({"decisions": st_.get("decisions"), "source": st_.get("source"),
+                                               "built": st_.get("built")} if st_ else None)
                 try:
                     from .game_state import game_build
                     now = game_build(cfg)

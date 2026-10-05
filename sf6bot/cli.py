@@ -611,6 +611,16 @@ def cmd_train(args, cfg):
         wrep["mined_combos"] = mine_combos(root, log=print)
     except Exception as e:                       # noqa: BLE001 - the networks are trained either way
         print(f"Combo mining failed: {e}")
+    # 0.21.0: the style table of the bot's character from every replay with it (play neutral like those players)
+    try:
+        from . import style as _style
+        from .fighter import load_fighter_config
+        ch = load_fighter_config(cfg.get("fighter", {}).get("config_dir", "configs/fighter")).get("character")
+        st = _style.build(root, ch, log=print) if ch else None
+        if st is not None:
+            print(f"Style table saved: {_style.save(st, root)}")
+    except Exception as e:                       # noqa: BLE001
+        print(f"Style table failed: {e}")
     if bg:
         out = root / "models"
         out.mkdir(parents=True, exist_ok=True)

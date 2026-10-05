@@ -332,16 +332,30 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{dr.get('opp_rushed_blocked', 0)}; punishes not tried because the +4 made the move safe: "
                                 f"{dr.get('punish_skipped', 0)}; my own blocked rush normals turned into pressure: "
                                 f"{dr.get('own_moments', 0)}."))
-    if dr.get("own_rush_in"):
-        out.append(("scripted", f"Drive Rushes in from mid range: {dr['own_rush_in']} ("
+    if dr.get("own_rush_in") or dr.get("style_rush"):
+        n_ = (dr.get("own_rush_in") or 0) + (dr.get("style_rush") or 0)
+        out.append(("scripted", f"Drive Rushes in from mid range: {n_} ("
                                 + ", ".join(f"{k.split(':', 1)[1]} x{v}" for k, v in dr.items() if k.startswith("rush_in:"))
                                 + ")."))
+    ne = summary.get("neutral") or {}
+    if ne.get("style"):
+        st = summary.get("style_table") or {}
+        top = ", ".join(f"{k} x{v}" for k, v in list(ne["style"].items())[:6])
+        out.append(("policy", f"Neutral played from the style table ({st.get('source') or 'replays'}): {top}"
+                              + (f"; inside {opp}'s range a stand-still became a crouch block "
+                                 f"{ne['crouch_block_in_range']} times" if ne.get("crouch_block_in_range") else "")
+                              + (f"; Drive Rushes held back (super meter / attack / Drive) {ne['rush_held']}"
+                                 if ne.get("rush_held") else "") + "."))
+    elif ne.get("crouch_block_in_range"):
+        out.append(("scripted", f"Inside {opp}'s range I crouch-blocked instead of standing or walking in "
+                                f"{ne['crouch_block_in_range']} times."))
     aa = summary.get("anti_air") or {}
     if any(aa.values()):
         out.append(("scripted", f"Anti-air: Shoryukens sent on jumps {aa.get('anti_air', 0)}, on airborne moves "
                                 f"{aa.get('air_moves', 0)}; held block with {opp} overhead (too close to call) "
                                 f"{aa.get('held_overhead', 0)}; jumps I could not answer (still in my own move or "
-                                f"stunned) {aa.get('busy', 0)}"
+                                f"stunned) {aa.get('busy', 0)}; jumps I waited for (nothing started) {aa.get('ready', 0)}; "
+                                f"Shoryukens on my wake-up {aa.get('wakeup_reversal', 0)}"
                                 + (f"; air-to-air out of Shoryuken range {aa['air_to_air']}" if aa.get("air_to_air") else "")
                                 + "."))
     pt = summary.get("parry_throws") or {}
@@ -441,7 +455,12 @@ def defense_thoughts(dstats: dict, opp: str, exp: Experience | None) -> list[tup
                                 f"{opp} " + (said or "showed nothing yet") + "."))
         mix = ", ".join(f"{NICE.get(k, k)} {v}" for k, v in sorted((st.get("options") or {}).items(),
                                                                     key=lambda kv: -kv[1]))
-        out.append(("policy", f"My answers there: {mix}."))
+        turns = st.get("turns") or {}
+        tt = ""
+        if turns:          # 0.21.0: whose turn it was by frame data
+            mine = sum(v for k, v in turns.items() if k.startswith("my turn"))
+            tt = f" (my turn by frame data {mine}, theirs {sum(turns.values()) - mine})"
+        out.append(("policy", f"My answers there: {mix}{tt}."))
         if exp is not None:
             res = []
             for opt in st.get("options") or {}:

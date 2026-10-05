@@ -128,6 +128,10 @@ def test_neutral_never_throws_a_punishable_special_or_a_drive_impact_without_a_p
     hasho = {"name": "L Hashogeki", "id": 1036, "intent": "special", "seq": "2@3 1@3 4+LP@3", "startup": 12,
              "projectile": False, "block_adv": -3, "super_cost": 0}
     pol2 = NeutralPolicy(_Brain(), moves + [hasho], seed=1)
+    # 0.21.0: inside the opponent's range (default reach 1.5) a 12-frame special is too slow; against a short-range
+    # opponent (measured reach 0.7) 1.0 is outside its range and the safe special is allowed
+    assert not pol2.allowed(me, 1.0, lambda a: True, op=op)[it.INTENTS.index("special")]
+    pol2.opp_poke = 0.7
     assert pol2.allowed(me, 1.0, lambda a: True, op=op)[it.INTENTS.index("special")]
     assert {pol2._move("special", "close", me, 1.0, op)["name"] for _ in range(20)} == {"L Hashogeki"}
     # Drive Impact: an opponent's special from 2.0 is not enough; a projectile is

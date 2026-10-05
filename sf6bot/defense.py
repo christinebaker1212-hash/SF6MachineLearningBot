@@ -111,12 +111,16 @@ class Defense:
         tot = sum(w.values()) or 1.0
         return {k: v / tot for k, v in w.items()}
 
-    def values(self, situation: str, can_spend=lambda a: True, resolve=None) -> dict:
+    def values(self, situation: str, can_spend=lambda a: True, resolve=None, exclude=(), bonus: dict | None = None) -> dict:
+        """`exclude`: options not allowed at this moment; `bonus`: added to an option's value (0.21.0 turn-taking: whose
+        turn it is by frame data, fighter._turn)."""
         p = self.odds(situation)
         k_model = float(self.c.get("model_weight", 4))
         out = {}
         options, payoff = self._set(situation)
         for name, oc in options.items():
+            if name in exclude:
+                continue
             if oc.get("situations") and situation not in oc["situations"]:
                 continue                       # an option only some moments allow (0.20.0: Drive Reversal in blockstun)
             if oc.get("drive") and not can_spend(oc["drive"]):
@@ -126,13 +130,14 @@ class Defense:
             pay = {**(payoff.get(name) or {}), **((self.situation_payoff.get(situation) or {}).get(name) or {})}
             model = sum(p[k] * float(pay.get(k, 0.0)) for k in RESPONSES)
             s, n = self.exp.defense_value(situation, name) if self.exp is not None else (0.0, 0.0)
-            out[name] = (model * k_model + s) / (k_model + n)
+            out[name] = (model * k_model + s) / (k_model + n) + float((bonus or {}).get(name, 0.0))
         return out
 
-    def choose(self, situation: str, can_spend=lambda a: True, resolve=None, wait: int | None = None) -> dict:
+    def choose(self, situation: str, can_spend=lambda a: True, resolve=None, wait: int | None = None,
+               exclude=(), bonus: dict | None = None) -> dict:
         """{option, seq, label, probs, odds}: one option drawn from exp(value / temperature). `resolve(name, option)`
         gives the move for an option with candidates ("pick"): a dict with seq / name, or None when unaffordable."""
-        vals = self.values(situation, can_spend, resolve)
+        vals = self.values(situation, can_spend, resolve, exclude, bonus)
         if not vals:
             return {"option": "block", "seq": "1@12", "label": "block", "probs": {}, "odds": self.odds(situation)}
         temp = max(0.05, float(self.c.get("temperature", 0.35)))

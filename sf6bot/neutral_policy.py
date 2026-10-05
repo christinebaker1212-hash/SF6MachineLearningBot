@@ -52,6 +52,9 @@ SAFE_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.2, "drive_im
 WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, factor for retreating)
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
+# 0.21.0: MEASURED 7 ranked matches on 0.20.5 / 0.20.6: ~2.3 parries a minute, many mid-blockstring, and 3 burnouts. A
+# parry from neutral only with this much Drive (3 bars)
+PARRY_MIN_DRIVE = 30000
 DI_WHEN = {"special"}                       # a Drive Impact read on a special (a fireball) from DI_MIN_DIST
 DI_MIN_DIST = 1.5
 NO_NEUTRAL_SPECIAL = ("OD ", "Shoryuken")   # OD specials and invincible reversals: only from the rules and routes
@@ -60,6 +63,17 @@ NO_NEUTRAL_SPECIAL = ("OD ", "Shoryuken")   # OD specials and invincible reversa
 # normal; L Hashogeki (-3) and H Hashogeki (+2) stay. Those moves are still used in combos, punishes and confirms.
 # Projectiles are judged by distance instead (FIREBALL_MIN_DIST). Unknown on-block = not in neutral.
 NEUTRAL_SPECIAL_MIN_BLOCK = -3
+# 0.21.0 (user's 7 ranked matches on 0.20.5 / 0.20.6, "look at how awful the decisionmaking is"). MEASURED (63 ranked
+# matches): the bot's slow buttons are the ones that get counter-hit: Solar Plexus Strike (start-up 20) hit 28 times in
+# its start-up out of 122 presses, Collarbone Breaker (20) 8 of 92, Standing Heavy Punch (10) 9 of 114, 2MK (8) 8 of
+# 252; Whirlwind Kick (16) 19 presses in 10 minutes, 10 whiffed, 8 followed by a hit on the bot. In neutral a poke or
+# special starts in at most NEUTRAL_MAX_STARTUP frames, and inside the opponent's poke range (its longest measured
+# poke, else OPP_POKE_DEFAULT, + THEIR_RANGE_MARGIN) in at most IN_RANGE_MAX_STARTUP: only buttons that come out before
+# theirs. Projectiles are judged by distance (FIREBALL_MIN_DIST). Combos, punishes and confirms keep every move.
+NEUTRAL_MAX_STARTUP = 12
+IN_RANGE_MAX_STARTUP = 9
+OPP_POKE_DEFAULT = 1.5        # ESTIMATE: an opponent without a measured poke (most characters' longest normals ~1.3-1.6)
+THEIR_RANGE_MARGIN = 0.25     # they can step in as they press
 
 
 def own_moves(character: str, ds_root: Path) -> list[dict]:
@@ -122,6 +136,14 @@ def _prior(m: dict, zone: str) -> float:
     return 1.0
 
 
+# 0.21.0 style tables (style.py): a style action -> the intent it is (masks, factors, experience)
+STYLE_INTENT = {"walk_fwd": "walk_fwd", "walk_back": "walk_back", "crouch_block": "crouch", "crouch": "crouch",
+                "stand": "idle", "dash_fwd": "dash_fwd", "dash_back": "dash_back", "jump_fwd": "jump_fwd",
+                "jump_neutral": "jump_neutral", "jump_back": "jump_back", "throw": "throw", "parry": "parry",
+                "rush": "drive_rush", "di": "drive_impact"}
+FREE_MOVES = {"idle", "crouch", "walk_fwd", "walk_back", "dash_fwd", "dash_back"}
+
+
 class NeutralPolicy:
     def __init__(self, brain, moves: list[dict], experience=None, book=None, chara_id=None, cfg: dict | None = None,
                  seed: int | None = None, win=None):
@@ -134,6 +156,10 @@ class NeutralPolicy:
         self.fireball_min = float(c.get("fireball_min_dist", FIREBALL_MIN_DIST))
         self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
+        self.max_startup = int(c.get("neutral_max_startup", NEUTRAL_MAX_STARTUP))
+        self.in_range_max_startup = int(c.get("in_range_max_startup", IN_RANGE_MAX_STARTUP))
+        self.opp_poke_default = float(c.get("opp_poke_default", OPP_POKE_DEFAULT))
+        self.range_margin = float(c.get("their_range_margin", THEIR_RANGE_MARGIN))
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
         self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
         # 0.20.7 (user: "It's using DI in fucking neutral"): the neutral policy never chooses a Drive Impact unless the
@@ -150,6 +176,13 @@ class NeutralPolicy:
         # measured reach per own action id (reach.py, menu B): pokes and close specials only from where they
         # have been seen to connect (0.14.0; the FT5 had ~20 combo starters whiff from too far)
         self.reach: dict = {}
+        # 0.21.0: the style table of the bot's character (style.py; set by the fighter): neutral is sampled from it
+        self.style_table: dict | None = None
+        self.style_temp = float(c.get("style_temperature", 1.0))
+        self.by_id = {m["id"]: m for m in moves if isinstance(m.get("id"), int)}
+        self.rush_follows: dict = {}          # Drive Rush follow-up move name -> the fighter's rush option (set by the fighter)
+        self.rush_min_drive = int(c.get("rush_min_drive", 30000))
+        self.parry_min_drive = int(c.get("parry_min_drive", PARRY_MIN_DRIVE))
 
     def allowed(self, me: dict, dist: float, can_spend, falling: bool | None = None, op: dict | None = None) -> np.ndarray:
         air = (num(me.get("y")) or 0.0) > 0.05
@@ -172,6 +205,8 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "parry" and not (op is not None and it.category(op) in PARRY_WHEN and dist <= PARRY_DIST):
                 ok[i] = False
+            elif name == "parry" and (num(me.get("drive")) or 0) < self.parry_min_drive:
+                ok[i] = False                  # 0.21.0: a parry is a Drive spend: only with 3 bars
             elif name == "drive_impact" and not self.allow_di:
                 ok[i] = False                  # 0.20.7 (user): never a Drive Impact from neutral
             elif name == "drive_impact" and not (op is not None and it.category(op) in DI_WHEN and dist >= DI_MIN_DIST
@@ -181,21 +216,22 @@ class NeutralPolicy:
                 ok[i] = False                  # 0.20.0 (user): a super beats a Drive Impact on reaction
             elif name in ("poke", "special", "air_attack") and not any(m["intent"] == name for m in self.moves):
                 ok[i] = False
-            elif name == "special" and not self._cands("special", me, dist, op):
-                ok[i] = False                  # 0.20.5: nothing safe to throw from here (was: a walk forward instead)
+            elif name in ("special", "poke") and not self._cands(name, me, dist, op):
+                ok[i] = False                  # 0.20.6 / 0.21.0: nothing safe or fast enough from here (was: a walk forward)
         return ok
 
-    def style(self, me: dict, op: dict) -> np.ndarray:
+    def style(self, me: dict, op: dict, spacing: bool = True) -> np.ndarray:
         """Fixed factors on the choices: fewer jumps; less retreating with the wall close behind (0.19.0)."""
         f = np.array([self.intent_factor.get(n, 1.0) for n in it.INTENTS])
         if self.safe:
             for n, k in SAFE_FACTOR.items():
                 f[it.INTENTS.index(n)] *= k
         mx, ox = num(me.get("x")), num(op.get("x"))
-        if self.opp_poke and mx is not None and ox is not None:
+        if spacing and mx is not None and ox is not None:
             # 0.20.0 (user's pick "spacing vs pokes"): hover just outside the opponent's longest poke, so its pokes whiff
             # (and get whiff-punished): step out when just inside it, hold just outside, close in from far. ESTIMATES.
-            d, r = abs(ox - mx), self.opp_poke
+            # 0.21.0: with the default reach when the opponent's is not measured yet
+            d, r = abs(ox - mx), self.their_reach()
             for band, facs in SPACING:
                 if band[0] <= d - r < band[1]:
                     for n, k in facs.items():
@@ -217,11 +253,124 @@ class NeutralPolicy:
         return hp is not None and any(m["intent"] == "super" and m["super_cost"] <= meter and (m.get("damage") or 0) >= hp
                                       for m in self.moves)
 
+    def _style_move_ok(self, m: dict, me: dict, dist: float, op: dict) -> bool:
+        """The masks a style-table move still goes through: no OD / Shoryuken / punishable special from neutral
+        (0.18.0 / 0.20.6), no fireball from close (0.19.1), supers only when they kill, the measured reach."""
+        if m["intent"] == "special":
+            if any(k in m["name"] for k in NO_NEUTRAL_SPECIAL):
+                return False
+            if m.get("projectile") and dist < self.fireball_min:
+                return False
+            if not m.get("projectile") and not (isinstance(m.get("block_adv"), int)
+                                                and m["block_adv"] >= NEUTRAL_SPECIAL_MIN_BLOCK):
+                return False
+        elif m["intent"] == "super":
+            if not (m["super_cost"] <= (num(me.get("super")) or 0) and (m.get("damage") or 0) >= (num(op.get("hp")) or 1e9)):
+                return False
+        elif m["intent"] != "poke":
+            return False
+        r = self.reach.get(m["id"]) if self.reach else None
+        return r is None or m.get("projectile") or dist <= r + REACH_MARGIN
+
+    def _rush_follow(self) -> str | None:
+        """A Drive Rush follow-up drawn from what the table's players pressed out of their rushes (0.21.0)."""
+        ar = (self.style_table or {}).get("after_rush") or {}
+        names, ws = [], []
+        for a, n in ar.items():
+            nm = "throw" if a == "throw" else (self.by_id.get(int(a[5:])) or {}).get("name") if a.startswith("move:") else None
+            if nm in self.rush_follows:
+                names.append(nm)
+                ws.append(float(n))
+        if not names:
+            return None
+        w = np.asarray(ws) / sum(ws)
+        return names[int(self.rng.choice(len(names), p=w))]
+
+    def _style_choice(self, me: dict, op: dict, prev_me, prev_op, frame, dt: int, dist: float, zone: str,
+                      can_spend) -> dict | None:
+        """0.21.0 (user: "we want Ryu to play like this", 12 Legend Ryu replays): neutral sampled from the style table of
+        the bot's character, cell = (distance band, what the opponent is doing), through the usual masks and factors
+        (jumps, the wall behind, safe mode, what worked against this opponent, the win model as far as it is trusted).
+        None = no table / no candidate."""
+        if self.style_table is None or (num(me.get("y")) or 0.0) > 0.05:
+            return None
+        from . import style as st
+        p = st.probs(self.style_table, st.band(dist), st.motion(me, op, prev_op))
+        if not p:
+            return None
+        ok = self.allowed(me, dist, can_spend, None, op)
+        fac = self.style(me, op, spacing=False)
+        idx = {n: i for i, n in enumerate(it.INTENTS)}
+        fol = self._rush_follow() if "rush" in p else None
+        cands, ws = [], []
+        for act, w in p.items():
+            m = None
+            if act.startswith("move:"):
+                m = self.by_id.get(int(act[5:]))
+                if m is None or not self._style_move_ok(m, me, dist, op):
+                    continue
+                intent = m["intent"]
+            elif act == "rush":
+                if fol is None or self.safe or not can_spend("drive_parry") \
+                        or (num(me.get("drive")) or 0) < self.rush_min_drive:
+                    continue
+                intent = "drive_rush"
+            else:
+                intent = STYLE_INTENT.get(act)
+                if intent is None or (intent not in FREE_MOVES and not ok[idx[intent]]):
+                    continue
+            v = w * fac[idx[intent]]
+            if self.exp is not None:
+                v *= self.exp.factor(zone, intent) * (self.exp.move_factor(zone, m["name"]) if m is not None else 1.0)
+            if v > 0:
+                cands.append((act, intent, m))
+                ws.append(v)
+        if not ws:
+            return None
+        adv, source = None, "style"
+        if self.win:
+            # what followed each choice in the bot's own matches (win_model), as in the network path
+            pv = np.zeros(len(it.INTENTS))
+            for (_, intent_, _), w_ in zip(cands, ws):
+                pv[idx[intent_]] += w_
+            adv = self.win.advantage(it.features(me, op, prev_me, prev_op, frame, dt), pv / pv.sum())
+            self.win_sum += adv
+            self.win_n += 1
+            mult = np.exp(np.clip(self.win_beta * self.win.trust * adv, -3.0, 3.0))
+            ws = [w_ * mult[idx[c_[1]]] for c_, w_ in zip(cands, ws)]
+            source += "+win"
+        q = np.asarray(ws) ** (1.0 / max(0.05, self.style_temp))
+        q = q / q.sum()
+        j = int(self.rng.choice(len(q), p=q))
+        act, intent, m = cands[j]
+        top = sorted(((cands[i][2]["name"] if cands[i][2] else cands[i][0].replace("_", " "), float(q[i]))
+                      for i in range(len(q))), key=lambda kv: -kv[1])[:3]
+        out = {"intent": intent, "zone": zone, "dist": dist, "top": top, "source": source, "move": None,
+               "seq": MACROS.get(intent), "route": None, "style_action": act,
+               "win_adv": None if adv is None else round(float(adv[idx[intent]]), 3)}
+        if m is not None:
+            out.update(move=m["name"], seq=m["seq"])
+            if self.book:
+                from .route_book import choose as pick
+                e = pick(self.book, me, op, starter=m["name"], hit_types=("normal",),
+                         learned=self.exp.routes() if self.exp else None, denjin=self.denjin)
+                if e is not None:
+                    out["route"] = e
+        elif intent == "drive_rush":
+            out.update(rush_follow=fol, move=f"Drive Rush > {fol}", seq=None)
+        elif intent == "idle":
+            out["seq"] = None
+        return out
+
     def choose(self, me: dict, op: dict, prev_me, prev_op, frame, can_spend, dt: int = 1) -> dict:
         """{intent, probs (top 3), move, seq or route, source}."""
         mx, ox = num(me.get("x")), num(op.get("x"))
         dist = abs(ox - mx) if mx is not None and ox is not None else 2.0
         zone, cat = it.zone(dist), it.category(op)
+        sc = self._style_choice(me, op, prev_me, prev_op, frame, dt, dist, zone, can_spend)
+        if sc is not None:
+            self.last = sc
+            return sc
         x = it.features(me, op, prev_me, prev_op, frame, dt)
         p, source = self.brain.probs(x, zone, cat)
         p = np.asarray(p, dtype=np.float64)
@@ -295,8 +444,26 @@ class NeutralPolicy:
             r = LiveReach.UNMEASURED
         return dist <= r + REACH_MARGIN
 
+    def their_reach(self) -> float:
+        """The opponent's longest ground poke: measured (reach.py) or the default estimate (0.21.0)."""
+        return self.opp_poke or self.opp_poke_default
+
+    def in_their_range(self, dist: float | None) -> bool:
+        return dist is not None and dist <= self.their_reach() + self.range_margin
+
+    def _fast_enough(self, m: dict, dist: float | None) -> bool:
+        """0.21.0: no slow buttons in neutral, none slower than theirs inside their range (see NEUTRAL_MAX_STARTUP).
+        Not with a style table: those players' own choices per distance decide (5HP at 1.5-2.0, Whirlwind Kick at
+        2.0-2.5), not a start-up cap."""
+        if self.style_table is not None or m["intent"] not in ("poke", "special") or m.get("projectile"):
+            return True
+        su = m.get("startup")
+        if not isinstance(su, int):
+            return False
+        return su <= (self.in_range_max_startup if self.in_their_range(dist) else self.max_startup)
+
     def _cands(self, intent: str, me: dict, dist: float | None = None, op: dict | None = None) -> list[dict]:
-        return [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist)
+        return [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist) and self._fast_enough(m, dist)
                 and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))
                 and not (intent == "special" and any(k in m["name"] for k in NO_NEUTRAL_SPECIAL))
                 and not (intent == "special" and m.get("projectile") and dist is not None and dist < self.fireball_min)

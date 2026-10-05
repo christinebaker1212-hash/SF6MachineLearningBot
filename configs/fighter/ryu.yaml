@@ -48,6 +48,13 @@ anti_air:
   # way up. ESTIMATES.
   air_to_air: {enabled: true, min_dist: 1.3, max_dist: 2.2, seq: "9@3 5@4 5+MP@3"}
   overhead_min_y: 0.9
+  # 0.21.0: anti-air readiness: an opponent in the air that will land within max_dist + ready_margin = start nothing
+  # until the anti-air window (MEASURED: 47 of 96 near jump-ins with the bot free got a normal or special started
+  # under them). On the bot's own wake-up: a reversal L Shoryuken when the opponent comes down `wakeup_window` frames
+  # after the bot's first free frame (its active frames 5-14, air invincible 1-14: Capcom).
+  ready_margin: 0.6
+  wakeup_reversal: true
+  wakeup_window: [3, 16]
   max_dist: 1.30
   max_height: 1.70
   block_lead_frames: 6 # blocking an airborne attack: hold back from where they will be in ~our input latency
@@ -231,12 +238,34 @@ defense:
     # 0.19.0 MEASURED (22 ranked matches): jumps out of blockstun lost 390-730 hp each over the next 2.3 s (lowered from
     # throw 0.6, strike -1.2, shimmy -0.4, wait -0.3); still the answer to a command grab
     jump:       {throw: 0.3, strike: -2.0, shimmy: -1.0, wait: -0.6, cmd_grab: 1.5}
-    reversal:   {throw: 1.2, strike: 1.2, shimmy: -2.5, wait: -2.5, cmd_grab: 1.5}   # a blocked Shoryuken is a full punish
-    parry:      {throw: -1.5, strike: 0.6, shimmy: -0.4, wait: -0.2, cmd_grab: -3.0}
+    # 0.21.0 (user: "parries and reversal guesses rare"; 7 ranked matches on 0.20.5 / 0.20.6: SA1 8 times, reversal
+    # guesses blocked, ~2.3 parries a minute, 3 burnouts): the guesses are worth less before this opponent's own
+    # answers say otherwise (was reversal 1.2 / 1.2 / -2.5 / -2.5, parry -1.5 / 0.6 / -0.4 / -0.2, Drive Reversal
+    # 0.0 / 0.1 / -0.3 / -1.0). With the prior odds: delay tech ~57% after a block, a guess ~15% together
+    reversal:   {throw: 0.8, strike: 0.8, shimmy: -2.5, wait: -3.0, cmd_grab: 1.2}   # a blocked Shoryuken is a full punish
+    parry:      {throw: -1.5, strike: 0.1, shimmy: -0.4, wait: -0.5, cmd_grab: -3.0}
     # invincible, pushes away (little damage) but costs 2 of the 6 Drive bars; blocked it is punishable, so "wait" (the
-    # opponent blocks) is bad. Kept a minority option: a replay of the 0.19.0 session through decide() picked it at 102
-    # of ~550 moments with the first estimates (0.3 / 0.4 / 0.1)
-    drive_reversal: {throw: 0.0, strike: 0.1, shimmy: -0.3, wait: -1.0, cmd_grab: 0.0}
+    # opponent blocks) is bad. A minority option: a replay of the 0.19.0 session through decide() picked it at 102 of
+    # ~550 moments with the first estimates (0.3 / 0.4 / 0.1)
+    drive_reversal: {throw: -0.3, strike: -0.1, shimmy: -0.6, wait: -1.8, cmd_grab: 0.0}
+  # 0.21.0 turn-taking by frame data (fighter._turn): whose turn it is decides which options a moment may use.
+  #  - the bot minus (or the frames unknown) after a block, a hit, or on its own wake-up: no jab, no instant tech; the
+  #    delay tech gets `bonus`; parry / Drive Reversal / reversal / jump lose `guess_penalty`
+  #  - the bot plus: the jab gets `jab_bonus`
+  #  - the opponent walking in: no block, parry or reversal guess; the jab gets `jab_bonus`
+  #  - a parry needs `parry_min_drive`
+  #  - on the opponent's wake-up: the meaty only within its measured reach (`meaty_id`, else `meaty_max_dist`), the throw
+  #    only within `oki_throw_max`
+  # ESTIMATES.
+  turns:
+    enabled: true
+    bonus: 0.5
+    jab_bonus: 0.35
+    guess_penalty: 0.3       # parry / Drive Reversal / reversal / jump on the opponent's turn
+    parry_min_drive: 30000
+    meaty_id: 640            # Ryu 2MK
+    meaty_max_dist: 1.25     # MEASURED 0.14.0: Ryu 2MK connected from up to 1.25 (7 contacts)
+    oki_throw_max: 0.9
   # 0.18.3: the opponent getting up next to the bot is the bot's OFFENCE (oki), not a defence: its own options, timed to
   # the opponent's first free frame (the 30-frame get-up, MEASURED). `early`: the decisive input lands that many frames
   # before it, so a meaty's active frames cover it (2MK start-up 8, active 8-10: Capcom). Payoffs are ESTIMATES (thousands
@@ -318,11 +347,30 @@ drive_rush_in:
   roll_every_s: 0.5
   cooldown_s: 5.0
   options:
-    # 0.20.5: with Capcom data the two normals run on the game clock like the combo lab's PDR (parry held, dash once the
-    # parry is out, the normal on the rush's frame); `seq` is the wall-clock fallback
-    - {name: "Drive Rush 5MP", route: "PDR 5MP", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+MP@3", weight: 0.5}
-    - {name: "Drive Rush 2MK", route: "PDR 2MK", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+MK@3", weight: 0.25}
-    - {name: "Drive Rush throw", seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@10 5+LP+LK@3", weight: 0.25}
+    # 0.20.5: with Capcom data the normals run on the game clock like the combo lab's PDR (parry held, dash once the
+    # parry is out, the normal on the rush's frame); `seq` is the wall-clock fallback.
+    # 0.21.0: `follow` = the Capcom name of the move out of the rush. With a style table (style.py) the neutral policy
+    # rushes where those players rushed and picks the follow-up by what they pressed out of their rushes (12 Legend Ryu
+    # replays, 71 rushes: 5HP 10, 5LP 10, 2HP 8, 5HK 8, 2LK 7, 5MP 5, 2MP 3, throw 3, 5MK 2, 2MK 1); `weight` is for
+    # this rule's own rolls (no style table)
+    - {name: "Drive Rush 5MP", route: "PDR 5MP", follow: "Standing Medium Punch", weight: 0.3,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+MP@3"}
+    - {name: "Drive Rush 2MK", route: "PDR 2MK", follow: "Crouching Medium Kick", weight: 0.15,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+MK@3"}
+    - {name: "Drive Rush 5HP", route: "PDR 5HP", follow: "Standing Heavy Punch", weight: 0.1,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+HP@3"}
+    - {name: "Drive Rush 5LP", route: "PDR 5LP", follow: "Standing Light Punch", weight: 0.1,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+LP@3"}
+    - {name: "Drive Rush 2HP", route: "PDR 2HP", follow: "Crouching Heavy Punch", weight: 0.05,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+HP@3"}
+    - {name: "Drive Rush 5HK", route: "PDR 5HK", follow: "Standing Heavy Kick", weight: 0.05,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+HK@3"}
+    - {name: "Drive Rush 2LK", route: "PDR 2LK", follow: "Crouching Light Kick", weight: 0.05,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+LK@3"}
+    - {name: "Drive Rush 2MP", route: "PDR 2MP", follow: "Crouching Medium Punch", weight: 0.05,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+MP@3"}
+    - {name: "Drive Rush throw", follow: "throw", weight: 0.15,
+       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@10 5+LP+LK@3"}
 # 0.18.4: a ground command grab that whiffed under the airborne bot: a jump attack on the way down (j.HK), then the
 # landing is a whiff punish. Payoffs for "cmd_grab" (above) are ESTIMATES: a neutral jump / back dash / invincible
 # reversal beats a command grab, a block / tech never does, and a grabbed parry is a punish counter.

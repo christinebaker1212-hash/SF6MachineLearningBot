@@ -2797,7 +2797,90 @@ fireball distance, 0.20.6 unsafe specials and supers out of neutral), so the use
 - Opponent Drive Impacts: 143; the bot DI'd back 47, pressed a normal into it 26, did nothing 41.
 - Not measurable from action ids: frame advantage after blocking (an action id stays for the whole animation, longer
   than the move's recovery: the exported total is the animation's length, 0.16.0). Needs the opponents' catalogs (C).
-- Scripts: kept outside the repo (session scratchpad); the measures are to go into `sf6bot scorecard` with 0.21.0.
+- Scripts: kept outside the repo (session scratchpad); the main measures are in `sf6bot scorecard` since 0.21.0.
+
+## 0.21.0: neutral like Legend Ryu; turn-taking by frame data; anti-air readiness (user, 2026-10-05)
+User: "Yes, push the update, then I will run 50"; with 7 more ranked recordings ("Look at how awful the decisionmaking
+is") and 12 replays ("we want Ryu to play like this. These are from Legend players"). All MOCK / replay-tested
+(`tests/test_0210.py`; `decide()` replayed open-loop over the 63 ranked recordings); nothing here is verified in game.
+### The 7 matches on 0.20.5 / 0.20.6 (MEASURED)
+- 0-6 and 1 unfinished, 10.3 fight minutes; damage dealt / taken 0.63; openings ~62 dealt vs ~105 taken; ground normals
+  62% of the damage taken.
+- Bad picks: Whirlwind Kick (start-up 16) 19 times, 10 whiffed, 8 followed by a hit on the bot; Solar Plexus Strike 11,
+  Collarbone Breaker 6; 2MK whiffed 12 of 26 from a median 1.44 (oki meaties from too far); ~2.3 parries a minute, many
+  mid-blockstring; SA1 8 times including blocked reversal guesses; 3 burnouts; 3 own Drive Impacts not DI-backs (0.20.7).
+- Presses per neutral minute: the bot 50, its human opponents 47, both with ~47% whiffs. The difference is WHICH button
+  WHEN, not how often.
+### 12 Legend Ryu replays vs the bot (MEASURED, same measures)
+| | Legend Ryu (18.5 min) | bot 0.20.5 / 0.20.6 |
+|---|---|---|
+| damage dealt / taken | 1.35 | 0.59 |
+| openings a minute (his / theirs) | 7.6 / 6.5 | 7.5 / 10.4 |
+| damage per opening (his) | 1,551 | 1,115 |
+| Drive Rush a minute | 3.8 (37 cancels, 34 from a parry) | 0.1 |
+| own Drive Impact a minute | 0 | 0.3+ |
+| jump-ins landing near: anti-aired / hit him / blocked | 23% / 18% / 41% | 0% / 36% / - |
+| after blocking: pressed a button / thrown | 31% / 2% | 44% / 6% |
+| walk starts a minute (forward / back) | 20.4 / 21.3 | 16.3 / 13.8 |
+- In true neutral the Legends mostly MOVE and BLOCK: at 1.0-1.5 crouch block 44%, walk back 28%, walk forward 8%; at
+  1.5-2.0 crouch block 42%, walk back 25%, walk forward 11%, 5HP 6%; at 2.0-2.5 walk back 38%, crouch block 27%, walk
+  forward 22%; at 3.5+ walk forward 49%. Out of a Drive Rush: 5HP 10, 5LP 10, 2HP 8, 5HK 8, 2LK 7, 5MP 5, 2MP 3, throw 3.
+- Fireballs per throw (Legend): from 3.5+ +160 hp, 2.5-3.5 +18, 1.5-2.5 -922: the bot's 3.5 minimum stays.
+### Changes
+1. **Style table** (`sf6bot/style.py`; shipped `configs/style/Ryu.json`, 1,972 decisions from the 12 Legend replays;
+   `train` / menu B rebuilds `datasets/models/style_<Character>.json` from every recorded replay with the bot's
+   character, and the bigger table wins):
+   - decision points every `WINDOW` 7 frames (the bot's decision rate) where the player is free and grounded and the
+     opponent is not in a stun; cell = distance band (<1.0, 1.0-1.5, 1.5-2.0, 2.0-2.5, 2.5-3.5, 3.5+) x the opponent's
+     motion (walking in / backing off / still / attacking / in the air); label = what the player did in the next 7
+     frames (a move by id, throw, Drive Rush, parry, walk forward / back, crouch block, crouch, dash, jump, stand)
+   - cells with few decisions lean on their band (`PRIOR_K` 12)
+   - `NeutralPolicy._style_choice`: neutral is drawn from the cell, through the old masks (no Drive Impact, no OD /
+     Shoryuken / punishable special, no fireball under 3.5, supers only when they kill, measured reach, throws within
+     1.0, parry only against an attack with 3 bars), the jump / wall / safe-mode factors, the per-opponent learning
+     (`Experience.factor`, `move_factor`) and the win model (as far as its held-out trust allows; source "style+win").
+     The start-up caps (below) do not apply: the table's own choices per distance decide. No table, or nothing allowed
+     in the cell: the network + counts as before.
+   - Drive Rush from the table: the follow-up is drawn from what the Legends pressed out of their rushes and performed as
+     a `drive_rush_in` option (now 9: 5MP, 2MK, 5HP, 5LP, 2HP, 5HK, 2LK, 2MP, throw; `follow` = the Capcom name) on the
+     game clock (combo lab PDR executor); not against a Super bar, not into an attack, not under 3 Drive bars. The
+     rule's own random rush (`_rush_in`) is off while a table is loaded.
+   - Record replays of strong Ryu players only (D): B builds the table from every replay with Ryu in it.
+2. **Anti-air readiness** (rule 4c, `fighter._jump_threat`): an opponent in the air (jump or airborne move) that will
+   land within the anti-air reach + `anti_air.ready_margin` 0.6: the bot starts nothing (no poke, walk, rush or charge)
+   until rule 4's Shoryuken window; inside it without a Shoryuken: block toward the landing side. MEASURED (56 matches):
+   in 96 near jump-ins with the bot free at take-off it started a normal (27) or a special (20) during the jump.
+3. **Wake-up anti-air** (`_wakeup_anti_air`): the opponent jumping at the bot as it gets up (44 of 518 jumps) and
+   landing within `anti_air.wakeup_window` [3, 16] frames after the bot is free: a reversal L Shoryuken (air-invincible
+   1-14, Capcom) timed to the first free frame.
+4. **Inside the opponent's range** (its longest measured poke, else `opp_poke_default` 1.5, + 0.25): standing still
+   becomes a crouch block; without a style table most walks in too (`walk_in_share` 0.3 stay). MEASURED: 84 normals hit
+   the bot standing (37), walking forward (32) or crouching without back (15), 3-9 frames after the button.
+5. **Start-up caps without a style table**: a neutral poke or special starts in <= 12 frames, inside the opponent's range
+   <= 9 (`neutral_max_startup`, `in_range_max_startup`). Solar Plexus (20) was counter-hit in its start-up 28 of 122
+   times, Collarbone (20) 8 of 92, 5HP (10) 9 of 114, 2MK (8) 8 of 252.
+6. **Turn-taking at pressure moments** (`fighter._turn`, `defense.turns`; `Defense.values / choose(exclude, bonus)`):
+   - the bot minus or the frames unknown (after a block or a hit, its own wake-up): no jab, no instant tech; delay tech
+     +0.5; parry / Drive Reversal / reversal / jump -0.3
+   - the bot plus (the blocked move is minus for the opponent): jab +0.35
+   - the opponent walking in: no block, parry or reversal; jab +0.35
+   - a parry only with 3 Drive bars (also from neutral: `policy.parry_min_drive`)
+   - oki: the meaty 2MK only within its measured reach (else 1.25), the throw only within 0.9
+   - payoffs lowered: reversal 0.8 / 0.8 / -2.5 / -3.0, parry -1.5 / 0.1 / -0.4 / -0.5, Drive Reversal
+     -0.3 / -0.1 / -0.6 / -1.8 (throw / strike / shimmy / wait; ESTIMATES)
+   - `defense.<situation>.turns` counts whose turn it was; the thoughts say it.
+7. **Scorecard diagnosis** (`scorecard`, cache v2): openings a minute both ways, damage per opening, what the bot was
+   doing when an opener started (own move / not blocking / blocking / air), anti-aired jump-ins, throws on the bot by
+   context, pressed / thrown after blocking, Drive Rush / parries / own DI a minute. On the 62 recordings: own move at
+   the opener 34-42%, after blocking pressed 36-59% / thrown 4-9%, own DI 1.34 / 0.76 a minute in 0.20.5 / 0.20.6.
+8. Thoughts: the style table's choices, crouch blocks in range, held rushes, jumps waited for, wake-up Shoryukens.
+### Replay check (open loop: the opponents do not react to these choices)
+- Neutral from the table over the 63 recordings: crouch block 34%, walk back 23-25%, walk forward 23%, buttons ~15%
+  (2MP 3.4%, 5HP 1.6-2.1%, 2LK, 2MK, 2LP ~1% each), throw 1.1-1.3%, Drive Rush 0.2%.
+- Defence after a block: delay tech 55-64%, block 15-20%, back dash 14-15%, parry / reversal / jump 1-4% each (before the
+  guess penalty: parry + Drive Reversal + reversal 22%). Approach: jab ~50%. Oki: shimmy 53-58%, meaty 26-41%.
+- The regression fingerprint `fighter_decisions` changed for exactly these defence choices (delay tech when minus, jab
+  when plus); golden updated.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
