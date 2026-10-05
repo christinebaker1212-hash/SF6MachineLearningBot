@@ -247,6 +247,19 @@ airborne moves, SA3 on long whiffs. Not done: perfect parry (its id is unknown),
 Next ranked session: check the new thoughts lines and `anti_air`, `parry_throws`, `di_wall` (with `after_ids`: the wall
 splat id) in the fight summaries.
 
+**Saved for the next batch of fights (user, 2026-10-05): build these with that data.**
+1. **True whiff punishes from the move and the distance.** The bot knows which move the opponent whiffed (catalog / move
+   map / live names) and how far away it is: punish every whiff whose remaining recovery allows it, with the best own
+   move that reaches from that distance (a longer poke, a step forward first, Drive Rush, Drive Impact, a projectile or
+   a super when it fits), not only when a poke's measured reach already covers it. Measure first: how many opponent
+   whiffs near the bot had a known move and enough frames left, and what the bot did.
+2. **No Drive Impact while the opponent has Super meter.** A super beats a Drive Impact on reaction. Applies to
+   neutral DI reads, `di_wall` and DI punishes. To settle with the data: does it also cover DI-back against the
+   opponent's own DI?
+3. **Burnout in the corner vs the opponent's Drive Impact: any Super Art.** A blocked Drive Impact against a burnt-out
+   bot near its wall is a stun; an invincible super (any level the meter allows, SA1 first as the cheapest) avoids it
+   and punishes. Needs the bot's burnout state, its back-to-wall distance and the opponent's DI id.
+
 **0.18.12:** match boundaries after rematches (a joined match's round no longer counts for the next one;
 results and recordings were shifted by a round in the user's second run, one false win). CLAUDE.md "0.18.12".
 
