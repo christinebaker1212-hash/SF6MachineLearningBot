@@ -3138,6 +3138,82 @@ All MOCK / replay-tested (`tests/test_0226.py`); not verified in game.
 - **Process priority** (`win32.prioritize_process`): this module's kernel32 with HANDLE / BOOL declared; a failure reports
   `priority_error` / `power_throttling_error` (GetLastError) in the startup line.
 
+## Diagnosis of the 0.22.5 run: missed punishes and the other errors (2026-10-05; nothing built yet)
+User: "It also often will give up punish opportunities, such as blocked sweeps, whiffed heavy buttons, blocked Supers,
+blocked DPs ... it is constantly, constantly sitting there and doing nothing during critical punish opportunities", and
+"find and identify all of these errors". MEASURED on the 36 finished matches. Exact windows from Capcom's numbers where the
+opponent's ids are known here (Ryu, Ken, Zangief: 16 matches); the rest by move kind (the input read from the opponent's
+mask). `decide()` replayed over the 16 matches with the knowledge the bot had (the user's Ryu and Ken catalogs, Zangief's
+inferred map). Scripts in the session scratchpad.
+### Punishes
+- **Blocked moves** that left a real window (>= 4 frames from the bot's first free frame) where one of Ryu's moves fit
+  (start-up <= window, reach >= distance; reach measured from every connect in the recordings): 30. Punished 8 (27%);
+  pressed nothing 12 (walked back or held down-back through the window); pressed something that missed 10 (too slow for
+  the window, out of reach: e.g. 5MP after a sweep blocked at 1.6, SA1 into a 4-frame window).
+- **Whiffs near the bot** (the recovery after the last active frame): 62 fitting windows. Punished 20 (32%), the bot busy in
+  its own move 8, nothing 12, pressed and missed 20 (out of reach, too slow, or a fireball / Denjin Charge / jump instead).
+- All 36 matches by move kind: blocked sweeps within 2.2: 4 of 21 punished (nothing pressed 11); blocked supers within 2.2:
+  0 of 3 (Alex's SA1 at 0.75 with ~38 frames); blocked DPs 2 of 5; whiffed heavy normals 10 of 30.
+- Causes in the code:
+  1. The punish rule (rule 5) runs only while the bot is in blockstun, fires in its last 4 frames, only within
+     `punish.max_dist` 1.6, and only for a move whose on-block value is known. After blockstun nothing punishes a blocked
+     move: the whiff punish refuses a move that "connected". 27 of the 47 blocked windows were beyond 1.6 after pushback
+     (median 1.64), where only 2HK (measured reach ~2.0), SA1 or a Drive Rush reach, and none of them is a punish option.
+  2. Unknown moves (no catalog / move map): no on-block value, so no punish; after blockstun rule 6 blocks for the whole
+     action ("opponent attacking (action N)") within poke range + 0.4.
+  3. Follow-through ids: a move that continues under another id (Ryu's Shoryuken landing 940, Zangief's 5HP 638 (25 times),
+     Ken's 2LP 619 and [QD] Dragonlash 984) is unknown (blocked through the recovery) or restarts the frame count
+     (FrameClock counts per id), so its phase reads "early" (block) and the frames left are wrong (52 for a landing with ~12).
+  4. Airborne DPs: a blocked or whiffed Shoryuken coming down is an "airborne attack" to the anti-air rules: "starting
+     nothing, anti-air ready" (4c) or "blocking toward the landing side" for ~30 frames, then the landing id is blocked.
+     Ryu's whiffed H Shoryukens at 1.4-2.0 (46-frame windows): 0 of 7 punished.
+  5. The whiff punish's "recovery" starts at start-up - 1 + 4 frames (a guess): the first recovery frames read "early" in
+     20 of 83 replayed windows.
+  6. No long-range punish (2HK, SA1, Drive Rush; H Tatsu unused); a whiff punish steps in only by a walk <= 0.5 or a
+     dash <= 1.25.
+  7. Counting: "Punishable moves I blocked: 22; I punished 0" (fireball Ryu) counts fireballs blocked from 3-4 apart
+     (Capcom's on-block is point blank); "blocked 1; punished 3" (Ed) counts punishes of other moves.
+### Burnout ids (a bug)
+- MEASURED: action ids 510-524 are movement in burnout (516 walk forward +0.047 a frame, 519 / 520 walk back, 511 / 512 /
+  515 / 524 crouch, 510 / 513 / 518 / 521 / 523 stand): 2,692 of the bot's 2,795 frames in them were in burnout.
+- They are >= `attack_id_min` 450: an opponent walking in burnout within 2.0 is "attacking" (the bot held down-back on 76% of
+  those frames; replay: "opponent attacking (action 519)"), and the bot's own burnout walk / crouch is "own move 5xx"
+  (busy for up to 30 frames: reflex rules held).
+### Fireball zoning (the 4 matches vs the fireball Ryu, 0-4)
+- The opponent was in a Hadoken animation 53-76% of the fight; the bot held down-back on 87-93% of those frames and drifted
+  17-25 units backwards per match (cornered 52-73%); 7 of 8 rounds lost on time; the bot in burnout 227 s over the 6 Ryu
+  matches. Cause: rule 6 treats a projectile move within 5.0 as a threat for the thrower's whole animation (47 frames,
+  its recovery included) and blocks.
+### Combos
+- Routes (thoughts): 353 started, 34 finished; without the frozen Dee Jay match (163 tries on a frozen game) ~190 / 34.
+  "2LK ~ 2LP ~ 5LP > 623HP" 0 of 36: after a 2LK hit (8 times) the 2LP came out as id 623 (not the catalogued 622) at the
+  2LK's recovery end (16 frames after the hit: no chain), and 5LP was never pressed. Variant ids are accepted only for
+  specials and supers.
+- Input delay in ranked: 3 every match; the lab's timings were recorded at 4 and are replayed only when the two match
+  (likely none replayed; the user's lab file not seen).
+- 60 crumples from the bot's Drive Impact: H Shoryuken 30+ times (~1,120-1,400), SA3 7, 2LK chains, Denjin Charge 3 times
+  (0 damage); "jump-in combos 0" in every match (likely no TRUE jump-in route in the book).
+### Defence
+- Wake-ups with the opponent within 1.6 (111): delay tech 51 (avg -306 hp over 1.5 s, dealt - taken), block 36 (-303),
+  reversal 12 (+1,183, one lost), a move 9 (-963). The defence game rarely picks the reversal (0.21.0's guess penalty and
+  lowered payoffs).
+- Pressing into the opponent's attack: 31 openings began in the bot's own start-up and 11 more where it pressed out of a
+  crouch block, ~14% of the damage taken (5HP 18, L Hadoken 10, 2HK 7, Solar Plexus 6, Whirlwind 6, 2MK 6).
+- Throws (3.3 a match, scorecard): of those whose start was seen, 15 of 31 landed on a bot holding down-back.
+- Denjin Charge: 26, 7 hit within 60 frames (from 3.0-3.6, into fireballs and approaches).
+### Bookkeeping
+- Victim ids collide with Ryu's: JP's Embrace puts the bot in 1015 -> 1025 (Ryu's L High Blade Kick id).
+- Projectile damage is put on the thrower's current action ("walking (id 9)" for Mai's fans, "standing (id 516)").
+- LP read "4,120" (a dropped digit).
+### Projection (ESTIMATES, not measured)
+- Win model `P(win) = sigmoid(-0.85 + 11.4 ln(dealt / taken))`, fitted on 147 ranked matches (0.17.4-0.22.5); on the 36
+  0.22.5 matches it gives 34% (actual 28%: 6 points optimistic).
+- Each fix's measured opportunities x a value (measured combo damage, Capcom) x a conversion rate (low / central / high,
+  estimates) -> damage per match -> the model, per match: all fixes ~48% calibrated at the same opponents (low ~40%, high
+  ~62%; +3,250 dealt / -3,950 taken a match central); one fix alone +2-3 points; 0.22.6 alone ~30%; the punish package
+  ~36%. By opponents (model): grapplers 23% -> 34%, fireball Ryu 1% -> 41%, the rest 44% -> 64%. Climbing LP brings
+  stronger opponents, so the rate drifts back toward 50%: LP is the measure.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

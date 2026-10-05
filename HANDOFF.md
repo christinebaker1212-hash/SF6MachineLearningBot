@@ -251,7 +251,15 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.22.6 (latest): command grabs jumped, frozen matches** (user: "the Siberian Express is the worst of them. It absolutely
+**Diagnosis of the 0.22.5 run (after 0.22.6, nothing built):** the user asked for every error, especially the missed
+punishes ("constantly sitting there and doing nothing during critical punish opportunities"). CLAUDE.md "Diagnosis of the
+0.22.5 run" has the list with numbers and the code causes: the punish rule works only in blockstun's last 4 frames, within
+1.6, for known moves, and nothing punishes after it; follow-through ids and falling DPs are blocked through their recovery;
+burnout movement ids (510-524) count as attacks; fireballs are blocked for the thrower's whole animation; the light chain
+never completes (2LP as id 623); wake-up reversals (+1,183) are rarely chosen over delay tech (-306). Projected win rate
+with all of them fixed: ~48% (40-62%) at the same opponents, from 28%. Wait for the user to pick what to build.
+
+**0.22.6: command grabs jumped, frozen matches** (user: "the Siberian Express is the worst of them. It absolutely
 refuses to jump before the moment of contact"; the opponent quit mid-round and the bot fought the frozen game for 47 minutes).
 Grabs are learned from being grabbed (`datasets/grabs/`, seeded with Zangief's and JP's measured grabs) and jumped when they
 take long enough to see coming (rule 1d); a battle whose clock stops gets no inputs; SF6's two disconnect boxes get F.
