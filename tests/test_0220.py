@@ -205,3 +205,37 @@ def test_takeover_in_a_fight_session(cfg, tmp_path, monkeypatch):
     assert meta2["operator_rounds"] == {"1": "lost"}
     assert "You took over" in thoughts_md and "lost 1 (discarded)" in thoughts_md
     assert all(r.get("assisted") for r in progress.load_ladder(ds)[-2:])
+
+
+def test_a_mirror_is_set_up_during_the_intro_not_after_fight(cfg, tmp_path, monkeypatch):
+    """0.22.2: in a Ryu mirror the side is only known from the crouch probe at "Fight!"; the setup (~1.8 s on the Ally:
+    the bot stood still at the start of both mirror matches in the 0.22.1 run) now happens during the intro."""
+    from tests.test_learning import _datasets, _ryu_catalog
+    ds = _datasets(tmp_path)
+    _ryu_catalog(ds)
+    rows = _rows("fight_2026-10-02_cpu4_ken.jsonl.gz")
+    for r in rows:
+        r["p2"] = dict(r["p2"], chara=r["p1"].get("chara") or 1)
+        r["p1"] = dict(r["p1"], chara=r["p1"].get("chara") or 1)
+        if r["round"] == 0 and r["stage_timer"] < 190 and r["p1"].get("action_id") in (400, 401):
+            r["_pause"] = 0.01           # the mock reader runs ahead of the loop: slow the intro so "latest" is current
+    lines = [{"in_battle": False, "ready": False}] * 200 + rows
+    readers, made = [], []
+
+    def open_reader(c, on_state=None):
+        readers.append(_Reader(on_state, lines, 0.00025).start())
+        return readers[-1]
+    monkeypatch.setattr(fi, "open_state_reader", open_reader)
+    real = fi.ScriptedFighter
+
+    def spy(*a, **kw):
+        st = readers[0].latest()
+        made.append(st.raw.get("stage_timer") if st is not None else None)
+        return real(*a, **kw)
+    monkeypatch.setattr(fi, "ScriptedFighter", spy)
+    cfg["datasets"] = {"root": str(ds)}
+    cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
+    with Session(cfg, "mirror_setup_test", mock=True) as s:
+        out = fi.run_fight(s, cfg, 30.0, player=None, matches=1, versus="ranked")
+    assert made and isinstance(made[0], int) and made[0] < fi.FIGHT_START_FRAME
+    assert out.get("side_probe") is not None and out.get("opponent") == "Ryu"

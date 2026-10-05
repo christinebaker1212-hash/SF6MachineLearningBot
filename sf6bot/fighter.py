@@ -3088,12 +3088,20 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     continue
                 else:
                     set_panel(False)
-                    continue
-                tracker.self_index = side["i"]
-                me_key, op_key = keys()
-                summary["player"] = me_key
-                summary["side_detection"] = {"side": me_key, "how": side["how"], "input_delay_frames": side["lag"]}
-                sess.narrate(f"I am {me_key.upper()} ({side['how']}).", source="measured")
+                    p1c_, p2c_ = (st.raw.get("p1") or {}).get("chara"), (st.raw.get("p2") or {}).get("chara")
+                    # 0.22.2: a mirror (both players the bot's character) can only be told apart at "Fight!" (the crouch
+                    # probe), and the fighter was set up after it: ~1.8 s with nothing pressed at the start of every
+                    # mirror round 1 (0.22.1 ranked recordings, hit both times). The setup is the same for either side,
+                    # so it is done now, during the intro; the side comes from the probe.
+                    if not (fighter is None and not fight_on and isinstance(p1c_, int) and p1c_ == p2c_
+                            and character_name(p1c_) == fcfg.get("character")):
+                        continue
+                if side["i"] is not None:
+                    tracker.self_index = side["i"]
+                    me_key, op_key = keys()
+                    summary["player"] = me_key
+                    summary["side_detection"] = {"side": me_key, "how": side["how"], "input_delay_frames": side["lag"]}
+                    sess.narrate(f"I am {me_key.upper()} ({side['how']}).", source="measured")
             # 0.18.11: a battle's first lines can still carry the previous match's characters; at "Fight!" they are
             # current, so a side found by character is checked again there
             recheck_ = (by_character(st.raw, fcfg.get("character")) if fight_on and side["how"] == "character"
@@ -3115,7 +3123,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 print(f"[side] I am {keys()[0].upper()}, not {old_.upper()} ({side['how']})")
                 sess.narrate(f"I was reading the game as {old_.upper()} but I am {keys()[0].upper()} ({side['how']}): "
                              "switched.", source="measured")
-            me_key, op_key = keys()
+            me_key, op_key = keys() if side["i"] is not None else ("p1", "p2")    # a mirror's setup: either side
             me, op = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
             if (fighter is not None and isinstance(op.get("chara"), int) and not summary["rounds"]
                     and not summary["decisions"] and character_name(op["chara"]) != summary.get("opponent")):

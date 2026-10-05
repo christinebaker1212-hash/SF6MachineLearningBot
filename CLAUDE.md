@@ -2985,6 +2985,33 @@ a session over the two real CPU fights); nothing here is verified in game.
   lab still follows it 30+). Not verified in game. The routes' measured damage in matches now covers the hits up to
   the last move's first hit (the per-opponent route values use completion, not damage).
 
+## 0.22.1 session (user, 2026-10-05, unattended): 17 ranked matches, 11-6 — and 0.22.3
+Scorecard (same measurement code; MEASURED):
+| | 0.18.10 | 0.19.0 | 0.20.5 + 0.20.6 | 0.22.1 |
+|---|---|---|---|---|
+| record / win % | 10-12 / 45% | 10-24 / 29% | 0-6 / 0% | 11-6 / 65% |
+| damage dealt / taken | 0.92 | 0.92 | 0.51 / 0.64 | 1.14 |
+| openings a minute (mine / theirs) | 8.2 / 10.0 | 8.6 / 9.7 | 7.8 / 10.8, 7.3 / 10.1 | 7.6 / 7.9 |
+| damage per opening (mine / theirs) | 1124 / 996 | 1207 / 1172 | | 1321 / 1116 |
+| jump-ins near: hit the bot % / anti-aired % | 33 / 9 | 32 / 4 | 33 / 0 | 18 / 8 |
+| Shoryuken inputs lost / match | 4.2 | 4.7 | 4.5-5.0 | 2.3 |
+| thrown / match (neutral / after block / wake-up) | 4.6 (2.5 / 0.8 / 1.4) | 3.7 | 2.5 | **6.4 (2.6 / 1.4 / 2.4)** |
+| back to wall % | 14 | 19 | 25-26 | 16 |
+- Ladder (OCR, `progress.md`): Platinum 1 -> Platinum 2, 14,754 LP; this session net +259 LP over 13 matches read (0 sign
+  disagreements). The user's CFN screenshots show the earlier part of the night too: 12-3 in the matches shown, wins over
+  a Platinum 3 (16,261 LP) and a Platinum 2 (15,060-15,100) twice.
+- Still weak: throws on the bot are the most ever (6.4 a match), ground normals 59% of the damage taken; the jump-ins that
+  hit dropped to 18% (from 32-33%).
+- **Standing still after combos (user's observation, 0.22.2):** idle stretches of 40+ frames with the bot free and nothing
+  pressed: 28 in 35 fight minutes (28 s), 23 of them right after a special that ended a route (1017, the 6HK > 214KK
+  ender: ~1 s each, the opponent's whole wake-up given away), 5 ended with the bot being hit. 0.19.0 had 5 such stretches
+  in 60 minutes.
+- **Mirror matches started with ~1.8 s of nothing (0.22.3):** both mirror match-starts in the run (bot P1 and P2) idled
+  ~110-130 frames after "Fight!" and were hit. The side in a mirror is only known from the crouch probe at "Fight!", and the
+  fighter's setup (catalogs, route book, models, learning files) ran after it, slow on the Ally. Now a mirror (both players
+  the bot's character) is set up during the intro (the setup does not depend on the side). Test: a MOCK mirror session
+  sets up before frame 190 (old code: after the probe).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

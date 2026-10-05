@@ -251,7 +251,11 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.22.2 (latest): no standing still after combos and supers** (user, watching the unattended run: "it pauses for a
+**0.22.3 (latest): mirrors set up during the intro** (the 0.22.1 run's two mirror matches started with ~1.8 s of nothing
+after "Fight!"). The 0.22.1 run itself: 11-6, damage ratio 1.14, the best version so far; throws on the bot are the worst
+yet (6.4 a match): the next thing to look at (CLAUDE.md "0.22.1 session").
+
+**0.22.2: no standing still after combos and supers** (user, watching the unattended run: "it pauses for a
 very long time after completing these combos ... especially worse after supers"). The combo executor's lab waits (up to 4 s
 after a route, up to 10 s after a super) also ran in matches; now a match route ends on its last hit (CLAUDE.md "0.22.2").
 The user's first unattended run on 0.22.1 (screenshots, partial): 12-3, Platinum 1 -> 2, wins over a Platinum 3 and a
