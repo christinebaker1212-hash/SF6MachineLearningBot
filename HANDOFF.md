@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-05: code version **0.24.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.24.1**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---

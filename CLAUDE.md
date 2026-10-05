@@ -3346,7 +3346,7 @@ nothing here is verified in game.
   the rest (nothing of it has gone out yet, not even a motion). After the first hit (`route_after_hit`) it also extends the
   route for the hit's kind. Measured on a book of all 114 plannable Ryu community routes: re-planning takes 0.5 ms median,
   ~5 ms p95, 11 ms worst (one per started move).
-- **Any attack the bot starts is continued live** (user: "No, this should require no input from me. This should be done by
+- **0.24.1: any attack the bot starts is continued live** (user: "No, this should require no input from me. This should be done by
   Ryu live, on the fly"; rule 0c `fighter._compose_live`): a move of its own that has just started for any reason (a
   neutral poke, an anti-air Shoryuken, a whiff punish, a pressure option) and is not already a route becomes step 0 of the
   composer's best combo from it with the Super / Drive it has (`Composer.best_from`, worth at least 150 expected); the
