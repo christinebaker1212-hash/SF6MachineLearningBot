@@ -90,8 +90,9 @@ ladder_read:
 # 0.22.0 operator takeover in fights (takeover.py): a real controller input (any XInput pad: the Ally's own, or yours
 # through Parsec) or safety.takeover_key hands the match to you; rounds you WIN teach the bot your answers, lost rounds
 # are discarded. Off for the controller where the bot is a virtual controller itself (Versus Human offline).
+# 0.22.1: OFF (user, 2026-10-05: "I really should just leave it unattended"); set true to use it again
 takeover:
-  enabled: true
+  enabled: false
   controller: true
 
 training:

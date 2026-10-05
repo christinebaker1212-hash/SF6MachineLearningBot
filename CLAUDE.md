@@ -2962,6 +2962,10 @@ a session over the two real CPU fights); nothing here is verified in game.
   - round reviews do not adapt the bot after a round the user played
   - thoughts say which rounds were kept or discarded, how many answers were learned, and which ones the bot used
 - The style table (Legend replays) is unchanged; the operator's play is not added to it.
+- **0.22.1: switched OFF by default** (`takeover.enabled: false`). User, 2026-10-05: "let's just stop this. Ultimately, I
+  really should just leave it unattended. If I don't, I'm just going to get frustrated when the bot is just learning
+  naturally, as it should." The code stays; a controller touch or F11 does nothing unless the setting is turned on.
+  (The user had first suggested the Start button as the takeover / return button, then dropped the feature.)
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

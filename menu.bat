@@ -222,7 +222,6 @@ echo       (the opponent plays here or joins over Parsec). A set is first to 2.
 echo    2  Online room / casual set: the bot plays as this PC's player. First to 2.
 echo    3  RANKED: start this once, then queue. The bot plays every ranked match as this PC's
 echo       player, back to back, until you stop it: F10 = stop after this match, F8 = stop now.
-echo       Take over any time with your controller (or F11): rounds you win teach the bot.
 echo       One run folder for the whole session (progress.md), no video, retrains every 20 matches.
 echo       (Also: double-click ranked.bat.)
 set "VM="

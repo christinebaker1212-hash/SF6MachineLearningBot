@@ -251,7 +251,10 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.22.0 (latest): operator takeover** (user: "a 'Take over' command that shows the bot how to fight against certain
+**0.22.1 (latest): the takeover is OFF by default** (user: "let's just stop this ... I really should just leave it
+unattended"). Don't re-propose operator play; the user wants the bot to learn on its own, unattended.
+
+**0.22.0: operator takeover** (user: "a 'Take over' command that shows the bot how to fight against certain
 gimmicks ... if I lose, disregard the info"; "discarding by round result is best"; "learn from my inputs on my controller,
 not my keyboard"; the user is a Master Ryu, 1380 MR). Any controller input (or F11) during a fight hands the match to the
 user until it ends (F11 = give back). Rounds the user WINS teach the bot their answers per opponent move

@@ -184,6 +184,7 @@ def test_takeover_in_a_fight_session(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(fi, "open_state_reader", open_reader)
     cfg["datasets"] = {"root": str(ds)}
     cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
+    cfg["takeover"] = {"enabled": True}          # off by default since 0.22.1
 
     def pad():
         st = readers[0].latest() if readers else None
