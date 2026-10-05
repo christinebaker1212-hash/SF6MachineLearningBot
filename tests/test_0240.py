@@ -114,8 +114,9 @@ def test_best_tail_adds_sa3_when_the_meter_is_there_and_learns_per_transition():
     assert comp.best_tail(e, 2, {"drive": 60000, "super": 20000, "x": 0}, op, reserve=10000) is None
     # results per transition: the SA3 cancel failed twice -> rated lower
     p0 = comp.p(comp.trans["H Shoryuken|*|,|SA3 Shin Shoryuken"])
-    res = {"steps": [{"contact": 5, "start": 1}, {"contact": 20, "start": 12}, {"contact": 40, "start": 30},
-                     {"contact": None, "start": None}]}
+    res = {"steps": [dict(c, name=s["name"]) for c, s in zip(
+        [{"contact": 5, "start": 1}, {"contact": 20, "start": 12}, {"contact": 40, "start": 30},
+         {"contact": None, "start": None}], new["plan"]["steps"])]}
     comp.record(new, res)
     comp.record(new, res)
     assert comp.learned[new["edges"][2]] == {"n": 2, "ok": 0} and comp.learned[new["edges"][0]] == {"n": 2, "ok": 2}
@@ -255,3 +256,40 @@ def test_the_executor_goes_on_from_a_move_already_out():
     run2.feed(_line(20, 934, 0, d=210, stun=20, hp=9000))
     run2.feed(_line(24, 934, 4, d=210, hs=10, stun=20, hp=8000))
     assert run2.done and run2.result()["success"]
+
+
+def test_a_replan_to_a_shorter_combo_does_not_crash_the_route():
+    """0.24.3 (user: "It said index out of range, and then it totally shut down during a ranked match"): a re-plan at move 1
+    to a SHORTER route made perform_route's loop read past the end of the steps; the exception ended the session."""
+    import threading
+    from types import SimpleNamespace
+    from tests.test_combo_lab import MOVES, Sim, _steps
+    moves = list(MOVES) + [dict(MOVES[-1], name="m3")]       # a 4-move route
+    sim = Sim(moves, lead=4)
+    steps = [dict(x, sequence=x.get("sequence") or "5+LP@3") for x in _steps(moves)]
+    got = {"n": 0}
+
+    class Q:
+        def get(self, timeout=None):
+            got["n"] += 1
+            if got["n"] > 400:
+                raise TimeoutError
+            return SimpleNamespace(ready=True, raw=sim.tick())
+    sent = []
+    reader = SimpleNamespace(subscribe=lambda: Q(), unsubscribe=lambda q: None)
+
+    def run_seq(seq, stop_event=None, end_neutral=True):
+        k = len(sent)
+        sent.append(k)
+        sim.send(k, steps[k]["prefix"] if k < len(steps) else 0)
+        return None, True
+    runner = SimpleNamespace(run=run_seq)
+    sess = SimpleNamespace(stop_event=threading.Event(), controller=SimpleNamespace(set_facing=lambda f: None))
+    calls = []
+
+    def on_step(j, raw):
+        calls.append(j)
+        return (steps[:3], None) if j == 1 else None      # at move 1: a 3-move combo instead of the 4-move one
+    res = cl.perform_route(sess, reader, runner, steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True,
+                           timeout=2.0, on_step=on_step)
+    assert calls and calls[0] == 1 and len(res["steps"]) == 3 and res.get("replans") and not res.get("errors")

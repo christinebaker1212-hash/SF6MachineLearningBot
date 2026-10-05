@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-05: code version **0.24.2**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.24.3**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -240,6 +240,9 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.24.3:** fixed the "index out of range" that ended a ranked session (a combo re-planned shorter mid-route); errors in a
+decision or a combo are now logged (`errors` in the match summary) and the match goes on.
 
 **0.24.2 (user):** jump-in routes only after a Drive Impact stun with the opponent cornered; no other attack starts with a
 jump (fireball jump-in, air-to-air, neutral forward jumps / air attacks off by default).

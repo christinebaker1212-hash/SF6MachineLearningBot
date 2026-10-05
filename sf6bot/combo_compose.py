@@ -466,12 +466,14 @@ class Composer:
         """Per-transition results of a performed route: a transition was tried once the move before it worked (hit, or
         came out for a Drive Rush), and worked when its own move did."""
         edges, st = e.get("edges"), res.get("steps") or []
-        if not edges:
-            return
+        psteps = (e.get("plan") or {}).get("steps") or []
+        if not edges or len(psteps) != len(st) or len(edges) != len(psteps) - 1 \
+                or [s.get("name") for s in psteps] != [s.get("name") for s in st]:
+            return                                    # what was performed is not this route (a re-plan was refused)
 
         def worked(k: int) -> bool:
             s_ = st[k]
-            if (e.get("plan") or {}).get("steps", [{}] * (k + 1))[k].get("hitting"):
+            if psteps[k].get("hitting"):
                 return s_.get("contact") is not None
             return s_.get("start") is not None
         for k in range(1, min(len(st), len(edges) + 1)):

@@ -2937,6 +2937,34 @@ def route_plans(fcfg: dict, character: str, ds_root: Path) -> dict:
     return out
 
 
+def _fight_error(summary: dict, sess, where: str, e: Exception) -> None:
+    """0.24.3: an error inside a decision or a combo is logged (summary `errors`, the narration) and the match goes on.
+    Before, an IndexError in the combo executor ended the whole ranked session mid-match (user, 2026-10-05)."""
+    import traceback
+    tb = traceback.format_exc(limit=6)
+    errs = summary.setdefault("errors", [])
+    if len(errs) < 20:
+        errs.append({"where": where, "error": f"{type(e).__name__}: {e}", "trace": tb[-1500:]})
+    print(f"(error in {where}, carrying on: {type(e).__name__}: {e})")
+    try:
+        sess.narrate(f"Internal error in {where} ({type(e).__name__}); released the keys and carried on.", source="scripted")
+    except Exception:                                # noqa: BLE001
+        pass
+
+
+def _safe_route(summary: dict, sess, perform, *args, **kw) -> dict:
+    """perform_route, but an exception releases the keys and reads as a failed route instead of ending the session."""
+    try:
+        return perform(*args, **kw)
+    except Exception as e:                           # noqa: BLE001
+        _fight_error(summary, sess, "combo", e)
+        try:
+            sess.controller.release_all("route error")
+        except Exception:                            # noqa: BLE001
+            pass
+        return {"success": False, "fail": {"kind": "error"}, "aborted": None, "steps": []}
+
+
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, matches: int | None = 1,
               panel=None, first_to: int | None = None, versus: str | None = None,
               opponent_name: str | None = None, human_limits: bool | None = None, blind_ask=None) -> dict:
@@ -3884,7 +3912,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             fighter.stale = cur["arrival"].stale_frames()
             # 0.23.0: how long ago forward was let go (frames): the motion guard's wait, counted into punish timing
             fighter.fwd_age = None if c.forward_t is None else (clock.now() - c.forward_t) * 60.0
-            d = fighter.decide(st.raw, t, side["i"])
+            try:
+                d = fighter.decide(st.raw, t, side["i"])
+            except Exception as e:                   # noqa: BLE001 - one bad line must never end a ranked session
+                _fight_error(summary, sess, "decide", e)
+                c.apply(InputState(), tag="fighter_error")
+                continue
             if fighter.assessment:
                 sess.status["assessment"] = fighter.assessment.get("line")
             if d.kind == "route" and (d.route or {}).get("lethal") and \
@@ -3947,7 +3980,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         fighter.compose_stats["started"] += 1
                         br = fighter.compose_stats["by_route"].setdefault(d.route["route"], {"n": 0, "ok": 0})
                         br["n"] += 1
-                    res = perform_route(sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
+                    res = _safe_route(summary, sess, perform_route, sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
                                         FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=6.0,
                                         abort=stop_check,
                                         lead=lead or pl.get("lead") or 4,
@@ -3980,7 +4013,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary[rk][why] = summary[rk].get(why, 0) + 1
                     live_ = fighter._live_route
                     if live_ is not None and fighter.composer is not None:
-                        fighter.composer.record(live_, res)       # 0.24.0: per transition, for the composer
+                        try:
+                            fighter.composer.record(live_, res)   # 0.24.0: per transition, for the composer
+                        except Exception as e:           # noqa: BLE001
+                            _fight_error(summary, sess, "composer record", e)
                         if live_.get("composed") and res.get("success"):
                             fighter.compose_stats["completed"] += 1
                             br = fighter.compose_stats["by_route"].setdefault(live_["route"], {"n": 0, "ok": 0})

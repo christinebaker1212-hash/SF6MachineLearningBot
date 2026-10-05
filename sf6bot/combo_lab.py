@@ -2255,15 +2255,25 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                 else:
                     run.extra["hit_switch"] = {"kind": None, "verdict": "keep"}
             if on_step is not None and not run.done:
-                for j in range(1, len(run.rt)):
+                # 0.24.3: the steps can change length inside this loop (a re-plan to a SHORTER combo): it read past the
+                # end of the list ("index out of range" in a ranked match, 0.24.2) and the exception ended the session
+                j = 1
+                while j < len(run.rt):
                     if run.rt[j]["start"] is None or j in started:
+                        j += 1
                         continue
                     started.add(j)
-                    new = on_step(j, st.raw)
+                    try:
+                        new = on_step(j, st.raw)
+                    except Exception as e:           # noqa: BLE001 - a re-plan must never stop a match
+                        run.extra.setdefault("errors", []).append(f"re-plan at move {j}: {type(e).__name__}: {e}")
+                        new = None
                     if new and new[0] and run.replace_tail(j + 1, new[0], new[1]):
                         run.extra.setdefault("replans", []).append({"at": j, "to": len(new[0])})
-                        if k is None:
-                            k = run._due(st.raw.get("stage_timer"), st.raw.get(me) or {}, run._land_est)
+                        # the step due before may be gone or another one now: decide again on the new steps
+                        k = run._due(st.raw.get("stage_timer"), st.raw.get(me) or {}, run._land_est)
+                        break
+                    j += 1
             if run.pdr_dash_due is not None and not run.done:
                 # the parry is out: dash (66, the parry still held), then everything is released
                 j, run.pdr_dash_due = run.pdr_dash_due, None

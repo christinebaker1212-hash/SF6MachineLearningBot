@@ -3374,6 +3374,17 @@ nothing here is verified in game.
 - Tests updated (`tests/test_0203.py`, `test_0230.py`, `test_0200.py`, `test_0220.py`: corner only; the rest off by
   default, correct when enabled); the `fighter_decisions` fingerprint changed accordingly. Not verified in game.
 
+## 0.24.3: a crash in a ranked match (user, 2026-10-05: "It said index out of range, and then it totally shut down")
+- Cause (0.24.0 code): `perform_route` walked the route's moves with a loop fixed to the route's length; when the composer
+  re-planned a running combo into a SHORTER one (`ComboRun.replace_tail`), the loop read past the end of the new list
+  (IndexError) and the exception ended the whole session mid-match. The re-planned step that was due was also not checked
+  again. Test `test_a_replan_to_a_shorter_combo_does_not_crash_the_route` raises exactly that IndexError on 0.24.2.
+- Fix: the loop follows the current list and stops after a re-plan; the due step is decided again on the new steps;
+  `Composer.record` ignores a route that is not what was performed.
+- Safety net for unattended runs: an exception in a decision (`fighter.decide`), a combo (`perform_route`) or the
+  composer's bookkeeping is logged (`errors` in the match summary: where, the error, a short trace; a narrated line),
+  the keys are released, and the match goes on.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
