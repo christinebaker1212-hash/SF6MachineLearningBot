@@ -247,6 +247,10 @@ airborne moves, SA3 on long whiffs. Not done: perfect parry (its id is unknown),
 Next ranked session: check the new thoughts lines and `anti_air`, `parry_throws`, `di_wall` (with `after_ids`: the wall
 splat id) in the fight summaries.
 
+**0.19.1 (latest):** the 0.19.0 batch (34 matches, 10-24) analysed: reversal timing (stun + hitstop), the Hadoken ->
+Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
+list below is the next build (the user sent the batch it was waiting for).
+
 **Saved for the next batch of fights (user, 2026-10-05): build these with that data.**
 1. **True whiff punishes from the move and the distance.** The bot knows which move the opponent whiffed (catalog / move
    map / live names) and how far away it is: punish every whiff whose remaining recovery allows it, with the best own

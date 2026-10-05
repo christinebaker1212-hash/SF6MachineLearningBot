@@ -37,6 +37,11 @@ INTENT_FACTOR = {"jump_fwd": 0.25, "jump_neutral": 0.25, "jump_back": 0.25}
 # time (its opponents' 8%) and it took 25% more damage a second there; 13 of 99 entries came from its own walking
 # back, back dashes or back jumps. Retreating weighs less the less room is behind it.
 BACK_INTENTS = ("walk_back", "dash_back", "jump_back")
+# 0.19.1 MEASURED (34 ranked matches on 0.19.0 vs 22 on 0.18.10): with jumps cut the neutral mass went to specials
+# (Hadokens 275 vs 172). Thrown from 1.5-3.5 away the opponent jumped ~1 in 4 and landed on the bot still recovering
+# (net -408 hp per fireball at 1.5-2.0); from 3.5+ the jump rarely reached it (net +223 at 3.5-4.0). A Shoryuken
+# anti-air can't come out of a fireball's recovery, so neutral fireballs only from this far.
+FIREBALL_MIN_DIST = 3.5
 WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, factor for retreating)
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
@@ -114,6 +119,7 @@ class NeutralPolicy:
         self.temperature = float(c.get("temperature", 0.8))
         self.explore = float(c.get("explore", 0.08))
         self.intent_factor = {**INTENT_FACTOR, **(c.get("intent_factor") or {})}
+        self.fireball_min = float(c.get("fireball_min_dist", FIREBALL_MIN_DIST))
         # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
         # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
         self.win = win
@@ -255,6 +261,7 @@ class NeutralPolicy:
         cands = [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist)
                  and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))
                  and not (intent == "special" and any(k in m["name"] for k in NO_NEUTRAL_SPECIAL))
+                 and not (intent == "special" and m.get("projectile") and dist is not None and dist < self.fireball_min)
                  and not (intent == "super" and op is not None and (m.get("damage") or 0) < (num(op.get("hp")) or 0))]
         if not cands:
             return None

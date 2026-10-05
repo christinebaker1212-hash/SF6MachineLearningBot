@@ -2555,6 +2555,38 @@ MOCK / replay-tested (`tests/test_0190.py`; `decide()` replayed over the recordi
   `assessment.perfect_parry.after_ids` records the ids after each timed try).
 - Thoughts lines for anti-air (jumps / air moves / held overhead), parry throws and wall Drive Impacts.
 
+## 0.19.0 session (user, 2026-10-04): 34 ranked matches, 10-24 — and the fixes in 0.19.1
+Scorecard against 0.18.10's 22 correctly-sided matches (same measurement code; MEASURED):
+| | 0.18.10 | 0.19.0 |
+|---|---|---|
+| record / win % | 10-12 / 45% | 10-24 / 29% |
+| damage dealt / taken | 0.90 | 0.92 |
+| bot jumps per minute | 6.3 | 0.5 |
+| bot's back to the wall (% of fight time) | 15% | 19% |
+| damage taken by opener: ground normals / jump-ins / specials | 42 / 19 / 20% | 52 / 23 / 12% |
+| jump-ins landing near the bot that met a Shoryuken | 16 of 119 (13%) | 2 of 158 (1%) |
+| bot busy (own move / stunned) when the opponent jumped | 41% | 59% (Hadoken recovery, knockdowns) |
+| Hadokens thrown | 172 | 275 |
+- **Reversals went out early and were dropped:** the exported blockstun / hitstun value STANDS STILL during hitstop
+  (blockstun 22 for 12 frames, then counting down); stun + hitstop = frames to the first free frame (exact when nothing
+  else hits). Using the value alone, timed defences (OD Shoryuken reversals especially) went out ~a hitstop early: of
+  292 Shoryuken motions the game read, 131 produced no Shoryuken, 128 of them pressed 5-25 frames before the bot was
+  free (0-4 frames early = buffered, worked: 0.18.10 had the same bug, half as often). **0.19.1:** `fighter.stun_left`
+  (stun + hitstop) for pressure moments, punish triggers and the SA3 punish; after-hit moments only for standing / crouch
+  hit reactions (200-229; 230+ is a knockdown).
+- **Shoryukens in neutral = Hadoken motions read as 623:** the motion guard counted from PRESSING forward, so after an
+  8-frame walk only ~4 neutral frames separated forward and the 2: Shoryuken 55 of 56 times; 8+ neutral frames gave a
+  Hadoken 368 of 368. **0.19.1:** the controller's `forward_t` updates while forward is held and when it is let go;
+  `inputs.motion_clear_frames` 10, counted from the release.
+- **Anti-air:** the 0.19.0 rules (replayed on these recordings) would have sent ~36 Shoryukens on front-landing jumps;
+  live the bot was mostly still in its own move (a Hadoken) when the opponent jumped, so the busy gate (correctly) held
+  them, and the thoughts counted each held line again ("Shoryukens on jumps 21" in a match where the game saw 4).
+  **0.19.1:** neutral fireballs only from 3.5+ (`neutral_policy.FIREBALL_MIN_DIST`; MEASURED: from 1.5-3.5 opponents
+  jumped ~1 in 4 and landed on the recovering bot, net -408 hp per fireball at 1.5-2.0; from 3.5-4.0 net +223). Anti-air
+  counts only Shoryukens actually sent, plus "jumps I could not answer" once per jump.
+- Not yet explained: hit-confirmed routes "2MK > 236MK" stopped as "not_out" while M High Blade Kick (1027) did come
+  out in the recordings (route executor traces needed, not in the fights zip).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

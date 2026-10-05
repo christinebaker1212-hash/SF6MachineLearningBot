@@ -97,3 +97,62 @@ def test_fewer_jumps_and_less_retreating_into_the_corner():
                  for _ in range(400)]
         return np.mean([p in ("jump_fwd", "jump_neutral", "jump_back") for p in picks])
     assert jump_share(new) < 0.5 * jump_share(old)
+
+
+# ---- 0.19.1: fixes from the 34 ranked matches on 0.19.0 ---------------------------------------------------------------
+
+def test_stun_left_counts_the_hitstop_the_stun_value_stands_still_in():
+    from sf6bot.fighter import stun_left
+    # MEASURED: blockstun 22 + hitstop 12 = 34 frames to the first free frame (the value holds still during hitstop)
+    assert stun_left({"blockstun": 22, "hitstop": 12}) == 34
+    assert stun_left({"hitstun": 15, "hitstop": 0}) == 15
+    assert stun_left({"blockstun": 0, "hitstun": 0, "hitstop": 9}) == 0
+
+
+def test_defence_timing_includes_the_hitstop():
+    # blockstun 6 + hitstop 10 = 16 frames to free: the defence's decisive input waits 10 frames longer than with no
+    # hitstop (0.19.0 used the frozen value alone: reversals went out 5-25 frames early and the game dropped them)
+    from sf6bot.sequences import parse_sequence
+
+    def first_wait(hitstop):
+        f = _fighter()
+        d = f.decide(state(me={"blockstun": 6, "hitstop": hitstop, "action_id": 160, "super": 0},
+                           op={"x": 0.9, "action_id": 600}, timer=500), 0.0, 0)
+        assert (d.rule or "").startswith("defense"), d
+        n = 0
+        for st in parse_sequence(d.seq, "x").steps:      # frames before the first button
+            if st.state.buttons:
+                break
+            n += st.frames
+        return n
+    assert first_wait(10) >= 8 and first_wait(12) - first_wait(10) == 2 and first_wait(0) == 0
+    f = _fighter()
+    far = f.decide(state(me={"blockstun": 6, "hitstop": 30, "action_id": 160, "super": 0},
+                         op={"x": 0.9, "action_id": 600}, timer=500), 0.0, 0)
+    assert not (far.rule or "").startswith("defense")            # 36 frames away: not yet
+
+
+def test_neutral_fireballs_only_from_far():
+    hado = {"id": 900, "name": "L Hadoken", "intent": "special", "projectile": True, "seq": "2@3 3@3 6+LP@3",
+            "startup": 16, "super_cost": 0}
+    pol = NeutralPolicy(_Brain(), [hado], cfg={}, seed=1)
+    pol.reach = {}
+    assert pol._move("special", "mid", {"super": 0}, 2.5) is None          # MEASURED: jumped and punished from 1.5-3.5
+    assert pol._move("special", "far", {"super": 0}, 3.8)["name"] == "L Hadoken"
+
+
+def test_forward_counts_until_it_is_let_go():
+    # the motion guard measures from when forward was last HELD (0.19.0 measured from the press: after an 8-frame walk
+    # forward only ~4 neutral frames were left, and the game read Hadokens as Shoryukens 55 of 56 times)
+    import time
+    from sf6bot.actions import Facing, InputState
+    from sf6bot.controller import Controller
+    from sf6bot.input_backend import MockInputBackend
+    from tests.test_actions_sequences import BIND
+    c = Controller(MockInputBackend(), BIND, Facing.RIGHT)
+    c.arm("test")
+    c.apply(InputState(6))
+    t_press = c.forward_t
+    time.sleep(0.05)
+    c.apply(InputState(5))
+    assert c.forward_t > t_press + 0.04

@@ -75,9 +75,12 @@ class Controller:
         """Make the held keys match ``state``. Returns (t_call, t_sent)."""
         with self._lock:
             target = self.logical_keys(state) if self._armed else set()
-            self.current = state if self._armed else NEUTRAL
-            if self._armed and state.direction in (3, 6, 9):
+            # 0.19.1: the time forward was last HELD, so also when it is let go. Before, only pressing it set the time:
+            # after an 8-frame walk forward the motion guard counted the walk itself as the wait, and Hadokens went out
+            # with 4-5 neutral frames after forward, which the game reads as a Shoryuken (MEASURED: 55 of 56)
+            if self._armed and (state.direction in (3, 6, 9) or self.current.direction in (3, 6, 9)):
                 self.forward_t = clock.now()
+            self.current = state if self._armed else NEUTRAL
             releases = sorted(self._held - target)
             presses = sorted(target - self._held)
             t0 = clock.now()

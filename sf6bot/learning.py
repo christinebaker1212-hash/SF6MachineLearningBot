@@ -332,9 +332,10 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{dr.get('own_moments', 0)}."))
     aa = summary.get("anti_air") or {}
     if any(aa.values()):
-        out.append(("scripted", f"Anti-air: Shoryukens on jumps {aa.get('anti_air', 0)}, on airborne moves "
+        out.append(("scripted", f"Anti-air: Shoryukens sent on jumps {aa.get('anti_air', 0)}, on airborne moves "
                                 f"{aa.get('air_moves', 0)}; held block with {opp} overhead (too close to call) "
-                                f"{aa.get('held_overhead', 0)}."))
+                                f"{aa.get('held_overhead', 0)}; jumps I could not answer (still in my own move or "
+                                f"stunned) {aa.get('busy', 0)}."))
     pt = summary.get("parry_throws") or {}
     if pt.get("chances"):
         out.append(("scripted", f"{opp} held Drive Parry within throw range {pt['chances']} times; I threw {pt.get('taken', 0)}."))

@@ -315,6 +315,7 @@ class ScriptedFighter:
         self._di_wall_watch: dict | None = None
         self.aa_stats = {"anti_air": 0, "air_moves": 0, "held_overhead": 0}
         self._aa_overhead_for = None
+        self._aa_busy_for = None
         self.prev_op: tuple | None = None    # (stage_timer, x, y) of the opponent at the last state
         self.op_vx = 0.0                     # opponent horizontal speed, units per game frame
         self.op_vy = 0.0
@@ -456,11 +457,19 @@ class ScriptedFighter:
                 st[why] = st.get(why, 0) + 1
                 if d.rule == "anti_air":
                     self.aa_done_for_jump = False
+                    # 0.19.1: one count per jump the bot could not answer (before, every line re-counted the decision:
+                    # "Shoryukens on jumps 21" in a match where the game saw 4 Shoryuken inputs)
+                    if self._aa_busy_for != self.op_onset:
+                        self._aa_busy_for = self.op_onset
+                        self.aa_stats["busy"] = self.aa_stats.get("busy", 0) + 1
                 elif d.rule == "di_reaction":
                     self.di_handled_id = None
                 elif d.rule in ("whiff_punish", "di_punish"):
                     self.op_move["punished"] = False
                 return Decision("none", reason=f"busy: {why}")
+        if d.rule == "anti_air" and d.kind == "seq":
+            k_ = getattr(self, "_aa_kind", "anti_air")
+            self.aa_stats[k_] = self.aa_stats.get(k_, 0) + 1
         return d
 
     def busy(self, me: dict) -> str | None:
@@ -607,7 +616,7 @@ class ScriptedFighter:
                         why = f"opponent airborne in a move (action {op_act}, height {op_y:.2f}, lands in {t_land:.0f}f)"
                     if t_land >= need - 2:
                         self.aa_done_for_jump = True
-                        self.aa_stats["air_moves" if air_move else "anti_air"] += 1
+                        self._aa_kind = "air_moves" if air_move else "anti_air"    # counted once actually sent
                         return Decision("seq", srk["name"], srk["seq"], reason=why, rule="anti_air")
                     if nrm is not None and t_land >= self.lead + self.stale + int(nrm.get("startup", 9)) - 3:
                         self.aa_done_for_jump = True    # too late for the Shoryuken: the anti-air normal
@@ -620,6 +629,7 @@ class ScriptedFighter:
         # 5. blocking, maybe punish
         bs = _num(me.get("blockstun")) or 0
         if bs > 0:
+            bs_left = stun_left(me)      # 0.19.1: + hitstop (the blockstun value stands still during it)
             if op_act is not None and op_act >= self.c["attack_id_min"]:
                 if self.blocked_id != op_act:
                     self.punished = False
@@ -638,17 +648,17 @@ class ScriptedFighter:
             ov = self.opp.get(self.blocked_id, {}).get("punish_with")
             if ov and not self.punished and in_range and ov in (self.c.get("moves") or {}):
                 m_ = self.c["moves"][ov]
-                if bs <= seq_prefix(m_["seq"]) + self.lead + self.stale:
+                if bs_left <= seq_prefix(m_["seq"]) + self.lead + self.stale:
                     self.punished = True
                     self.punish_stats["taken"] += 1
                     return self._move(ov, "punish", f"blocked {self.opp[self.blocked_id].get('name')}: your rule, "
                                                     f"{m_['name']}")
-            sp = self._super_punish(me, op, dist, adv, bs) if (not self.punished and in_range and adv is not None) else None
+            sp = self._super_punish(me, op, dist, adv, bs_left) if (not self.punished and in_range and adv is not None) else None
             if sp is not None:
                 self.punished = True
                 self.punish_stats["taken"] += 1
                 return sp
-            if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"]
+            if (not self.punished and adv is not None and bs_left <= self.c["punish"]["latency_frames"]
                     and adv <= -4 and self.book and in_range):
                 # the best TRUE combo whose first move starts in time (combo lab; punish = punish counter)
                 from .route_book import choose
@@ -663,7 +673,7 @@ class ScriptedFighter:
                     return Decision("route", e["route"], route=e, rule="punish",
                                     reason=f"blocked {name} ({adv:+d}): combo lab true combo, "
                                            f"{e.get('damage')} dmg{kill}")
-            if (not self.punished and adv is not None and bs <= self.c["punish"]["latency_frames"] and in_range):
+            if (not self.punished and adv is not None and bs_left <= self.c["punish"]["latency_frames"] and in_range):
                 for opt in self.c["punish"]["options"]:
                     if adv <= opt["max_adv"]:
                         self.punished = True
@@ -736,7 +746,7 @@ class ScriptedFighter:
         tmr, oa = raw.get("stage_timer"), op.get("action_id")
         self._track_self(me, op, tmr)
         if bs > 0:
-            sit, rem = ("after_rush_block" if self._blocked_rush else "after_block"), bs
+            sit, rem = ("after_rush_block" if self._blocked_rush else "after_block"), stun_left(me)
         elif hs > 0:
             # 0.17.5: after a hit too (the user's ranked match: 5 of Jamie's 6 throws started while the bot was still
             # reeling from the same hit and landed on its first free frame; before, hitstun was never a moment). Not
@@ -744,7 +754,10 @@ class ScriptedFighter:
             if not grounded or (isinstance(oa, int) and oa >= self.c["attack_id_min"] and oa != self._hit_by
                                 and oa not in self.throw_ids):
                 return None
-            sit, rem = "after_hit", hs
+            # 0.19.1: only a standing / crouching hit reaction (200-229); 230+ is a knockdown (the wake-up moment)
+            if not (isinstance(aid, int) and 200 <= aid < 230):
+                return None
+            sit, rem = "after_hit", stun_left(me)
         elif isinstance(aid, int) and aid in self.hit_ids and grounded:
             sit = "wakeup"
             wf = (dc.get("wakeup_frames") or {}).get(aid)
@@ -1460,6 +1473,16 @@ def seq_prefix(seq: str) -> int:
             return n
         n += int(fr or 1)
     return n
+
+
+def stun_left(me: dict) -> int:
+    """Frames until the player is out of blockstun / hitstun. 0.19.1 MEASURED (34 ranked matches on 0.19.0): the
+    exported blockstun / hitstun value STANDS STILL during hitstop (blockstun 22 for 12 frames, then counting down),
+    and stun + the exported hitstop = the frames to the first free frame (exact whenever nothing else hits). Using the
+    value alone, reversals and timed defences went out ~a hitstop early: of 131 Shoryuken inputs the game read without
+    a Shoryuken coming out, 128 were pressed 5-25 frames before the bot was free (0-4 frames early = buffered, works)."""
+    st = max(_num(me.get("blockstun")) or 0, _num(me.get("hitstun")) or 0)
+    return int(st + (_num(me.get("hitstop")) or 0)) if st > 0 else 0
 
 
 def motion_guard(seq: str, since_forward_s: float | None, clear_frames: int) -> tuple[str, int]:
