@@ -87,6 +87,13 @@ menu_watch:
 ladder_read:
   enabled: true
 
+# 0.22.0 operator takeover in fights (takeover.py): a real controller input (any XInput pad: the Ally's own, or yours
+# through Parsec) or safety.takeover_key hands the match to you; rounds you WIN teach the bot your answers, lost rounds
+# are discarded. Off for the controller where the bot is a virtual controller itself (Versus Human offline).
+takeover:
+  enabled: true
+  controller: true
+
 training:
   reset_key: SLASH        # Training Mode "reset position" on the user's keyboard (user-reported: "/")
 
@@ -97,6 +104,7 @@ safety:
   flip_facing_key: F6     # manual facing flip (M1 has no facing detection yet)
   success_key: F9         # combo lab: "that try actually worked" (operator override, 0.12.5)
   skip_key: F10           # combo lab: skip the current route (keeps failing), go to the next one
+  takeover_key: F11       # 0.22.0 fights: take over from the bot / give control back (a controller input also takes over)
   refocus_grace_s: 0.5    # wait after the game regains focus before re-arming
   start_countdown_s: 5    # time to click into the game before inputs start
   poll_s: 0.005

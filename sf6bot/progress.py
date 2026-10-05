@@ -42,6 +42,7 @@ def compact(summary: dict, models: dict | None = None) -> dict:
             or summary.get("opponent_kind"),
             "character": summary.get("character"), "opponent": summary.get("opponent"),
             "finished": bool(m), "won": m.get("bot_won") if m else None,
+            "assisted": bool(summary.get("assisted")),
             "rounds_won": sum(1 for r in rounds if r.get("bot_won")), "rounds": len(rounds),
             "dealt": dmg.get("dealt", 0), "taken": dmg.get("taken", 0),
             "input_delay": idl.get("median"), "models": models or {},
@@ -129,7 +130,8 @@ def lp_summary(session: list[dict], history: list[dict]) -> dict:
 
 
 def _rate(rows: list[dict]) -> tuple[int, int, float | None]:
-    dec = [r for r in rows if r.get("finished")]
+    # 0.22.0: a match the operator took over (part of it played by the user) is not the bot's result
+    dec = [r for r in rows if r.get("finished") and not r.get("assisted")]
     w = sum(1 for r in dec if r.get("won"))
     return w, len(dec) - w, (w / len(dec) if dec else None)
 
@@ -138,6 +140,7 @@ def _takeovers(rows: list[dict]) -> dict:
     """0.18.6 (user, 2026-10-04): the operator takes over with F8 against gimmicky players, which leaves the match
     unfinished; which ones were takeovers isn't recorded, so every unfinished match counts as one. The win rate with them
     counted as losses is the pessimistic bound; the plain win rate (finished matches only) the optimistic one."""
+    rows = [r for r in rows if not r.get("assisted")]
     u = sum(1 for r in rows if not r.get("finished"))
     w = sum(1 for r in rows if r.get("finished") and r.get("won"))
     return {"takeovers": u, "win_rate_takeovers_lost": round(w / len(rows), 3) if rows else None}
@@ -151,6 +154,8 @@ def summarize(session: list[dict], history: list[dict], lp: dict | None = None) 
     w, l, r = _rate(session)
     out["session"] = {"matches": len(session), "won": w, "lost": l, "win_rate": None if r is None else round(r, 3),
                       "dealt": sum(x.get("dealt", 0) for x in session), "taken": sum(x.get("taken", 0) for x in session),
+                      "assisted": sum(1 for x in session if x.get("assisted")),
+                      "assisted_won": sum(1 for x in session if x.get("assisted") and x.get("won")),
                       **_takeovers(session)}
     out["history"]["matches"] = len(history)
     for n in (20, 50, 200):
@@ -161,7 +166,7 @@ def summarize(session: list[dict], history: list[dict], lp: dict | None = None) 
     for x in history:
         k = x.get("opponent") or "?"
         e = out["by_opponent"].setdefault(k, {"won": 0, "lost": 0})
-        if x.get("finished"):
+        if x.get("finished") and not x.get("assisted"):
             e["won" if x.get("won") else "lost"] += 1
     bl = [x for x in session if x.get("blind_guess")]
     if bl:
@@ -183,7 +188,9 @@ def markdown(p: dict) -> str:
              + (f" ({s['win_rate']:.0%})" if s.get("win_rate") is not None else "")
              + (f"; taken over by you (unfinished): {s['takeovers']}, win rate counting those as losses "
                 f"{s['win_rate_takeovers_lost']:.0%}" if s.get("takeovers") else "")
-             + f"; damage dealt {s['dealt']:,}, taken {s['taken']:,}",
+             + f"; damage dealt {s['dealt']:,}, taken {s['taken']:,}"
+             + (f"; you played part of {s['assisted']} (won {s['assisted_won']}; not in the bot's record)"
+                if s.get("assisted") else ""),
              f"- all recorded matches: {p['history'].get('matches', 0)}"]
     for k in ("last_20", "last_50", "last_200"):
         e = p["history"].get(k)

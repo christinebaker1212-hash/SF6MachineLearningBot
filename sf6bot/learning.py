@@ -238,6 +238,19 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{set_record['lost']} {vol or opp}."))
     elif set_record and summary.get("ranked"):
         out.append(("measured", f"Ranked session so far: {set_record['won']} won, {set_record['lost']} lost."))
+    asst = summary.get("assisted") or {}
+    if asst:
+        rs = asst.get("rounds") or {}
+        kept = sum(1 for v in rs.values() if v == "kept")
+        out.append(("measured", f"You took over ({len(asst.get('takeovers') or [])}x) and played {len(rs)} round(s): "
+                                f"won {kept} (learned from), lost {len(rs) - kept} (discarded). This match is not in my "
+                                f"record."))
+        if summary.get("operator_learned"):
+            out.append(("learned", f"Answers learned from your rounds: {summary['operator_learned']}."))
+    oa = summary.get("operator_answers") or {}
+    if oa.get("used"):
+        out.append(("learned", "Your answers I used: " + ", ".join(f"{k} {v}x" for k, v in oa["used"].items() if v)
+                    + (f"; {oa['late']} came too late to time" if oa.get("late") else "") + "."))
     dmg = summary.get("damage") or {}
     if dmg:
         out.append(("measured", f"Damage: I dealt {dmg.get('dealt', 0):,}, I took {dmg.get('taken', 0):,}."))

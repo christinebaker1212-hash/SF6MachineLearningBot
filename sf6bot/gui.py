@@ -531,7 +531,8 @@ def main(argv: list[str] | None = None) -> None:
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"SF6 BOT panel at {url}", flush=True)
     panel.say(f"SF6 BOT v{__version__}. Pick a tab, set the options, press GO. The bot's own hotkeys still "
-              "work: F8 stop, F7 pause, F9 'that combo try worked', F10 skip a combo route.", "me")
+              "work: F8 stop, F7 pause, F9 'that combo try worked', F10 skip a combo route; in fights your "
+              "controller (or F11) takes over, and rounds you win teach the bot.", "me")
     if not a.no_window:
         threading.Thread(target=open_window, args=(url, panel, hwnd_box), daemon=True).start()
     try:

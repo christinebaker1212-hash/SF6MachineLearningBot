@@ -36,6 +36,7 @@ from .intents import category as intents_category
 from .game_state import (ArrivalMeter, character_name, facing_of, file_stem, num, open_state_reader,
                          player_distance)
 from .sequences import SequenceRunner, parse_sequence
+from .takeover import attack_id as attack_id_
 from .session import Session
 
 INTRO_IDS = {400, 401}
@@ -77,7 +78,7 @@ def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
 
 
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
-               "di_burnout_super", "anti_air_a2a", "denjin"}
+               "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -294,6 +295,10 @@ class ScriptedFighter:
         self._approach_fired = False
         self._their_wake_fired = None
         self._crumple_t0, self._crumple_done = None, False
+        # 0.22.0: the operator's answers against this opponent (takeover.AnswerBook), learned from rounds the user won
+        self.op_answers = None
+        self._oa_for, self._oa_hold = None, None
+        self.operator_stats: dict = {"used": {}, "late": 0, "no_move": 0}
         self._cg_n, self._cg, self._cg_punished, self._me_y_prev = -1, set(), None, 0.0
         self.cmd_grab_stats = {"seen": 0, "grabbed": 0, "jump_punish": 0}
         self.cmd_grab_ids()
@@ -569,6 +574,9 @@ class ScriptedFighter:
                     self.di_handled_id = None
                 elif d.rule in ("whiff_punish", "di_punish"):
                     self.op_move["punished"] = False
+                elif d.rule == "operator_answer":
+                    self._oa_for = None
+                    self.operator_stats["used"][d.name] -= 1
                 return Decision("none", reason=f"busy: {why}")
         if d.kind in ("seq", "route") and self._throw_too_early(d, raw, me_i):
             return Decision("none", reason="throw held: the opponent is not standing yet")
@@ -689,6 +697,10 @@ class ScriptedFighter:
         cf = self._crumple_followup(raw, me, op, dist)
         if cf is not None:
             return cf
+        # 1c. an answer the operator showed against this move in a round they won (0.22.0, takeover.py)
+        oa_ = self._operator_answer(raw, me, op, dist)
+        if oa_ is not None:
+            return oa_
         # 2. throw tech: the opponent's throw start-up (forward 715 / back 717 measured for Ken) is
         #    visible for ~5 frames before it connects; press throw at once. Before 0.8.0 the bot held
         #    down-back here (rule 5 counted the throw as an attack): throws were 42-62% of its damage.
@@ -1190,6 +1202,80 @@ class ScriptedFighter:
         self.super_stats["crumple"][pick["name"]] = self.super_stats["crumple"].get(pick["name"], 0) + 1
         return Decision("seq", pick["name"], pick["seq"], rule="crumple_followup",
                         reason=f"opponent crumpled at {dist:.2f} (super meter {int(meter)}): {pick['name']}")
+
+    def _answer_seq(self, resp: str, me: dict) -> tuple[str, str] | None:
+        """(name, input sequence) for an operator answer, or None when the bot can't do it (no catalogued move with that
+        id, or not the resources)."""
+        if resp.startswith("jump:"):
+            return f"jump {resp[5:]}", f"{resp[5:]}@4"
+        if resp == "parry":
+            ok = (_num(me.get("drive")) or 0) >= int((self.c.get("policy") or {}).get("parry_min_drive", 30000))
+            return ("Drive Parry", "5+MP+MK@14") if ok else None
+        if not resp.startswith("move:"):
+            return None
+        aid = int(resp[5:])
+        if 715 <= aid < 730:
+            return "Throw", "5+LP+LK@3"
+        m = next((x for x in self.own if x.get("id") == aid), None)
+        if m is None:
+            self.operator_stats["no_move"] += 1
+            return None
+        if (m.get("super_cost") or 0) > (_num(me.get("super")) or 0):
+            return None
+        if str(m.get("name", "")).startswith("OD ") and not self.can_spend(me, "od_move"):
+            return None
+        return m["name"], m["seq"]
+
+    def _operator_answer(self, raw: dict, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.22.0 rule 1c: the opponent started a move the operator answered (in rounds they won) at least twice with a
+        positive result, at a similar distance and height: do the same, at the same time after the move began (the
+        user's delay, minus the bot's input delay, stale state and the motion). Holds (block / crouch block) start at
+        once and last until the opponent's move ends. Once per opponent move."""
+        bk, oa, tmr = self.op_answers, op.get("action_id"), raw.get("stage_timer")
+        h = self._oa_hold
+        if h is not None:
+            if oa == h["id"] and isinstance(tmr, int) and tmr <= h["until"]:
+                return Decision("hold", direction=h["dir"], rule="operator_answer",
+                                reason=f"your answer to {h['name']}: holding {h['dir']}")
+            self._oa_hold = None
+        if bk is None or not isinstance(tmr, int) or not isinstance(self.op_onset, int) or not attack_id_(oa):
+            return None
+        key = (self.op_onset, oa)
+        if self._oa_for == key:
+            return None
+        ans = bk.best(oa, dist, _num(op.get("y")) or 0.0)
+        if ans is None:
+            return None
+        since = tmr - self.op_onset
+        what = (self.opp.get(oa) or {}).get("name") or f"id {oa}"
+        why = f"your answer to {what} ({ans['n']}x, {ans['mean']:+.2f}k hp each)"
+        resp = ans["response"]
+        if resp.startswith("hold:"):
+            if not self._ok("guard"):
+                return None
+            self._oa_for = key
+            tot = (self.opp.get(oa) or {}).get("total")
+            self._oa_hold = {"id": oa, "dir": int(resp[5:]), "name": what,
+                             "until": self.op_onset + (int(tot) if isinstance(tot, int) else 40)}
+            self.operator_stats["used"][resp] = self.operator_stats["used"].get(resp, 0) + 1
+            return Decision("hold", direction=int(resp[5:]), rule="operator_answer", reason=why)
+        ms = self._answer_seq(resp, me)
+        if ms is None:
+            self._oa_for = key
+            return None
+        name, seq = ms
+        send_at = ans["delay"] - self.lead - self.stale - seq_prefix(seq)
+        if since < send_at:
+            return Decision("none", reason=f"{why}: {name} in {send_at - since}F", rule="operator_answer")
+        if since > send_at + 8:
+            self._oa_for = key
+            self.operator_stats["late"] += 1
+            return None
+        if not self._ok("guard"):
+            return None
+        self._oa_for = key
+        self.operator_stats["used"][name] = self.operator_stats["used"].get(name, 0) + 1
+        return Decision("seq", name, seq, rule="operator_answer", reason=why)
 
     def _stun_jump_in(self, me: dict, op: dict, dist: float, tmr: int, rem: int, sc: dict):
         """0.20.3 (user, 2026-10-05: "Jump ins are supposed to be used after a successful DI stun ... routes starting with a
@@ -1718,14 +1804,18 @@ class ScriptedFighter:
         rr["free"] = not ((_num(me.get("hitstun")) or 0) > 0 or (_num(me.get("blockstun")) or 0) > 0
                           or aid in self.hit_ids or aid in self.thrown_ids)
 
-    def round_review(self) -> dict:
+    def round_review(self, adapt: bool = True) -> dict:
         """At a round's end: what hurt most, and the changes for the next round (anti-air earlier after losing to
-        jump-ins; throws expected at pressure moments after losing to throws). Resets the round's counts."""
+        jump-ins; throws expected at pressure moments after losing to throws). Resets the round's counts. adapt=False
+        (0.22.0: a round the operator played): counts only, no changes."""
         self.denjin_stock = False            # 0.20.3 ASSUMPTION: the Denjin stock does not carry into the next round
         taken, self.round_taken = self.round_taken, {}
         self._rr = {"hp": None, "free": True, "cat": "other"}
         total = sum(d for _, d in taken.values())
         out = {"taken": {k: {"openings": n, "damage": d} for k, (n, d) in taken.items()}, "changes": []}
+        if not adapt:
+            out["operator"] = True
+            return out
         if total <= 0:
             return out
         share = {k: d / total for k, (_, d) in taken.items()}
@@ -2429,6 +2519,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
               "(recorded in every match summary).")
     c = sess.controller
     runner = SequenceRunner(c, sink=sess.recorder.event)
+    # 0.22.0 operator takeover: a real controller input (or F11) hands the match to the user; rounds they win teach the
+    # bot their answers (takeover.py). The controller doesn't count where the bot is a virtual controller itself, and
+    # there is no takeover in a blind test.
+    from .takeover import AnswerBook, Takeover
+    from .takeover import extract as op_extract
+    tk_in = getattr(sess, "takeover_inputs", None) if blind_ask is None else None
+    tk_cfg = cfg.get("takeover") or {}
+    pad_fn = None
+    if tk_in and tk_cfg.get("controller", True) and versus != "offline" \
+            and getattr(getattr(c, "backend", None), "name", "") != "virtual_pad":
+        pad_fn = getattr(tk_in[0], "active", tk_in[0])
+    tk = Takeover(tk_cfg, pad_active=pad_fn, key_down=tk_in[1] if tk_in else None)
+    if tk.enabled:
+        print("Take over any time: " + ("press a button on your controller or " if pad_fn else "")
+              + f"press {(cfg.get('safety') or {}).get('takeover_key', 'F11')} (again to give control back). "
+              "The bot learns your answers from the rounds you WIN.")
+    tk_seen = [0]
     # the bot's input delay, measured live from its own input mask (input_delay.py, 0.14.0)
     from .game_state import load_input_bits
     from .input_delay import DelayMeter
@@ -2535,6 +2642,38 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             except Exception as e:                   # noqa: BLE001 - a report, never stops a session
                 print(f"(LP record not written: {e})")
 
+    def _operator_round(rnd, won: bool) -> None:
+        """0.22.0: a round the operator played just ended. Won: its answers are learned (saved per opponent at once);
+        lost: nothing is learned (the user's rule). The rows are judged when the match is saved."""
+        me_k, op_k = keys()
+        if not won or me_k is None:
+            msg_ = f"Round {rnd + 1 if isinstance(rnd, int) else '?'} lost while you played: nothing learned from it."
+        else:
+            rows_ = cur["data"].rows
+            got_ = op_extract(rows_, me_k, op_k, mine=lambda r_: bool(r_.get("op")) and r_.get("round") == rnd)
+            bk_ = cur.get("answers") or AnswerBook(ds_root, summary.get("character"), summary.get("opponent"))
+            cur["answers"] = bk_
+            n_ = bk_.learn(got_)
+            bk_.round_done(rnd, True, n_)
+            try:
+                bk_.save()
+            except OSError as e_:
+                print(f"(operator answers not saved: {e_})")
+            if fighter is not None and bk_.usable():
+                fighter.op_answers = bk_
+            msg_ = (f"Round won while you played: learned {n_} answers to {summary.get('opponent')}'s moves "
+                    f"({bk_.usable()} now used: shown twice and came out ahead).")
+            summary.setdefault("operator_learned", 0)
+            summary["operator_learned"] += n_
+        print("[takeover] " + msg_)
+        sess.narrate(msg_, source="learned")
+        if cur.get("answers") is not None and not won:
+            cur["answers"].round_done(rnd, False, 0)
+            try:
+                cur["answers"].save()
+            except OSError:
+                pass
+
     def finish_match() -> None:
         nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0, learner
         data, cur["data"] = cur["data"], DatasetBuilder(need_match_start=True)
@@ -2610,6 +2749,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 exp.end_match({"result": summary.get("match"), "rounds": summary.get("rounds"),
                                "opponent_kind": summary.get("opponent_kind"),
                                "nickname": (summary.get("opponent_human") or {}).get("nickname")})
+            judged_ = data.judge_operator({r_.get("round"): r_.get("bot_won") for r_ in summary["rounds"]})
+            if judged_ or summary.get("operator_takeovers"):
+                summary["assisted"] = {"rounds": {str(k): v for k, v in judged_.items()},
+                                       "takeovers": summary.get("operator_takeovers") or []}
+                data.extra_meta["operator_rounds"] = summary["assisted"]["rounds"]
+            if fighter is not None and fighter.operator_stats["used"]:
+                summary["operator_answers"] = dict(fighter.operator_stats)
             lines_ = thoughts(summary, exp, record if (first_to or versus == "ranked") else None)
             summary["thoughts"] = [f"[{s}] {t}" for s, t in lines_]
             title = f"Match {len(done) + 1}: {summary.get('character')} vs {summary.get('opponent')}"
@@ -2654,6 +2800,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 pass
             except Exception as e:                   # noqa: BLE001 - progress is a report, never stops a session
                 print(f"(progress file not written: {e})")
+        tk.match_over()
+        tk_seen[0] = 0
         if fixed_side is None:
             side.update(i=None, how=None, lag=None)
         summary, tracker, fighter, pending = _new_match_summary(keys()[0]), EpisodeTracker(self_index=side["i"], need_match_start=True), \
@@ -2703,7 +2851,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     break
             match_over, end_i = False, len(batch)
             me_key, op_key = keys()
+            ev_ = tk.poll(fight_on, batch[-1].raw.get("round") if batch else None)
+            if tk.active and tk_seen[0] != len(tk.starts):
+                tk_seen[0] = len(tk.starts)
+                c.release_all("operator takeover")
+                summary.setdefault("operator_takeovers", []).append({"source": tk.source, "round": tk.starts[-1]["round"]})
+                print(f"[takeover] you have the controls ({tk.source}); the bot sends nothing until the match ends"
+                      " or you press the takeover key again.")
+                sess.narrate("Operator took over: watching and learning (kept only if you win the round).",
+                             source="scripted")
+                sess.status["fighter"] = "OPERATOR playing (bot watching)"
+            elif ev_ == "stop":
+                print("[takeover] control back to the bot.")
+                sess.narrate("Control back to the bot.", source="scripted")
             for i, st in enumerate(batch):
+                # lines that arrived before the takeover (a batch piles up while a sequence runs) are still the bot's
+                if tk.active and fight_on and st.t_recv >= tk.starts[-1]["t"] - 0.02:
+                    st.raw["operator"] = True
                 cur["data"].add(st.raw, st.t_recv)
                 if fight_on:
                     cur["arrival"].add(st.t_recv, st.raw.get("f"))
@@ -2720,17 +2884,22 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         won = side["i"] is not None and e.get("winner") == side["i"]
                         summary["rounds"].append({"round": e.get("round"), "reason": e.get("reason"), "bot_won": won})
                         sess.narrate(f"Round over: {'won' if won else 'lost'} ({e.get('reason')}).", source="measured")
+                        op_round = e.get("round") in tk.rounds
+                        if op_round:
+                            summary["rounds"][-1]["operator"] = True
+                            _operator_round(e.get("round"), won)
                         if fighter is not None:
                             # 0.18.0: review the round and adapt before the next one (0.17.5 ranked: every round 2 and 3 lost)
-                            rv = fighter.round_review()
+                            # 0.22.0: not from a round the operator played (the user's play is not the bot's)
+                            rv = fighter.round_review(adapt=not op_round)
                             rv["round"], rv["bot_won"] = e.get("round"), won
                             summary.setdefault("round_reviews", []).append(rv)
                             if exp is not None:
                                 exp.end_round()
-                                if rv.get("throws"):
+                                if rv.get("throws") and not op_round:
                                     for sit_ in ("after_block", "after_hit", "wakeup", "approach", "their_wakeup"):
                                         exp.response(sit_, "throw")
-                                if rv.get("cmd_grabs"):
+                                if rv.get("cmd_grabs") and not op_round:
                                     for sit_ in ("after_block", "after_hit", "wakeup", "approach", "their_wakeup"):
                                         exp.response(sit_, "cmd_grab")
                             top = sorted(rv["taken"].items(), key=lambda kv: -kv[1]["damage"])[:2]
@@ -3014,6 +3183,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
                 fighter.human = human
+                cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
+                if cur["answers"].usable():
+                    fighter.op_answers = cur["answers"]
+                    sess.narrate(f"Your answers against {summary['opponent']}: {cur['answers'].usable()} ready "
+                                 "(from rounds you won).", source="learned")
                 fighter.live_reach = cur["live_reach"]
                 from .catalog import perfect_parry_ids
                 fighter.pp_ids = perfect_parry_ids(ds_root)
@@ -3083,6 +3257,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 continue
             was_active = True
             set_panel(True)
+            if tk.active:
+                sess.status["fighter"] = "OPERATOR playing (bot watching)"
+                continue
             if meter is not None:
                 fighter.lead = meter.lead(fighter.lead)
             fighter.stale = cur["arrival"].stale_frames()
@@ -3117,6 +3294,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     latest = reader.latest()
                     return fighter.urgent(latest.raw, side["i"]) if latest is not None else None
                 neutral = d.rule.startswith(("neutral:", "policy:"))
+
+                def stop_check(neutral_=neutral):
+                    # 0.22.0: a takeover stops any sequence between two inputs; neutral ones also stop for urgent events
+                    return tk.check() or (urgent() if neutral_ else None)
                 pl = d.route["plan"] if d.kind == "route" else plans.get(d.name)
                 if pl is not None:
                     # combos run on the game's clock: each input no earlier than the move can come out;
@@ -3129,7 +3310,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         fighter.lead = lead
                     res = perform_route(sess, reader, runner, pl["steps"], {}, FIGHT_NEUTRAL,
                                         FIGHT_NEUTRAL, FIGHT_MOVEMENT, me=me_key, op=op_key, timeout=6.0,
-                                        abort=urgent if neutral else None,
+                                        abort=stop_check,
                                         lead=lead or pl.get("lead") or 4,
                                         fixed=pl.get("recorded_timing") if not lead or lead == pl.get("lead") else None,
                                         confirm=True,
@@ -3160,7 +3341,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if guard_wait:
                     summary["motion_guard"] = summary.get("motion_guard", 0) + 1
                 _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
-                                   abort=urgent if neutral else None)
+                                   abort=stop_check)
                 if not d.intent or d.intent in itn.ATTACK_INTENTS or d.intent.startswith(("jump", "dash")):
                     c.apply(InputState(), tag="fighter_seq_end")
                 if runner.aborted:

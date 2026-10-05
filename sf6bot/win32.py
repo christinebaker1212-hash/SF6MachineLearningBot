@@ -426,6 +426,28 @@ class XInputCombo:
         return False
 
 
+class XInputActivity(XInputCombo):
+    """0.22.0 operator takeover: True while ANY real input is on a connected XInput pad (a button, a trigger past
+    `trigger`/255, a stick past `stick` of its range). Only reads; slots in `ignore` (the bot's own virtual pad) are
+    skipped. Parsec forwards the user's controller as an XInput pad on the host, like the Ally's built-in one."""
+
+    def __init__(self, trigger: int = 64, stick: float = 0.5, ignore: tuple = (), rescan_s: float = 2.0) -> None:
+        super().__init__(["A"], rescan_s)          # any mask: loads the dll and the state structure
+        self.trigger, self.stick, self.ignore = int(trigger), int(32767 * float(stick)), set(ignore)
+
+    def active(self) -> bool:
+        if not self.available:
+            return False
+        for i in self.connected():
+            if i in self.ignore or self._dll.XInputGetState(i, ctypes.byref(self._state)) != 0:
+                continue
+            g = self._state.Gamepad
+            if g.wButtons or g.bLeftTrigger > self.trigger or g.bRightTrigger > self.trigger \
+                    or max(abs(g.sThumbLX), abs(g.sThumbLY), abs(g.sThumbRX), abs(g.sThumbRY)) > self.stick:
+                return True
+        return False
+
+
 def move_client_to(hwnd: int, x: int, y: int) -> tuple[int, int, int, int]:
     """Move a window so its CLIENT area's top-left is at screen (x, y), keeping its size (the GUI's
     'Arrange windows': SF6 to the top right of a 1920x1080 screen). Returns the new client rect."""

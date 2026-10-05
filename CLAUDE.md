@@ -2921,6 +2921,48 @@ no need for a 2HP fallback - Shoryuken is invincible to air attacks." All MOCK /
   0.21.1 sends 88 (71 hit, 13 whiffs, 4 after the jump-in's hit) and no 2HP. Open loop can't show the jumps the new bot
   would have been free for (0.21.0 starts nothing while a jump comes down in reach).
 
+## 0.22.0: operator takeover; the bot learns from rounds the user wins (user, 2026-10-05)
+User: "What if we add a 'Take over' command that shows the bot how to fight against certain gimmicks? And if I lose, to
+disregard the info?"; "I'm also a Master Ryu, 1380MR. I can do it. I think discarding by round result is best. The bot
+should also learn from my inputs on my controller, not my keyboard." All MOCK-tested (`tests/test_0220.py`: unit tests and
+a session over the two real CPU fights); nothing here is verified in game.
+- **Taking over** (`sf6bot/takeover.py: Takeover`, `win32.XInputActivity`):
+  - triggers: any input on a real XInput controller while the bot fights (a button, a trigger past 64/255, a stick past
+    half: the Ally's own pad, or the user's pad through Parsec), or **F11** (`safety.takeover_key`) at any time
+  - the bot releases its keys at once, stops any sequence or combo between two inputs (the takeover check is part of
+    every abort callback), and sends nothing until the match ends; F11 gives control back
+  - after a takeover ends, the controller must be left alone for 1 s before it counts again
+  - off for the controller where the bot is itself a virtual controller (Versus Human offline, `--pad`) and in blind tests
+    (`configs/default.yaml: takeover`)
+  - UNVERIFIED: whether SF6 takes the controller as P1 while the keyboard is bound to P1, especially online
+- **Judged by round** (the user's rule): state lines from the takeover on are marked `op` in the match recording; at each
+  round's end a round the user played is kept if won, else discarded. Rows end up `op: "kept"` / `"lost"`, and the meta
+  has `operator_rounds`. Lines that piled up before the takeover (while a sequence ran) stay the bot's.
+- **What a kept round teaches:**
+  - **answers** (`AnswerBook`, `datasets/operator/<Bot>_vs_<Opponent>.json`, saved at the round's end): for every attack the
+    opponent started (normals, specials, supers; not throws, Drive Rush / Drive Impact or parries, which have their own
+    rules), what the user did next. Kinds: a move by id, hold back / down-back, a jump, a parry. Also stored: when (frames
+    after the opponent's move began), at what distance and height, and the result over the next 1.5 s (damage dealt −
+    taken). Read from the game state (action ids, input masks), so the device does not matter.
+  - **rule 1c** (`ScriptedFighter._operator_answer`, after the crumple cash-out, before throw tech): an answer given at
+    least twice (`MIN_N`) with a positive average, within ±0.3 of the distances and ±0.6 of the heights it was given at.
+    The best average (shrunk by one sighting) wins.
+    - moves: sent so they start where the user's did (the user's delay − input delay − stale state − the motion), at
+      most 8 frames late, once per opponent move, through the busy gate and human limits; OD moves, supers and parries
+      only with the resources
+    - holds: start at once and last for the opponent's move (its Capcom total, else 40 frames)
+    - the user's question 2 (keep the whole stretch or only answers that came out ahead) was not answered: defaulted to
+      answers that came out ahead, shown twice
+  - **networks:** the copy-a-player network learns the bot's side of kept rounds (weight 1.0, like a replay; the bot's own
+    play is still never imitated), and the win model scores them like the bot's own play. Operator rows from lost rounds
+    are left out of both (`intents.OP_CODE`, sample cache v3). The opponent's side is used as before.
+- **Kept apart from the bot's record:**
+  - assisted matches are left out of the scorecard (counted as "taken over by you") and of the progress win rates
+    (`progress.md`: "you played part of N")
+  - round reviews do not adapt the bot after a round the user played
+  - thoughts say which rounds were kept or discarded, how many answers were learned, and which ones the bot used
+- The style table (Legend replays) is unchanged; the operator's play is not added to it.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

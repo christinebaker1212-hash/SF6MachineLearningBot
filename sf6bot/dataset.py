@@ -89,6 +89,8 @@ class DatasetBuilder:
         row = {"t": round(t, 4), "round": rnd, "seg": self._segment, "frame": timer, "fight": self._fighting}
         if isinstance(raw.get("f"), int):
             row["f"] = raw["f"]          # 0.18.3: the exporter's render counter (game ticks per render = its frame rate)
+        if raw.get("operator"):
+            row["op"] = 1                # 0.22.0: the operator was playing (takeover.py); judged per round at the end
         for i, pk in enumerate(("p1", "p2")):
             p = raw.get(pk) or {}
             q = {k: p.get(k) for k in PLAYER_FIELDS}
@@ -103,6 +105,16 @@ class DatasetBuilder:
                 self.lines_without_input += 1
             row[pk] = q
         self.rows.append(row)
+
+    def judge_operator(self, won_by_round: dict) -> dict:
+        """0.22.0: the operator's rows become "kept" (a round the bot's side won) or "lost" (lost, or no result: the
+        user's rule, "if I lose, disregard the info"). Returns {round: "kept" | "lost"} for the meta."""
+        out = {}
+        for r in self.rows:
+            if r.get("op"):
+                r["op"] = "kept" if won_by_round.get(r.get("round")) is True else "lost"
+                out[r.get("round")] = r["op"]
+        return out
 
     def meta(self, source: str, notes: str = "") -> dict:
         rounds = [e for e in self.events if e["event"] == "round_end"]

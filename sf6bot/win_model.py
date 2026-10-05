@@ -97,6 +97,8 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
         kept = 0
         for x in s:
             w = r["weights"].get(x["player"])
+            if x.get("op") == 2 and x["player"] == r.get("bot"):
+                continue               # 0.22.0: the operator's play in a round they lost (the user: "disregard")
             if w:
                 x["rec"], x["w"] = ri, w
                 samples.append(x)

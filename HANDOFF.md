@@ -251,7 +251,18 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.21.1 (latest): a Shoryuken on every air attack it can reach** (user: "humans do not shoryuken every air attack. Our
+**0.22.0 (latest): operator takeover** (user: "a 'Take over' command that shows the bot how to fight against certain
+gimmicks ... if I lose, disregard the info"; "discarding by round result is best"; "learn from my inputs on my controller,
+not my keyboard"; the user is a Master Ryu, 1380 MR). Any controller input (or F11) during a fight hands the match to the
+user until it ends (F11 = give back). Rounds the user WINS teach the bot their answers per opponent move
+(`datasets/operator/<Bot>_vs_<Opponent>.json`, used once shown twice with a positive result: rule 1c); lost rounds are
+discarded; the user's kept play also trains the copy-a-player network and the win model; assisted matches stay out of
+the bot's record, the scorecard and progress win rates (CLAUDE.md "0.22.0"). The user's question 2 (keep the whole
+stretch, or only answers that came out ahead) was NOT answered: defaulted to "only answers that came out ahead, shown
+twice". **Ask the user** to test once whether SF6 takes the controller for P1 while the keyboard is bound to P1 (Training
+Mode, then a casual match).
+
+**0.21.1: a Shoryuken on every air attack it can reach** (user: "humans do not shoryuken every air attack. Our
 bot should"; "no need for a 2HP fallback"): the predicted landing side decides (in front -> Shoryuken, behind -> block),
 no 2HP, late Shoryukens while they can start before the landing (air invincible from frame 1), reversal Shoryukens out of
 blockstun, any attack in a jump arc counts (CLAUDE.md "0.21.1"). Replay check: 35 -> 71 Shoryuken hits on 295 real
@@ -604,7 +615,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py` |
+| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.

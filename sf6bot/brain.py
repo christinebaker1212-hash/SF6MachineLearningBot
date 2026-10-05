@@ -3,7 +3,8 @@
 `sf6bot train` (menu B) reads every recording and learns what players chose to do in each situation:
   - datasets/replays + datasets/merged: both players (top-player replays: the main teachers)
   - datasets/fights: the bot's OPPONENT only (CPU, or a volunteer in Versus Human). The bot's own side
-    is never imitated (it would learn its own scripted habits).
+    is never imitated (it would learn its own scripted habits), except where the operator took over and won the round
+    (0.22.0, takeover.py: the user's own play, weight 1.0).
 Labels are character-independent intents (intents.py) read from the game state. The network
 (mlp.py, numpy, CPU) gives P(intent | situation); the counts give the same from plain frequencies and
 pick the concrete move per character. Held-out recordings measure both against a majority-class
@@ -25,6 +26,7 @@ MIN_SAMPLES = 200          # below this the network is not trained (counts only)
 # the bot starts ranked at Platinum 1, and it should learn to BEAT those players, not to play like them; what wins
 # against them is the win model's job, win_model.py)
 SOURCE_WEIGHT = {"replay": 1.0, "human": 1.0, "cpu": 0.5, "ranked": 0.2}
+OPERATOR_WEIGHT = 1.0      # 0.22.0: the user (Master Ryu) playing the bot's side in a round they won, like a replay
 MODEL = "intent_net.npz"
 COUNTS = "counts.json"
 
@@ -81,13 +83,15 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
     for ri, r in enumerate(recs):
         from .sample_cache import file_samples
         try:
-            s = [x for x in file_samples(r["path"], ds_root) if x["player"] in r["players"]]
+            s = [x for x in file_samples(r["path"], ds_root) if x["player"] in r["players"]
+                 or (x["player"] == r.get("bot") and x.get("op") == 1)]
         except (OSError, ValueError, EOFError) as e:
             log(f"  skipped {r['path'].name}: {e}")
             info.append({"file": r["path"].name, "source": r["source"], "samples": 0, "skipped": str(e)[:120]})
             continue
         for x in s:
-            x["rec"], x["w"] = ri, SOURCE_WEIGHT[r["source"]]
+            x["rec"] = ri
+            x["w"] = OPERATOR_WEIGHT if x["player"] == r.get("bot") else SOURCE_WEIGHT[r["source"]]
         samples += s
         made_from = _meta(r["path"]).get("recordings") if r["path"].parent.name == "merged" else None
         info.append({"file": r["path"].name, "source": r["source"], "samples": len(s),

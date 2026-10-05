@@ -95,6 +95,7 @@ class Session:
             focused = lambda: True  # noqa: E731
             kill = lambda: False  # noqa: E731
             pause = flip = mark = skip = None
+            self.takeover_inputs = None
             alive = lambda: True  # noqa: E731
             moved = lambda: False  # noqa: E731
         else:
@@ -119,6 +120,9 @@ class Session:
             mark = lambda: win32.is_vk_down(k_mark)  # noqa: E731
             k_skip = vk(s.get("skip_key") or "F10")
             skip = lambda: win32.is_vk_down(k_skip)  # noqa: E731
+            # 0.22.0 operator takeover (takeover.py): any real controller input, or the takeover key (F11)
+            k_take = vk(s.get("takeover_key") or "F11")
+            self.takeover_inputs = (win32.XInputActivity(), lambda: win32.is_vk_down(k_take))
             alive = lambda: win32.is_window(hwnd)  # noqa: E731
             last = [0.0]
 

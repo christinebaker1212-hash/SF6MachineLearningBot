@@ -3,6 +3,8 @@ REM One click: the bot plays ranked matches as this PC's player, back to back, u
 REM F10 = stop after the current match, F8 = stop now. With auto-accept it runs unattended; one run
 REM folder for the whole session (progress.md updated after every match), no video, and the bot
 REM retrains itself in the background every 20 matches.
+REM Take over against a gimmick: press anything on your controller (or F11); the bot learns your answers
+REM from the rounds you WIN and forgets the rounds you lose. F11 again gives control back.
 REM Start it once, BEFORE you queue. Between matches the menus are yours (controller); the bot takes
 REM over at "Fight!", finds its side, and writes what it thinks after every match (runs\...\thoughts.md).
 cd /d "%~dp0"

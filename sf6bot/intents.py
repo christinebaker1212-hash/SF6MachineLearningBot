@@ -228,6 +228,11 @@ def returns(rows: list[dict], pi: int, half_life: int = RETURN_HALF_LIFE, round_
     return out
 
 
+# 0.22.0 operator takeover rows (takeover.py): 0 the bot (or nobody: replays), 1 the operator in a round they won (kept),
+# 2 the operator otherwise (lost, or not judged yet): left out of what the bot learns about its own side
+OP_CODE = {None: 0, 0: 0, "kept": 1, "lost": 2, 1: 2}
+
+
 def samples(rows: list[dict], players=(0, 1), stride: int = STRIDE, horizon: int = HORIZON,
             with_return: bool = False) -> list[dict]:
     """Decision samples from one recording: for each player, every `stride` contiguous in-fight frames
@@ -263,7 +268,7 @@ def samples(rows: list[dict], players=(0, 1), stride: int = STRIDE, horizon: int
             smp = {"x": features(me, op, prev_me, prev_op, r.get("frame")), "y": lab,
                    "chara": me.get("chara"), "opp_chara": op.get("chara"), "zone": zone(dist),
                    "opp_cat": category(op), "move_id": move_id, "air": (num(me.get("y")) or 0) > 0.05,
-                   "player": pi}
+                   "player": pi, "op": OP_CODE.get(r.get("op"), 2)}
             if with_return:
                 smp["g"] = rets[pi].get((r.get("round"), r.get("seg", 0), r["frame"]), 0.0)
             out.append(smp)

@@ -207,7 +207,7 @@ def collect(ds_root: Path, log=None) -> dict:
     ds_root = Path(ds_root)
     cache_p = ds_root / "models" / "cache" / "scorecard.json"
     cache = _load_cache(cache_p)
-    out: dict = defaultdict(lambda: {"matches": 0, "won": 0, "lost": 0, "counts": Counter()})
+    out: dict = defaultdict(lambda: {"matches": 0, "won": 0, "lost": 0, "assisted": 0, "counts": Counter()})
     changed = False
     for mp in sorted((ds_root / "fights").glob("*.meta.json")):
         gz = mp.with_name(mp.name[:-len(".meta.json")] + ".jsonl.gz")
@@ -220,6 +220,10 @@ def collect(ds_root: Path, log=None) -> dict:
         notes = (meta.get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
         if bot is None or not bot_side_ok(meta, bot) or meta.get("partial"):
+            continue
+        if meta.get("operator_rounds"):
+            # 0.22.0: the operator played part of this match: it measures the user, not the bot (counted apart)
+            out[meta.get("sf6bot_version") or "?"]["assisted"] += 1
             continue
         key = f"{gz.name}:{gz.stat().st_size}"
         ent = cache["files"].get(key)
@@ -256,6 +260,7 @@ def row(v: dict) -> dict:
     jn = max(1, c["jumpins_near"])
     return {
         "matches": v["matches"], "record": f"{v['won']}-{v['lost']}",
+        "taken over by you (left out)": v.get("assisted", 0),
         "win %": round(100 * v["won"] / n), "damage ratio": round(c["dealt"] / taken, 2),
         "jumps / min": round(c["jumps"] / mins, 1),
         "back to wall %": round(100 * c["bot_cornered"] / fr), "opp to wall %": round(100 * c["opp_cornered"] / fr),
@@ -299,7 +304,7 @@ def markdown(data: dict, last: int = 4) -> str:
     for k in keys:
         out.append(f"| {k} | " + " | ".join(str(rows_[v][k]) for v in vs) + " |")
     out += ["", "Few matches = noisy: about +/-14 points of win rate at 50 matches. Wrong-side and joined-late "
-                "recordings are left out."]
+                "recordings are left out, and so are matches you took over (0.22.0)."]
     return "\n".join(out)
 
 

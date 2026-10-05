@@ -14,7 +14,7 @@ import numpy as np
 
 from . import intents as it
 
-CACHE_VERSION = 2          # 2 (0.17.5): features v2, frozen online move frames repaired
+CACHE_VERSION = 3          # 2 (0.17.5): features v2, frozen online move frames repaired; 3 (0.22.0): operator rows
 _NONE = -1
 
 
@@ -41,6 +41,7 @@ def _to_arrays(s: list[dict]) -> dict:
             "move_id": np.array([iv(x.get("move_id")) for x in s], dtype=np.int32),
             "air": np.array([bool(x.get("air")) for x in s], dtype=bool),
             "player": np.array([x["player"] for x in s], dtype=np.int8),
+            "op": np.array([x.get("op", 0) for x in s], dtype=np.int8),
             "g": np.array([x.get("g", 0.0) for x in s], dtype=np.float32)}
 
 
@@ -49,7 +50,8 @@ def _to_dicts(a: dict) -> list[dict]:
     nn = lambda v: None if v == _NONE else int(v)  # noqa: E731
     return [{"x": a["x"][i], "y": it.INTENTS[a["y"][i]], "chara": nn(a["chara"][i]), "opp_chara": nn(a["opp_chara"][i]),
              "zone": zones[a["zone"][i]], "opp_cat": it.OPP_CATS[a["opp_cat"][i]], "move_id": nn(a["move_id"][i]),
-             "air": bool(a["air"][i]), "player": int(a["player"][i]), "g": float(a["g"][i])}
+             "air": bool(a["air"][i]), "player": int(a["player"][i]), "g": float(a["g"][i]),
+             "op": int(a["op"][i]) if "op" in a else 0}
             for i in range(len(a["y"]))]
 
 
