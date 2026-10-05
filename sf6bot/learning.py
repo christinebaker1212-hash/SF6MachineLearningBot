@@ -352,10 +352,11 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     aa = summary.get("anti_air") or {}
     if any(aa.values()):
         out.append(("scripted", f"Anti-air: Shoryukens sent on jumps {aa.get('anti_air', 0)}, on airborne moves "
-                                f"{aa.get('air_moves', 0)}; held block with {opp} overhead (too close to call) "
-                                f"{aa.get('held_overhead', 0)}; jumps I could not answer (still in my own move or "
-                                f"stunned) {aa.get('busy', 0)}; jumps I waited for (nothing started) {aa.get('ready', 0)}; "
-                                f"Shoryukens on my wake-up {aa.get('wakeup_reversal', 0)}"
+                                f"{aa.get('air_moves', 0)}; blocked toward the landing side: cross-ups "
+                                f"{aa.get('blocked_crossup', 0)}, landing on top / behind {aa.get('held_overhead', 0)}; "
+                                f"jumps I could not answer (still in my own move or stunned) {aa.get('busy', 0)}; jumps I "
+                                f"waited for (nothing started) {aa.get('ready', 0)}; reversal Shoryukens on my wake-up "
+                                f"{aa.get('wakeup_reversal', 0)}, out of blockstun {aa.get('blockstun_reversal', 0)}"
                                 + (f"; air-to-air out of Shoryuken range {aa['air_to_air']}" if aa.get("air_to_air") else "")
                                 + "."))
     pt = summary.get("parry_throws") or {}

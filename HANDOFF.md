@@ -251,7 +251,13 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.21.0 (latest): neutral like Legend Ryu** (style table from 12 Legend replays: mostly crouch-blocking and walking,
+**0.21.1 (latest): a Shoryuken on every air attack it can reach** (user: "humans do not shoryuken every air attack. Our
+bot should"; "no need for a 2HP fallback"): the predicted landing side decides (in front -> Shoryuken, behind -> block),
+no 2HP, late Shoryukens while they can start before the landing (air invincible from frame 1), reversal Shoryukens out of
+blockstun, any attack in a jump arc counts (CLAUDE.md "0.21.1"). Replay check: 35 -> 71 Shoryuken hits on 295 real
+jump-ins, whiffs 7 -> 13. Check `anti_air` in the next batch (sent / blocked cross-ups / busy).
+
+**0.21.0: neutral like Legend Ryu** (style table from 12 Legend replays: mostly crouch-blocking and walking,
 the Legends' buttons per distance, Drive Rush with their follow-ups), anti-air readiness and a wake-up Shoryuken,
 crouch-block inside the opponent's range, turn-taking at pressure moments (delay tech when minus, jab when plus, guesses
 rare, parry only with 3 bars), oki meaty / throw only in range, and the diagnosis rows in `scorecard` (CLAUDE.md

@@ -34,24 +34,29 @@ anti_air:
   # + startup), and only real jumps count (ids.jump), not falling from a juggle or knockdown.
   lead_frames: 12      # (before 0.18.0: the prediction horizon; now timing comes from the landing)
   # 0.18.0: fired so the Shoryuken is active as the opponent comes down: landing in <= motion + input delay + start-up +
-  # early_frames. Too late for that -> the anti-air normal; later still -> block.
+  # early_frames. 0.21.1: no anti-air normal (user: "Shoryuken is invincible to air attacks"): a late Shoryuken still goes
+  # out while it can start before the landing (late_frames); later than that -> block.
   move: anti_air_srk
-  normal: anti_air_normal
+  late_frames: 4
   gravity: 0.0123      # MEASURED: jumps last 37 frames and peak at 2.11 (most characters)
   early_frames: 6
   crossup_past: 0.3    # MEASURED: predicted landing this far past the bot = a cross-up (54/72, no false alarms)
-  min_dist: 0.25       # predicted closer than this, or on the other side = cross-up -> block instead
-  # 0.19.0 MEASURED (22 ranked matches): every cross-over that the Shoryuken whiffed (11 of 11) started with the opponent
-  # within 0.5 sideways and 1.4-1.9 high; the 26 that hit mostly started 0.55+ away. Overhead = block, decide later.
-  overhead_dx: 0.5
+  # 0.21.1 (user: "humans do not shoryuken every air attack. Our bot should."): only the predicted landing side decides.
+  # Predicted to land on the side the opponent is on now -> Shoryuken (MEASURED, 295 near jump-ins in 63 ranked matches:
+  # 93% landed in front, a Shoryuken sent at the decision hits 120 of 124 within 1.0; 39 of 40 within 0.25, which the
+  # 0.19.0 rules - min_dist 0.25, overhead_dx 0.5 / overhead_min_y 0.9 - blocked); predicted to cross, or closer than
+  # side_dead sideways now -> block toward the landing side. (min_dist / overhead_dx / overhead_min_y are no longer used.)
+  side_dead: 0.05
+  # 0.21.1: frames the opponent must have been on its current side (since it last passed over the bot) before a
+  # Shoryuken goes out; else block toward the landing side
+  cross_settle: 2
   # 0.20.0 (user's pick "backup anti-air"): an opponent coming down out of Shoryuken range -> forward jump MP on the
   # way up. ESTIMATES.
   air_to_air: {enabled: true, min_dist: 1.3, max_dist: 2.2, seq: "9@3 5@4 5+MP@3"}
-  overhead_min_y: 0.9
   # 0.21.0: anti-air readiness: an opponent in the air that will land within max_dist + ready_margin = start nothing
   # until the anti-air window (MEASURED: 47 of 96 near jump-ins with the bot free got a normal or special started
-  # under them). On the bot's own wake-up: a reversal L Shoryuken when the opponent comes down `wakeup_window` frames
-  # after the bot's first free frame (its active frames 5-14, air invincible 1-14: Capcom).
+  # under them). On the bot's own wake-up (0.21.1: and out of blockstun): a reversal L Shoryuken when the opponent comes
+  # down `wakeup_window` frames after the bot's first free frame (its active frames 5-14, air invincible 1-14: Capcom).
   ready_margin: 0.6
   wakeup_reversal: true
   wakeup_window: [3, 16]
@@ -143,7 +148,6 @@ moves:
   shoryuken: {name: "Shoryuken (623HP)", seq: "6@3 2@3 3+HP@3"}
   # 0.18.0 anti-air: L Shoryuken (Capcom: start-up 5, active 5-14, air-invincible), crouching HP (start-up 9)
   anti_air_srk: {name: "L Shoryuken (anti-air)", seq: "6@3 2@3 3+LP@3", startup: 5}
-  anti_air_normal: {name: "2HP (anti-air)", seq: "2+HP@4", startup: 9}
   # 0.18.1 Super Arts (Capcom: SA3 Shin Shoryuken 236236K start-up 5, 4000 dmg; SA1 Shinku Hadoken 236236P start-up 7,
   # 2000 dmg); 3-frame motion steps (0.4.1: 2-frame steps turned 236236 into 623)
   sa3: {name: "SA3 Shin Shoryuken", seq: "2@3 3@3 6@3 2@3 3@3 6+LK@3", startup: 5, super: 30000, damage: 4000}

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from sf6bot import intents as it
+from sf6bot.actions import Facing
 from sf6bot import style
 from sf6bot.fighter import ScriptedFighter, load_fighter_config
 from sf6bot.neutral_policy import NeutralPolicy
@@ -257,3 +258,68 @@ def test_the_style_table_ships_as_valid_json():
     p = Path(__file__).parent.parent / "configs" / "style" / "Ryu.json"
     t = json.loads(p.read_text(encoding="utf-8"))
     assert t["version"] == style.VERSION and t["after_rush"] and t["cells"]
+
+
+# ---- 0.21.1: anti-air on every air attack it can reach -----------------------------------------------------------------
+
+def test_a_jump_in_while_the_bot_blocks_meets_a_reversal_shoryuken():
+    """Blocking (a fireball, a string) while the opponent jumps at the bot: a reversal L Shoryuken whose button lands on
+    the first free frame (before 0.21.1 the busy gate dropped every anti-air input in blockstun)."""
+    f = ScriptedFighter(FCFG, seed=1)
+    f.lead = 4
+    d = None
+    y, vy, x = 0.6, 0.18, 2.6
+    for k in range(20):
+        y, x = y + vy, x - 0.04
+        vy -= 0.0123
+        d = f.decide(state(me={"blockstun": 26 - k, "action_id": 160, "super": 0},
+                           op={"x": x, "y": max(y, 0.0), "action_id": 37}, timer=600 + k), k / 60, 0)
+        if d.rule == "wakeup_anti_air":
+            break
+    assert d.rule == "wakeup_anti_air" and "blocking" in d.reason and f.aa_stats["blockstun_reversal"] == 1
+    assert d.facing is Facing.RIGHT and "Shoryuken" in d.name
+
+
+def test_no_anti_air_normal_and_a_late_shoryuken_still_goes_out():
+    """User: "There's no need for a 2HP fallback - Shoryuken is invincible to air attacks". A Shoryuken that can start
+    before the landing goes out even if its hit comes in the landing recovery; nothing else is sent as anti-air."""
+    assert "normal" not in FCFG["anti_air"] and "anti_air_normal" not in FCFG["moves"]
+    f = ScriptedFighter(FCFG, seed=1)
+    f.lead = 4
+    names = set()
+    y, vy, x = 0.0, 0.22, 2.6
+    for k in range(40):
+        y, x = y + vy, x - 0.045
+        vy -= 0.0123
+        d = f.decide(state(me={"super": 0}, op={"x": x, "y": max(y, 0.0), "action_id": 37}, timer=200 + k), k / 60, 0)
+        if d.rule == "anti_air":
+            names.add(d.name)
+    assert names and all(n.startswith("L Shoryuken") for n in names)
+
+
+def test_any_attack_inside_a_jump_counts_as_the_jump():
+    """Many characters' jump attacks are not in ids.jump (Cammy 639-643, Viper 627-631, Guile 647-650 ...): once the
+    opponent left the ground with a jump, everything until the landing is part of the jump (except a projectile)."""
+    f = ScriptedFighter(FCFG, seed=1)
+    f.decide(state(op={"x": 2.0, "y": 0.5, "action_id": 36}, timer=700), 0.0, 0)
+    assert f._jumping({"action_id": 641, "y": 0.3})
+    g = ScriptedFighter(FCFG, seed=1)
+    assert not g._jumping({"action_id": 641, "y": 0.3})            # no jump seen: not a jump
+
+
+def test_the_landing_side_decides_the_anti_air():
+    """MEASURED (295 jump-ins): predicted to land in front -> Shoryuken (the motion for the side the opponent is on now);
+    predicted behind -> block toward the landing side, and no Shoryuken right after a cross-over."""
+    f = ScriptedFighter(FCFG, seed=1)
+    f.lead = 4
+    rules = []
+    for k, (x, y) in enumerate([(0.32, 1.55), (0.30, 1.50), (0.28, 1.45), (0.26, 1.40), (0.24, 1.35)]):
+        rules.append(f.decide(state(me={"super": 0}, op={"x": x, "y": y, "action_id": 37}, timer=300 + k), k / 60, 0).rule)
+    assert "anti_air" in rules                                     # lands just in front (0.10): Shoryuken
+    g = ScriptedFighter(FCFG, seed=1)
+    g.lead = 4
+    out = []
+    for k, (x, y) in enumerate([(0.20, 1.55), (0.10, 1.50), (-0.04, 1.45), (-0.14, 1.40), (-0.24, 1.35)]):
+        out.append(g.decide(state(me={"super": 0}, op={"x": x, "y": y, "action_id": 37}, timer=300 + k), k / 60, 0))
+    assert "anti_air" not in [d.rule for d in out[:4]]             # crossing: block toward where it lands
+    assert any(d.rule in ("block_overhead", "block_crossup") and d.facing is Facing.LEFT for d in out)

@@ -2882,6 +2882,45 @@ is") and 12 replays ("we want Ryu to play like this. These are from Legend playe
 - The regression fingerprint `fighter_decisions` changed for exactly these defence choices (delay tech when minus, jab
   when plus); golden updated.
 
+## 0.21.1: a Shoryuken on every air attack it can reach (user, 2026-10-05)
+User: "We are in danger of dropping into Gold ... humans do not shoryuken every air attack. Our bot should."; "There's
+no need for a 2HP fallback - Shoryuken is invincible to air attacks." All MOCK / replay-tested (`tests/test_0210.py`,
+`tests/test_0190.py`, `tests/test_fighter.py`); not verified in game.
+### MEASURED
+- **Where a Shoryuken connects** (every Shoryuken started against an airborne, non-juggled opponent: 96 of the bot's in
+  63 ranked matches, 8 of the Legend Ryus'): 75 + 8 hit, on its own frames 5-9, with the opponent 0.0-1.4 in front and
+  up to 2.1 high. Every whiff was an opponent passing over Ryu (0.24-0.48 in front at the start, -0.7 by frame 8) or out
+  of reach (1.9+).
+- **Jump-ins:** 295 opponent jumps landing within 1.6 of the bot: 10 anti-aired, 96 hit the bot, 80 blocked. At the
+  anti-air's decision line (predicted landing within motion + input delay + start-up + 6 frames):
+  - predicted to land in front (the side the opponent is on now), within 1.0: 124 jumps, 93% landed in front, a
+    Shoryuken sent there hits 120 by the hit model above; within 0.25: 39 of 40, which 0.19.0's "too close to call" rule
+    (min_dist 0.25; overhead 0.5 sideways / 0.9 high) blocked
+  - predicted to cross: 119 jumps, 12% landed in front, a Shoryuken hits 20%
+  - 1.0-1.3: 73% hit; 1.3+: 54% (max_dist 1.3 stays)
+### Changes (`fighter.py` rule 4, `configs/fighter/ryu.yaml: anti_air`)
+- **The predicted landing side decides:** in front -> L Shoryuken, its motion mirrored for the side the opponent is on now
+  (the game reads motions by side, 0.8.0); predicted behind, or directly above (`side_dead` 0.05) -> block toward the
+  landing side, decided again every line.
+- **Not right after a cross-over** (`cross_settle` 2 frames on the current side): Shoryukens sent 0-1 frames after the
+  opponent passed over Ryu were a coin flip by the hit model, and how the game reads a motion across the side switch is
+  not verified.
+- **No anti-air normal** (2HP and its move entry removed): a Shoryuken goes out while it can still START before the
+  landing (`late_frames` 4; invincible to airborne attacks frames 1-14, Capcom, so the jump attack cannot beat it; its hit
+  comes during the landing recovery); later than that -> block.
+- **Reversal Shoryuken out of blockstun** (the busy gate dropped every anti-air input sent during blockstun): the 0.21.0
+  wake-up rule now also fires after a block, when the jump comes down 3-16 frames after the bot's first free frame.
+- **The whole jump arc counts:** from take-off with a jump id to the landing, any action except a hit reaction or a
+  projectile is the jump. MEASURED: many characters' jump attacks are outside ids.jump (Cammy 639-643, Viper 627-631,
+  Guile 647-650, Chun-Li 618/620, Blanka 635/636, Lily / Zangief / Dee Jay 643-645, Mai 634) and only counted above
+  height 0.4.
+- `anti_air` stats + thoughts: Shoryukens on jumps / airborne moves, blocked cross-ups, blocked landings on top / behind,
+  busy, waited, reversal Shoryukens on wake-up / out of blockstun.
+### Replay check (open loop: the recorded bot's own state decides when it was busy; the hit model above)
+- On the same 295 jumps: 0.21.0 sent 44 Shoryukens (35 hit, 7 whiffs, 2 after the jump-in's hit) and 21 2HPs;
+  0.21.1 sends 88 (71 hit, 13 whiffs, 4 after the jump-in's hit) and no 2HP. Open loop can't show the jumps the new bot
+  would have been free for (0.21.0 starts nothing while a jump comes down in reach).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

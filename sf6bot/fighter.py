@@ -355,6 +355,8 @@ class ScriptedFighter:
         self._aa_overhead_for = None
         self._aa_busy_for = None
         self._aa_ready_for = None             # 0.21.0: the jump the bot held still for (counted once)
+        self._op_side, self._op_side_t = None, None   # 0.21.1: the opponent's side and when it last changed (cross-overs)
+        self._op_jump_arc = False             # 0.21.1: the opponent is in a jump that started with a jump id
         self._burnout_super_for = None
         self._a2a_for = None
         self._corner_fired = None
@@ -451,6 +453,14 @@ class ScriptedFighter:
             self.vel_ok = True
         if isinstance(tmr, int) and x is not None:
             self.prev_op = (tmr, x, y)
+        # 0.21.1: the opponent's jump arc, from take-off (a jump id in the air) to landing: every action in it is part of the
+        # jump. Many characters' jump attacks are not in ids.jump (MEASURED, 63 ranked matches: Cammy 639-643, Viper
+        # 627-631, Guile 647-650, Chun-Li 618/620, Blanka 635/636, Lily / Zangief / Dee Jay 643-645, Mai 634)
+        a = op.get("action_id")
+        if y <= 0.02 or a in self.hit_ids or a in self.thrown_ids:
+            self._op_jump_arc = False
+        elif a in self.jump_ids:
+            self._op_jump_arc = True
 
     def can_spend(self, me: dict, action: str, lethal: bool = False, reserve: float | None = None) -> bool:
         """Never go into burnout (drive 0) unless the follow-up is certain to kill (user rule,
@@ -477,9 +487,15 @@ class ScriptedFighter:
         return Facing.RIGHT if pdx > 0 else Facing.LEFT
 
     def _jumping(self, op: dict) -> bool:
-        """A real jump or jump attack, not falling from a juggle or knockdown (0.6.x anti-aired those)."""
+        """A real jump or jump attack, not falling from a juggle or knockdown (0.6.x anti-aired those). 0.21.1: any action
+        inside a jump arc that started with a jump id (any character's jump attacks and air specials), except a
+        projectile (the Shoryuken is invincible to airborne attacks, not to projectiles)."""
         a = op.get("action_id")
-        return (_num(op.get("y")) or 0.0) > 0.05 and a in self.jump_ids and a not in self.hit_ids
+        if (_num(op.get("y")) or 0.0) <= 0.05 or a in self.hit_ids:
+            return False
+        if a in self.jump_ids:
+            return True
+        return self._op_jump_arc and not (self.opp.get(a) or {}).get("projectile")
 
     def _air_move(self, op: dict) -> bool:
         """0.19.0 (user: "many moves leave a character airborne, like Cammy's hooligan startup, Akuma's demon flip, Ingrid's
@@ -633,6 +649,12 @@ class ScriptedFighter:
         self._note_onset(op.get("action_id"), self._now)
         self._track(raw, op)
         self.facing(me, op)
+        mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
+        if mx_ is not None and ox_ is not None and abs(ox_ - mx_) >= 0.02:
+            sd_ = 1 if ox_ > mx_ else -1
+            if sd_ != self._op_side:
+                # the first reading of the side is not a cross-over
+                self._op_side, self._op_side_t = sd_, (self._now if self._op_side is not None else None)
         op_y, me_y = _num(op.get("y")) or 0.0, _num(me.get("y")) or 0.0
         if op_y <= 0.05:
             self.aa_done_for_jump = False
@@ -710,44 +732,54 @@ class ScriptedFighter:
             mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
             px = ox + self.op_vx * t_land
             pdx, dx = px - mx, ox - mx
-            srk, nrm = self.c["moves"][aa.get("move", "shoryuken")], self.c["moves"].get(aa.get("normal", ""))
+            srk = self.c["moves"][aa.get("move", "shoryuken")]
             need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
             early = int(aa.get("early_frames", 6)) + self.aa_extra   # active this many frames before they land
             if abs(pdx) <= aa["max_dist"] + 0.6 and t_land <= need + early:
-                # 0.19.0 (user: "the bot seems to be whiffing DPs as soon as an opponent goes over its head - the bot should
-                # make a DP decision at a later time"). MEASURED, 22 ranked matches: 41 Shoryukens against airborne
-                # opponents; all 26 that hit had them land on the same side, all 11 cross-overs whiffed (9 then punished),
-                # and every cross-over started with the opponent within 0.5 sideways and 1.4-1.9 high. Nearly overhead, or
-                # landing too close to call: block toward the landing side and decide again on the next line.
+                # 0.21.1 (user: "humans do not shoryuken every air attack. Our bot should."): the side the opponent is
+                # predicted to land on decides, nothing else. MEASURED (295 jump-ins landing near the bot, 63 ranked
+                # matches), at this line: predicted to land in front (same side as now, any distance up to 1.0): 124
+                # jumps, 93% landed in front and a Shoryuken sent here hits 120 of 124 (39 of 40 when predicted within
+                # 0.25, which 0.19.0's "too close to call" rule blocked); predicted to cross: 119 jumps, 12% landed in
+                # front, a Shoryuken hits 20%. So: in front -> Shoryuken (motion for the side the opponent is on now: the
+                # game reads motions by side, 0.8.0); crossing, or directly above -> block toward the landing side and
+                # decide again on the next line. (0.19.0's whiffs were predicted crosses treated as in front.)
                 land_side = (Facing.RIGHT if pdx > 0 else Facing.LEFT) if abs(pdx) > 0.05 else self.side
-                overhead = abs(dx) < float(aa.get("overhead_dx", 0.5)) and op_y > float(aa.get("overhead_min_y", 0.9))
-                unclear = dx * pdx <= 0 or abs(pdx) < float(aa.get("min_dist", 0.25))
-                if overhead or (unclear and not (dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3)))):
+                in_front = abs(dx) >= float(aa.get("side_dead", 0.05)) and dx * pdx > 0
+                # frames since the opponent passed over the bot: a Shoryuken sent on the very line it crossed was a coin
+                # flip (MEASURED, same 295 jumps: 10 of 15 sent 0-1 frames after a cross would hit, 59 of 65 with no cross
+                # in the last 12)
+                since_cross = (self._now - self._op_side_t) if isinstance(self._now, int) and isinstance(
+                    self._op_side_t, int) else 99
+                if in_front and since_cross < int(aa.get("cross_settle", 1)):
+                    in_front = False
+                if not in_front:
+                    crossing = dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3))
                     if self._aa_overhead_for != self.op_onset:
                         self._aa_overhead_for = self.op_onset
-                        self.aa_stats["held_overhead"] += 1
+                        self.aa_stats["blocked_crossup" if crossing else "held_overhead"] = \
+                            self.aa_stats.get("blocked_crossup" if crossing else "held_overhead", 0) + 1
+                    if crossing:
+                        return Decision("hold", direction=4, facing=land_side, rule="block_crossup",
+                                        reason=f"opponent crossing over (lands {abs(pdx):.2f} "
+                                               f"{'right' if pdx > 0 else 'left'})")
                     return Decision("hold", direction=4, facing=land_side, rule="block_overhead",
-                                    reason=f"opponent overhead ({dx:+.2f} now, lands {pdx:+.2f}): too close to call, "
-                                           "blocking toward the landing side")
-                if dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3)):
-                    # cross-up: a 623 input now would come out for the wrong side; block toward where they land.
-                    # MEASURED 0.18.0 (99 jump-ins, 3 checks each): predicted >= 0.3 past the bot = a real cross-up 54
-                    # of 72, no false alarm; closer predictions land in front (the bodies push apart at ~0.6)
-                    land = Facing.RIGHT if pdx > 0 else Facing.LEFT
-                    return Decision("hold", direction=4, facing=land, rule="block_crossup",
-                                    reason=f"opponent crossing over (lands {abs(pdx):.2f} {'right' if pdx > 0 else 'left'})")
+                                    reason=f"opponent overhead ({dx:+.2f} now, lands {pdx:+.2f}): landing behind or on "
+                                           "top, blocking toward the landing side")
                 if abs(pdx) <= aa["max_dist"]:
                     why = f"opponent jumping in (height {op_y:.2f}, lands in {t_land:.0f}f {abs(pdx):.2f} away)"
                     if air_move:
                         why = f"opponent airborne in a move (action {op_act}, height {op_y:.2f}, lands in {t_land:.0f}f)"
-                    if t_land >= need - 2:
+                    # 0.21.1 (user: "There's no need for a 2HP fallback - Shoryuken is invincible to air attacks"): L
+                    # Shoryuken is invincible to airborne attacks from its first frame (1-14, Capcom), so the jump attack
+                    # cannot beat it once it has started; it only has to start before the jump-in connects (at the
+                    # latest the landing), and then hits during the landing recovery. `late_frames` 4: started by the
+                    # frame before the landing (motion + input delay + 1 = need - start-up + 1). Later than that: block.
+                    if t_land >= need - int(aa.get("late_frames", 4)):
                         self.aa_done_for_jump = True
                         self._aa_kind = "air_moves" if air_move else "anti_air"    # counted once actually sent
-                        return Decision("seq", srk["name"], srk["seq"], reason=why, rule="anti_air")
-                    if nrm is not None and t_land >= self.lead + self.stale + int(nrm.get("startup", 9)) - 3:
-                        self.aa_done_for_jump = True    # too late for the Shoryuken: the anti-air normal
-                        return Decision("seq", nrm["name"], nrm["seq"], reason=why + "; too late for a Shoryuken",
-                                        rule="anti_air")
+                        return Decision("seq", srk["name"], srk["seq"], reason=why, rule="anti_air",
+                                        facing=Facing.RIGHT if dx > 0 else Facing.LEFT)
             if self.busy(me) is None and not self.safe:
                 a2 = self._air_to_air(me, op, pdx, t_land, op_y)
                 if a2 is not None:
@@ -944,8 +976,8 @@ class ScriptedFighter:
         # defences chosen after a block - Shoryuken, jab, delay tech - were thrown: their input came too late)
         if self._pressure_fired or rem is None or rem > self.lead + self.stale + self.defense.pad + 1:
             return None
-        if sit == "wakeup":
-            wa = self._wakeup_anti_air(me, op, rem)
+        if sit in ("wakeup", "after_block", "after_rush_block"):
+            wa = self._wakeup_anti_air(me, op, rem, sit)
             if wa is not None:
                 self._pressure_fired = True
                 return wa
@@ -963,11 +995,13 @@ class ScriptedFighter:
         self._pressure_fired = True
         return self._commit_defense(sit, raw, me, op, dist, t, rem=rem)
 
-    def _wakeup_anti_air(self, me: dict, op: dict, rem: int) -> Decision | None:
+    def _wakeup_anti_air(self, me: dict, op: dict, rem: int, sit: str = "wakeup") -> Decision | None:
         """0.21.0: the opponent jumping at the bot while it gets up (MEASURED, 56 ranked matches: 44 of 518 jumps came on
         the bot's wake-up): a reversal anti-air Shoryuken whose button lands on the bot's first free frame. L Shoryuken
         is invincible to airborne attacks from frame 1 to 14 (Capcom), active 5-14: only when the opponent comes down in
-        that window (`anti_air.wakeup_window`), on the same side (a cross-up is blocked by the usual rules)."""
+        that window (`anti_air.wakeup_window`), predicted to land in front (a cross-up is blocked by the usual rules).
+        0.21.1: also out of blockstun (a fireball or a string blocked, then a jump at the bot: the classic setup; the
+        busy gate dropped every anti-air input during blockstun)."""
         aa = self.c["anti_air"]
         jt = self._jump_threat(me, op)
         if jt is None or not aa.get("wakeup_reversal", True):
@@ -975,15 +1009,18 @@ class ScriptedFighter:
         t_land, pdx = jt
         dx = (_num(op.get("x")) or 0.0) - (_num(me.get("x")) or 0.0)
         lo, hi = (aa.get("wakeup_window") or [3, 16])[:2]
-        if dx * pdx <= 0 or abs(pdx) < float(aa.get("min_dist", 0.25)) or not rem + int(lo) <= t_land <= rem + int(hi):
+        if abs(dx) < float(aa.get("side_dead", 0.05)) or dx * pdx <= 0 or abs(pdx) > float(aa["max_dist"]) \
+                or not rem + int(lo) <= t_land <= rem + int(hi):
             return None
         srk = self.c["moves"][aa.get("move", "shoryuken")]
         pad = max(0, int(rem) - self.lead - self.stale) - seq_prefix(srk["seq"])
         self.aa_done_for_jump = True
-        self.aa_stats["wakeup_reversal"] = self.aa_stats.get("wakeup_reversal", 0) + 1
+        key = "wakeup_reversal" if sit == "wakeup" else "blockstun_reversal"
+        self.aa_stats[key] = self.aa_stats.get(key, 0) + 1
+        what = "getting up" if sit == "wakeup" else "blocking"
         return Decision("seq", f"reversal {srk['name']}", (f"5@{pad} " if pad > 0 else "") + srk["seq"],
-                        rule="wakeup_anti_air",
-                        reason=f"getting up with the opponent jumping in (lands in {t_land:.0f}f, I am free in {rem}f)")
+                        rule="wakeup_anti_air", facing=Facing.RIGHT if dx > 0 else Facing.LEFT,
+                        reason=f"{what} with the opponent jumping in (lands in {t_land:.0f}f, I am free in {rem}f)")
 
     def _approach(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
         """0.18.0: the opponent walking into throw range in neutral is a pressure moment too (0.17.5 ranked: 9 of 26

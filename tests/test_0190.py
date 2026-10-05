@@ -20,11 +20,17 @@ def _fall(f, op_x, xs, ys, act=36, me=None, t0=500):
 
 
 def test_no_shoryuken_while_the_opponent_is_overhead():
-    # MEASURED: every cross-over the Shoryuken whiffed started with the opponent within 0.5 sideways, 1.4-1.9 high
+    # 0.21.1: the predicted landing side decides (MEASURED, 295 near jump-ins: predicted to cross -> 12% landed in front;
+    # predicted in front -> 93%). Coming down over the bot and predicted to land just behind it: block, no Shoryuken
     f = _fighter()
-    ds = _fall(f, 0, [0.30 - 0.02 * k for k in range(6)], [1.70 - 0.05 * k for k in range(6)])
+    ds = _fall(f, 0, [0.30 - 0.04 * k for k in range(6)], [1.70 - 0.05 * k for k in range(6)])
     rules = [d.rule for d in ds]
     assert "anti_air" not in rules and "block_overhead" in rules
+    # the same height, predicted to land just in front (0.02): it lands in front 88% of the time and a Shoryuken hits 94%
+    # (0.19.0's "too close to call" rule blocked these)
+    f1 = _fighter()
+    ds1 = _fall(f1, 0, [0.30 - 0.02 * k for k in range(6)], [1.70 - 0.05 * k for k in range(6)])
+    assert "anti_air" in [d.rule for d in ds1]
     # a jump that comes down in front of the bot, farther out: still the Shoryuken
     f2 = _fighter()
     ds2 = _fall(f2, 0, [1.30 - 0.01 * k for k in range(40)], [2.00 - 0.03 * k for k in range(40)])

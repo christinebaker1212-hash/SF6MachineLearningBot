@@ -29,9 +29,14 @@ def test_anti_air_where_the_jump_lands():
     assert d.rule != "anti_air"
     f.decide(state(op={"x": 1.96, "y": 1.25, "action_id": 37}, timer=511), 0.18, 0)
     d = f.decide(state(op={"x": 1.90, "y": 1.2, "action_id": 37}, timer=512), 0.2, 0)     # lands at ~1.3 in ~10f
-    # 0.18.0: timed from the landing; 10 frames is too late for a Shoryuken (motion 6 + delay 4 + start-up 5): 2HP
-    assert d.rule == "anti_air" and d.name.startswith("2HP") and "too late" in d.reason
-    assert f.decide(state(op={"x": 1.84, "y": 1.1, "action_id": 37}, timer=513), 0.22, 0).rule != "anti_air"
+    # 0.21.1: no 2HP fallback (user: Shoryuken is invincible to air attacks). 10 frames: the Shoryuken (motion 6 + delay
+    # 4) could not even start before the landing: block toward the landing side
+    assert d.rule != "anti_air" and d.direction == 4
+    # ~12 frames: late (active ~2 frames after the landing) but started in the air, invincible: the Shoryuken goes out
+    g = ScriptedFighter(FCFG, seed=1)
+    g.decide(state(op={"x": 1.96, "y": 1.50, "action_id": 37}, timer=511), 0.18, 0)
+    d = g.decide(state(op={"x": 1.90, "y": 1.45, "action_id": 37}, timer=512), 0.2, 0)
+    assert d.rule == "anti_air" and d.name.startswith("L Shoryuken") and d.facing is Facing.RIGHT
 
 
 def test_no_anti_air_on_juggled_opponent():
