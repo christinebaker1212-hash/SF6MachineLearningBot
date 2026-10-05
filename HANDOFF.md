@@ -251,7 +251,14 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.6 (latest): no punishable specials (Tatsus, L/M High Blade Kick) and no Drive Impact without a projectile
+**0.20.7 (latest): no Drive Impact from neutral at all** (neutral policy, wall DI and DI punish off; DI-back and DI in
+combo routes stay). The user's 50-match batch (2026-10-05) runs on 0.20.6. **Proposed as 0.21.0, waiting for the user's
+go:** anti-air readiness (no neutral moves once the opponent jumps toward the bot; reversal Shoryuken on a wake-up
+jump-in), crouch-block by default inside the opponent's poke range, throw defence by default (act first on a walk-up;
+delay-tech on wake-up / after blocking), turn-taking by frame data, and the diagnosis in `scorecard` (CLAUDE.md
+"Diagnosis of 56 ranked matches").
+
+**0.20.6: no punishable specials (Tatsus, L/M High Blade Kick) and no Drive Impact without a projectile
 from the neutral policy** (CLAUDE.md "0.20.6").
 
 **0.20.5: punishes compare SA3 with routes by damage; a route goes on by its starter's measured hit

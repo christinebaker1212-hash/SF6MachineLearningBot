@@ -74,14 +74,17 @@ def test_fighter_parries_a_projectile_whose_timing_it_learned():
 
 def test_drive_impact_punishes_a_slow_move_out_of_poke_range():
     opp = {950: {"name": "Slow special", "startup": 20, "total": 60}}
-    f = ScriptedFighter(FCFG, opp, seed=1, own_reach={614: 1.3})
     s = state(op={"x": 2.4, "action_id": 950, "action_frame": 5, "action_frames_total": 60})
+    off = ScriptedFighter(FCFG, opp, seed=1, own_reach={614: 1.3})
+    assert off.decide(s, 1.0, 0).rule != "di_punish"                        # 0.20.7 (user): off by default
+    cfg = dict(FCFG, di_punish={"enabled": True})
+    f = ScriptedFighter(cfg, opp, seed=1, own_reach={614: 1.3})
     d = f.decide(s, 1.0, 0)
     assert d.rule == "di_punish" and f.assess_stats["di_punish"] == {"chances": 1, "taken": 1}
-    f2 = ScriptedFighter(FCFG, opp, seed=1, own_reach={614: 1.3})
+    f2 = ScriptedFighter(cfg, opp, seed=1, own_reach={614: 1.3})
     near_end = state(op={"x": 2.4, "action_id": 950, "action_frame": 40, "action_frames_total": 60})
     assert f2.decide(near_end, 1.0, 0).rule != "di_punish"                  # 20F left: too late for a 26F DI
-    f3 = ScriptedFighter(FCFG, opp, seed=1, own_reach={614: 1.3})
+    f3 = ScriptedFighter(cfg, opp, seed=1, own_reach={614: 1.3})
     burnout = state(me={"drive": 5000}, op={"x": 2.4, "action_id": 950, "action_frame": 5, "action_frames_total": 60})
     assert f3.decide(burnout, 1.0, 0).rule != "di_punish"                   # never into burnout
 

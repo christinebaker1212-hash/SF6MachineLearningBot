@@ -48,8 +48,17 @@ def test_a_parrying_opponent_up_close_is_thrown():
     assert f2.decide(state(op={"x": 1.6, "action_id": 480}), 0.0, 0).rule != "parry_throw"     # out of throw range
 
 
+def _on(f, key):
+    # 0.20.7 (user): the rule is off by default; it still works when turned on
+    f.c = dict(f.c, **{key: dict(f.c.get(key) or {}, enabled=True)})
+    return f
+
+
 def test_drive_impact_against_an_opponent_at_the_wall_is_a_mix():
-    f = _fighter()
+    off = _fighter()
+    assert all(off.decide(state(me={"x": 5.0}, op={"x": 7.0}, timer=500 + k), k / 60, 0).rule != "di_wall"
+               for k in range(240))                                         # 0.20.7: off by default
+    f = _on(_fighter(), "di_wall")
     rules = []
     for k in range(240):                       # 4 s of the opponent standing with its back to the wall, 2.0 away
         t = k / 60
@@ -57,10 +66,10 @@ def test_drive_impact_against_an_opponent_at_the_wall_is_a_mix():
         f.observe_line(raw, 0)
         rules.append(f.decide(raw, t, 0).rule)
     assert rules.count("di_wall") == 1                                      # once in 4 s (cooldown)
-    f2 = _fighter()
+    f2 = _on(_fighter(), "di_wall")
     assert all(f2.decide(state(me={"x": 5.0, "drive": 15000}, op={"x": 7.0}, timer=500 + k), k / 60, 0).rule != "di_wall"
                for k in range(240))                                         # 1.5 bars: not into burnout
-    f3 = _fighter()
+    f3 = _on(_fighter(), "di_wall")
     assert all(f3.decide(state(me={"x": 0.0}, op={"x": 2.0}, timer=500 + k), k / 60, 0).rule != "di_wall"
                for k in range(240))                                         # midscreen: no
 

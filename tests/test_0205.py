@@ -133,6 +133,9 @@ def test_neutral_never_throws_a_punishable_special_or_a_drive_impact_without_a_p
     # Drive Impact: an opponent's special from 2.0 is not enough; a projectile is
     sp = {"x": 2.0, "y": 0.0, "hp": 10000, "action_id": 1004, "super": 0}
     di = it.INTENTS.index("drive_impact")
-    assert not pol.allowed(me, 2.0, lambda a: True, op=sp)[di]
     pol.op_projectile = True
+    assert not pol.allowed(me, 2.0, lambda a: True, op=sp)[di]          # 0.20.7 (user): never from neutral by default
+    pol.allow_di = True                                                 # turned back on in the config: projectiles only
     assert pol.allowed(me, 2.0, lambda a: True, op=sp)[di]
+    pol.op_projectile = False
+    assert not pol.allowed(me, 2.0, lambda a: True, op=sp)[di]

@@ -2766,6 +2766,39 @@ DI fail completely, because the bot waits for the enemy to fall down before inpu
   and the DI punish of a long recovery are unchanged.
 - Test `tests/test_0205.py` (synthetic). Not verified in game.
 
+## 0.20.7: no Drive Impact from neutral at all (user, 2026-10-05)
+- User: "It's using DI in fucking neutral. This is a travesty." After 0.20.6 three rules could still start the bot's own
+  Drive Impact without the opponent doing one: the neutral policy (through a projectile), the wall DI (0.19.0: opponent
+  cornered, 15% per 0.5 s) and the DI punish at range (0.16.0: a long recovery out of poke range).
+- All three are off by default: `policy.neutral_drive_impact: false` (`NeutralPolicy.allow_di`), `di_wall.enabled:
+  false`, `di_punish.enabled: false` (configs/fighter/ryu.yaml). The bot's own Drive Impact is now the DI-back against
+  the opponent's DI (user's rule; the crumple cash-out still follows it) and DI inside combo-lab routes. Each rule still
+  works when turned back on.
+- Tests (`tests/test_0190.py`, `tests/test_assess.py`, `tests/test_0205.py`): off by default, correct when enabled.
+
+## Diagnosis of 56 ranked matches (0.18.10 + 0.19.0, 2026-10-05): basis for the 0.21.0 proposal
+MEASURED from the recordings (bot side checked, 20 won / 36 lost, 103 fight minutes). The bot has changed since (0.19.1
+fireball distance, 0.20.6 unsafe specials and supers out of neutral), so the user's next batch is to be re-measured.
+- Damage per opening: the bot ~1,060, opponents ~970. It loses on the NUMBER of openings (868 vs 1,018), not combos.
+  By distance at the opening: 1.0-1.5 apart 243k taken vs 160k dealt (poke range), 2.5-3.5 81k vs 42k (jump-in range);
+  it wins up close (<1.0: 345k vs 397k) and at 1.5-2.0 (175k vs 201k). Rounds: R1 20-36, R2 27-29, R3 8-15.
+- Jump-ins: 518 opponent jumps (~5 a minute), 277 landing within 1.6: 89 hit the bot, 18 were anti-aired; jump-ins were
+  19% of the damage taken. In the 96 near jumps with the bot FREE at take-off it started a normal (27) or special (20)
+  during the jump; Shoryuken 10, blocked 13, walked back 11, jumped 8. Cause in code: rule 4 (anti-air) only acts when
+  the landing is within the Shoryuken's window; until then rules 6-7 (neutral policy) keep choosing moves. 44 jumps
+  came on the bot's wake-up.
+- Poked while not blocking: 84 opponent normals hit the free bot standing (dir 5: 37), walking forward (32) or crouching
+  without back (15); mostly from 1.0-2.0, 3-9 ticks from the button to the hit (no time to react).
+- Throws on the bot ~105 (1.9 a match): neutral 54, wake-up 51, blocking / just blocked 35, during its own throw 29.
+  (Throws are not in the opening tables: the victim is in a thrown state before the damage.)
+- Pressing into the opponent: 90 openings (10.6% of damage) began in the bot's own normal / special start-up.
+- Own whiffs punished: 193 openings (17.3%), recovering from a whiffed special (78, mostly fireballs jumped), super (83),
+  normal (32).
+- Opponent Drive Impacts: 143; the bot DI'd back 47, pressed a normal into it 26, did nothing 41.
+- Not measurable from action ids: frame advantage after blocking (an action id stays for the whole animation, longer
+  than the move's recovery: the exported total is the animation's length, 0.16.0). Needs the opponents' catalogs (C).
+- Scripts: kept outside the repo (session scratchpad); the measures are to go into `sf6bot scorecard` with 0.21.0.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

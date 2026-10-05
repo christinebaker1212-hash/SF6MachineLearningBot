@@ -19,6 +19,9 @@ policy:
   win_beta: 1.5
   retrain_every: 20
   retrain_in_all_modes: false
+  # 0.20.7 (user, 2026-10-05: "It's using DI in fucking neutral. This is a travesty."): the neutral policy never picks a
+  # Drive Impact. true = 0.20.6's behaviour (only through an opponent's projectile, never against a Super bar).
+  neutral_drive_impact: false
 ranges:
   throw: 0.80          # SuperCombo
   close: 1.00
@@ -169,8 +172,10 @@ perfect_parry:
   enabled: true
   min_dist: 1.2            # closer, a projectile arrives too soon to time; block instead
   seq: "5+MP+MK@12"
+# 0.20.7 (user, 2026-10-05: "It's using DI in fucking neutral. This is a travesty."): off. The bot's own Drive Impact
+# is now only the DI-back (the opponent's DI) and DI inside combo routes.
 di_punish:
-  enabled: true
+  enabled: false
 # 0.14.0: defence at pressure moments by PREDICTION (sf6bot/defense.py). Throws can't be teched on reaction:
 # a 5-frame start-up vs seeing it + 3-5 frames of input delay (26 of 29 throws landed in the user's FT5).
 # When the bot is about to be free (blockstun / knockdown ending) with the opponent this close, it commits
@@ -372,7 +377,7 @@ stun_jump_in:
 # 0.19.0: Drive Impact against an opponent with its back to the wall: blocked or not it stuns against the wall. ESTIMATES:
 # the wall distance for the stun (max_back), and how often a chance is taken (chance per decision, cooldown).
 di_wall:
-  enabled: true
+  enabled: false           # 0.20.7 (user): no Drive Impact from neutral, cornered opponent or not
   max_back: 1.5            # the opponent's back this close to its wall
   min_dist: 0.8
   max_dist: 2.6            # Drive Impact's travel (also capped by the measured reach)

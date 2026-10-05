@@ -136,6 +136,9 @@ class NeutralPolicy:
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
         self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
+        # 0.20.7 (user: "It's using DI in fucking neutral"): the neutral policy never chooses a Drive Impact unless the
+        # config turns it back on (policy.neutral_drive_impact)
+        self.allow_di = bool(c.get("neutral_drive_impact", False))
         # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
         # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
         self.win = win
@@ -169,9 +172,11 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "parry" and not (op is not None and it.category(op) in PARRY_WHEN and dist <= PARRY_DIST):
                 ok[i] = False
+            elif name == "drive_impact" and not self.allow_di:
+                ok[i] = False                  # 0.20.7 (user): never a Drive Impact from neutral
             elif name == "drive_impact" and not (op is not None and it.category(op) in DI_WHEN and dist >= DI_MIN_DIST
                                                  and self.op_projectile):
-                ok[i] = False                  # 0.20.5: only through an actual projectile (the fighter sets op_projectile)
+                ok[i] = False                  # 0.20.6: only through an actual projectile (the fighter sets op_projectile)
             elif name == "drive_impact" and op is not None and (num(op.get("super")) or 0) >= 10000:
                 ok[i] = False                  # 0.20.0 (user): a super beats a Drive Impact on reaction
             elif name in ("poke", "special", "air_attack") and not any(m["intent"] == name for m in self.moves):
