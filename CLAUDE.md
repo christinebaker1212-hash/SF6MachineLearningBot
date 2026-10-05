@@ -2639,6 +2639,28 @@ Ryu catalog and the measured reach); nothing here is verified in game. Numbers m
 - Test updates: `tests/test_fighter.py` expected the pre-0.19.0 cross-up and anti-air rules (both failed on 0.19.1
   already): an overhead cross-up may be `block_overhead`, and airborne attacks are anti-aired.
 
+## 0.20.1: LP / MR read from the screen; LP history (user, 2026-10-05)
+- User: "add the LP/MR reading, as well as a history of its LP gain and LP loss over time before we run ranked again".
+  Why it matters: ranked matchmaking pulls the win rate toward 50% as the bot climbs, so the win rate alone can't show
+  learning; LP over time and the record against stronger / weaker opponents can.
+- **No game-state field for LP / MR is known**, and a memory route needs a new exporter AND a new research build of
+  REFramework, so the numbers are read from the SCREEN with the OCR the bot already uses (screen_text.py: Windows OCR,
+  else Tesseract), in ranked only, never during a fight (`sf6bot/ladder_read.py`, `ladder_read.enabled`):
+  - VS / loading screen (battle loading or intro): the window in two halves, left = P1, right = P2, every 1.5 s (max 10
+    reads): both players' rank / LP / MR; split into the bot's and the opponent's by the bot's side at the match end.
+  - result screen (match end until the next battle or Fighting Ground): the bot's LP change and new LP (the LAST read: the
+    counter animates). A check per match: the change's sign must agree with the result (`lp_delta_sign_ok`).
+  - Fighting Ground (MenuWatch's reads): the bot's own LP / rank before a match.
+- Parser (`ladder_read.parse`): numbers next to "LP" / "MR" (signed = change), rank names Rookie ... Legend (+ tier).
+  **The real screens' wording / layout has NOT been seen:** every read's text goes to `ladder_reads.md` (first 10 matches,
+  in S) and the first 4 matches' screens to `ladder_shots/` (local), to check and fix the parser after the first session.
+- History: the match's line in `datasets/ladder/matches.jsonl` gets the opponent's rank / LP / MR and the bot's LP before;
+  the result screen's record goes to `datasets/ladder/lp.jsonl` (joined by `match_id`). `progress.md` "LP and MR": now,
+  net LP this session and overall (gained / lost), net per 20 matches, the record by the opponent's strength (its LP / MR
+  minus the bot's: stronger > +500 LP / +50 MR, weaker < -500 / -50, else about even), the reading check, recent matches.
+- MOCK-tested (`tests/test_ladder.py`: synthetic OCR text, the result screen ending before or after the match summary);
+  not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -109,8 +109,9 @@ def grab(rect: tuple[int, int, int, int], path: str | None = None) -> str:
     return path
 
 
-def read_game_screen(cfg: dict, keep: Path | None = None) -> str | None:
-    """OCR text of the SF6 window, or None (no engine, no window, or a failure). `keep`: also save the picture there."""
+def read_game_screen(cfg: dict, keep: Path | None = None, part: str | None = None) -> str | None:
+    """OCR text of the SF6 window, or None (no engine, no window, or a failure). `keep`: also save the picture there.
+    `part`: "left" / "right" = only that half of the window (0.20.1: P1's and P2's side of the VS screen)."""
     name, _ = engine()
     if name is None:
         return None
@@ -120,7 +121,10 @@ def read_game_screen(cfg: dict, keep: Path | None = None) -> str | None:
         w = find_game_window(g.get("exe_name", "StreetFighter6.exe"), g.get("title_contains", "Street Fighter 6"))
         if w is None:
             return None
-        png = grab(w.client_rect, str(keep) if keep else None)
+        l_, t_, r_, b_ = w.client_rect
+        mid = (l_ + r_) // 2
+        rect = (l_, t_, mid, b_) if part == "left" else (mid, t_, r_, b_) if part == "right" else (l_, t_, r_, b_)
+        png = grab(rect, str(keep) if keep else None)
         return _winrt_read(png) if name == "windows" else _tesseract_read(png)
     except Exception:
         return None

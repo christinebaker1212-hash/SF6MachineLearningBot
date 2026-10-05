@@ -58,7 +58,7 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False, 
             out += ["", f"(scorecard not built: {e})"]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
-        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "fight_status.json", "combo_lab.md", "brain_report.md", "win_report.md", "progress.md", "thoughts.md"):
+        for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "fight_status.json", "combo_lab.md", "brain_report.md", "win_report.md", "progress.md", "ladder_reads.md", "thoughts.md"):
             f = d / name
             if not f.exists():
                 continue

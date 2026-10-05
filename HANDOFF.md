@@ -251,7 +251,12 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.0 (latest): the saved list below is BUILT** (CLAUDE.md "0.20.0"; all MOCK / replay-tested). Next ranked batch:
+**0.20.1 (latest): LP / MR read from the screen in ranked + LP history in progress.md** (CLAUDE.md "0.20.1"). After the
+first ranked session: read `ladder_reads.md` in S and fix the parser to the real screens' wording (the reading check
+says whether LP changes agree with the results). The user's plan: opponent catalogs (C) -> K on Ryu -> B -> a FROZEN
+version for a long unattended ranked run (100+ matches) to see whether the learned parts improve.
+
+**0.20.0: the saved list below is BUILT** (CLAUDE.md "0.20.0"; all MOCK / replay-tested). Next ranked batch:
 read the scorecard at the top of S (0.20.0 vs 0.19.x), the new thoughts lines (DI rules, throws held, safe mode,
 burnouts, corner pressure, Drive Rushes in, step-in whiff punishes, air-to-air) and the route traces. Ask the user to
 run C -> 7 (dummy perfect parries everything) once: it finds the Perfect Parry id. Drive Reversal / corner / rush

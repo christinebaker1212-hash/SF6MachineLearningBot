@@ -1955,6 +1955,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                      source="scripted")
         if eng_:
             screen_reader = lambda: screen_text.read_game_screen(cfg)          # noqa: E731
+    # 0.20.1 (user): LP / MR / rank read from the screen (VS screen, result screen, Fighting Ground), never in a fight
+    ladder = None
+    if versus == "ranked" and screen_reader is not None and (cfg.get("ladder_read") or {}).get("enabled", True):
+        from .ladder_read import LadderReader, read_half_factory
+        ladder = LadderReader(read_half_factory(cfg), shots_dir=sess.recorder.dir / "ladder_shots")
+        _menu_reader = screen_reader
+
+        def screen_reader():                                                    # noqa: F811
+            text_ = _menu_reader()
+            ladder.menu_text(text_)
+            return text_
+        print("LP / MR reading: on (from the screen; the first screens are saved in ladder_shots to check the reader).")
     brain_mtime = [None]
     if not sess.mock and brain is not None and (brain.stale or (win is not None and win.stale)):
         # 0.17.5 changed a model input (the opponent's move progress): retrain now, in the background; the new
@@ -2061,6 +2073,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             panel.locked = locked
             sess.status["controller"] = "BOT FIGHTING (buttons locked)" if locked else "yours: overlay buttons"
 
+    def _flush_ladder() -> None:
+        """Result-screen records (the bot's LP change / new LP) go to datasets/ladder/lp.jsonl and progress.md."""
+        while ladder is not None and ladder.done:
+            rec_ = ladder.done.pop(0)
+            if not rec_.get("match_id"):
+                continue
+            try:
+                from .progress import record_lp
+                record_lp(ds_root, sess.recorder.dir, rec_, session_rows)
+                if rec_.get("lp_delta") is not None or rec_.get("lp") is not None:
+                    msg_ = (f"LP {rec_['lp_delta']:+d}" if rec_.get("lp_delta") is not None else "LP")
+                    msg_ += f" -> {rec_['lp']:,}" if rec_.get("lp") is not None else ""
+                    print("  " + msg_ + (f" ({rec_['rank']})" if rec_.get("rank") else ""))
+                    sess.narrate(msg_, source="measured")
+            except Exception as e:                   # noqa: BLE001 - a report, never stops a session
+                print(f"(LP record not written: {e})")
+
     def finish_match() -> None:
         nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0, learner
         data, cur["data"] = cur["data"], DatasetBuilder(need_match_start=True)
@@ -2160,7 +2189,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 from .progress import record_match
                 if summary.get("partial"):        # 0.18.11: joined after its start: neither a result nor a takeover
                     raise _SkipProgress()
+                if ladder is not None:
+                    summary["ladder_pre"] = ladder.pre_record(side["i"])
                 prog = record_match(ds_root, sess.recorder.dir, summary, session_rows, models_info(ds_root))
+                if ladder is not None:
+                    ladder.match_finished(session_rows[-1].get("match_id"), side["i"],
+                                          (summary.get("match") or {}).get("bot_won"))
+                    (sess.recorder.dir / "ladder_reads.md").write_text(ladder.raw_markdown(), encoding="utf-8")
                 h = prog["history"].get("last_20") or {}
                 if h.get("win_rate") is not None:
                     print(f"  Progress: last {min(20, prog['history']['matches'])} matches {h['won']}-{h['lost']} "
@@ -2349,6 +2384,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     print(f"[menu] communication error on screen (try {mwatch.tries}): pressed "
                           + ", ".join(k for k, _ in steps_))
                     sess.narrate("Communication error: OK, Ranked Match, back (searching again).", source="scripted")
+            if ladder is not None:
+                phase_ = ("menu" if not st.in_battle else
+                          "result" if (match_end_t is not None or (rmenu is not None and rmenu.t_end is not None)) else
+                          "loading" if (not st.ready or p1d.get("action_id") in INTRO_IDS
+                                        or p2d.get("action_id") in INTRO_IDS) else "fight")
+                ladder.tick(clock.now(), phase_)
+                _flush_ladder()
             if rmenu is not None:
                 hp_zero = (_num(p1d.get("hp")) or 0) <= 0 or (_num(p2d.get("hp")) or 0) <= 0
                 if p1d.get("action_id") in INTRO_IDS or p2d.get("action_id") in INTRO_IDS:
@@ -2681,6 +2723,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         st = lines.get_nowait()
         cur["data"].add(st.raw, st.t_recv)
     finish_match()                       # a match cut short by F8 / time is kept too
+    if ladder is not None:
+        ladder.close_post()              # stopped on a result screen: what was read so far
+        _flush_ladder()
     result = _overall(done)
     if done:
         sess.recorder.write_json("fight_summary.json", result)

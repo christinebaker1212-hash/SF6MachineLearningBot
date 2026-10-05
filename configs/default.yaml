@@ -82,6 +82,10 @@ menu_watch:
   steps: [["F", 0.0], ["F", 1.5], ["ESC", 1.5]]   # key, seconds to wait before it
   cooldown_s: 5
   max_tries: 6        # in a row without a battle in between (user: up to 3 errors before it works); then it waits and logs
+# 0.20.1: LP / MR / rank read from the screen in ranked (VS screen, result screen, Fighting Ground; never in a fight):
+# progress.md "LP and MR". Needs the same screen reading as menu_watch.
+ladder_read:
+  enabled: true
 
 training:
   reset_key: SLASH        # Training Mode "reset position" on the user's keyboard (user-reported: "/")
