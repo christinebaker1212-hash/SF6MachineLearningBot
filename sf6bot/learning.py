@@ -251,6 +251,11 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if oa.get("used"):
         out.append(("learned", "Your answers I used: " + ", ".join(f"{k} {v}x" for k, v in oa["used"].items() if v)
                     + (f"; {oa['late']} came too late to time" if oa.get("late") else "") + "."))
+    bf = summary.get("burnout_fireballs") or {}
+    if bf.get("fireballs"):
+        out.append(("scripted", f"Fireballs while I was in burnout: {bf['fireballs']}; cancelled with my Hadoken "
+                                f"{bf.get('clash', 0)}, jumped {bf.get('jump_fwd', 0) + bf.get('jump_neutral', 0)}, "
+                                f"blocked (no time) {bf.get('blocked', 0)}."))
     dmg = summary.get("damage") or {}
     if dmg:
         out.append(("measured", f"Damage: I dealt {dmg.get('dealt', 0):,}, I took {dmg.get('taken', 0):,}."))

@@ -78,7 +78,7 @@ def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
 
 
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
-               "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer"}
+               "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer", "burnout_fireball"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -297,6 +297,12 @@ class ScriptedFighter:
         self._crumple_t0, self._crumple_done = None, False
         # 0.22.0: the operator's answers against this opponent (takeover.AnswerBook), learned from rounds the user won
         self.op_answers = None
+        # 0.22.4 (user: "when it is in burnout, it cannot just sit there and block Hadoukens ... it will just die from chip
+        # damage"): burnout from Drive reaching 0 until the gauge is full again (or a new round); fireballs are then
+        # cancelled with the bot's own or jumped
+        self.in_burnout = False
+        self._bo_fb_for = None
+        self.burnout_stats: dict = {"fireballs": 0, "clash": 0, "jump_fwd": 0, "jump_neutral": 0, "blocked": 0}
         self._oa_for, self._oa_hold = None, None
         self.operator_stats: dict = {"used": {}, "late": 0, "no_move": 0}
         self._cg_n, self._cg, self._cg_punished, self._me_y_prev = -1, set(), None, 0.0
@@ -574,6 +580,8 @@ class ScriptedFighter:
                     self.di_handled_id = None
                 elif d.rule in ("whiff_punish", "di_punish"):
                     self.op_move["punished"] = False
+                elif d.rule == "burnout_fireball":
+                    self._bo_fb_for = None
                 elif d.rule == "operator_answer":
                     self._oa_for = None
                     self.operator_stats["used"][d.name] -= 1
@@ -796,6 +804,10 @@ class ScriptedFighter:
                 a2 = self._air_to_air(me, op, pdx, t_land, op_y)
                 if a2 is not None:
                     return a2
+        # 4a. 0.22.4: in burnout, never block a fireball (chip damage can kill): cancel it with a Hadoken, else jump it
+        bf = self._burnout_fireball(raw, me, op, dist)
+        if bf is not None:
+            return bf
         # 4b. perfect parry an opponent projectile whose arrival time has been learned (assess.ProjectileTimer)
         pp = self._perfect_parry(raw, me, dist)
         if pp is not None:
@@ -1435,6 +1447,11 @@ class ScriptedFighter:
         d = _num(me.get("drive"))
         prev = self._drive_prev
         self._drive_prev = d
+        if d is not None:
+            if d <= 0:
+                self.in_burnout = True
+            elif d >= float((self.c.get("burnout") or {}).get("full_drive", 59000)):
+                self.in_burnout = False
         if d is None or prev is None:
             return
         if d < prev:
@@ -1809,6 +1826,7 @@ class ScriptedFighter:
         jump-ins; throws expected at pressure moments after losing to throws). Resets the round's counts. adapt=False
         (0.22.0: a round the operator played): counts only, no changes."""
         self.denjin_stock = False            # 0.20.3 ASSUMPTION: the Denjin stock does not carry into the next round
+        self.in_burnout = False              # the Drive gauge refills at a new round (MEASURED 0.2.7)
         taken, self.round_taken = self.round_taken, {}
         self._rr = {"hp": None, "free": True, "cat": "other"}
         total = sum(d for _, d in taken.values())
@@ -1938,6 +1956,70 @@ class ScriptedFighter:
         if thr["lethal"] and not self._was_threat:
             self.assess_stats["threatened_lethal"] += 1
         self._was_threat = thr["lethal"]
+
+    def _fireball_left(self, tmr) -> tuple[float, str] | None:
+        """Frames until the opponent's projectile in flight reaches the bot, and where the estimate comes from: this
+        match's learned arrival times (ProjectileTimer), else the MEASURED median for Ryu's Hadokens (0.22.1 and earlier
+        ranked recordings, ~540 fireballs: 16F at 1.0, 21F at 2.25, 27F at 2.75, 36F at 3.25, 47F at 4.25 from the
+        throw's start: ~27 + 10 per unit beyond 2.75; other characters' projectiles are learned in the match)."""
+        f = self.pt.flight
+        if f is None or not isinstance(tmr, int) or not isinstance(f.get("t0"), int):
+            return None
+        arr, src = self.pt.predict(f["id"], f["dist"]), "learned"
+        if arr is None:
+            bc = self.c.get("burnout") or {}
+            arr = max(float(bc.get("fireball_min_frames", 14)),
+                      float(bc.get("fireball_frames_at", 27)) + float(bc.get("fireball_frames_per_unit", 10))
+                      * (f["dist"] - float(bc.get("fireball_ref_dist", 2.75))))
+            src = "measured Hadoken speed"
+        return arr - (tmr - f["t0"]), src
+
+    def _burnout_fireball(self, raw: dict, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.22.4 (user): "when it is in burnout, it cannot just sit there and block Hadoukens. Otherwise, it will just die
+        from chip damage." In burnout an opponent projectile in flight is answered once:
+          - time for the bot's own Hadoken to come out before it arrives (start-up + motion + input delay + stale + 2):
+            H Hadoken (projectiles cancel each other; no Drive needed)
+          - else, when it arrives 7-20 frames after a jump input lands: a jump, forward when the opponent is within
+            `burnout.jump_fwd_max` (over the fireball onto its recovery), else neutral
+          - else nothing can be done: block (counted)
+        Needs the projectile to be known as one (the opponent's catalog / move map / live names / shared ids)."""
+        bc = self.c.get("burnout") or {}
+        if not bc.get("enabled", True) or not self.in_burnout or self.pt.flight is None:
+            return None
+        f = self.pt.flight
+        if self._bo_fb_for == (f["id"], f["t0"]) or (_num(me.get("y")) or 0.0) > 0.05:
+            return None
+        if (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0):
+            return None
+        tl = self._fireball_left(raw.get("stage_timer"))
+        if tl is None:
+            return None
+        left, src = tl
+        self._bo_fb_for = (f["id"], f["t0"])
+        st = self.burnout_stats
+        st["fireballs"] += 1
+        name = (self.opp.get(f["id"]) or {}).get("name") or f"projectile {f['id']}"
+        why = f"in burnout, {name} arrives in ~{left:.0f}F ({src})"
+        had = self.c["moves"].get(bc.get("clash_move", "hadoken_hp"))
+        if had and self.busy(me) is None:
+            need = int(bc.get("hadoken_startup", 16)) + seq_prefix(had["seq"]) + self.lead + self.stale + 2
+            if left >= need:
+                st["clash"] += 1
+                return Decision("seq", had["name"], had["seq"], rule="burnout_fireball",
+                                reason=why + f": my {had['name']} cancels it (chip damage could kill)")
+        lo, hi = self.lead + self.stale + 7, self.lead + self.stale + 20
+        if self.busy(me) is None and left >= lo:
+            if left > hi:
+                self._bo_fb_for = None               # too early to jump: decide again on a later line
+                st["fireballs"] -= 1
+                return Decision("release", rule="burnout_fireball", reason=why + ": jumping it when it is closer")
+            fwd = dist <= float(bc.get("jump_fwd_max", 3.4))
+            st["jump_fwd" if fwd else "jump_neutral"] += 1
+            return Decision("seq", "forward jump" if fwd else "neutral jump", "9@4" if fwd else "8@4",
+                            rule="burnout_fireball", reason=why + (": jumping over it at the thrower" if fwd
+                                                                   else ": jumping over it"))
+        st["blocked"] += 1
+        return None
 
     def _perfect_parry(self, raw: dict, me: dict, dist: float) -> Decision | None:
         pc = self.c.get("perfect_parry") or {}
@@ -2708,6 +2790,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["drive_rush"] = dict(fighter.rush_stats)
                 summary["anti_air"] = dict(fighter.aa_stats)
                 summary["parry_throws"] = dict(fighter.parry_throw_stats)
+                if fighter.burnout_stats["fireballs"]:
+                    summary["burnout_fireballs"] = dict(fighter.burnout_stats)
                 summary["di_wall"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in fighter.di_wall_stats.items()}
                 if fighter.cmd_grab_ids():
                     summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()))

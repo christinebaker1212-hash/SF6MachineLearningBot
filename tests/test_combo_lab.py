@@ -1434,3 +1434,52 @@ def test_after_a_super_connects_a_match_route_returns_at_once():
     assert res["success"] and n_match <= 2
     n_lab, _ = lines_after_contact(False)
     assert n_lab >= 30
+
+
+def test_in_a_match_a_route_whose_link_window_passed_ends_when_the_bot_is_free():
+    """0.22.4 (audit of lab waits in matches): the bot back to neutral with the next input not due = the route is over;
+    the lab waited for the dummy to recover. Here the second move's link is planned far too late (frame 200)."""
+    moves = [dict(MOVES[0], adv=80), dict(MOVES[1])]
+    steps = _steps(moves)
+    steps[1]["at"] = 200
+    sim = Sim(moves, lead=4)
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True)
+    free_at = done_at = None
+    for _ in range(300):
+        line = sim.tick()
+        k = run.feed(line)
+        if free_at is None and run.rt[0]["start"] is not None and line["p1"]["action_id"] == NEUTRAL:
+            free_at = line["stage_timer"]
+        if run.done:
+            done_at = line["stage_timer"]
+            break
+        if k is not None:
+            run.sent(k)
+            sim.send(k, steps[k]["prefix"])
+    assert run.done and run.result()["fail"]["kind"] == "dropped"
+    assert free_at is not None and done_at - free_at <= 4 + cl.FREE_STALL + 1
+    # the lab: still waiting there
+    sim2 = Sim(moves, lead=4)
+    lab = cl.ComboRun(_steps(moves), {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    lab.steps[1]["at"] = 200
+    for _ in range(done_at + 5):
+        line = sim2.tick()
+        k = lab.feed(line)
+        if k is not None:
+            lab.sent(k)
+            sim2.send(k, lab.steps[k]["prefix"])
+    assert not lab.done
+
+
+def test_in_a_match_no_landing_combo_after_a_jump_in_that_did_not_hit():
+    steps = [{"name": "j.HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "air", "startup": 9, "air": True,
+              "landing": 3, "hitting": True, "min_offset": cl.NO_FLOOR},
+             {"name": "2HP", "sequence": "2@2 2+HP@3", "prefix": 2, "trigger": "landing", "hitting": True,
+              "min_offset": 0, "startup": 9}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True)
+    run.rt[0].update(sent=10, start=12)
+    assert run._due(40, {"y": 0.0}, 0) is None and run.done and run.result()["fail"]["kind"] == "whiff"
+    lab = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    lab.rt[0].update(sent=10, start=12)
+    lab._due(40, {"y": 0.0}, 0)
+    assert not lab.done

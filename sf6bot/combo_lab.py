@@ -41,7 +41,9 @@ CONTACT_PLUS = 2       # cancels/chains: reach the game this many frames after c
 CONFIRM_SLACK = 6      # matches (confirm): a move with no hit this many own frames after its start-up whiffed
 RUSH_AT = 11           # GUESS: frame of a Drive Rush on which the next normal is pressed
 OFFSET_RANGE = (-4, 6)
-END_TICKS = 240        # wait at most 4 s after the last move for its hits
+END_TICKS = 240        # wait at most 4 s after the last move for its hits (lab only since 0.22.2)
+NOT_OUT_MATCH = 8      # matches: a press that showed nothing this many ticks past the input delay + motion was eaten
+FREE_STALL = 10        # matches: the bot neutral this many ticks past the input delay with nothing due = the route is over
 DRIVE_BAR, SUPER_BAR = 10000, 10000   # 60000 = 6 Drive bars, 30000 = 3 Super bars (exporter)
 SYSTEM_SEQ = {"drive_rush": "6@3 5@2 6@3", "drive_impact": "5+HP+HK@3", "dash": "6@3 5@3 6@3"}
 PDR_SEQ = "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3"
@@ -539,6 +541,7 @@ class ComboRun:
         self.min = {}
         self.pending = None
         self.ticks_after_last = 0
+        self._free_ticks = 0         # matches: ticks the bot has been neutral with the next input not due (0.22.4)
         self.super_connected = None
         self.bar = framebar.BarTrack(me)     # the Training Mode frame bar (exporter v9), if present
 
@@ -708,7 +711,9 @@ class ComboRun:
                 if st.get("system") == "drive_rush" and s_aid == exp:
                     r["exp_seen"] = s_tick
                 self.pending = None
-            elif tick - r["sent"] > st["prefix"] + self.lead + 15:
+            elif tick - r["sent"] > st["prefix"] + self.lead + (NOT_OUT_MATCH if self.confirm else 15):
+                # a press that never came out: the lab allows 15 frames past the input delay (its search reads the
+                # reason); a match gives up sooner (0.22.4), so the bot is not left waiting for an eaten input
                 self._finish("not_out", k)
                 self.last = raw
                 return None
@@ -807,7 +812,18 @@ class ComboRun:
             self._finish(kind, step)
             return None
         land = self._ticks_to_land(p1, tick)
-        return self._due(tick, p1, land)
+        k_ = self._due(tick, p1, land)
+        if self.confirm and not self.done and k_ is None and self.pending is None:
+            # a match (0.22.4, the audit after 0.22.2): the bot back to neutral with the route's next input still not
+            # due means the link window has passed (a link is pressed BEFORE the bot is free, by the input delay). The
+            # lab waits on (the dummy's recovery ends the try); in a match the bot would stand there doing nothing
+            if aid in self.neutral_a:
+                self._free_ticks += max(dt, 0)
+                if self._free_ticks > self.lead + FREE_STALL:
+                    self._finish("dropped", self._next())
+            else:
+                self._free_ticks = 0
+        return k_
 
     def _next(self) -> int:
         return next((k for k, r in enumerate(self.rt) if r["sent"] is None), len(self.rt) - 1)
@@ -865,6 +881,10 @@ class ComboRun:
             y = num(p1.get("y")) or 0.0
             if y > 0.01 and pr["contact"] is None:
                 return None                   # the jump-in has not hit yet: never press before it does
+            if self.confirm and y <= 0.01 and pr["contact"] is None and pst.get("hitting"):
+                # a match (0.22.4): landed and the jump-in never hit: no landing combo into a blocking or free opponent
+                self._finish("whiff", n - 1)
+                return None
             if y <= 0.01 and self._ground_since is not None:
                 # landed: count from the landing itself (0.20.2: the estimate stays 0 on the ground, so a press
                 # meant to arrive later than the landing, e.g. a +2 offset in the search, never went out)

@@ -251,7 +251,11 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.22.3 (latest): mirrors set up during the intro** (the 0.22.1 run's two mirror matches started with ~1.8 s of nothing
+**0.22.4 (latest): every combo-lab wait audited for matches** (table in CLAUDE.md "0.22.4": a route now also ends when
+its link window has passed, after a jump-in that whiffed, and sooner after an eaten input), and **fireballs in burnout**
+are cancelled with a Hadoken or jumped instead of blocked (user: chip damage kills in burnout).
+
+**0.22.3: mirrors set up during the intro** (the 0.22.1 run's two mirror matches started with ~1.8 s of nothing
 after "Fight!"). The 0.22.1 run itself: 11-6, damage ratio 1.14, the best version so far; throws on the bot are the worst
 yet (6.4 a match): the next thing to look at (CLAUDE.md "0.22.1 session").
 

@@ -183,6 +183,22 @@ perfect_parry:
   enabled: true
   min_dist: 1.2            # closer, a projectile arrives too soon to time; block instead
   seq: "5+MP+MK@12"
+# 0.22.4 (user: "when it is in burnout, it cannot just sit there and block Hadoukens. Otherwise, it will just die from chip
+# damage"): in burnout (Drive reached 0, until the gauge is full again) an opponent fireball is cancelled with the bot's own
+# H Hadoken when there is time for it to come out, else jumped (forward within jump_fwd_max, else neutral), else blocked.
+burnout:
+  enabled: true
+  full_drive: 59000          # burnout ends when the gauge is (nearly) full again
+  clash_move: hadoken_hp
+  hadoken_startup: 16        # Capcom (Ryu's Hadokens)
+  jump_fwd_max: 3.4          # ESTIMATE: a forward jump over the fireball lands on the thrower from about this far
+  # MEASURED (Ryu's Hadokens in the 0.18.10-0.22.1 ranked recordings, medians): frames from the throw's start to the
+  # fireball reaching the opponent ~ 27 at 2.75 apart, +10 per unit farther (16 at 1.0, 47 at 4.25); used until this
+  # match has learned the projectile's own arrival times
+  fireball_frames_at: 27
+  fireball_ref_dist: 2.75
+  fireball_frames_per_unit: 10
+  fireball_min_frames: 14
 # 0.20.7 (user, 2026-10-05: "It's using DI in fucking neutral. This is a travesty."): off. The bot's own Drive Impact
 # is now only the DI-back (the opponent's DI) and DI inside combo routes.
 di_punish:

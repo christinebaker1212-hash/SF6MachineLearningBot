@@ -3012,6 +3012,37 @@ Scorecard (same measurement code; MEASURED):
   the bot's character) is set up during the intro (the setup does not depend on the side). Test: a MOCK mirror session
   sets up before frame 190 (old code: after the probe).
 
+## 0.22.4: every lab wait audited for matches; fireballs in burnout (user, 2026-10-05)
+User: "Can we go ahead and assumptively fix all [waits] that might work and make sense in the combo lab, but not in a match?
+I just want to be very thorough about this." and "when it is in burnout, it cannot just sit there and block Hadoukens.
+Otherwise, it will just die from chip damage." All MOCK / unit-tested; not verified in game.
+### The audit (`combo_lab.ComboRun` / `perform_route` with `confirm=True` = a match; the lab is unchanged)
+| wait | lab (kept) | match |
+|---|---|---|
+| after the last move | until the dummy recovers, up to 4 s (`END_TICKS`) | ends on the last move's hit / whiff (0.22.2) |
+| after a super connected | its cinematic until both idle 30 lines, up to 10 s | returns at once (0.22.2) |
+| next input not due while the bot is already neutral (the link window has passed) | waits for the dummy to recover | ends as `dropped` after input delay + `FREE_STALL` 10 ticks |
+| landing move after a jump-in that never hit | pressed on landing | the route ends (`whiff`): no landing combo into a blocking / free opponent |
+| a press that showed nothing (eaten input) | 15 ticks past input delay + motion (the search reads the reason) | `NOT_OUT_MATCH` 8 ticks |
+| a cancel / chain waiting for the previous hit | predicted contact | hit confirm (0.13.1): a whiff ends the route after start-up + 6 |
+- Left as they are (needed in a match, or bounded): the wait for a link's own frame (the timing itself), the Drive Impact
+  follow-up (85 ticks MEASURED, the bot cannot act before), the Parry Drive Rush dash on the parry's frame, a jump-in's
+  air button on the way down, the hit-confirm wait. The overall cap stays 6 s.
+- Outside the executor: the fighter's own waits are deliberate (pressure-moment holds timed to the first free frame,
+  anti-air readiness while a jump comes down, the crumple jump-in), not lab leftovers.
+### Fireballs in burnout (`fighter._burnout_fireball`, rule 4a; `configs/fighter/ryu.yaml: burnout`)
+- Burnout = the bot's Drive reached 0, until the gauge is (nearly) full again or a new round (`in_burnout`).
+- An opponent projectile in flight (needs it known as one: catalog / move map / live names) is answered once:
+  - the bot's own H Hadoken when it can come out before the fireball arrives (start-up 16 + motion + input delay +
+    stale + 2): projectiles cancel each other, no Drive needed
+  - else a jump when the fireball arrives 7-20 frames after the jump input lands: forward within `jump_fwd_max` 3.4
+    (ESTIMATE; over it onto the thrower's recovery), else neutral; earlier than that it waits (nothing else started)
+  - else it is blocked (no time), counted
+- Arrival: this match's learned times (`ProjectileTimer`), else the MEASURED median for Ryu's Hadokens in the 0.18.10-0.22.1
+  recordings: ~27 frames from the throw's start at 2.75 apart, +10 per unit (16 at 1.0, 47 at 4.25). Other characters'
+  projectiles differ; their own times are learned in the match.
+- `fight_summary.burnout_fireballs` {fireballs, clash, jump_fwd, jump_neutral, blocked} and a thoughts line.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

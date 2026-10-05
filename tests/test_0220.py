@@ -239,3 +239,50 @@ def test_a_mirror_is_set_up_during_the_intro_not_after_fight(cfg, tmp_path, monk
         out = fi.run_fight(s, cfg, 30.0, player=None, matches=1, versus="ranked")
     assert made and isinstance(made[0], int) and made[0] < fi.FIGHT_START_FRAME
     assert out.get("side_probe") is not None and out.get("opponent") == "Ryu"
+
+
+# ---- burnout: fireballs are not blocked (0.22.4) -----------------------------------------------------------------------
+
+def _burnout_fighter():
+    f = ScriptedFighter(FCFG, {904: {"name": "H Hadoken", "projectile": True}}, own=RYU)
+    f.lead = 4
+    return f
+
+
+def _throw(f, dist, t0, me_drive=0):
+    f.observe_line(state(me={"drive": 60000}, op={"x": dist}, timer=t0 - 2), 0)
+    f.observe_line(state(me={"drive": me_drive}, op={"x": dist}, timer=t0 - 1), 0)
+    f.observe_line(state(me={"drive": me_drive}, op={"x": dist, "action_id": 904}, timer=t0), 0)
+
+
+def test_in_burnout_a_far_fireball_is_cancelled_with_a_hadoken():
+    f = _burnout_fighter()
+    _throw(f, 4.0, 500)
+    assert f.in_burnout and f.pt.flight is not None
+    d = f.decide(state(me={"drive": 0}, op={"x": 4.0, "action_id": 904}, timer=501), 0.0, 0)
+    assert d.rule == "burnout_fireball" and d.name == "H Hadoken"
+    assert f.burnout_stats["clash"] == 1
+
+
+def test_in_burnout_a_closer_fireball_is_jumped_when_it_is_near():
+    f = _burnout_fighter()
+    _throw(f, 2.5, 500)
+    d = f.decide(state(me={"drive": 0}, op={"x": 2.5, "action_id": 904}, timer=500), 0.0, 0)
+    assert d.rule == "burnout_fireball" and d.kind == "release"      # ~24F away: too early to jump
+    d = f.decide(state(me={"drive": 0}, op={"x": 2.5, "action_id": 904}, timer=506), 0.0, 0)
+    assert d.rule == "burnout_fireball" and d.seq == "9@4"           # forward jump over it at the thrower
+    assert f.burnout_stats["jump_fwd"] == 1 and f.burnout_stats["fireballs"] == 1
+
+
+def test_not_in_burnout_or_too_late_the_rule_stays_out():
+    f = _burnout_fighter()
+    _throw(f, 4.0, 500, me_drive=30000)
+    d = f.decide(state(me={"drive": 30000}, op={"x": 4.0, "action_id": 904}, timer=501), 0.0, 0)
+    assert d.rule != "burnout_fireball"
+    f = _burnout_fighter()
+    _throw(f, 2.0, 500)
+    d = f.decide(state(me={"drive": 0}, op={"x": 2.0, "action_id": 904}, timer=512), 0.0, 0)
+    assert d.rule != "burnout_fireball" and f.burnout_stats["blocked"] == 1
+    # burnout ends once the gauge is full again
+    f.observe_line(state(me={"drive": 60000}, op={"x": 2.0}, timer=900), 0)
+    assert not f.in_burnout
