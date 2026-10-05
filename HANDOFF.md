@@ -261,6 +261,14 @@ splat id) in the fight summaries.
    bot near its wall is a stun; an invincible super (any level the meter allows, SA1 first as the cheapest) avoids it
    and punishes. Needs the bot's burnout state, its back-to-wall distance and the opponent's DI id.
 
+4. **Meaty throws timed to the opponent standing up** (user, 2026-10-05: "it mistimes meaty grabs constantly, choosing to
+   grab as soon as the opponent is on the ground. It needs to wait until the first frame that an opponent is
+   standing"). A throw can't catch a knocked-down or getting-up opponent. Measure in the fights: every bot throw
+   started while the opponent was in a knockdown / get-up id (300-349) and which rule sent it (oki `throw`, neutral
+   policy, approach, defence). Fix: no throw while the opponent is down or getting up; the oki throw is timed so its
+   active frame (start-up 5, Capcom) lands on the opponent's first standing frame (the measured 30-frame get-up). Check
+   in the data whether the first standing frame is still throw-invulnerable (then one frame later).
+
 **0.18.12:** match boundaries after rematches (a joined match's round no longer counts for the next one;
 results and recordings were shifted by a round in the user's second run, one false win). CLAUDE.md "0.18.12".
 
