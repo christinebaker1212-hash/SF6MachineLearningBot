@@ -55,7 +55,7 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
                        # previous move's late hit (multi-hit special, projectile), not this move's
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
-LAB_RULES = "0.12.5"
+LAB_RULES = "0.20.2"
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
 DELAY_START = 4
@@ -387,6 +387,21 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             st["floor"], st["link_as_cancel"] = "the previous move has hit (contact)", True
             notes.append(f"{prev['name']} , {st['name']}: no link window ({prev['hit_adv']:+d} on hit vs "
                          f"{st['startup']}F start-up) but the normal is special-cancelable: performed as a cancel")
+        elif conn == "," and not system and st.get("super_art") and not prev.get("system") and not prev.get("air") \
+                and prev.get("cancel_col_known") and (prev.get("cancel") or "").strip() not in ("", "*", "*1") \
+                and cancel_allowed(prev, row):
+            # a Super Art after a move whose cancel column allows that super is a SUPER CANCEL, however the route
+            # writes it (user, 2026-10-05: "it failed specifically on a shoryuken into SA3, by waiting for the
+            # Shoryuken to finish, then inputting SA3 after": the community route says '623MP , 236236K'). The
+            # super's motion goes in during the move, so its button lands just after the hit; a multi-hit move is
+            # canceled on its first hit (an assumption: Ken's Shoryukens hit 2-3 times; the search shifts it)
+            st["trigger"], st["min_offset"] = "contact", -CONTACT_PLUS - JITTER
+            st["floor"], st["super_cancel"] = "the previous move has hit (super cancel)", True
+            rule_h = cancel_hit_rule(capcom.get("character"), prev.get("name"))
+            if rule_h and len(prev.get("active_hits") or []) > 1:
+                st["cancel_on_hit"] = max(1, min(rule_h, len(prev["active_hits"])))
+            notes.append(f"{prev['name']} , {st['name']}: performed as a super cancel (Capcom cancel column "
+                         f"{prev.get('cancel')!r})")
         elif conn == ",":
             st["trigger"], st["at"] = "own_frame", prev.get("total")
             st["min_offset"], st["floor"] = -JITTER, f"previous move's recovery ends (frame {prev.get('total')})"
@@ -407,7 +422,8 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             st["window_from_notes"] = start
             st["min_offset"] = -1 - JITTER if start is not None else NO_FLOOR
             st["floor"] = f"Capcom window from frame {start}" if start is not None else "no window in Capcom's notes"
-        elif not system and conn == ">" and not st.get("target_combo") and not cancel_allowed(prev, row):
+        elif not system and conn == ">" and not st.get("target_combo") and not cancel_allowed(prev, row) \
+                and not (st.get("super_art") and re.fullmatch(r"SA[123]?", (prev.get("cancel") or "").strip().upper())):
             # the route says cancel / chain, but Capcom's cancel column does not allow it (Ken: L Tatsu has
             # no cancel, so '214LK > 623MP' is a juggle AFTER the tatsu recovers): time it after recovery
             st["trigger"], st["at"] = "own_frame", prev.get("total")
@@ -420,6 +436,13 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
         else:
             st["trigger"], st["min_offset"] = "contact", -CONTACT_PLUS - JITTER
             st["floor"] = "the previous move has hit (contact)"
+            if st.get("super_art") and conn == ">" and not cancel_allowed(prev, row):
+                # the route writes a super cancel from a special whose cancel column names a higher level (Ryu's
+                # High Blade Kick 'SA3' > SA1, 'PC 236HK > 236236P'): the route is followed (user, 2026-10-05:
+                # "Blade kick ALSO needs the route into Super cancel"; 0.20.1 pressed SA1 after the kick ended)
+                st["super_cancel"] = True
+                notes.append(f"{prev['name']} > {st['name']}: super cancel as the route writes it (Capcom's cancel "
+                             f"column says {prev.get('cancel')!r})")
             hits = prev.get("active_hits") or []
             if conn == ">" and len(hits) > 1:
                 # a multi-hit move: cancel on the hit that can be canceled (user, 0.12.4: Ryu's Axe Kick 4HK,
@@ -484,6 +507,7 @@ class ComboRun:
         self.bot_y = None                    # recent (y, tick) of the bot: jump-in timing
         self.gravity = gravity               # per tick^2 (negative), measured from the bot's jump
         self._land_est = None
+        self._ground_since = None            # the tick the bot was last seen landing (0.20.2)
         self._vy = None                      # the bot's vertical speed (per tick): jump attacks only when < 0
         self.neutral_a, self.neutral_d, self.movement = set(neutral_a), set(neutral_d), set(movement)
         self.rt = [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[]) for _ in steps]
@@ -516,7 +540,10 @@ class ComboRun:
         if y is None:
             return None
         if y <= 0.01:
+            if self._ground_since is None:
+                self._ground_since = tick
             return 0
+        self._ground_since = None
         if p1.get("hitstop") or (self.bot_y and self.bot_y[-1][0] == y):
             return self._land_est                     # frozen: keep the last estimate
         hist = (self.bot_y or [])[-2:] + [(y, tick)]
@@ -731,15 +758,16 @@ class ComboRun:
             # replay the recorded success exactly (user, 0.11.5: "record that exact state and repeat it")
             if trig == "air" and not (self._vy is not None and self._vy < 0):
                 return None                   # still rising: a jump attack is pressed on the way DOWN
-            if trig in ("air", "landing") and fx.get("land") is not None:
-                if trig == "landing" and (num(p1.get("y")) or 0.0) > 0.01 and pr["contact"] is None:
-                    return None
-                if land is None:
-                    return n if trig == "landing" and (num(p1.get("y")) or 0.0) <= 0.01 else None
-                return n if land <= fx["land"] else None
+            if trig == "air" and fx.get("land") is not None:
+                return n if land is not None and land <= fx["land"] else None
             if trig == "own_frame" and fx.get("prev_frame") is not None:
                 return n if pr["moving"] >= fx["prev_frame"] else None
-            if fx.get("after_prev_start") is not None:
+            # a move after a jump-in's landing is replayed by its own rule below: the input delay and the offsets
+            # are frozen in a replay, so it decides exactly as in the success. 0.20.1 and before replayed the
+            # landing estimate recorded at the press, which kept the last AIRBORNE estimate when the press came
+            # on or after landing: every replay pressed several frames early, in the air, and nothing came out
+            # (user's K run, 2026-10-05: 'jHP , 5HP > ...' move 2 failed in every exact replay, worked when searched)
+            if trig != "landing" and fx.get("after_prev_start") is not None:
                 return n if tick - pr["start"] >= fx["after_prev_start"] else None
         if trig == "air":
             # jump-in: the attack should hit JUMP_DEPTH frames before landing (deep), so press when
@@ -755,6 +783,10 @@ class ComboRun:
             y = num(p1.get("y")) or 0.0
             if y > 0.01 and pr["contact"] is None:
                 return None                   # the jump-in has not hit yet: never press before it does
+            if y <= 0.01 and self._ground_since is not None:
+                # landed: count from the landing itself (0.20.2: the estimate stays 0 on the ground, so a press
+                # meant to arrive later than the landing, e.g. a +2 offset in the search, never went out)
+                return n if tick - self._ground_since >= rec - self.lead - st["prefix"] + off else None
             if land is None:
                 return n if y <= 0.01 else None
             return n if land + rec <= self.lead + st["prefix"] - off else None
@@ -826,7 +858,8 @@ class ComboRun:
         self.rt[k].update(sent=t, at_send=(p1.get("action_id"), p1.get("action_frame")),
                           sent_moving_prev=self.rt[k - 1]["moving"] if k else None,
                           sent_after_prev_start=(t - self.rt[k - 1]["start"]) if k and self.rt[k - 1]["start"] is not None else None,
-                          land_at_send=self._land_est if self.steps[k].get("trigger") in ("air", "landing") else None)
+                          land_at_send=(0 if (num(p1.get("y")) or 0.0) <= 0.01 else self._land_est)
+                          if self.steps[k].get("trigger") in ("air", "landing") else None)
         self.pending = k
 
     def _bar_link(self, k: int) -> dict | None:

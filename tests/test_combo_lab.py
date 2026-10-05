@@ -1160,3 +1160,76 @@ def test_matches_stop_a_route_whose_starter_whiffed():
     sim.whiffs = {0}
     run, sent = _run_confirm(sim, _steps(MOVES))
     assert sent == [0] and run.result()["fail"]["kind"] == "whiff" and run.result()["fail"]["step"] == 0
+
+
+# ---- 0.20.2: super cancels written as links; exact replays after a jump-in -----------------------------------------
+
+def test_a_super_after_a_super_cancelable_move_is_a_super_cancel():
+    """User, 2026-10-05: 'it failed specifically on a shoryuken into SA3, by waiting for the Shoryuken to finish':
+    the community route writes '623MP , 236236K'; Capcom's cancel column (SA3) lets the Shoryuken be canceled into
+    SA3, so it is performed as a cancel (pressed on the hit), not after the Shoryuken's recovery."""
+    cap = _capcom("ryu")
+    cat = json.load(gzip.open(DATA / "catalog_ryu_0.3.2.json.gz", "rt"))
+    data = _combos("ryu", cap)
+    r = next(c for c in data["combos"] if c["route"].startswith("jHP , 5HP > DRC , 5HK , 5HP > DRC , 5HP , 4HP > 236HK"))
+    plan = cl.plan_route(r, cap, cat)
+    last, prev = plan["steps"][-1], plan["steps"][-2]
+    assert prev["name"] == "M Shoryuken" and last["name"] == "SA3 Shin Shoryuken"
+    assert last["trigger"] == "contact" and last.get("super_cancel")
+    # SA1 after a special that only cancels into SA3 stays a link (pressed after recovery)
+    r2 = next(c for c in data["combos"] if c["route"] == "214HP , 236236P")
+    s2 = cl.plan_route(r2, cap, cat)["steps"][-1]
+    assert s2["trigger"] == "own_frame" and not s2.get("super_cancel")
+
+
+def _jump_in(fixed=None):
+    steps = [{"name": "jump", "system": "jump", "sequence": "9@3", "prefix": 0, "trigger": "first",
+              "allow_movement": True, "hitting": False, "min_offset": 0},
+             {"name": "j.HP", "sequence": "5+HP@3", "prefix": 0, "trigger": "air", "startup": 9, "air": True,
+              "landing": 3, "hitting": True, "min_offset": cl.NO_FLOOR},
+             {"name": "2HP", "sequence": "2+HP@3", "prefix": 0, "trigger": "landing", "hitting": True,
+              "min_offset": -cl.JITTER}]
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, {37}, lead=1, fixed=fixed)
+    sent, hit_at, start_air = {}, None, None
+    y = lambda t: max(0.0, 0.2 * (t - 4) - 0.005 * (t - 4) ** 2) if t > 4 else 0.0   # airborne t 5..43
+    for t in range(1, 80):
+        air_id = 652 if start_air is not None and t >= start_air else 37
+        a = NEUTRAL if t <= 1 else air_id if 1 < t < 44 else 5
+        hp = 9200 if hit_at and t >= hit_at else 10000
+        hs = 8 if hit_at and hit_at <= t < hit_at + 8 else 0
+        react = REACT if hit_at and t >= hit_at else DUMMY_IDLE
+        k = run.feed(_line(t, a, 0, y(t), react, hs, 20 if hit_at else 0, hp))
+        if k is not None:
+            run.sent(k)
+            sent[k] = t
+            if k == 1:
+                start_air = t + 4
+                hit_at = start_air + 8
+            if k == 2:
+                break
+    return sent, run
+
+
+def test_a_landing_move_replays_on_the_same_frame_it_worked():
+    """User's K run (2026-10-05): after a success up to move 11, every exact replay failed at move 2 (5HP after the
+    jump-in), which worked again when searched. The landing move was pressed on the ground (input delay 1 here), but
+    the recorded 'frames to landing' kept the last AIRBORNE estimate, so replays pressed it in the air."""
+    sent, run = _jump_in()
+    assert sent[2] >= 44                                         # pressed once grounded
+    assert run.rt[2]["land_at_send"] == 0                        # recorded as on the ground, not a stale estimate
+    fixed = [{"prev_frame": None, "after_prev_start": None, "land": None},
+             {"prev_frame": None, "after_prev_start": None, "land": run.rt[1]["land_at_send"]},
+             {"prev_frame": None, "after_prev_start": 30, "land": 7}]       # what 0.20.1 recorded (stale)
+    again, _ = _jump_in(fixed)
+    assert again[2] == sent[2]                                   # the same frame as the success
+
+
+def test_a_route_written_as_a_super_cancel_is_canceled():
+    """User, 2026-10-05: 'Blade kick ALSO needs the route into Super cancel'. 'PC 236HK > 236236P': Capcom's cancel
+    column for H High Blade Kick says SA3, the route cancels into SA1; the route is followed (pressed on the hit),
+    not pressed after the kick's recovery."""
+    cap = _capcom("ryu")
+    cat = json.load(gzip.open(DATA / "catalog_ryu_0.3.2.json.gz", "rt"))
+    r = next(c for c in _combos("ryu", cap)["combos"] if c["route"] == "PC 236HK > 236236P")
+    last = cl.plan_route(r, cap, cat)["steps"][-1]
+    assert last["trigger"] == "contact" and last.get("super_cancel") and not last.get("not_cancelable")

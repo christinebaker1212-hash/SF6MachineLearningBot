@@ -2661,6 +2661,29 @@ Ryu catalog and the measured reach); nothing here is verified in game. Numbers m
 - MOCK-tested (`tests/test_ladder.py`: synthetic OCR text, the result screen ending before or after the match summary);
   not verified in game.
 
+## 0.20.2: super cancels; exact replays after a jump-in (user's K run on Ryu, 2026-10-05)
+- **"It failed specifically on a shoryuken into SA3, by waiting for the Shoryuken to finish, then inputting SA3 after"**:
+  the community route writes `... 623MP , 236236K` (a link), so the lab pressed SA3 after the Shoryuken's recovery
+  (own frame 57). Capcom's cancel column for the Shoryukens is SA3: a Super Art after a move whose column allows that
+  super is now a SUPER CANCEL however the route writes it (`super_cancel`, trigger contact: the super's motion goes in
+  during the move, the button lands just after the hit). A multi-hit move (Ken's Shoryukens: 2-3 hits) is canceled on
+  its first hit unless `combo_rules.yaml: cancel_hit` says otherwise (an assumption; the timing search shifts it).
+- **"Blade kick ALSO needs the route into Super cancel"**: `PC 236HK > 236236P` (H High Blade Kick into SA1) was pressed
+  after the kick ended because Capcom's column for the kick says SA3. A route that WRITES a cancel ('>') from a
+  special with any SA cancel level into a super is now performed as a super cancel. A ',' into a super only becomes a
+  cancel when Capcom's column allows that level (`214HP , 236236P` stays a link).
+- **Moves that had worked failed in every exact replay:** after `jHP , 5HP > ...` worked up to move 11, every replay
+  that "kept moves 1-10 exactly" failed at move 2 (the 5HP after landing), which worked again when searched. Cause: a
+  move after a jump-in's landing, pressed on or after landing, was recorded with the last AIRBORNE landing estimate
+  (several frames) instead of 0, so replays pressed it in the air. Now a landing move is replayed by its own rule (input
+  delay and offsets are frozen in a replay), and the record says 0 on the ground.
+- **The landing move never went out with a later timing:** on the ground the landing estimate stays 0, so a press meant
+  to arrive after the landing (the search's +2 ... +5 for move 2: "dropped" in the user's log) never fired. Once the bot
+  has landed it is now timed from the landing tick itself.
+- `LAB_RULES` = 0.20.2: earlier conclusive failures are retried on the next K. Tests: `tests/test_combo_lab.py`
+  (the real Ryu routes plan as super cancels; a jump-in simulator replays the landing move on the frame it worked).
+  Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

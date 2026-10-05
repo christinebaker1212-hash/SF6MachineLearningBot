@@ -251,7 +251,10 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.1 (latest): LP / MR read from the screen in ranked + LP history in progress.md** (CLAUDE.md "0.20.1"). After the
+**0.20.2 (latest): combo lab super cancels (Shoryuken / High Blade Kick into supers) and exact replays after a
+jump-in** (CLAUDE.md "0.20.2"). The user is running K on Ryu: check the routes ending in supers and the jump-in routes.
+
+**0.20.1: LP / MR read from the screen in ranked + LP history in progress.md** (CLAUDE.md "0.20.1"). After the
 first ranked session: read `ladder_reads.md` in S and fix the parser to the real screens' wording (the reading check
 says whether LP changes agree with the results). The user's plan: opponent catalogs (C) -> K on Ryu -> B -> a FROZEN
 version for a long unattended ranked run (100+ matches) to see whether the learned parts improve.
