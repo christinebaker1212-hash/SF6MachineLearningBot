@@ -3403,6 +3403,15 @@ nothing here is verified in game.
   any standard opponent, a planned SA3 ends on the Shoryuken instead, still tried from 1.0 and against Zangief; a drop is
   not a spacing miss; a route cut short after the running move). Not verified in game.
 
+## 0.24.x ranked (user, 2026-10-05): Diamond
+- User: "The newest updates were a resounding success." Result screen screenshot (MEASURED from the screen, one match):
+  the bot won 2-0 against a Diamond Zangief, a 2-win streak, **Diamond, 19,053 LP (+58)**; the bar's next mark reads 20,200.
+  The 0.22.5 run ended at Platinum 2, 14,340 LP, and went 1-6 against Zangiefs.
+- The screen confirms 0.18.9's rule: "Return to Previous Mode" is the result screen's first option (highlighted). The
+  LP block reads "19053 LP +58 20200"; `ladder_read.parse` on text in that shape gives lp 19053, change +58, rank Diamond
+  (the real OCR output is not seen yet).
+- Not yet measured: the session's record, scorecard, `composer` / `errors` counters. Waiting for S and the fight files.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

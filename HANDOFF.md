@@ -15,6 +15,10 @@ the project stands, how to work with the user, and what to do next.
 Versus Human → Ranked, human-like inputs on) and said "I'll send the results after". No code work is in progress;
 the working tree is clean and pushed (d7c26c8).
 
+**Latest result (user screenshot, 2026-10-05):** the bot reached **Diamond, 19,053 LP**, winning 2-0 against a Diamond
+Zangief ("The newest updates were a resounding success"). Up from Platinum 2 / 14,340 LP after the 0.22.5 run. The
+session's full numbers (S + fight files) have not arrived yet.
+
 **What this segment built (all MOCK / replay-tested, none verified in game yet):**
 | version | what | what to look for in the results |
 |---|---|---|
