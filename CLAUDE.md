@@ -2684,6 +2684,32 @@ Ryu catalog and the measured reach); nothing here is verified in game. Numbers m
   (the real Ryu routes plan as super cancels; a jump-in simulator replays the landing move on the frame it worked).
   Not verified in game.
 
+## 0.20.3: Denjin Charge in matches; jump-in routes after a Drive Impact stun (user, 2026-10-05)
+- User: "It probably should be trying to use Denjin charge when safe"; "It shouldn't always give up oki for Denjin";
+  "Jump ins are supposed to be used after a successful DI stun ... routes starting with a jump in". Before, the bot never
+  charged in a match and the route book left out every Denjin-setup and every jump-in route.
+- **Denjin stock** (`fighter._track_denjin`): Capcom: Denjin Charge (22+P) is 52 frames, the stock is added on frame 51,
+  one stock at most, it powers up Hadoken / Hashogeki / SA1 / SA2. Gained when the bot's own Denjin Charge id (catalog C;
+  else 1051, MEASURED) reaches the stock frame; spent when a powered move's id comes out (catalog names Hadoken /
+  Hashogeki, + up to 5 variant ids); ASSUMED lost at a round's end. While a stock is held, the combo lab's Denjin routes
+  are usable (punishes, confirms, `route_book.choose(denjin=...)`).
+- **When it charges** (`configs/fighter/ryu.yaml: denjin`):
+  - on a knockdown, only when the opponent stays down long enough for the whole charge + input delay (15 frames of
+    exposure allowed from 2.5+ away). MEASURED (58 ranked matches): knockdown length from the first grounded frame p10
+    330: 35, 331: 45, 320 / 321: 43, 337: 42; median 29 frames left once the bot can act, 9% leave 60+. So it fires only
+    on long knockdowns. It is a choice against oki: `oki_share` 0.4 when oki is in reach, `far_share` 0.9 otherwise
+    (ESTIMATES); `kept_oki` counts the times oki won.
+  - far apart (3.0+), the opponent free, not walking in, no projectile in flight, not in safe mode: a roll every 0.5 s at
+    12% (ESTIMATES). Replaying the 24 ranked recordings of 0.18.10: ~0.9 charges a match.
+- **Jump-in routes after a Drive Impact stun** (`fighter._stun_jump_in`, `stun_jump_in`): MEASURED, the crumple lasts ~150
+  frames (112-159), ~70 left when the bot can act, the opponent ~0.75 away. The best affordable TRUE jump-in route
+  (`route_book.choose_jump_in`) is performed from a NEUTRAL jump at that distance (user's choice; `route_book.neutral_jump`;
+  the air button is still timed from the fall), when the stun leaves time for the jump to hit (44 frames + input delay,
+  ESTIMATE) and its expected damage is at least 0.8x SA3's; otherwise the 0.18.1 super cash-out. The super cash-out waits
+  while a jump-in route is coming (the Shoryuken fallback used to fire first, during the DI animation).
+- `fight_summary.denjin` / `stun_followups` and thoughts lines. Tests: `tests/test_0203.py` (stock, routes with / without
+  a stock, knockdown choice vs oki, range mix and no charge into a fireball, the crumple jump-in). Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

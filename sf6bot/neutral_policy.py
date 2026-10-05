@@ -129,6 +129,7 @@ class NeutralPolicy:
         self.fireball_min = float(c.get("fireball_min_dist", FIREBALL_MIN_DIST))
         self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
+        self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
         # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
         # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
         self.win = win
@@ -256,7 +257,7 @@ class NeutralPolicy:
                 if intent != "air_attack" and self.book:
                     from .route_book import choose as pick
                     e = pick(self.book, me, op, starter=m["name"], hit_types=("normal",),
-                             learned=self.exp.routes() if self.exp else None)
+                             learned=self.exp.routes() if self.exp else None, denjin=self.denjin)
                     if e is not None:
                         out["route"] = e
         self.last = out

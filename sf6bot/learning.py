@@ -371,6 +371,15 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         cz = sorted((dv.get("causes") or {}).items(), key=lambda kv: -kv[1])
         out.append(("measured", f"Burnouts: {dv['burnouts']}; what drained the Drive most in the 4 s before: "
                                 + ", ".join(f"{k} x{v}" for k, v in cz[:4]) + "."))
+    dj = summary.get("denjin") or {}
+    if any(v for k, v in dj.items() if k != "stock_at_end"):
+        out.append(("scripted", f"Denjin Charge: charged on a knockdown {dj.get('charged_knockdown', 0)}, from far away "
+                                f"{dj.get('charged_range', 0)}; kept the oki instead {dj.get('kept_oki', 0)}; stocks gained "
+                                f"{dj.get('stock', 0)}, used {dj.get('spent', 0)}."))
+    sf = summary.get("stun_followups") or {}
+    if sf.get("jump_in") or sf.get("super"):
+        out.append(("scripted", f"After my Drive Impact stunned {opp}: jump-in combos {sf.get('jump_in', 0)}, supers "
+                                f"{sf.get('super', 0)}."))
     cp = summary.get("corner_pressure") or {}
     if cp.get("moments"):
         out.append(("scripted", f"Corner pressure turns (cornered {opp} blocking, me not minus): {cp['moments']}."))

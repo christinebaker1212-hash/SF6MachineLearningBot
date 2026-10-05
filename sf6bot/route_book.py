@@ -51,10 +51,11 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3) -> list[dict]:
         if r.get("unresolved"):
             continue
         plan = plan_route({"route": route, **r}, capcom, catalog)
-        if plan.get("unsupported") or plan.get("setup") or not plan["steps"]:
-            continue                       # Denjin setups need a quiet moment: not in a match yet
-        if plan.get("jump_in"):
-            continue                       # jump-ins need the lab's measured jump distance
+        if plan.get("unsupported") or not plan["steps"]:
+            continue
+        # 0.20.3: Denjin routes are used while the bot holds a Denjin stock (it charges at safe moments: fighter
+        # `_denjin_*`); jump-in routes after a successful Drive Impact stun (user: "Jump ins are supposed to be used
+        # after a successful DI stun")
         rec = v.get("recorded_timing") or {}
         if rec and len(rec.get("steps") or []) == len(plan["steps"]):
             plan["recorded_timing"], plan["lead"] = rec["steps"], rec.get("lead")
@@ -65,7 +66,8 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3) -> list[dict]:
                      "drive": num(v.get("drive_spent")) or 0, "super": num(v.get("super_spent")) or 0,
                      "rate": v.get("success_rate_final_timing") or 0.0, "plan": plan,
                      "starter": s0.get("name"), "starter_id": s0.get("expect_id"),
-                     "startup": s0.get("startup"), "kind": _starter_kind(plan)})
+                     "startup": s0.get("startup"), "kind": _starter_kind(plan),
+                     "needs_denjin": bool(plan.get("setup")), "jump_in": bool(plan.get("jump_in"))})
     return book
 
 
@@ -97,13 +99,16 @@ def value(e: dict, learned: dict | None = None) -> float:
 
 
 def choose(book: list[dict], me: dict, op: dict, *, frames: int | None = None, starter: str | None = None,
-           hit_types=("normal",), learned: dict | None = None, reserve: float = 0) -> dict | None:
-    """The best affordable route for the situation; a killing route wins over everything else."""
+           hit_types=("normal",), learned: dict | None = None, reserve: float = 0, denjin: bool = False) -> dict | None:
+    """The best affordable route for the situation; a killing route wins over everything else. Denjin routes only
+    while the bot holds a Denjin stock (`denjin`)."""
     corner = cornered(op, me)
     opp_hp = num(op.get("hp"))
     best, best_v = None, -1.0
     for e in book:
         if e["hit_type"] not in hit_types or e["kind"] not in ("ground", "drive_rush"):
+            continue
+        if e.get("needs_denjin") and not denjin:
             continue
         if e["position"] == "corner" and not corner:
             continue
@@ -118,3 +123,35 @@ def choose(book: list[dict], me: dict, op: dict, *, frames: int | None = None, s
         if v > best_v:
             best, best_v = dict(e, lethal=lethal), v
     return best
+
+
+def choose_jump_in(book: list[dict], me: dict, op: dict, *, learned: dict | None = None, reserve: float = 0,
+                   denjin: bool = False) -> dict | None:
+    """0.20.3: the best affordable jump-in route (any hit type: the opponent is stunned, so the route's links hold) for
+    a Drive Impact stun; corner routes only with the opponent cornered; Denjin routes only with a stock."""
+    corner = cornered(op, me)
+    opp_hp = num(op.get("hp"))
+    best, best_v = None, -1.0
+    for e in book:
+        if not e.get("jump_in") or (e.get("needs_denjin") and not denjin):
+            continue
+        if e["position"] == "corner" and not corner:
+            continue
+        ok, lethal = affordable(e, me, opp_hp, reserve)
+        if not ok:
+            continue
+        v = value(e, learned) + (1e6 if lethal else 0.0)
+        if v > best_v:
+            best, best_v = dict(e, lethal=lethal), v
+    return best
+
+
+def neutral_jump(e: dict) -> dict:
+    """The same jump-in route from a NEUTRAL jump (user, 2026-10-05: after a Drive Impact crumple the opponent is ~0.75
+    away, so a forward jump would cross over). The air button is still timed from the fall (ComboRun 'air' trigger)."""
+    plan = dict(e["plan"])
+    steps = [dict(s) for s in plan["steps"]]
+    if steps and steps[0].get("system") == "jump":
+        steps[0]["sequence"] = "8" + steps[0]["sequence"][1:]
+    plan["steps"] = steps
+    return dict(e, plan=plan, neutral_jump=True)

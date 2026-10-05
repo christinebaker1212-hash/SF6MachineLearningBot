@@ -336,6 +336,37 @@ di_rules:
   di_hit: 1000
   follow_up_default: 2000
   wall_dist: 1.5
+# 0.20.3 (user, 2026-10-05: "It probably should be trying to use Denjin charge when safe ... It shouldn't always give up oki
+# for Denjin"). Capcom: Denjin Charge (22+P) is 52 frames, the stock is added on frame 51, one stock at most; it powers up
+# Hadoken, Hashogeki, SA1 and SA2. The stock is tracked from the bot's own action ids (catalog C; else these MEASURED Ryu
+# ids) and assumed lost at a round's end (not known). Charged (a) while the opponent is down long enough (MEASURED
+# knockdown lengths from the first grounded frame, 58 ranked matches: p10 per id), instead of oki only `oki_share` of the
+# time when oki is in reach; (b) far apart with the opponent not coming in, as a mix. The rest are ESTIMATES. While a stock
+# is held the combo lab's Denjin routes are used.
+denjin:
+  enabled: true
+  seq: "2@3 5@2 2+LP@3"
+  total: 52
+  stock_frame: 51
+  charge_id: 1051
+  consume_ids: ["900-911", "1036-1045", "1200-1205", "1212-1219"]
+  consume_names: "Hadoken|Hashogeki"
+  knockdown_frames: {330: 35, 331: 45, 320: 43, 321: 43, 337: 42, default: 35}
+  far_dist: 2.5            # from this far the opponent can't reach the last frames of the charge in time
+  far_exposure: 15
+  oki_share: 0.4           # charge instead of walking in for oki this often when oki is in reach
+  far_share: 0.9           # ... and this often when it isn't
+  range: {enabled: true, min_dist: 3.0, chance: 0.12, roll_every_s: 0.5, max_approach: 0.02}
+# 0.20.3 (user: "Jump ins are supposed to be used after a successful DI stun"): the combo lab's TRUE jump-in routes after the
+# bot's Drive Impact crumples the opponent. MEASURED: the crumple lasts ~150 frames (112-159), ~70 left when the bot can
+# act, the opponent ~0.75 away -> a NEUTRAL jump (user's choice). ESTIMATES: stun_frames, jump_hit_frames (pre-jump +
+# fall to a deep hit), vs_super (the route's expected damage must reach this share of SA3's).
+stun_jump_in:
+  enabled: true
+  stun_frames: 140
+  jump_hit_frames: 44
+  neutral_jump_below: 1.2
+  vs_super: 0.8
 # 0.19.0: Drive Impact against an opponent with its back to the wall: blocked or not it stuns against the wall. ESTIMATES:
 # the wall distance for the stun (max_back), and how often a chance is taken (chance per decision, cooldown).
 di_wall:

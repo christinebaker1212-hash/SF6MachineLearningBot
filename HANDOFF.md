@@ -251,7 +251,11 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.2 (latest): combo lab super cancels (Shoryuken / High Blade Kick into supers) and exact replays after a
+**0.20.3 (latest): Denjin Charge in matches (stock tracked; on long knockdowns as a choice against oki; from far away as a
+mix; Denjin routes while stocked) and jump-in routes from a neutral jump after a Drive Impact crumple** (CLAUDE.md
+"0.20.3"). Check in the next batch: `denjin` (charges, kept oki, stocks used, `stock_at_end`) and `stun_followups`.
+
+**0.20.2: combo lab super cancels (Shoryuken / High Blade Kick into supers) and exact replays after a
 jump-in** (CLAUDE.md "0.20.2"). The user is running K on Ryu: check the routes ending in supers and the jump-in routes.
 
 **0.20.1: LP / MR read from the screen in ranked + LP history in progress.md** (CLAUDE.md "0.20.1"). After the

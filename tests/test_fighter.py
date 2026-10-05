@@ -146,7 +146,8 @@ def test_drive_impact_reaction(tmp_path):
 def test_neutral_by_distance_and_side():
     f = ScriptedFighter(FCFG, seed=3)
     rules = {f.decide(state(op={"x": 3.5}), i * 1.0, 0).rule for i in range(40)}
-    assert rules <= {"neutral:hadoken_lp", "neutral:hadoken_hp", "neutral:walk_forward", "neutral:wait"}
+    # 0.20.3: far apart the bot also charges Denjin now and then
+    assert rules <= {"neutral:hadoken_lp", "neutral:hadoken_hp", "neutral:walk_forward", "neutral:wait", "denjin"}
     f = ScriptedFighter(FCFG, seed=3)
     # bot as p2: its own state is p2
     raw = state(me={"x": 3.0}, op={"x": 2.4})

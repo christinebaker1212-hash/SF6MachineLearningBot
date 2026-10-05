@@ -47,8 +47,35 @@ RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741)
 # combo_gen.RUSH_BONUS). 0.18.1 ranked: Ken's rushed normals landed 5 of 8; after blocking one the bot was hit within
 # 45 frames 3 times of 8; the bot never used the +4 itself.
 RUSH_BONUS = 4
+def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
+    """0.20.3: the bot's Denjin Charge id and the ids of the moves a Denjin stock powers up (Capcom: "Hadoken, Hashogeki,
+    Shinku Hadoken, and Shin Hashogeki's properties are enhanced"), from its move-list catalog (menu C); else the config's
+    MEASURED Ryu ids. An uncatalogued variant id (up to 5 after a special's id, as the combo lab counts them) counts too."""
+    dc = fcfg.get("denjin") or {}
+    charge, consume = dc.get("charge_id"), set(_ids(dc.get("consume_ids")))
+    try:
+        cat = json.loads((Path(ds_root) / "catalog" / f"{file_stem(character or '')}_movelist.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cat = None
+    if cat:
+        pat = re.compile(dc.get("consume_names", r"Hadoken|Hashogeki"))
+        found = set()
+        for name, m in (cat.get("moves") or {}).items():
+            g = m.get("guard_none") or m.get("guard_all") or {}
+            mid = g.get("move_id")
+            if not isinstance(mid, int) or g.get("same_as"):
+                continue
+            if name == "Denjin Charge":
+                charge = mid
+            elif pat.search(name):
+                found.update(range(mid, mid + 6))
+        if found:
+            consume = found
+    return {"charge": charge, "consume": consume}
+
+
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
-               "di_burnout_super", "anti_air_a2a"}
+               "di_burnout_super", "anti_air_a2a", "denjin"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -328,6 +355,14 @@ class ScriptedFighter:
         self._burnout_super_for = None
         self._a2a_for = None
         self._corner_fired = None
+        # 0.20.3 Denjin Charge: the stock the bot holds (tracked from its own action ids), and when to charge
+        self.denjin_stock = False
+        self.denjin_ids = {"charge": None, "consume": set()}   # set by the fight setup from the bot's catalog
+        self.denjin_stats = {"charged_knockdown": 0, "charged_range": 0, "stock": 0, "spent": 0, "kept_oki": 0}
+        self._denjin_seen = None
+        self._kd_t0 = self._kd_id = self._denjin_kd_for = None
+        self._denjin_roll_t = 0.0
+        self.stun_stats = {"jump_in": 0, "super": 0}
         self.corner_stats = {"moments": 0}
         self._rush_next = 0.0
         self._rush_roll_t = 0.0
@@ -727,6 +762,7 @@ class ScriptedFighter:
                 # the best TRUE combo whose first move starts in time (combo lab; punish = punish counter)
                 from .route_book import choose
                 e = choose(self.book, me, op, frames=-adv, hit_types=("punish_counter", "normal"),
+                           denjin=self.denjin_stock,
                            learned=self.exp.routes() if self.exp else None,
                            reserve=self.c.get("drive_reserve", 0))
                 if e is not None:
@@ -770,7 +806,8 @@ class ScriptedFighter:
             return Decision("hold", direction=block_dir, facing=block_face, reason="holding block", rule="block")
         # 6b. the opponent getting up next to the bot, or walking into throw range (0.18.0)
         ap = (self._their_wakeup(raw, me, op, dist, t) or self._corner_pressure(raw, me, op, dist, t)
-              or self._approach(raw, me, op, dist, t) or self._oki_walk(me, op, dist))
+              or self._approach(raw, me, op, dist, t) or self._denjin_knockdown(me, op, dist, t)
+              or self._oki_walk(me, op, dist))
         if ap is not None:
             return ap
         # 6c. Drive Impact against an opponent with its back to the wall (0.19.0)
@@ -781,6 +818,10 @@ class ScriptedFighter:
         dr = self._rush_in(me, op, dist, t)
         if dr is not None:
             return dr
+        # 6e. Denjin Charge from far away (0.20.3)
+        dj = self._denjin_range(me, op, dist, t)
+        if dj is not None:
+            return dj
         # 7. neutral
         if t < self.next_neutral_t:
             return Decision("none")
@@ -996,6 +1037,18 @@ class ScriptedFighter:
             self._crumple_t0, self._crumple_done = tmr, False
         if self._crumple_done or dist > float(sc.get("crumple_max_dist", 1.1)):
             return None
+        aid = me.get("action_id")
+        if isinstance(aid, int) and 850 <= aid < 870:    # still in the bot's own Drive Impact
+            rem0 = int(sc.get("di_recovery_frames", 85)) - (tmr - self._crumple_t0)
+        elif self.busy(me) is None:
+            rem0 = 0
+        else:
+            return None
+        jr = self._stun_jump_in(me, op, dist, tmr, rem0, sc)
+        if jr == "wait":
+            return None                          # a jump-in route will go out once the bot is free: no super now
+        if jr is not None:
+            return jr
         meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
         pick = None
         for key in ("sa3", "sa1"):
@@ -1006,19 +1059,138 @@ class ScriptedFighter:
         pick = pick or self._super("crumple_srk") or self._super("shoryuken")
         if pick is None:
             return None
-        aid = me.get("action_id")
-        if isinstance(aid, int) and 850 <= aid < 870:    # still in the bot's own Drive Impact
-            rem = int(sc.get("di_recovery_frames", 85)) - (tmr - self._crumple_t0)
-        elif self.busy(me) is None:
-            rem = 0
-        else:
-            return None
-        if rem > seq_prefix(pick["seq"]) + self.lead + self.stale:
+        if rem0 > seq_prefix(pick["seq"]) + self.lead + self.stale:
             return None
         self._crumple_done = True
+        self.stun_stats["super"] += 1
         self.super_stats["crumple"][pick["name"]] = self.super_stats["crumple"].get(pick["name"], 0) + 1
         return Decision("seq", pick["name"], pick["seq"], rule="crumple_followup",
                         reason=f"opponent crumpled at {dist:.2f} (super meter {int(meter)}): {pick['name']}")
+
+    def _stun_jump_in(self, me: dict, op: dict, dist: float, tmr: int, rem: int, sc: dict):
+        """0.20.3 (user, 2026-10-05: "Jump ins are supposed to be used after a successful DI stun ... routes starting with a
+        jump in"): the combo lab's TRUE jump-in route with the best expected damage, when the stun leaves time for the
+        jump to hit and it is worth more than the super cash-out. MEASURED (ranked recordings): the crumple lasts ~150
+        frames (112-159) and ~70 are left when the bot can act; the opponent is ~0.75 away, so the jump is a NEUTRAL jump
+        (user's choice); the air button is timed from the fall as in the lab. ESTIMATES: `stun_jump_in`."""
+        jc = self.c.get("stun_jump_in") or {}
+        if not jc.get("enabled", True) or not self.book:
+            return None
+        left = int(jc.get("stun_frames", 140)) - (tmr - self._crumple_t0) - max(0, rem)
+        if left < int(jc.get("jump_hit_frames", 44)) + self.lead + self.stale:
+            return None
+        from .route_book import choose_jump_in, neutral_jump, value
+        e = choose_jump_in(self.book, me, op, learned=self.exp.routes() if self.exp else None,
+                           reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+        if e is None:
+            return None
+        meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+        sup = self._super("sa3")
+        sup_dmg = (sup.get("damage") or 4000) if sup and meter >= int(sup.get("super", 30000)) else 0
+        if not e.get("lethal") and value(e, self.exp.routes() if self.exp else None) < float(jc.get("vs_super", 0.8)) * sup_dmg:
+            return None                       # SA3 is worth more here
+        if rem > self.lead + self.stale:
+            return "wait"                     # the jump goes out when the bot is free (a jump is not buffered)
+        if dist < float(jc.get("neutral_jump_below", 1.2)):
+            e = neutral_jump(e)
+        self._crumple_done = True
+        self.stun_stats["jump_in"] += 1
+        return Decision("route", e["route"], route=e, rule="stun_jump_in",
+                        reason=f"opponent stunned at {dist:.2f} with ~{left}F left: "
+                               + ("neutral " if e.get("neutral_jump") else "") + f"jump-in route {e['route']}")
+
+    # ---- 0.20.3: Denjin Charge ---------------------------------------------------------------------------------------
+    def _track_denjin(self, me: dict, op: dict, tmr) -> None:
+        """The stock: gained when the bot's Denjin Charge reaches its stock frame (Capcom: "stock added on the 51st
+        frame"; one stock at most), spent when a move it powers up comes out (Hadoken, Hashogeki, SA1, SA2). Also the
+        opponent's grounded knockdown (for when charging is safe)."""
+        dc = self.c.get("denjin") or {}
+        aid = me.get("action_id")
+        cid = self.denjin_ids.get("charge") or dc.get("charge_id")
+        if aid == cid and isinstance(tmr, int) and isinstance(self._my_act_t0, int) and not self.denjin_stock \
+                and tmr - self._my_act_t0 >= int(dc.get("stock_frame", 51)) - 1 and self._denjin_seen != self._my_act_t0:
+            self._denjin_seen = self._my_act_t0
+            self.denjin_stock = True
+            self.denjin_stats["stock"] += 1
+        elif self.denjin_stock and isinstance(aid, int) and aid in (self.denjin_ids.get("consume") or set()):
+            self.denjin_stock = False
+            self.denjin_stats["spent"] += 1
+        oa = op.get("action_id")
+        if isinstance(oa, int) and 300 <= oa < 340 and (_num(op.get("y")) or 0.0) <= 0.05:
+            if self._kd_t0 is None and isinstance(tmr, int):
+                self._kd_t0, self._kd_id = tmr, oa
+        elif not (isinstance(oa, int) and 200 <= oa < 400):
+            self._kd_t0 = self._kd_id = None
+
+    def _knockdown_left(self, op: dict, tmr) -> int | None:
+        """Frames until the knocked-down opponent can act. MEASURED (58 ranked matches, from the first grounded knockdown
+        frame): 330 p10 35, 331 45, 320 / 321 43, 337 42 (`denjin.knockdown_frames`); the last get-up action lasts 30."""
+        dc = self.c.get("denjin") or {}
+        oa = op.get("action_id")
+        wf = ((self.c.get("defense") or {}).get("wakeup_frames") or {}).get(oa)
+        if wf and isinstance(tmr, int) and isinstance(self.op_onset, int):
+            return int(wf) - (tmr - self.op_onset)
+        if self._kd_t0 is None or not isinstance(tmr, int):
+            return None
+        kd = dc.get("knockdown_frames") or {}
+        base = kd.get(self._kd_id, kd.get(str(self._kd_id), kd.get("default", 35)))
+        return int(base) - (tmr - self._kd_t0)
+
+    def _denjin_need(self, dist: float) -> int:
+        dc = self.c.get("denjin") or {}
+        need = int(dc.get("total", 52)) + self.lead + self.stale
+        if dist >= float(dc.get("far_dist", 2.5)):
+            need -= int(dc.get("far_exposure", 15))     # far away, the last frames are not reachable in time
+        return need
+
+    def _denjin_knockdown(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.20.3 (user: "It probably should be trying to use Denjin charge when safe ... It shouldn't always give up oki
+        for Denjin, though"): with the opponent down long enough for the whole charge (52 frames + input delay; some
+        exposure allowed from far away), charge INSTEAD of walking in for oki only sometimes: `oki_share` of the time
+        when oki is in reach, `far_share` when it is not. Once per knockdown."""
+        dc = self.c.get("denjin") or {}
+        if not dc.get("enabled", True) or self.denjin_stock or self._kd_t0 is None or self._denjin_kd_for == self._kd_t0:
+            return None
+        if self.busy(me) is not None or (_num(me.get("y")) or 0.0) > 0.05:
+            return None
+        left = self._knockdown_left(op, self._now)
+        if left is None or left < self._denjin_need(dist):
+            return None
+        self._denjin_kd_for = self._kd_t0
+        oki_reach = dist <= float((self.c.get("oki") or {}).get("max_dist", 3.2))
+        share = float(dc.get("oki_share", 0.4)) if oki_reach else float(dc.get("far_share", 0.9))
+        if self.rng.random() >= share:
+            self.denjin_stats["kept_oki"] += 1
+            return None
+        self.denjin_stats["charged_knockdown"] += 1
+        return Decision("seq", "Denjin Charge", dc.get("seq", "2@3 5@2 2+LP@3"), rule="denjin",
+                        reason=f"opponent down ~{left}F at {dist:.2f}: Denjin Charge"
+                               + (" instead of oki" if oki_reach else ""))
+
+    def _denjin_range(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.20.3: far apart (`range.min_dist`), the opponent free and not coming in, no projectile in flight, not in safe
+        mode: a Denjin Charge now and then (a mix; ESTIMATES `denjin.range`). MEASURED: quiet moments 2.5+ apart lasting
+        50+ frames came ~1.3 times a match in 58 ranked matches (3.0+: 0.3)."""
+        dc = self.c.get("denjin") or {}
+        rc = dc.get("range") or {}
+        if not dc.get("enabled", True) or not rc.get("enabled", True) or self.denjin_stock or self.safe:
+            return None
+        if dist < float(rc.get("min_dist", 3.0)) or self.busy(me) is not None or self.pt.flight is not None:
+            return None
+        oa = op.get("action_id")
+        if (isinstance(oa, int) and oa >= self.c["attack_id_min"]) or (_num(op.get("y")) or 0.0) > 0.05:
+            return None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None or (self.vel_ok and (mx - ox) * self.op_vx > float(rc.get("max_approach", 0.02))):
+            return None                       # the opponent is walking / dashing in
+        if t < self._denjin_roll_t:
+            return None
+        self._denjin_roll_t = t + float(rc.get("roll_every_s", 0.5))
+        if self.rng.random() >= float(rc.get("chance", 0.12)):
+            return None
+        self.denjin_stats["charged_range"] += 1
+        return Decision("seq", "Denjin Charge", dc.get("seq", "2@3 5@2 2+LP@3"), rule="denjin",
+                        reason=f"far apart ({dist:.2f}), the opponent not coming in: Denjin Charge")
 
     def _parry_throw(self, me: dict, op: dict, dist: float) -> Decision | None:
         pc = self.c.get("parry_throw") or {}
@@ -1370,6 +1542,7 @@ class ScriptedFighter:
     def round_review(self) -> dict:
         """At a round's end: what hurt most, and the changes for the next round (anti-air earlier after losing to
         jump-ins; throws expected at pressure moments after losing to throws). Resets the round's counts."""
+        self.denjin_stock = False            # 0.20.3 ASSUMPTION: the Denjin stock does not carry into the next round
         taken, self.round_taken = self.round_taken, {}
         self._rr = {"hp": None, "free": True, "cat": "other"}
         total = sum(d for _, d in taken.values())
@@ -1426,6 +1599,7 @@ class ScriptedFighter:
         self._track_damage_taken(me, op)
         self._op_hist.append((tmr, _num(op.get("drive")), _num(op.get("x"))))
         self._track_drive(me, tmr)
+        self._track_denjin(me, op, tmr)
         w_ = self._di_wall_watch
         if w_ is not None:
             # what the opponent did after the bot's wall Drive Impact (the wall-splat reaction id is not known yet)
@@ -1620,6 +1794,7 @@ class ScriptedFighter:
             if self.book:
                 from .route_book import choose
                 e = choose(self.book, me, op, starter=m["name"], hit_types=("punish_counter", "normal"),
+                           denjin=self.denjin_stock,
                            learned=None, reserve=self.c.get("drive_reserve", 0))
                 if e is not None and isinstance(e.get("damage"), (int, float)):
                     dmg = max(dmg, e["damage"])
@@ -1648,6 +1823,7 @@ class ScriptedFighter:
         if self.book:
             from .route_book import choose
             e = choose(self.book, me, op, starter=m["name"], hit_types=("punish_counter", "normal"),
+                           denjin=self.denjin_stock,
                        learned=self.exp.routes() if self.exp else None, reserve=self.c.get("drive_reserve", 0))
             if e is not None:
                 return Decision("route", e["route"], route=e, rule="whiff_punish", reason=why + f" -> {e['route']}")
@@ -1725,6 +1901,7 @@ class ScriptedFighter:
             prev, dt = {}, 1
         self.policy.safe = self._safe_mode(raw, me, op, t)
         self.policy.opp_poke = self.opp_poke_reach()
+        self.policy.denjin = self.denjin_stock
         ch = self.policy.choose(me, op, prev.get(mk), prev.get(ok), t1, lambda a: self.can_spend(me, a), dt=dt)
         intent = ch["intent"]
         probs = " · ".join(f"{k.replace('_', ' ')} {v:.0%}" for k, v in ch["top"])
@@ -2135,6 +2312,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["drive"] = {"burnouts": fighter.drive_stats["burnouts"],
                                     "causes": dict(fighter.drive_stats["causes"])}
                 summary["corner_pressure"] = dict(fighter.corner_stats)
+                summary["denjin"] = dict(fighter.denjin_stats, stock_at_end=fighter.denjin_stock)
+                summary["stun_followups"] = dict(fighter.stun_stats)
             if learner is not None:
                 try:
                     saved = learner.save()
@@ -2567,6 +2746,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.live_reach = cur["live_reach"]
                 from .catalog import perfect_parry_ids
                 fighter.pp_ids = perfect_parry_ids(ds_root)
+                fighter.denjin_ids = denjin_ids(summary["character"], ds_root, fcfg)
                 try:
                     from .live_moves import LiveMoveLearner
                     learner = LiveMoveLearner(summary["opponent"], ds_root, fighter.opp, load_input_bits(), fcfg)
