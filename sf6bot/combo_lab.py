@@ -55,7 +55,7 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
                        # previous move's late hit (multi-hit special, projectile), not this move's
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
-LAB_RULES = "0.20.2"
+LAB_RULES = "0.20.4"
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
 DELAY_START = 4
@@ -803,19 +803,36 @@ class ComboRun:
                 return n if pr["moving"] >= free - self.lead - st["prefix"] + off else None
             return n if p1.get("action_id") in self.neutral_a else None
         # contact (cancel / chain / target combo)
-        base = pr["contact"]
+        base = self._contact_base(n, tick, p1)
+        if base is None:
+            return None
+        return n if tick >= base + CONTACT_PLUS + off - self.lead - st["prefix"] else None
+
+    def _contact_base(self, n: int, tick: int, p1: dict) -> int | None:
+        """The tick step n's cancel is timed from: the previous move's contact, seen or predicted. For a cancel
+        on hit h of a multi-hit move (Ryu's Axe Kick 4HK: hit 2) the hit is PREDICTED once the hits before it
+        have connected: its own frame (Capcom's active start - 1) minus the move's own frame now, plus the
+        hitstop still to run. Before 0.20.4 it waited until hit h was seen, so a special's motion (623 = 9
+        frames) + the input delay put the button ~13 frames after hit 2, past the cancel window, and the
+        timing search could not press any earlier (user, 2026-10-05: '4HK > shoryuken ... simply doesn't come
+        out')."""
+        pr, pst, st = self.rt[n - 1], self.steps[n - 1], self.steps[n]
         h = st.get("cancel_on_hit") or 1
         if h > 1:
-            # cancel on hit h of a multi-hit move: wait until that hit has connected
-            if len(pr["contacts"]) < h:
+            if len(pr["contacts"]) >= h:
+                return pr["contacts"][h - 1]
+            hits = pst.get("active_hits") or []
+            if len(pr["contacts"]) < h - 1 or h > len(hits) or pr["start"] is None:
                 return None
-            base = pr["contacts"][h - 1]
+            own_left = max(0, hits[h - 1] - 1 - pr["moving"])
+            return tick + own_left + int(p1.get("hitstop") or 0)
+        base = pr["contact"]
         if base is None:
             su = pst.get("startup")
             if su is None:
                 return None
             base = pr["start"] + su - 1
-        return n if tick >= base + CONTACT_PLUS + off - self.lead - st["prefix"] else None
+        return base
 
     def presend(self) -> int | None:
         """Confirm mode: the next step's MOTION (its directions, harmless without the button) may go out on
@@ -827,14 +844,17 @@ class ComboRun:
         if not n or self.rt[n].get("motion_sent") is not None:
             return None
         st, pr, pst = self.steps[n], self.rt[n - 1], self.steps[n - 1]
-        if not st.get("prefix") or pr["start"] is None or pr["contact"] is not None or not pst.get("hitting"):
+        h = st.get("cancel_on_hit") or 1
+        if not st.get("prefix") or pr["start"] is None or not pst.get("hitting"):
+            return None
+        if len(pr["contacts"]) >= h:           # the hit the cancel needs was seen: the whole input goes out
             return None
         if st["trigger"] in ("air", "landing", "own_frame", "prev_neutral", "prev_free", "first"):
             return None
-        su = pst.get("startup")
-        if su is None:
+        p1 = (self.last or {}).get(self.me) or {}
+        base = self._contact_base(n, self._tick, p1)
+        if base is None:
             return None
-        base = pr["start"] + su - 1
         return n if self._tick >= base + CONTACT_PLUS + self._off(n) - self.lead - st["prefix"] else None
 
     def observe(self, raw: dict) -> None:

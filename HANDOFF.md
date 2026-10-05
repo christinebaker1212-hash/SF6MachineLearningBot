@@ -251,7 +251,10 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.3 (latest): Denjin Charge in matches (stock tracked; on long knockdowns as a choice against oki; from far away as a
+**0.20.4 (latest): a cancel on the second hit of a two-hit move (Ryu 4HK > Shoryuken) is timed to the predicted hit, so
+the motion goes in during the move** (CLAUDE.md "0.20.4"). 4HK routes are retried on the next K.
+
+**0.20.3: Denjin Charge in matches (stock tracked; on long knockdowns as a choice against oki; from far away as a
 mix; Denjin routes while stocked) and jump-in routes from a neutral jump after a Drive Impact crumple** (CLAUDE.md
 "0.20.3"). Check in the next batch: `denjin` (charges, kept oki, stocks used, `stock_at_end`) and `stun_followups`.
 

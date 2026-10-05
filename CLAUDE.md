@@ -2710,6 +2710,19 @@ Ryu catalog and the measured reach); nothing here is verified in game. Numbers m
 - `fight_summary.denjin` / `stun_followups` and thoughts lines. Tests: `tests/test_0203.py` (stock, routes with / without
   a stock, knockdown choice vs oki, range mix and no charge into a fireball, the crumple jump-in). Not verified in game.
 
+## 0.20.4: canceling the second hit of a two-hit move (user, 2026-10-05: "4HK > shoryuken ... simply doesn't come out")
+- Ryu's Axe Kick (4HK) hits on frames 10 and 20; only the second hit can be canceled (0.12.4, `combo_rules.yaml:
+  cancel_hit`). The lab waited until hit 2 was SEEN before starting the next input, so a special's motion (623 = 9
+  frames) + the input delay put the button ~13 frames after hit 2, past the cancel window. The timing search could not
+  help: an earlier offset still waited for hit 2.
+- Now (`ComboRun._contact_base`) hit N is PREDICTED once the hits before it have connected: its own frame (Capcom's
+  active start - 1) minus the move's own frame now, plus the bot's hitstop still to run. The motion goes in during the
+  move, and the button lands just after hit 2. Nothing goes out on hit 1's cancel (not cancelable). The same applies in
+  matches (hit confirm: after hit 1 is seen) and to every multi-hit cancel (a rule's hit, else the last).
+- `LAB_RULES` = 0.20.4: routes that failed this way are retried on the next K. Tests (`tests/test_combo_lab.py`, frame
+  simulator, NOT the game): 4HK > 623 with a 9-frame motion lands (failed on 0.20.3); a non-motion cancel still waits
+  for hit 2; hit confirm in matches. Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -65,14 +65,21 @@ class Sim:
             m, cur = self.moves[k], self.cur
             if cur is None:
                 self._start(k)
-            elif m["conn"] in (">", "~") and isinstance(cur["hit"], int) and self.t <= cur["hit"] + self.HITSTOP + 3:
+            elif m["conn"] in (">", "~") and len(cur.get("hit_ticks", [])) >= m.get("cancel_on", 1) \
+                    and cur["hit_ticks"][m.get("cancel_on", 1) - 1] <= self.t \
+                    <= cur["hit_ticks"][m.get("cancel_on", 1) - 1] + self.HITSTOP + 3:
                 self._start(k)
             # else: dropped (no buffer)
         c = self.cur
         if c is not None and c["frame"] == c["m"]["su"] - 1 and c["hit"] is None and c["k"] in self.whiffs:
             c["hit"] = "whiff"               # out of range: no hit, no hitstop
-        if c is not None and c["frame"] == c["m"]["su"] - 1 and c["hit"] is None:
-            c["hit"] = self.t                # startup s: hits on its frame s-1 (measured, Ryu 5HP)
+        later = c is not None and c["hit"] is not None and c["hit"] != "whiff" and self.hitstop == 0 \
+            and len(c.get("hit_ticks", [])) < len(c["m"].get("hits", [c["m"]["su"]])) \
+            and c["frame"] == c["m"]["hits"][len(c["hit_ticks"])] - 1
+        if c is not None and ((c["frame"] == c["m"]["su"] - 1 and c["hit"] is None) or later):
+            if c["hit"] is None:
+                c["hit"] = self.t            # startup s: hits on its frame s-1 (measured, Ryu 5HP)
+            c.setdefault("hit_ticks", []).append(self.t)   # a multi-hit move (`hits`: each hit's start-up)
             self.hitstop = self.HITSTOP
             if self.guard_all:
                 self.block = 10              # Training Mode guard: all
@@ -1233,3 +1240,45 @@ def test_a_route_written_as_a_super_cancel_is_canceled():
     r = next(c for c in _combos("ryu", cap)["combos"] if c["route"] == "PC 236HK > 236236P")
     last = cl.plan_route(r, cap, cat)["steps"][-1]
     assert last["trigger"] == "contact" and last.get("super_cancel") and not last.get("not_cancelable")
+
+
+# ---- 0.20.4: canceling the second hit of a two-hit move ------------------------------------------------------------
+
+def test_cancel_on_the_second_hit_is_predicted_so_a_special_motion_arrives_in_time():
+    """User, 2026-10-05: '4HK > shoryuken ... simply doesn't come out'. Axe Kick hits on frames 10 and 20 and only
+    the second hit can be canceled. 0.20.3 waited until hit 2 was SEEN, so the 623 motion (9 frames) + the input
+    delay put the button past the cancel window, and no earlier offset could help. Now hit 2 is predicted from the
+    move's own frame once hit 1 has connected."""
+    moves = [{"id": 668, "su": 10, "hits": [10, 20], "tot": 40, "adv": 20, "conn": ""},
+             {"id": 930, "su": 5, "tot": 47, "adv": 30, "conn": ">", "cancel_on": 2}]
+    steps = _steps(moves)
+    steps[0]["active_hits"] = [10, 20]
+    steps[1].update(cancel_on_hit=2, prefix=9)
+    res = _run(Sim(moves, lead=4), steps, {})
+    assert res["success"] and res["hits"] == 3, res
+
+
+def test_a_cancel_on_hit_two_never_goes_out_on_hit_one():
+    """The prediction must not send the button for hit 1 (not cancelable): with no motion to cover, it waits for
+    hit 2's own frame."""
+    moves = [{"id": 668, "su": 10, "hits": [10, 20], "tot": 40, "adv": 20, "conn": ""},
+             {"id": 604, "su": 5, "tot": 22, "adv": 4, "conn": ">", "cancel_on": 2}]
+    steps = _steps(moves)
+    steps[0]["active_hits"] = [10, 20]
+    steps[1]["cancel_on_hit"] = 2
+    sim = Sim(moves, lead=4)
+    res = _run(sim, steps, {})
+    assert res["success"], res
+
+
+def test_matches_cancel_the_second_hit_with_the_motion_sent_early():
+    """In a match (hit confirm): once hit 1 has connected, the Shoryuken input goes out timed to the predicted
+    second hit, and comes out after it."""
+    moves = [{"id": 668, "su": 10, "hits": [10, 20], "tot": 40, "adv": 20, "conn": ""},
+             {"id": 930, "su": 5, "tot": 47, "adv": 30, "conn": ">", "cancel_on": 2}]
+    steps = _steps(moves)
+    steps[0]["active_hits"] = [10, 20]
+    steps[1].update(cancel_on_hit=2, prefix=9)
+    run, sent = _run_confirm(Sim(moves, lead=4), steps)
+    assert run.result()["success"] and sent == [0, 1], run.result()
+    assert run.rt[1]["sent"] < run.rt[0]["contacts"][1] <= run.rt[1]["start"]
