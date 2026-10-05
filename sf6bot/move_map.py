@@ -81,13 +81,23 @@ def requirement(move: dict) -> dict | None:
     jump = "jump" in inp.lower()
     rest = re.sub(r"\([^()]*\)", " ", inp).strip()
     rest = re.sub(r"(\d)\|\d", r"\1", rest)
+    # 0.22.6: "63214+LK|MK" (Zangief's Siberian Express) is either button; before, only the first counted, so an MK press
+    # was named Russian Suplex ("63214+K")
+    alt = re.search(r"\+(LP|MP|HP|LK|MK|HK|P|K)\|(LP|MP|HP|LK|MK|HK|P|K)$", rest)
     rest = re.sub(r"\+(LP|MP|HP|LK|MK|HK|P|K)\|(LP|MP|HP|LK|MK|HK|P|K)$", r"+\1", rest)
     rest = re.sub(r"^(\d) (?=[LMH][PK]$)", r"\1+", rest)
     m = re.fullmatch(r"((?:\[\d\]|\d)*)\+?((?:LP|MP|HP|LK|MK|HK|P|K)(?:\+(?:LP|MP|HP|LK|MK|HK|P|K))*)", rest)
     if not m:
         return None
     dirs, buttons = m.group(1), m.group(2).split("+")
-    return {"name": move["name"], "dirs": dirs, "buttons": buttons, "jump": jump, "kind": row_kind(move)}
+    out = {"name": move["name"], "dirs": dirs, "buttons": buttons, "jump": jump, "kind": row_kind(move)}
+    if alt:
+        out["alt_buttons"] = [buttons[:-1] + [alt.group(2)]]
+    return out
+
+
+def _req_buttons_ok(req: dict, pressed: set[str]) -> bool:
+    return any(_buttons_ok(b, pressed) for b in [req["buttons"]] + (req.get("alt_buttons") or []))
 
 
 def _buttons_ok(req_buttons: list[str], pressed: set[str]) -> bool:
@@ -136,7 +146,10 @@ def _dirs_ok(req_dirs: str, press_dir: int | None, history: list[int]) -> bool:
 
 def _specificity(req: dict) -> int:
     d = req["dirs"]
-    return 10 * len(d.replace("[", "").replace("]", "")) + 3 * len(req["buttons"]) + (2 if req["jump"] else 0)
+    # 0.22.6: a named button beats a generic P / K of the same motion (Siberian Express "63214+LK|MK" over Russian
+    # Suplex "63214+K" for an LK press: before, the tie went to whichever row Capcom lists first)
+    named = sum(1 for b in req["buttons"] if b not in ("P", "K"))
+    return 10 * len(d.replace("[", "").replace("]", "")) + 3 * len(req["buttons"]) + named + (2 if req["jump"] else 0)
 
 
 def match(reqs: list[dict], pressed: set[str], press_dir: int | None, history: list[int], airborne: bool,
@@ -149,7 +162,7 @@ def match(reqs: list[dict], pressed: set[str], press_dir: int | None, history: l
             continue
         if aid is not None and not kind_ok(aid, r.get("kind")):
             continue
-        if not _buttons_ok(r["buttons"], pressed) or not _dirs_ok(r["dirs"], press_dir, history):
+        if not _req_buttons_ok(r, pressed) or not _dirs_ok(r["dirs"], press_dir, history):
             continue
         if best is None or _specificity(r) > _specificity(best):
             best = r

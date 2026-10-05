@@ -78,7 +78,7 @@ def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
 
 
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
-               "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer", "burnout_fireball"}
+               "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer", "burnout_fireball", "cmd_grab_jump"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -306,7 +306,18 @@ class ScriptedFighter:
         self._oa_for, self._oa_hold = None, None
         self.operator_stats: dict = {"used": {}, "late": 0, "no_move": 0}
         self._cg_n, self._cg, self._cg_punished, self._me_y_prev = -1, set(), None, 0.0
-        self.cmd_grab_stats = {"seen": 0, "grabbed": 0, "jump_punish": 0}
+        self.cmd_grab_stats = {"seen": 0, "grabbed": 0, "jump_punish": 0, "jumped": 0, "jumped_whiffed": 0,
+                               "jumped_grabbed": 0, "waited": 0, "too_late": 0, "learned": 0}
+        # 0.22.6: command grabs learned from being grabbed (grabs.py); the fight setup gives the opponent's book (seeded
+        # with the config's measured grabs). Rule 1d jumps the ones that take long enough to see coming.
+        from .grabs import GrabBook
+        self.grabs = GrabBook(None, None)
+        self.grab_watch = None
+        self._grab_rows: list = []
+        self._grab_v = -1
+        self.grab_named: list[str] = []
+        self._cg_jump_for = self._cg_wait_for = self._cg_late_for = self._cg_jump_id = None
+        self._gc_ids, self._gc_t0, self._gc_onsets, self._gc_id, self._gc_id_t = [], None, {}, None, None
         self.cmd_grab_ids()
         from collections import deque
         self._op_hist: deque = deque(maxlen=50)     # (clock, drive, x) of the opponent: Drive Rush without a known id
@@ -345,6 +356,10 @@ class ScriptedFighter:
         self.throw_ids = _ids(ids.get("throw_startup"))
         self.hit_ids = _ids(ids.get("hit_reaction"))
         self.thrown_ids = _ids(ids.get("thrown"))
+        from .grabs import GrabWatch
+        self.grab_watch = GrabWatch(self.grabs, is_grab=lambda a: (self.opp.get(a) or {}).get("cmd_grab") == "ground",
+                                    reaction_ids=self.hit_ids | self.thrown_ids,
+                                    own_ids={m["id"] for m in self.own if isinstance(m.get("id"), int)})
         # 0.19.0 (22 ranked matches on 0.18.10, user's to-do list): parries thrown, Drive Impact at the wall, airborne
         # moves anti-aired, a later anti-air decision when the opponent is overhead
         self.parry_ids = _ids(ids.get("parry")) or set(range(480, 490))
@@ -356,6 +371,7 @@ class ScriptedFighter:
         self._di_wall_watch: dict | None = None
         self.aa_stats = {"anti_air": 0, "air_moves": 0, "held_overhead": 0}
         self.throw_stats = {"held_not_standing": 0}
+        self._throw_held_for = None
         self.risk_stats: dict = {}            # seconds in each safe mode (0.20.0)
         self.safe: str | None = None
         self._safe_t = None
@@ -553,6 +569,8 @@ class ScriptedFighter:
             return "opponent throw"
         if self.opp.get(op.get("action_id"), {}).get("di") and dist < 3.0:
             return "opponent Drive Impact"
+        if op.get("action_id") in self.cmd_grab_ids() and (self.grabs.contact(op.get("action_id")) or dist <= 1.5):
+            return "opponent command grab"    # 0.22.6: rule 1d jumps it (a running sequence would get the bot grabbed)
         if (self._jumping(op) or self._air_move(op)) and (dist <= self.c["anti_air"]["max_dist"] + 0.6
                                                           or self._jump_threat(me, op) is not None):
             return "opponent jumping in"      # 0.21.0: from where it will LAND, not only how close it is now
@@ -578,6 +596,7 @@ class ScriptedFighter:
                         self.aa_stats["busy"] = self.aa_stats.get("busy", 0) + 1
                 elif d.rule == "di_reaction":
                     self.di_handled_id = None
+                    self.di_stats["di_back"] -= 1          # 0.22.6: counted once it goes out ("DI-backs 131" in a match)
                 elif d.rule in ("whiff_punish", "di_punish"):
                     self.op_move["punished"] = False
                 elif d.rule == "burnout_fireball":
@@ -585,6 +604,9 @@ class ScriptedFighter:
                 elif d.rule == "operator_answer":
                     self._oa_for = None
                     self.operator_stats["used"][d.name] -= 1
+                elif d.rule == "cmd_grab_jump":
+                    self._cg_jump_for = self._cg_jump_id = None
+                    self.cmd_grab_stats["jumped"] -= 1
                 return Decision("none", reason=f"busy: {why}")
         if d.kind in ("seq", "route") and self._throw_too_early(d, raw, me_i):
             return Decision("none", reason="throw held: the opponent is not standing yet")
@@ -615,7 +637,9 @@ class ScriptedFighter:
             active_at = self.lead + self.stale + lead_in + 4          # the throw's start-up is 5 (Capcom)
             if active_at >= free_in:
                 return False
-        self.throw_stats["held_not_standing"] += 1
+        if self._throw_held_for != self.op_onset:          # 0.22.6: once per opponent action, not per line
+            self._throw_held_for = self.op_onset
+            self.throw_stats["held_not_standing"] += 1
         return True
 
     def busy(self, me: dict) -> str | None:
@@ -709,6 +733,10 @@ class ScriptedFighter:
         oa_ = self._operator_answer(raw, me, op, dist)
         if oa_ is not None:
             return oa_
+        # 1d. a command grab the bot can see coming (Siberian Express): jump so it whiffs under the bot (0.22.6)
+        sg = self._slow_grab(me, op, dist)
+        if sg is not None:
+            return sg
         # 2. throw tech: the opponent's throw start-up (forward 715 / back 717 measured for Ken) is
         #    visible for ~5 frames before it connects; press throw at once. Before 0.8.0 the bot held
         #    down-back here (rule 5 counted the throw as an attack): throws were 42-62% of its damage.
@@ -870,6 +898,9 @@ class ScriptedFighter:
                     sp = None
             if sp is not None:
                 self.sa3_vs_route["sa3"] += 1
+                # 0.22.6: counted here, when it goes out (it was counted every line it was considered: "Super Art punishes
+                # x122" in one 0.22.5 match while a combo kept winning over it)
+                self.super_stats["punish"] = self.super_stats.get("punish", 0) + 1
                 self.punished = True
                 self.punish_stats["taken"] += 1
                 return sp
@@ -1115,9 +1146,31 @@ class ScriptedFighter:
         self.rush_stats["own_moments"] += 1
         return self._commit_defense("own_rush_block", raw, me, op, dist, t, rem=int(total - fr))
 
+    def set_grabs(self, book, rows: list | None = None) -> None:
+        """0.22.6: the opponent's command grab book (grabs.GrabBook) and its Capcom rows (to name learned grabs)."""
+        self.grabs = book
+        self._grab_rows = list(rows or [])
+        self._grab_v = -1
+        if self.grab_watch is not None:
+            self.grab_watch.book = book
+        self.cmd_grab_ids()
+
+    def _refresh_grabs(self) -> None:
+        """What the grab book knows goes into the opponent's move knowledge (grabs.apply_to_moves), once per change."""
+        if self.grabs.version == self._grab_v:
+            return
+        self._grab_v = self.grabs.version
+        from .grabs import apply_to_moves
+        for line_ in apply_to_moves(self.opp, self.grabs, self._grab_rows):
+            if line_ not in self.grab_named:
+                self.grab_named.append(line_)
+        self._cg_n = -1
+
     def cmd_grab_ids(self) -> set:
-        """The opponent's GROUND command grab ids (catalog / move map / live names + Capcom's "Throw" property), refreshed
-        when its move knowledge grows. Tells the defence game whether this opponent has one at all."""
+        """The opponent's GROUND command grab ids (catalog / move map / live names + Capcom's "Throw" property, and the
+        grabs learned from being grabbed), refreshed when its move knowledge grows. Tells the defence game whether this
+        opponent has one at all."""
+        self._refresh_grabs()
         if len(self.opp) != self._cg_n:
             self._cg_n = len(self.opp)
             self._cg = {a for a, v in self.opp.items() if v.get("cmd_grab") == "ground"}
@@ -1143,6 +1196,101 @@ class ScriptedFighter:
         name = (self.opp.get(oa) or {}).get("name") or f"action {oa}"
         return Decision("seq", "jump attack (command grab whiffed)", cc.get("jump_attack", "5+HK@3"), rule="cmd_grab_punish",
                         reason=f"{name} whiffed under me at {dist:.2f}: jump attack on the way down, then punish the landing")
+
+    def _track_grab_chain(self, oa, tmr) -> None:
+        """The command grab the opponent is in, from its first id: an OD version shows the plain one for a frame first
+        (MEASURED: 918 -> 924, 917 -> 923), so an id that follows a grab id within 2 frames continues the same grab."""
+        if oa == self._gc_id or not isinstance(tmr, int):
+            return
+        grab = oa in self.cmd_grab_ids()
+        if grab and self._gc_ids and isinstance(self._gc_id_t, int) and tmr - self._gc_id_t <= 2:
+            self._gc_ids.append(oa)
+            self._gc_onsets[oa] = tmr
+        elif grab:
+            self._gc_ids, self._gc_t0, self._gc_onsets = [oa], tmr, {oa: tmr}
+        else:
+            self._gc_ids, self._gc_t0, self._gc_onsets = [], None, {}
+        self._gc_id, self._gc_id_t = oa, tmr
+
+    def _grab_left(self, el: int, dist: float, me: dict, op: dict) -> tuple[float | None, str]:
+        """Frames until the command grab the opponent started `el` frames ago (_track_grab_chain) connects, and where that
+        comes from:
+          - its measured connect frames, when they hardly vary (Siberian Express from close: 24-28)
+          - a running grab: from how fast it closes in; it connects from `cmd_grab.reach` (MEASURED: the far Siberian
+            Express winds up ~30 frames, then runs 0.086-0.099 a frame and connects from 0.86)
+          - before it runs: the earliest connect measured
+          - nothing measured: Capcom's start-up of the move its name says, if it is slow (`slow_startup`) or the opponent
+            is within `near_dist` (replaying the 0.22.5 Zangief matches, trusting the far Siberian Express's live name
+            "Russian Suplex" (10 frames) from 3 apart jumped on its first frame and landed before it came)"""
+        cc = self.c.get("cmd_grab") or {}
+        dyn = None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if self.vel_ok and mx is not None and ox is not None:
+            closing = -self.op_vx if ox > mx else self.op_vx
+            reach = float(cc.get("reach", 0.86))
+            if closing >= float(cc.get("run_speed_min", 0.04)) and dist > reach:
+                dyn = (dist - reach) / closing
+        samples: list = []
+        for a in self._gc_ids:
+            off = self._gc_onsets.get(a, self._gc_t0) - self._gc_t0
+            samples = [s + off for s in self.grabs.contact(a)]
+            if samples:
+                break
+        if samples:
+            lo, hi = min(samples) - el, max(samples) - el
+            if hi - lo <= int(cc.get("fixed_spread", 6)):
+                return lo, "measured"
+            return (dyn, "running in") if dyn is not None else (lo, "earliest measured")
+        if dyn is not None:
+            return dyn, "running in"
+        su = (self.opp.get(self._gc_ids[-1]) or {}).get("startup") if self._gc_ids else None
+        if isinstance(su, (int, float)) and su > el and (su >= float(cc.get("slow_startup", 20))
+                                                         or dist <= float(cc.get("near_dist", 1.5))):
+            return su - el, "Capcom start-up"
+        return None, ""
+
+    def _slow_grab(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.22.6 rule 1d (user: "the bot is still falling for command grabs, and the Siberian Express is the worst of them.
+        It absolutely refuses to jump before the moment of contact"). MEASURED, 7 Zangief matches on 0.22.5: Siberian
+        Express connected ~20 times, 28 frames after it started from close and 52-66 from far, and the bot never jumped;
+        when it happened to be in the air, the grab whiffed and Zangief stood in it for ~110 frames.
+        A ground command grab whose connect is still more than prejump + input delay + stale frames away: the bot starts
+        nothing until it is `jump_margin` frames short of that, then jumps straight up so the grab whiffs under it (rule 1a
+        then hits Zangief on the way down; the landing is a whiff punish). A grab connecting sooner (Screw Piledriver, 5
+        frames) can't be reacted to: the defence game's prediction answers those."""
+        cc = self.c.get("cmd_grab") or {}
+        oa = op.get("action_id")
+        self._track_grab_chain(oa, self._now)
+        if not cc.get("react", True) or oa not in self.cmd_grab_ids() or (_num(me.get("y")) or 0.0) > 0.05:
+            return None
+        if (_num(op.get("y")) or 0.0) > 0.4:
+            return None                                # the opponent in the air: the anti-air rule answers it
+        if not self._gc_ids or self._cg_jump_for == self._gc_t0 or not isinstance(self._now, int):
+            return None
+        el = self._now - self._gc_t0
+        left, src = self._grab_left(el, dist, me, op)
+        if left is None:
+            return None
+        need = int(cc.get("prejump", 4)) + self.lead + self.stale        # frames until the bot leaves the ground
+        margin = int(cc.get("jump_margin", 10))
+        st = self.cmd_grab_stats
+        name = (self.opp.get(oa) or {}).get("name") or f"command grab {oa}"
+        if left < need:
+            if self._cg_late_for != self._gc_t0:
+                self._cg_late_for = self._gc_t0
+                st["too_late"] += 1
+            return None
+        if left <= need + margin and self._ok("grab"):
+            self._cg_jump_for, self._cg_jump_id = self._gc_t0, self._gc_ids[0]
+            st["jumped"] += 1
+            return Decision("seq", "neutral jump", cc.get("jump_seq", "8@4"), rule="cmd_grab_jump",
+                            reason=f"{name} connects in ~{left:.0f}F ({src}): jumping so it whiffs under me")
+        if self._cg_wait_for != self._gc_t0:
+            self._cg_wait_for = self._gc_t0
+            st["waited"] += 1
+        return Decision("release", rule="cmd_grab_wait",
+                        reason=f"{name} coming, connects in ~{left:.0f}F ({src}): starting nothing, jumping it at "
+                               f"~{need + margin}F")
 
     def _super(self, key: str) -> dict | None:
         m = (self.c.get("moves") or {}).get(key)
@@ -1590,7 +1738,6 @@ class ScriptedFighter:
             return None
         if -adv < int(m.get("startup", 5)) + 1 or dist > float((self.c.get("supers") or {}).get("sa3_max_dist", 1.3)):
             return None
-        self.super_stats["punish"] = self.super_stats.get("punish", 0) + 1
         return Decision("seq", m["name"], m["seq"], rule="punish", reason=f"blocked a {adv:+d} move with 3 bars: SA3")
 
     def _their_wakeup(self, raw: dict, me: dict, op: dict, dist: float, t: float) -> Decision | None:
@@ -1812,7 +1959,10 @@ class ScriptedFighter:
         aid = me.get("action_id")
         if rr["hp"] is not None and hp is not None and hp < rr["hp"]:
             if rr["free"]:
-                rr["cat"] = "command grab" if op.get("action_id") in self.cmd_grab_ids() else opener_category(op, aid)
+                # 0.22.6: also the grabbing ids that connect (the damage lands during them: Zangief's 919, 921, 926)
+                oa_ = op.get("action_id")
+                cg_ = oa_ in self.cmd_grab_ids() or (self.opp.get(oa_) or {}).get("grab_connect")
+                rr["cat"] = "command grab" if cg_ else opener_category(op, aid)
                 if rr["cat"] == "command grab":
                     self.cmd_grab_stats["grabbed"] += 1
                 self.round_taken.setdefault(rr["cat"], [0, 0])[0] += 1
@@ -1881,9 +2031,22 @@ class ScriptedFighter:
         oa = op.get("action_id")
         tmr = raw.get("stage_timer")
         self._note_onset(oa, tmr)
+        self._track_grab_chain(oa, tmr)
         self._track_self(me, op, tmr)
         self._track_own_attack(me, op)
         self._track_damage_taken(me, op)
+        ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
+        if ev_:
+            st_ = self.cmd_grab_stats
+            if ev_.get("learned"):
+                st_["learned"] += len(ev_["learned"])
+            if self._cg_jump_id is not None:
+                if ev_.get("whiff") == self._cg_jump_id:
+                    st_["jumped_whiffed"] += 1          # the jump worked: it whiffed under the bot
+                    self._cg_jump_id = None
+                elif "connect" in ev_ and self._cg_jump_id in [a for a, _ in ev_.get("learned") or []] + [ev_.get("start")]:
+                    st_["jumped_grabbed"] += 1
+                    self._cg_jump_id = None
         self._op_hist.append((tmr, _num(op.get("drive")), _num(op.get("x"))))
         self._track_drive(me, tmr)
         self._track_denjin(me, op, tmr)
@@ -1900,10 +2063,11 @@ class ScriptedFighter:
         if oa != self.op_move["id"]:
             rushed = isinstance(oa, int) and 600 <= oa < 715 and (self.op_move["id"] in RUSH_IDS
                                                                     or self._rushed_by_gauge(me, op))
+            prev_oa_ = self.op_move["id"]
             self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False, "rushed": rushed}
             if rushed:
                 self.rush_stats["opp_rushed_normals"] += 1
-            if oa in self.cmd_grab_ids():
+            if oa in self.cmd_grab_ids() and prev_oa_ not in self.cmd_grab_ids():   # an OD switch is the same grab
                 self.cmd_grab_stats["seen"] += 1
             if (self.opp.get(oa) or {}).get("projectile"):
                 d_ = player_distance(me, op)
@@ -2445,18 +2609,26 @@ def _new_match_summary(me_key: str) -> dict:
 
 FIGHT_NEUTRAL = set(range(0, 33))        # MEASURED: idle / walk / crouch ids < 33 for Ryu and Ken (fights)
 FIGHT_MOVEMENT = set(range(33, 41))      # jump ids 34-40 (fights)
+# 0.22.6: a fight is only fought while its round clock moves (it runs through hitstop, supers and the KO slow motion).
+# The user's session (2026-10-05): the opponent quit mid-round, the battle froze with both players alive, and the bot
+# kept deciding on the frozen state for 47 minutes (957 throws, 163 combo starts) while SF6 showed its boxes.
+FROZEN_S = 1.0
 
 
 def _reader_diag(reader) -> dict:
     """Why no state arrives (0.14.1, ranked: 165 s of silence during an online match): is the file growing, are
     lines unreadable, what the exporter's own heartbeat says (frames rendered, lines written, last error)."""
     import os
-    d = {"lines_read": reader.lines, "unreadable": reader.parse_errors, "repaired_nan": getattr(reader, "repaired", 0),
+    n_ = getattr(reader, "lines", None)
+    d = {"lines_read": n_ if isinstance(n_, int) else None, "unreadable": getattr(reader, "parse_errors", None),
+         "repaired_nan": getattr(reader, "repaired", 0),
          "bytes_read": getattr(reader, "bytes_read", None)}
     if getattr(reader, "last_bad", ""):
         d["last_unreadable"] = reader.last_bad[:200]
-    if reader.error is not None:
+    if getattr(reader, "error", None) is not None:
         d["reader_error"] = repr(reader.error)[:200]
+    if getattr(reader, "path", None) is None:
+        return d                                 # not a file reader (tests)
     try:
         d["file_bytes"] = os.path.getsize(reader.path)
     except OSError as e:
@@ -2760,14 +2932,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
 
     clock_seen = {"timer": None, "moved": 0.0}
 
-    def menu_check(fighting: bool) -> None:
-        """SF6's error boxes (communication / matchmaking error), read from the screen whenever no fight is running
-        (result_menu.MenuWatch): each box is cleared with its own keys."""
+    def menu_check(fighting: bool, note: str | None = None) -> None:
+        """SF6's error boxes (communication / matchmaking error, a disconnect in a match), read from the screen whenever
+        no fight is running (result_menu.MenuWatch): each box is cleared with its own keys."""
         if mwatch is None or (screen_reader is None and not sess.mock):
             return
-        steps_ = mwatch.tick(clock.now(), fighting, c.armed, screen_reader or (lambda: None))
+        steps_ = mwatch.tick(clock.now(), fighting, c.armed, screen_reader or (lambda: None), note=note)
         if not steps_:
             return
+        from .result_menu import DISCONNECT_RULES
+        if mwatch.log[-1].get("what") in DISCONNECT_RULES and (was_active or summary["decisions"]):
+            # 0.22.6: the match in progress ended by a disconnection (the user's session: the opponent quit mid-round)
+            summary["disconnect"] = mwatch.log[-1].get("what")
         for key_, wait_ in steps_:
             clock.precise_sleep_until(clock.now() + float(wait_))
             c.backend.send([(key_, True)])
@@ -2819,7 +2995,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["burnout_fireballs"] = dict(fighter.burnout_stats)
                 summary["di_wall"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in fighter.di_wall_stats.items()}
                 if fighter.cmd_grab_ids():
-                    summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()))
+                    summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()),
+                                                    named=list(fighter.grab_named))
+                    try:
+                        saved_ = fighter.grabs.save()          # 0.22.6: what this match taught about the grabs
+                        if saved_:
+                            summary["command_grabs"]["saved"] = str(saved_)
+                    except OSError as e:
+                        summary["command_grabs"]["saved"] = f"not saved: {e}"
                 summary["input_delay_used"] = fighter.lead
                 # 0.20.0
                 summary["drive_impact_rules"] = dict(fighter.di_stats)
@@ -3105,7 +3288,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 clock_seen.update(timer=tmr_, moved=clock.now())
             # 0.22.5: a fight is running only while the battle's clock moves; menus, loading and a battle frozen by a
             # disconnect are where SF6's error boxes appear
-            menu_check(bool(st.in_battle) and bool(st.ready) and clock.now() - clock_seen["moved"] < 2.5)
+            frozen_for = clock.now() - clock_seen["moved"]
+            in_play_ = bool(st.in_battle) and bool(st.ready)
+            menu_check(in_play_ and frozen_for < 2.5, note="frozen battle" if in_play_ and frozen_for >= 2.5 else None)
             if ladder is not None:
                 phase_ = ("menu" if not st.in_battle else
                           "result" if (match_end_t is not None or (rmenu is not None and rmenu.t_end is not None)) else
@@ -3160,6 +3345,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         and timer >= FIGHT_START_FRAME
                         and (_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0
                         and p1r.get("action_id") not in INTRO_IDS and p2r.get("action_id") not in INTRO_IDS)
+            frozen_ = fight_on and frozen_for > FROZEN_S       # 0.22.6: the round clock stopped (a disconnect)
             if c.armed and not fight_on:
                 why = ("the match is over" if match_end_t is not None else
                        "the round started before I was watching (a previous match's screen, or joined late)"
@@ -3168,6 +3354,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                        "a player at 0 hp" if not ((_num(p1r.get("hp")) or 0) > 0 and (_num(p2r.get("hp")) or 0) > 0) else
                        f"round clock {timer} < {FIGHT_START_FRAME}" if isinstance(timer, int) else "no round clock")
                 status(f"in battle, waiting for \"Fight!\" ({why})", detail)
+            elif c.armed and frozen_:
+                status("battle frozen: the round clock has not moved for 1 s+ (a disconnect, an error box): pressing "
+                       "nothing", detail)
             elif c.armed and side["i"] is not None:
                 status(f"fighting as {keys()[0].upper()}", detail)
             # which side is the bot? (Versus Human / auto): by character, else the crouch probe at "Fight!"
@@ -3300,6 +3489,23 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     sess.narrate(f"Your answers against {summary['opponent']}: {cur['answers'].usable()} ready "
                                  "(from rounds you won).", source="learned")
                 fighter.live_reach = cur["live_reach"]
+                # 0.22.6: the opponent's command grabs learned from being grabbed (+ the config's measured ones), named by
+                # the Capcom grab whose start-up fits
+                try:
+                    from . import framedata as fdg_
+                    from .grabs import GrabBook
+                    cgc_ = fcfg.get("cmd_grab") or {}
+                    gb_ = GrabBook(ds_root, summary["opponent"],
+                                   seeds=(cgc_.get("measured") or {}).get(summary["opponent"]))
+                    fighter.set_grabs(gb_, (fdg_.load(summary["opponent"], ds_root / "framedata") or {}).get("moves"))
+                    if gb_.onsets():
+                        slow_ = sorted(a for a in gb_.onsets() if min(gb_.contact(a)) >= 12)
+                        sess.narrate(f"{summary['opponent']}'s command grabs I know: {len(gb_.onsets())} start ids"
+                                     + (f", {len(slow_)} slow enough to jump on reaction "
+                                        + ", ".join((fighter.opp.get(a) or {}).get("name") or str(a) for a in slow_)
+                                        if slow_ else "") + ".", source="learned")
+                except Exception as e:                   # noqa: BLE001 - the grab book is optional
+                    print(f"(command grab book unavailable: {e})")
                 from .catalog import perfect_parry_ids
                 fighter.pp_ids = perfect_parry_ids(ds_root)
                 fighter.denjin_ids = denjin_ids(summary["character"], ds_root, fcfg)
@@ -3368,6 +3574,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 continue
             was_active = True
             set_panel(True)
+            if frozen_:
+                fz_ = summary.setdefault("frozen", {"times": 0, "longest_s": 0.0, "round": st.raw.get("round"),
+                                                    "clock": timer})
+                if cur.get("frozen_since") is None:
+                    cur["frozen_since"] = clock_seen["moved"]
+                    fz_["times"] += 1
+                    c.release_all("battle frozen")
+                    sess.narrate("The game froze (the round clock stopped): pressing nothing until it moves again.",
+                                 source="measured")
+                fz_["longest_s"] = max(fz_["longest_s"], round(clock.now() - cur["frozen_since"], 1))
+                continue
+            cur["frozen_since"] = None
             if tk.active:
                 sess.status["fighter"] = "OPERATOR playing (bot watching)"
                 continue
@@ -3377,7 +3595,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             d = fighter.decide(st.raw, t, side["i"])
             if fighter.assessment:
                 sess.status["assessment"] = fighter.assessment.get("line")
-            if d.kind == "route" and (d.route or {}).get("lethal"):
+            if d.kind == "route" and (d.route or {}).get("lethal") and \
+                    fighter.assess_stats.get("_taken_for") != fighter.assess_stats["lethal_chances"]:
+                # 0.22.6: once per chance ("a killing combo available 1 times and went for it 5 times")
+                fighter.assess_stats["_taken_for"] = fighter.assess_stats["lethal_chances"]
                 fighter.assess_stats["lethal_taken"] += 1
             if fighter.side is not None and facing_of(me) is not None and facing_of(me) is not fighter.side:
                 summary["facing_flag_disagreed"] += 1     # frames where 0.7.0 would have mirrored wrongly
@@ -3469,6 +3690,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             sess.recorder.write_json("fight_status.json", {"status_log": wait["log"], "matches_played": len(done),
                                                           "result_menu_presses": rmenu.log if rmenu else None,
                                                           "communication_errors": mwatch.log if mwatch else None,
+                                                          "screen_texts_unmatched": mwatch.unmatched if mwatch else None,
                                                            "record": record})
         except Exception:
             pass

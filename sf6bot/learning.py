@@ -229,10 +229,17 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     m = summary.get("match") or {}
     rounds = summary.get("rounds") or []
     won_r = sum(1 for r in rounds if r.get("bot_won"))
+    fz = summary.get("frozen") or {}
     if m:
         out.append(("measured", f"I {'WON' if m.get('bot_won') else 'lost'} {won_r}-{len(rounds) - won_r} against {who}."))
+    elif summary.get("disconnect"):
+        out.append(("measured", f"The match against {who} ended because of a disconnection ({won_r}-{len(rounds) - won_r} "
+                                f"in rounds; SF6 showed \"{summary['disconnect']}\"): no result."))
     else:
         out.append(("measured", f"The match against {who} was cut short ({won_r}-{len(rounds) - won_r} in rounds)."))
+    if fz:
+        out.append(("measured", f"The game froze {fz.get('times', 1)} time(s) in this match (the round clock stopped, the "
+                                f"longest {fz.get('longest_s', 0):.0f} s): I pressed nothing while it was frozen."))
     if set_record and set_record.get("first_to"):
         out.append(("measured", f"Set score (first to {set_record['first_to']}): me {set_record['won']} - "
                                 f"{set_record['lost']} {vol or opp}."))
@@ -428,6 +435,14 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if cg.get("seen") or cg.get("grabbed"):
         out.append(("measured", f"{opp}'s command grabs: started {cg.get('seen', 0)}, landed on me {cg.get('grabbed', 0)}; "
                                 f"I jump-punished {cg.get('jump_punish', 0)} that whiffed under me."))
+    if cg.get("jumped") or cg.get("too_late") or cg.get("learned"):
+        # 0.22.6 rule 1d: grabs slow enough to see coming (Siberian Express) are jumped
+        out.append(("scripted", f"Command grabs I saw coming: jumped {cg.get('jumped', 0)} (whiffed under me "
+                                f"{cg.get('jumped_whiffed', 0)}, grabbed anyway {cg.get('jumped_grabbed', 0)}), saw too late "
+                                f"{cg.get('too_late', 0)}" + (f"; learned {cg['learned']} new grab timings" if cg.get("learned")
+                                                              else "") + "."))
+    if cg.get("named"):
+        out.append(("learned", "Grabs named by their measured start-up: " + "; ".join(cg["named"][:4]) + "."))
     oi = summary.get("opponent_inputs_seen") or {}
     if oi.get("lines"):
         out.append(("measured", f"{opp}'s input bits in game memory: set on {oi['with_input']:,} of {oi['lines']:,} lines"

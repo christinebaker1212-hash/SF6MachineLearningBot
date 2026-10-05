@@ -73,6 +73,7 @@ result_menu:
   retry_every_s: 2
   max_presses: 60
   stuck_s: 45         # a battle with a player at 0 hp this long without a match end (disconnect): treat as ended
+  frozen_s: 30        # 0.22.6: a battle whose round clock has not moved this long (the opponent quit): treat as ended
 # 0.18.8: outside a battle (Fighting Ground) the bot presses nothing, except for "A communication error has occurred."
 # (read from the screen: screen_text.py). Then: F (OK), F (Ranked Match), Esc (back: searching again). User, 2026-10-04.
 menu_watch:
@@ -81,9 +82,14 @@ menu_watch:
   # 0.22.5 (user): each box SF6 shows is cleared as it appears (checked in this order):
   #   "A matchmaking error has occurred" (red box) -> F, then Esc (the ranked search restarts)
   #   "A communication error has occurred" (Caution + error code; one or two boxes) -> F
+  # 0.22.6 (user's screenshots: the opponent quit mid-round and the battle froze): "Caution / A problem has occurred during
+  #   the match." [OK] -> F; then "Disconnection Detected / The match has ended because of a disconnection." [Details]
+  #   [Close], Close selected by default -> F. Taps only (holding a key there votes for a no-contest ruling).
   rules:
     - {what: matchmaking error, phrase: "A matchmaking error has occurred", steps: [["F", 0.0], ["ESC", 1.0]]}
     - {what: communication error, phrase: "A communication error has occurred", steps: [["F", 0.0]]}
+    - {what: problem during the match, phrase: "A problem has occurred during the match", steps: [["F", 0.0]]}
+    - {what: disconnection, phrase: "The match has ended because of a disconnection", steps: [["F", 0.0]]}
   cooldown_s: 1.5     # read again this soon after a press: the next box (or the screen behind) is there by then
   max_tries: 12       # in a row without a fight in between; then it waits and logs
 # 0.20.1: LP / MR / rank read from the screen in ranked (VS screen, result screen, Fighting Ground; never in a fight):

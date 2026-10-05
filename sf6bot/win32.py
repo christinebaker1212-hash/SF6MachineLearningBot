@@ -76,6 +76,18 @@ if IS_WINDOWS:
                                     ctypes.c_int, ctypes.c_int, wintypes.UINT]
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
+    # 0.22.6: process / thread priority (prioritize_process, raise_thread_priority): pseudo-handles are HANDLE-sized
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetCurrentThread.restype = wintypes.HANDLE
+    kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.SetPriorityClass.restype = wintypes.BOOL
+    kernel32.SetThreadPriority.argtypes = [wintypes.HANDLE, ctypes.c_int]
+    kernel32.SetThreadPriority.restype = wintypes.BOOL
+    try:                                         # Windows 8+ only: never fail the import over it
+        kernel32.SetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        kernel32.SetProcessInformation.restype = wintypes.BOOL
+    except AttributeError:
+        pass
     kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
                                                     ctypes.POINTER(wintypes.DWORD)]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
@@ -127,23 +139,29 @@ def prioritize_process() -> dict:
     ~55/s), so it saw the game 2-3 frames late. Asks for ABOVE_NORMAL priority (below SF6's own threads' boosts, above
     background apps) and opts out of Windows 11 power throttling (EcoQoS: efficiency cores, coalesced timers, timer
     resolution ignored for windowless processes). Returns what worked."""
+    # 0.22.6: every session so far printed {'priority': False, 'power_throttling_off': False}. The calls went through
+    # ctypes.windll with no declared types, so the process pseudo-handle (-1) and the results were passed as 32-bit ints;
+    # they now use this module's kernel32 with HANDLE / BOOL declared, and a failure says why (GetLastError).
     out = {"priority": False, "power_throttling_off": False}
     if not IS_WINDOWS:
         return out
     try:
-        k32 = ctypes.windll.kernel32
-        out["priority"] = bool(k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00008000))   # ABOVE_NORMAL
-    except Exception:
-        pass
+        proc = kernel32.GetCurrentProcess()
+        out["priority"] = bool(kernel32.SetPriorityClass(proc, 0x00008000))               # ABOVE_NORMAL
+        if not out["priority"]:
+            out["priority_error"] = ctypes.get_last_error()
+    except Exception as e:                                       # noqa: BLE001 - reported, never fatal
+        out["priority_error"] = str(e)
     try:
         class _PPTS(ctypes.Structure):
             _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
         st = _PPTS(1, 0x1 | 0x4, 0)          # EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION controlled, both off
-        k32 = ctypes.windll.kernel32
-        out["power_throttling_off"] = bool(k32.SetProcessInformation(k32.GetCurrentProcess(), 4,      # ProcessPowerThrottling
-                                                                     ctypes.byref(st), ctypes.sizeof(st)))
-    except Exception:
-        pass
+        out["power_throttling_off"] = bool(kernel32.SetProcessInformation(kernel32.GetCurrentProcess(), 4,  # PowerThrottling
+                                                                          ctypes.byref(st), ctypes.sizeof(st)))
+        if not out["power_throttling_off"]:
+            out["power_throttling_error"] = ctypes.get_last_error()
+    except Exception as e:                                       # noqa: BLE001
+        out["power_throttling_error"] = str(e)
     return out
 
 
@@ -152,8 +170,7 @@ def raise_thread_priority() -> bool:
     if not IS_WINDOWS:
         return False
     try:
-        k32 = ctypes.windll.kernel32
-        return bool(k32.SetThreadPriority(k32.GetCurrentThread(), 2))
+        return bool(kernel32.SetThreadPriority(kernel32.GetCurrentThread(), 2))
     except Exception:
         return False
 

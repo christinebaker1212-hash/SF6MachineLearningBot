@@ -43,6 +43,7 @@ def compact(summary: dict, models: dict | None = None) -> dict:
             "character": summary.get("character"), "opponent": summary.get("opponent"),
             "finished": bool(m), "won": m.get("bot_won") if m else None,
             "assisted": bool(summary.get("assisted")),
+            "disconnect": bool(summary.get("disconnect")),
             "rounds_won": sum(1 for r in rounds if r.get("bot_won")), "rounds": len(rounds),
             "dealt": dmg.get("dealt", 0), "taken": dmg.get("taken", 0),
             "input_delay": idl.get("median"), "models": models or {},
@@ -140,10 +141,12 @@ def _takeovers(rows: list[dict]) -> dict:
     """0.18.6 (user, 2026-10-04): the operator takes over with F8 against gimmicky players, which leaves the match
     unfinished; which ones were takeovers isn't recorded, so every unfinished match counts as one. The win rate with them
     counted as losses is the pessimistic bound; the plain win rate (finished matches only) the optimistic one."""
-    rows = [r for r in rows if not r.get("assisted")]
+    # 0.22.6: a match SF6 ended because of a disconnection (the opponent quit) is no takeover, and has no result
+    dis = sum(1 for r in rows if r.get("disconnect") and not r.get("finished"))
+    rows = [r for r in rows if not r.get("assisted") and not (r.get("disconnect") and not r.get("finished"))]
     u = sum(1 for r in rows if not r.get("finished"))
     w = sum(1 for r in rows if r.get("finished") and r.get("won"))
-    return {"takeovers": u, "win_rate_takeovers_lost": round(w / len(rows), 3) if rows else None}
+    return {"takeovers": u, "win_rate_takeovers_lost": round(w / len(rows), 3) if rows else None, "disconnects": dis}
 
 
 def summarize(session: list[dict], history: list[dict], lp: dict | None = None) -> dict:
@@ -190,7 +193,8 @@ def markdown(p: dict) -> str:
                 f"{s['win_rate_takeovers_lost']:.0%}" if s.get("takeovers") else "")
              + f"; damage dealt {s['dealt']:,}, taken {s['taken']:,}"
              + (f"; you played part of {s['assisted']} (won {s['assisted_won']}; not in the bot's record)"
-                if s.get("assisted") else ""),
+                if s.get("assisted") else "")
+             + (f"; ended by a disconnection: {s['disconnects']} (no result)" if s.get("disconnects") else ""),
              f"- all recorded matches: {p['history'].get('matches', 0)}"]
     for k in ("last_20", "last_50", "last_200"):
         e = p["history"].get(k)

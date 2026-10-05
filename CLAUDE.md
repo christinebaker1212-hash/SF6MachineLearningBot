@@ -3069,6 +3069,75 @@ Otherwise, it will just die from chip damage." All MOCK / unit-tested; not verif
   never during a fight; a MOCK ranked session where the boxes appear while the match loads. The OCR of these boxes
   (wording, the red box) is not verified in game: the screen text of each press is logged to check it.
 
+## 0.22.5 session (user, 2026-10-05, unattended): 36 ranked matches, 10-26, and one the opponent quit — and 0.22.6
+Scorecard (same measurement code; MEASURED):
+| | 0.22.1 | 0.22.5 |
+|---|---|---|
+| record / win % | 11-6 / 65% | 10-26 / 28% |
+| damage dealt / taken | 1.14 | 0.84 |
+| openings a minute (mine / theirs) | 7.6 / 7.9 | 6.3 / 9.7 |
+| thrown / match (neutral / after block / wake-up) | 6.4 (2.6 / 1.4 / 2.4) | 3.3 (1.5 / 0.6 / 1.2) |
+| back to the wall % | 16 | 26 |
+| jump-ins near: hit the bot % / anti-aired % | 18 / 8 | 25 / 18 |
+| damage taken by opener % | ground normal 59, special 16, jump-in 10 | ground normal 35, special 23, jump-in 20, DI 10 |
+- Opponents: Ed 3-5, Zangief 1-6, Ryu 2-4 (one fireball player 0-4), Ken 1-2, JP / Alex / Manon / Mai 0-2, Jamie 1-1, Dee Jay
+  1-0 (+ the quit), Yasmine 1-0. LP 14,714 -> 14,340 (Platinum 2). Throws on the bot halved; the rest got worse, much of it
+  from the opponents (seven Zangiefs, zoners).
+- **Command grabs (user: "the Siberian Express is the worst of them. It absolutely refuses to jump before the moment of
+  contact, and one round I saw Zangief ONLY perform this move")**: MEASURED, 7 Zangief matches: Siberian Express from close
+  (917, 1.8-2.4 apart) connected 28 frames after it started every time; from far (918, 2.6-3.7) Zangief winds up in place ~30
+  frames, then runs 0.086-0.099 a frame and it connected 52-73 frames after the start, always from 0.86 apart; ~20 connected,
+  the bot never jumped (it walked, swept into the armor, or blocked). When it happened to be in the air, the grab whiffed and
+  Zangief stood in it ~110 frames. The bot's live move names called 918 "Russian Suplex" (Capcom: 10 frames) and 924 "OD
+  Russian Suplex"; the connecting ids (919, 921 punish counter, 926, 928) were unnamed, so "landed on me 0" was reported.
+  JP's Embrace (1010, OD 1016) is the same kind of problem from farther: started 3.0-4.9 apart, it connected 41-49 frames later
+  (16 connects, 0-2 and 0-2).
+- **The opponent quit mid-round (user, screenshots)**: the battle froze with both alive (round clock still, heartbeats only), and
+  the bot kept deciding on the frozen state for 47 minutes (957 throws, 163 combo starts) until the user came back. SF6 showed
+  "Caution / A problem has occurred during the match." [OK], then "Disconnection Detected / The match has ended because of a
+  disconnection." [Details] [Close] (Close selected by default). The screen WAS read every second: no rule knew those texts.
+- **The fireball Ryu (4 matches)**: 59-68 Hadokens a match against the bot's 2-6; the bot's back within 1.5 of the wall 52-73%
+  of the time, 4-8 burnouts a match from blocking; 7 of 8 rounds lost on time. Not changed in 0.22.6 (proposal).
+- Counters that counted every line instead of every event: "Super Art punishes x122" (a combo kept winning over SA3 while it was
+  re-considered each line), "DI-backs 131" (re-counted while the busy gate held it), "went for a killing combo 197 times" (one
+  chance), "throws held 950".
+- The process priority request had never worked (`{'priority': False, 'power_throttling_off': False}` in every session): the
+  calls went through ctypes.windll without declared HANDLE / BOOL types.
+
+## 0.22.6: command grabs jumped; a frozen match presses nothing; the disconnect boxes (user, 2026-10-05)
+All MOCK / replay-tested (`tests/test_0226.py`); not verified in game.
+- **Grabs learned from being grabbed** (`sf6bot/grabs.py`): a grab that connects shows as the victim's animation, the grabbing id
+  +/- 1 (Zangief 919/920, 921/920, 926/927, 931/932) or, for a ranged grab, another special-range id that is none of the bot's
+  own moves (JP's Embrace: 1015, 1025, then 231); it is confirmed by its damage 78-125 frames later (the opponent still in the
+  grabbing id; a strike lands at once). The opponent's special ids since it last did something else give the grab's start
+  (an id it switched to within 2 frames is the OD variant: 918 -> 924, 917 -> 923) and the frames to the connect; a whiffed
+  one gives its length. Not learned: grabs that started while the bot was reeling (combos), in the air (Cammy's Hooligan),
+  or within 3 frames of their start. Per opponent character in `datasets/grabs/<Character>.json` (erased with "fights"),
+  seeded with `configs/fighter/ryu.yaml: cmd_grab.measured` (Zangief 917/918/923/924/930, JP 1010/1016, MEASURED above).
+  Learned ids are named by the Capcom command grab whose start-up fits (OD rows for variants): 918 = Siberian
+  Express(Far range), not Russian Suplex.
+- **Rule 1d `_slow_grab`**: the opponent in a ground command grab whose connect is predicted more than prejump (4) + input
+  delay + stale frames away: the bot starts nothing (`cmd_grab_wait`), then jumps straight up `jump_margin` (10) frames before
+  the latest moment (`cmd_grab_jump`), in the air ~10 frames before and ~28 after. Prediction (`_grab_left`): measured connect
+  frames when they hardly vary (close Siberian Express); for a running grab, from how fast it closes in (connects from 0.86);
+  before it runs, the earliest measured; with nothing measured, Capcom's start-up only if slow (20+) or within 1.5.
+  Rule 1a then hits the whiffing grab on the way down (j.HK) and the landing is a whiff punish (the learned length).
+  Replaying the 7 Zangief matches through `decide()` (open loop): 24 of 27 connects would find the bot in the air (with only
+  what the other matches taught: 23; with nothing known: 19); the misses had the recorded bot already in a sweep or a dash.
+  JP: 16 of 16 (13 with nothing known). Live: 0 of 27.
+- **Live move names** (`move_map`): "63214+LK|MK" accepts either button (only the first did), and a named button beats a
+  generic P / K of the same motion (an LK press was named Russian Suplex "63214+K", the row Capcom lists first).
+- **A frozen battle**: a fight runs only while its round clock moves; 1 s still (`fighter.FROZEN_S`) -> inputs released,
+  nothing decided ("battle frozen" status, `summary.frozen`, a thoughts line). The screen is read from 2.5 s; unknown texts
+  read there are kept in `fight_status.json: screen_texts_unmatched`. New MenuWatch rules: "A problem has occurred during
+  the match" -> F, "The match has ended because of a disconnection" -> F (Close is the default; taps only: holding a key
+  there votes for a no-contest ruling). A match ended this way is `disconnect`: no result, not a takeover in progress.md
+  ("ended by a disconnection: N"). ResultMenu: a battle frozen 30 s (`result_menu.frozen_s`) counts as ended (F every 2 s).
+- **Counters per event**: SA3 punishes when one goes out, DI-backs when one goes out (the busy gate undoes the count), a killing
+  combo once per chance, throws held once per opponent action.
+- **Process priority** (`win32.prioritize_process`): this module's kernel32 with HANDLE / BOOL declared; a failure reports
+  `priority_error` / `power_throttling_error` (GetLastError) in the startup line.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

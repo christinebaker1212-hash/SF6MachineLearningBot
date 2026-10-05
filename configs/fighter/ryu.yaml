@@ -397,6 +397,39 @@ drive_rush_in:
 cmd_grab:
   jump_attack: "5+HK@3"
   max_dist: 1.6
+  # 0.22.6 (user: "It absolutely refuses to jump before the moment of contact"): a command grab that takes long enough to
+  # see coming (grabs.py: learned from being grabbed, seeded below) is jumped so the bot is in the air when it would
+  # connect: the jump goes in when it would connect within prejump + input delay + stale + jump_margin frames; before
+  # that the bot starts nothing (a move still running at that moment would get it grabbed). A running grab's connect is
+  # also predicted from how fast it closes in (it connects from `reach`).
+  react: true
+  jump_seq: "8@4"
+  prejump: 4             # Ryu's jump leaves the ground after 4 frames (SuperCombo: 4+38+3)
+  jump_margin: 10        # jump this much earlier than the latest moment: in the air ~10 frames before, and ~28 after
+  reach: 0.86            # MEASURED: every Siberian Express connected from 0.86 apart (27 grabs)
+  run_speed_min: 0.04    # closing faster than this (units a frame) = running in (Siberian Express: 0.086-0.099)
+  fixed_spread: 6        # connect frames varying this little = a fixed start-up (Siberian Express close: 24-28)
+  # Capcom's start-up of a named grab is used without a measured one only if it is 20+ (slow) or the opponent is within
+  # near_dist (a 10-frame grab can't come from 3 apart: the far Siberian Express was named "Russian Suplex" from its inputs)
+  near_dist: 1.5
+  slow_startup: 20
+  # MEASURED (0.22.5 ranked, 7 Zangief matches; grabs.GrabWatch over the recordings): start id -> frames from its start to
+  # the grab connecting, frames it lasted when it whiffed, the connecting ids. Siberian Express close 917 (Capcom 28),
+  # far 918 (Capcom 55 "at the shortest distance"; ~30 frames of wind-up, then a run), OD 923 / 924 (Capcom 23 / 54),
+  # Screw Piledriver 930 (5: no time to react, the defence game's prediction answers it). datasets/grabs/<Character>.json
+  # adds what each match learns.
+  measured:
+    Zangief:
+      917: {contact: [24, 28, 28, 28, 28, 28], connect: [919, 921, 926]}
+      918: {contact: [52, 57, 58, 58, 60, 64, 64, 66], whiff: [110], connect: [919, 921, 926]}
+      923: {contact: [23], connect: [926], variant: true}       # the OD versions show 917 / 918 for a frame first
+      924: {contact: [63], whiff: [108], connect: [926, 928], variant: true}
+      930: {contact: [5, 5, 5, 5], connect: [931]}
+    # JP's Embrace (2 matches, 0.22.5; 10 connects): a ranged grab started from 3.0-4.9 apart, connecting 41-49 frames
+    # later (the bot shows 1015 / 1025 while caught, then 231); a whiffed one lasts 52 frames. OD 1016 (shows 1010 for a frame).
+    JP:
+      1010: {contact: [42, 45, 46, 48], whiff: [52, 52], connect: [1011, 1017]}
+      1016: {contact: [41, 49], connect: [1017], variant: true}
 # 0.19.0: the opponent holding Drive Parry within throw range -> throw (a throw beats a parry). MEASURED, 22 ranked
 # matches: 21 parries within 1.2, ~34 frames long on average; the bot threw 2 of them.
 parry_throw:

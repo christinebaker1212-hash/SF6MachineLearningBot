@@ -251,7 +251,15 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.22.5 (latest): error boxes in ranked** cleared as they appear: communication error -> F (one or two boxes), matchmaking
+**0.22.6 (latest): command grabs jumped, frozen matches** (user: "the Siberian Express is the worst of them. It absolutely
+refuses to jump before the moment of contact"; the opponent quit mid-round and the bot fought the frozen game for 47 minutes).
+Grabs are learned from being grabbed (`datasets/grabs/`, seeded with Zangief's and JP's measured grabs) and jumped when they
+take long enough to see coming (rule 1d); a battle whose clock stops gets no inputs; SF6's two disconnect boxes get F.
+Counters fixed (SA3 punishes, DI-backs, killing combos, throws held); the process priority call fixed. The 0.22.5 run's
+scorecard and the fireball-zoner problem: CLAUDE.md "0.22.5 session". Next run: check `command_grabs` (jumped / whiffed /
+grabbed anyway) in the summaries, and the startup priority line.
+
+**0.22.5: error boxes in ranked** cleared as they appear: communication error -> F (one or two boxes), matchmaking
 error -> F + Esc; read whenever no fight runs, also while a match loads (CLAUDE.md "0.22.5"). Check
 `fight_status.json: communication_errors` after the next unattended run.
 

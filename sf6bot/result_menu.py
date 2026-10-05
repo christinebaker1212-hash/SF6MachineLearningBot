@@ -15,12 +15,14 @@ Decided from the GAME STATE only, no screen reading:
     (the user's session 2026-10-04: F was pressed every 2 s for 2 minutes into the next match). A new match is now seen
     by the round clock jumping back (or the round number changing) after the match end, intro actions, or "Fight!":
     the presses stop there.
+  - 0.22.6: a battle whose round clock has not moved for `frozen_s` also counts as ended (the user's session 2026-10-05:
+    the opponent quit mid-round, the battle froze with both players alive, and nothing was pressed for 47 minutes).
 Every press is logged with its timing (fight_status.json, narration) so the first unattended session calibrates these.
 """
 from __future__ import annotations
 
 DEFAULTS = {"enabled": True, "first_s": 5.0, "retry_after_s": 5.0, "retry_every_s": 2.0, "max_presses": 60,
-            "stuck_s": 45.0}
+            "stuck_s": 45.0, "frozen_s": 30.0}
 
 
 class ResultMenu:
@@ -33,6 +35,8 @@ class ResultMenu:
         self.end_clock = None      # (round, round clock) when the match ended: a new match restarts the clock
         self.log: list[dict] = []
         self.new_matches_seen = 0  # rematches recognised (presses stopped)
+        self.clock_last = None     # the round clock, and when it last moved (a frozen battle: disconnect)
+        self.clock_moved = None
 
     def match_ended(self, now: float, rnd=None, clock=None) -> None:
         if self.t_end is None:
@@ -70,6 +74,12 @@ class ResultMenu:
                 self.t_end = now - float(self.c["first_s"])     # no match end seen (a disconnect?): treat as ended
         else:
             self.zero_since = None
+        if not isinstance(clock, int):
+            self.clock_last, self.clock_moved = None, None
+        elif clock != self.clock_last or self.clock_moved is None:
+            self.clock_last, self.clock_moved = clock, now
+        elif self.t_end is None and now - self.clock_moved >= float(self.c.get("frozen_s", 30.0)):
+            self.t_end = now - float(self.c["first_s"])         # a frozen battle (the opponent left): treat as ended
         if self.t_end is None or not can_press or self.presses >= int(self.c["max_presses"]):
             return None
         since = now - self.t_end
@@ -90,11 +100,20 @@ class ResultMenu:
 # 0.22.5 (user, 2026-10-05): what SF6 shows and what clears it, checked in this order on every read:
 #   - "A matchmaking error has occurred" (red box, canceling matchmaking) -> F, then Esc: the ranked search starts again
 #   - "A communication error has occurred" ("Caution", an error code; sometimes one box, sometimes two) -> F
+# 0.22.6 (user's screenshots, 2026-10-05: the opponent quit in the middle of a round, the battle froze):
+#   - "Caution / A problem has occurred during the match." [OK] -> F
+#   - "Disconnection Detected / The match has ended because of a disconnection." [Details] [Close]: Close is selected by
+#     default (user) -> F
+#   The screen also says "Hold ... to vote for a no-contest ruling": the presses are taps, never a hold.
 MENU_RULES = [
     {"what": "matchmaking error", "phrase": "A matchmaking error has occurred", "steps": [["F", 0.0], ["ESC", 1.0]]},
     {"what": "communication error", "phrase": "A communication error has occurred", "steps": [["F", 0.0]]},
+    {"what": "problem during the match", "phrase": "A problem has occurred during the match", "steps": [["F", 0.0]]},
+    {"what": "disconnection", "phrase": "The match has ended because of a disconnection", "steps": [["F", 0.0]]},
 ]
 MENU_DEFAULTS = {"enabled": True, "every_s": 1.0, "rules": MENU_RULES, "cooldown_s": 1.5, "max_tries": 12}
+# the boxes that end a match: the opponent (or this PC) lost the connection in the middle of it
+DISCONNECT_RULES = ("problem during the match", "disconnection")
 
 
 class MenuWatch:
@@ -120,10 +139,14 @@ class MenuWatch:
         self.last_fix = None
         self.tries = 0
         self.log: list[dict] = []
+        # 0.22.6: what was on screen in a FROZEN battle when no rule matched (the opponent's disconnect showed boxes the
+        # rules did not know): the next unknown box can be added from fight_status.json
+        self.unmatched: list[dict] = []
 
-    def tick(self, now: float, fighting: bool, can_press: bool, read_text) -> list | None:
+    def tick(self, now: float, fighting: bool, can_press: bool, read_text, note: str | None = None) -> list | None:
         """Call on state lines. `fighting` = a fight is running (the game state moving in a battle): nothing is read or
-        pressed. `read_text()` -> the screen's text or None. Returns the key steps to perform, or None."""
+        pressed. `read_text()` -> the screen's text or None. `note`: a read made where a box is expected (a frozen
+        battle) whose text matches no rule is kept in `unmatched` with it. Returns the key steps to perform, or None."""
         if not self.c.get("enabled", True):
             return None
         if fighting:
@@ -142,6 +165,10 @@ class MenuWatch:
         from .screen_text import contains
         rule = next((r for r in self.c["rules"] if contains(text, r["phrase"])), None)
         if rule is None:
+            flat = " ".join(text.split())[:240]
+            if note and flat and (not self.unmatched or self.unmatched[-1]["text"] != flat):
+                self.unmatched.append({"note": note, "text": flat})
+                del self.unmatched[:-8]
             return None
         self.tries += 1
         self.last_fix = now

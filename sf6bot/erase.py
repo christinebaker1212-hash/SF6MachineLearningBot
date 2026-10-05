@@ -13,8 +13,8 @@ TARGETS = {
     "training": ("training data: recorded replays, merged replays, learned move ids, the trained networks (brain and "
                  "win model) and their sample cache, measured move reach, combos found in recordings",
                  ["replays", "merged", "move_maps", "models", "reach", "combos_mined"]),
-    "fights": ("fight data: the bot's recorded matches, what it learned from them per opponent and the ladder "
-               "progress history", ["fights", "learning", "ladder"]),
+    "fights": ("fight data: the bot's recorded matches, what it learned from them per opponent (incl. the command grab "
+               "timings) and the ladder progress history", ["fights", "learning", "ladder", "grabs"]),
 }
 KEEP = ("catalog", "framedata")
 

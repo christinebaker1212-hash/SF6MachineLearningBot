@@ -55,6 +55,8 @@ def test_throws_are_held_until_the_opponent_can_be_thrown():
     throw = Decision("seq", "throw", "5+LP+LK@3", rule="neutral:throw")
     assert f._throw_too_early(throw, state(op={"action_id": 340}, timer=505), 0)        # 25 frames left: held
     assert not f._throw_too_early(throw, state(op={"action_id": 340}, timer=521), 0)    # lands as it stands
+    assert f._throw_too_early(throw, state(op={"action_id": 340}, timer=506), 0)        # held again: counted once
+    f._note_onset(300, 600)
     assert f._throw_too_early(throw, state(op={"action_id": 300}, timer=600), 0)        # knocked down
     assert not f._throw_too_early(Decision("seq", "tech", "4+LP+LK@3", rule="throw_tech"),
                                   state(op={"action_id": 300}), 0)
