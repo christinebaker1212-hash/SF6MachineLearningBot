@@ -52,7 +52,8 @@ anti_air:
   cross_settle: 2
   # 0.20.0 (user's pick "backup anti-air"): an opponent coming down out of Shoryuken range -> forward jump MP on the
   # way up. ESTIMATES.
-  air_to_air: {enabled: true, min_dist: 1.3, max_dist: 2.2, seq: "9@3 5@4 5+MP@3"}
+  # 0.24.2: off (user: no attack starts with a jumping attack except after a DI stun in the corner)
+  air_to_air: {enabled: false, min_dist: 1.3, max_dist: 2.2, seq: "9@3 5@4 5+MP@3"}
   # 0.21.0: anti-air readiness: an opponent in the air that will land within max_dist + ready_margin = start nothing
   # until the anti-air window (MEASURED: 47 of 96 near jump-ins with the bot free got a normal or special started
   # under them). On the bot's own wake-up (0.21.1: and out of blockstun): a reversal L Shoryuken when the opponent comes
@@ -262,6 +263,9 @@ burnout:
 # what each answer scores against the opponent takes over (situation "fireball", datasets/learning).
 fireball:
   enabled: true
+  # 0.24.2 (user, 2026-10-05: "there's no reason to initiate any attack with a jumping attack. Unless it is a DI stun in the
+  # corner"): the forward jump-in onto the thrower is off. The neutral jump over a fireball (no attack) stays.
+  jump_punish: false
   # the jump-in over a fireball, on the game clock (the combo lab's executor: the air button on the way down, the landing
   # combo only after it hit); the combo lab's TRUE jump-in routes come first. damage: Capcom's listed damage of the three
   # moves, an ESTIMATE of the scaled total

@@ -216,7 +216,8 @@ class ZoningMixin:
             # 1. jump forward over it onto the thrower (a punish: it is still recovering when the jump attack lands)
             jp = self._zn_jump(s, True)
             lo, hi = float(zc.get("jump_land_min", 0.2)), float(zc.get("jump_land_max", 0.9))
-            if jp["clear"] and lo <= jp["land_d"] <= hi and jp["land_k"] - JUMP_HIT_BEFORE_LAND <= s["free_k"] - 1:
+            # 0.24.2: off by default (user: no attack starts with a jumping attack except after a DI stun in the corner)
+            if zc.get("jump_punish", False) and jp["clear"] and lo <= jp["land_d"] <= hi and jp["land_k"] - JUMP_HIT_BEFORE_LAND <= s["free_k"] - 1:
                 rname, entry, dmg = self._zn_jump_route(me, op)
                 v = self._zn_learned("jump_punish", float(zc.get("jump_punish_value", 0.8)) * dmg / 1000.0
                                      - float(zc.get("jump_fail_cost", 0.3)))

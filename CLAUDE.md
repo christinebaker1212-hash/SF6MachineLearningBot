@@ -3359,6 +3359,21 @@ nothing here is verified in game.
 - Not modelled: Drive Rush scaling beyond the calibration, juggle limits, damage of multi-hit moves hit by hit, range after
   pushback (a spliced special may not reach). These are what the success estimates and the per-transition results absorb.
 
+## 0.24.2: jumping attacks only after a Drive Impact stun in the corner (user, 2026-10-05)
+- User (watching ranked on 0.24.1): "when it tries to choose the most damaging route, it will often go for a jumping attack to
+  start. However, all of the routes that start with a jumping attack are attacks that are supposed to be initiated after a DI
+  stun in the corner ... there's no reason to initiate any attack with a jumping attack. Unless it is a DI stun in the corner."
+- `route_book.choose_jump_in` returns nothing unless the opponent is cornered, so the combo lab's jump-in routes go out only
+  after the bot's Drive Impact stun with the opponent's back to the wall (`_stun_jump_in`); midscreen the crumple is cashed out
+  with a super or a ground combo as before. The composer never used jump-in routes.
+- Off by default (`configs/fighter/ryu.yaml`), each still there if turned back on: the forward jump-in onto a fireball's
+  thrower (`fireball.jump_punish: false`; the neutral jump over a fireball, without an attack, stays), the air-to-air jump MP
+  (`anti_air.air_to_air.enabled: false`), and forward jumps / air attacks from neutral (`neutral_policy.INTENT_FACTOR`
+  jump_fwd 0, air_attack 0).
+- Kept: j.HK on a command grab that whiffed under the bot (it is already in the air from jumping the grab).
+- Tests updated (`tests/test_0203.py`, `test_0230.py`, `test_0200.py`, `test_0220.py`: corner only; the rest off by
+  default, correct when enabled); the `fighter_decisions` fingerprint changed accordingly. Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

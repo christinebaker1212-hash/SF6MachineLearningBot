@@ -154,8 +154,12 @@ def after_first_hit(book: list[dict], e: dict, kind: str | None, me: dict, op: d
 def choose_jump_in(book: list[dict], me: dict, op: dict, *, learned: dict | None = None, reserve: float = 0,
                    denjin: bool = False) -> dict | None:
     """0.20.3: the best affordable jump-in route (any hit type: the opponent is stunned, so the route's links hold) for
-    a Drive Impact stun; corner routes only with the opponent cornered; Denjin routes only with a stock."""
+    a Drive Impact stun; Denjin routes only with a stock. 0.24.2 (user, 2026-10-05: "all of the routes that start with a
+    jumping attack are attacks that are supposed to be initiated after a DI stun in the corner ... there's no reason to
+    initiate any attack with a jumping attack. Unless it is a DI stun in the corner"): only with the opponent cornered."""
     corner = cornered(op, me)
+    if not corner:
+        return None
     opp_hp = num(op.get("hp"))
     best, best_v = None, -1.0
     for e in book:

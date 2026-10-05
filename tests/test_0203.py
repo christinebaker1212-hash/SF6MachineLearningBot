@@ -83,21 +83,31 @@ def test_charging_from_far_away_is_a_mix_and_never_into_a_fireball():
     assert f2.decide(raw, 0.0, 0).rule != "denjin"
 
 
-def test_a_drive_impact_crumple_gets_a_neutral_jump_in_route():
-    f = _fighter(book=[_entry("j.HP , 5HP > 236HK , 623MP , 236236K", damage=5000)])
+def _crumple(f, me_x, op_x):
     d = None
     for k in range(90):                                    # the bot's DI animation, then free
         a = 855 if k < 85 else 1
-        raw = state(me={"action_id": a, "super": 0}, op={"x": 0.75, "action_id": 276}, timer=1000 + k)
+        raw = state(me={"action_id": a, "super": 0, "x": me_x}, op={"x": op_x, "action_id": 276}, timer=1000 + k)
         f.observe_line(raw, 0)
         d = f.decide(raw, k / 60, 0)
         if d.kind == "route":
             break
+    return d
+
+
+def test_a_drive_impact_crumple_gets_a_neutral_jump_in_route_only_in_the_corner():
+    """0.24.2 (user): the jump-in routes are for a Drive Impact stun with the opponent in the corner, nothing else."""
+    f = _fighter(book=[_entry("j.HP , 5HP > 236HK , 623MP , 236236K", damage=5000)])
+    d = _crumple(f, 6.0, 6.75)                             # the opponent's back to the wall (7.65)
     assert d.rule == "stun_jump_in" and d.route["plan"]["steps"][0]["sequence"].startswith("8@")
     assert f.stun_stats["jump_in"] == 1
+    f2 = _fighter(book=[_entry("j.HP , 5HP > 236HK , 623MP , 236236K", damage=5000)])
+    d2 = _crumple(f2, 0.0, 0.75)                           # midscreen: no jump-in
+    assert d2.rule != "stun_jump_in" and f2.stun_stats["jump_in"] == 0
 
 
 def test_route_helpers():
     e = _entry("j.HP , 5HP")
-    assert choose_jump_in([e], {"drive": 60000, "super": 0, "x": 0.0}, {"hp": 10000, "x": 0.8})["route"] == "j.HP , 5HP"
+    assert choose_jump_in([e], {"drive": 60000, "super": 0, "x": 6.0}, {"hp": 10000, "x": 6.8})["route"] == "j.HP , 5HP"
+    assert choose_jump_in([e], {"drive": 60000, "super": 0, "x": 0.0}, {"hp": 10000, "x": 0.8}) is None   # midscreen
     assert neutral_jump(e)["plan"]["steps"][0]["sequence"] == "8@3" and e["plan"]["steps"][0]["sequence"] == "9@3"

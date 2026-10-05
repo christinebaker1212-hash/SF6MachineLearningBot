@@ -216,7 +216,11 @@ def test_the_jump_physics_match_the_measured_jump():
 
 
 def test_a_fireball_from_jump_range_is_jumped_onto_the_thrower_on_its_first_frame():
+    import copy
     f = _zoner()
+    assert not f.c["fireball"].get("jump_punish")          # 0.24.2: off by default (no attack starts with a jump)
+    f.c = copy.deepcopy(f.c)
+    f.c["fireball"]["jump_punish"] = True
     raw = _throw_at(f, 2.5, 1000)
     d = f.decide(raw, 1000 / 60.0, 0)
     assert d.rule == "fireball_jump" and d.seq.startswith("9") and f.zn_stats["jump_punish"] == 1

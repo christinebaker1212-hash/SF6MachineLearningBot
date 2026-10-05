@@ -267,7 +267,10 @@ def test_in_burnout_a_far_fireball_is_cancelled_with_a_hadoken():
 def test_in_burnout_a_closer_fireball_is_jumped_onto_the_thrower_at_once():
     """0.23.0: from 2.5 the forward jump clears it (the physics in zoning.py) and lands 0.6 from the thrower while it is
     still recovering, so it goes out on the throw's first frame (0.22.4 waited until the fireball was near)."""
+    import copy
     f = _burnout_fighter()
+    f.c = copy.deepcopy(f.c)
+    f.c["fireball"]["jump_punish"] = True                  # 0.24.2: off by default
     _throw(f, 2.5, 500)
     d = f.decide(state(me={"drive": 0}, op={"x": 2.5, "action_id": 904}, timer=500), 0.0, 0)
     assert d.rule == "fireball_jump" and d.seq.startswith("9")

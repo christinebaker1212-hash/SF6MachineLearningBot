@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-05: code version **0.24.1**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.24.2**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -240,6 +240,9 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.24.2 (user):** jump-in routes only after a Drive Impact stun with the opponent cornered; no other attack starts with a
+jump (fireball jump-in, air-to-air, neutral forward jumps / air attacks off by default).
 
 **0.24.0 (the combo composer; user: "mix and match these combos ... maximize the damage output based on the resources"):**
 verified transitions from the lab's true combos are joined into bigger combos by expected damage and the meter the bot has

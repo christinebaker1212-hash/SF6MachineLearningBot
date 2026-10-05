@@ -130,12 +130,17 @@ def test_spacing_hovers_outside_the_opponents_longest_poke():
 
 
 def test_air_to_air_when_the_opponent_lands_out_of_shoryuken_range():
+    import copy
     f = _fighter()
     f.op_vy, f.op_onset = -0.05, 700
+    assert f._air_to_air({"x": 0.0}, {"x": 2.0}, 1.8, 16, 1.4) is None            # 0.24.2: off by default
+    f.c = copy.deepcopy(f.c)
+    f.c["anti_air"]["air_to_air"]["enabled"] = True
     d = f._air_to_air({"x": 0.0}, {"x": 2.0}, 1.8, 16, 1.4)
     assert d is not None and d.rule == "anti_air_a2a" and f.aa_stats["air_to_air"] == 1
     assert f._air_to_air({"x": 0.0}, {"x": 2.0}, 1.8, 16, 1.4) is None                    # once per jump
     f2 = _fighter()
+    f2.c = f.c
     f2.op_vy, f2.op_onset = -0.05, 700
     assert f2._air_to_air({"x": 0.0}, {"x": 1.0}, 1.0, 16, 1.4) is None                   # the Shoryuken's range
 

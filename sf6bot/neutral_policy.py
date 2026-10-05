@@ -32,7 +32,9 @@ SPEND = {"super", "drive_impact", "parry", "drive_rush"}
 # 6.3 a minute; 24% were hit in the air, 13% landed a hit; neutral jumps broke even over the next 2.3 s, jumps out of
 # blockstun lost 390-730 hp each. Jumps stay possible (a read on a fireball) but much rarer, and never exploratory.
 JUMPS = ("jump_fwd", "jump_neutral", "jump_back")
-INTENT_FACTOR = {"jump_fwd": 0.25, "jump_neutral": 0.25, "jump_back": 0.25}
+# 0.24.2 (user: "there's no reason to initiate any attack with a jumping attack. Unless it is a DI stun in the corner"): no
+# forward jumps and no air attacks from neutral (a jump-in without an attack only lands next to the opponent)
+INTENT_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.25, "jump_back": 0.25, "air_attack": 0.0}
 # 0.19.0 (user: "it tends to corner itself"). MEASURED: the bot's back was within 1.5 of the wall 15% of the fight
 # time (its opponents' 8%) and it took 25% more damage a second there; 13 of 99 entries came from its own walking
 # back, back dashes or back jumps. Retreating weighs less the less room is behind it.
