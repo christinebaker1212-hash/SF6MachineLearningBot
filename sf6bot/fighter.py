@@ -1977,6 +1977,7 @@ class ScriptedFighter:
         self.policy.safe = self._safe_mode(raw, me, op, t)
         self.policy.opp_poke = self.opp_poke_reach()
         self.policy.denjin = self.denjin_stock
+        self.policy.op_projectile = bool((self.opp.get(op.get("action_id")) or {}).get("projectile")) or self.pt.flight is not None
         ch = self.policy.choose(me, op, prev.get(mk), prev.get(ok), t1, lambda a: self.can_spend(me, a), dt=dt)
         intent = ch["intent"]
         probs = " · ".join(f"{k.replace('_', ' ')} {v:.0%}" for k, v in ch["top"])

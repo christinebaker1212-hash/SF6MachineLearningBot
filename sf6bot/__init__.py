@@ -1,2 +1,2 @@
 """sf6bot: experimental ML agent for Street Fighter 6."""
-__version__ = "0.20.5"
+__version__ = "0.20.6"

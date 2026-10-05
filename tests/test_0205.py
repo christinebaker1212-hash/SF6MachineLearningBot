@@ -104,3 +104,35 @@ def test_the_fighters_drive_rush_in_uses_the_game_clock_pdr(tmp_path):
     for name in ("Drive Rush 5MP", "Drive Rush 2MK"):
         s0 = plans[name]["steps"][0]
         assert s0["pdr"] and s0["sequence"] == cl.PDR_PARRY and s0["pdr_dash"] == cl.PDR_DASH
+
+
+# ---- neutral: no punishable specials, Drive Impact only through a projectile (user: "Heavy tatsu and DI in neutral") --
+
+def test_neutral_never_throws_a_punishable_special_or_a_drive_impact_without_a_projectile():
+    from sf6bot import intents as it
+    from sf6bot.neutral_policy import NeutralPolicy
+    from tests.test_winning import _Brain
+    moves = [{"name": "H Tatsumaki Senpu-kyaku", "id": 1004, "intent": "special", "seq": "2@3 1@3 4+HK@3",
+              "startup": 16, "projectile": False, "block_adv": -13, "super_cost": 0},
+             {"name": "M High Blade Kick", "id": 1027, "intent": "special", "seq": "2@3 3@3 6+MK@3", "startup": 18,
+              "projectile": False, "block_adv": -8, "super_cost": 0},
+             {"name": "5MP", "id": 605, "intent": "poke", "seq": "5+MP@3", "startup": 6, "projectile": False,
+              "block_adv": 1, "super_cost": 0}]
+    me = {"x": 0.0, "y": 0.0, "hp": 10000, "drive": 60000, "super": 0}
+    op = {"x": 1.0, "y": 0.0, "hp": 10000, "action_id": 1}
+    pol = NeutralPolicy(_Brain(), moves, seed=1)
+    ok = pol.allowed(me, 1.0, lambda a: True, op=op)
+    assert not ok[it.INTENTS.index("special")]                     # nothing safe to throw: no "special" at all
+    picks = {pol._move("special", "close", me, 1.0, op) for _ in range(20)}
+    assert picks == {None}
+    hasho = {"name": "L Hashogeki", "id": 1036, "intent": "special", "seq": "2@3 1@3 4+LP@3", "startup": 12,
+             "projectile": False, "block_adv": -3, "super_cost": 0}
+    pol2 = NeutralPolicy(_Brain(), moves + [hasho], seed=1)
+    assert pol2.allowed(me, 1.0, lambda a: True, op=op)[it.INTENTS.index("special")]
+    assert {pol2._move("special", "close", me, 1.0, op)["name"] for _ in range(20)} == {"L Hashogeki"}
+    # Drive Impact: an opponent's special from 2.0 is not enough; a projectile is
+    sp = {"x": 2.0, "y": 0.0, "hp": 10000, "action_id": 1004, "super": 0}
+    di = it.INTENTS.index("drive_impact")
+    assert not pol.allowed(me, 2.0, lambda a: True, op=sp)[di]
+    pol.op_projectile = True
+    assert pol.allowed(me, 2.0, lambda a: True, op=sp)[di]

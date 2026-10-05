@@ -55,6 +55,11 @@ PARRY_DIST = 2.5
 DI_WHEN = {"special"}                       # a Drive Impact read on a special (a fireball) from DI_MIN_DIST
 DI_MIN_DIST = 1.5
 NO_NEUTRAL_SPECIAL = ("OD ", "Shoryuken")   # OD specials and invincible reversals: only from the rules and routes
+# 0.20.5 (user: "It's now using Heavy tatsu and DI in neutral"): a special thrown out in neutral must not be punishable
+# when blocked. Capcom: Ryu's Tatsus are -15 / -13 / -13 and L / M High Blade Kick -11 / -8, punished by any 4-frame
+# normal; L Hashogeki (-3) and H Hashogeki (+2) stay. Those moves are still used in combos, punishes and confirms.
+# Projectiles are judged by distance instead (FIREBALL_MIN_DIST). Unknown on-block = not in neutral.
+NEUTRAL_SPECIAL_MIN_BLOCK = -3
 
 
 def own_moves(character: str, ds_root: Path) -> list[dict]:
@@ -130,6 +135,7 @@ class NeutralPolicy:
         self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
+        self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
         # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
         # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
         self.win = win
@@ -163,12 +169,15 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "parry" and not (op is not None and it.category(op) in PARRY_WHEN and dist <= PARRY_DIST):
                 ok[i] = False
-            elif name == "drive_impact" and not (op is not None and it.category(op) in DI_WHEN and dist >= DI_MIN_DIST):
-                ok[i] = False
+            elif name == "drive_impact" and not (op is not None and it.category(op) in DI_WHEN and dist >= DI_MIN_DIST
+                                                 and self.op_projectile):
+                ok[i] = False                  # 0.20.5: only through an actual projectile (the fighter sets op_projectile)
             elif name == "drive_impact" and op is not None and (num(op.get("super")) or 0) >= 10000:
                 ok[i] = False                  # 0.20.0 (user): a super beats a Drive Impact on reaction
             elif name in ("poke", "special", "air_attack") and not any(m["intent"] == name for m in self.moves):
                 ok[i] = False
+            elif name == "special" and not self._cands("special", me, dist, op):
+                ok[i] = False                  # 0.20.5: nothing safe to throw from here (was: a walk forward instead)
         return ok
 
     def style(self, me: dict, op: dict) -> np.ndarray:
@@ -281,12 +290,17 @@ class NeutralPolicy:
             r = LiveReach.UNMEASURED
         return dist <= r + REACH_MARGIN
 
+    def _cands(self, intent: str, me: dict, dist: float | None = None, op: dict | None = None) -> list[dict]:
+        return [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist)
+                and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))
+                and not (intent == "special" and any(k in m["name"] for k in NO_NEUTRAL_SPECIAL))
+                and not (intent == "special" and m.get("projectile") and dist is not None and dist < self.fireball_min)
+                and not (intent == "special" and not m.get("projectile")
+                         and not (isinstance(m.get("block_adv"), int) and m["block_adv"] >= NEUTRAL_SPECIAL_MIN_BLOCK))
+                and not (intent == "super" and op is not None and (m.get("damage") or 0) < (num(op.get("hp")) or 0))]
+
     def _move(self, intent: str, zone: str, me: dict, dist: float | None = None, op: dict | None = None) -> dict | None:
-        cands = [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist)
-                 and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))
-                 and not (intent == "special" and any(k in m["name"] for k in NO_NEUTRAL_SPECIAL))
-                 and not (intent == "special" and m.get("projectile") and dist is not None and dist < self.fireball_min)
-                 and not (intent == "super" and op is not None and (m.get("damage") or 0) < (num(op.get("hp")) or 0))]
+        cands = self._cands(intent, me, dist, op)
         if not cands:
             return None
         seen = self.brain.counts.move_choices(self.chara_id, intent, zone) if (self.brain and self.brain.counts) else {}

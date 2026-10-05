@@ -2751,6 +2751,21 @@ DI fail completely, because the bot waits for the enemy to fall down before inpu
   measured length is kept.
 - `LAB_RULES` = 0.20.5: PDR and DI routes that failed are retried on the next K.
 
+## 0.20.6: no punishable specials and no Drive Impact without a projectile in neutral (user, 2026-10-05)
+- User: "It's now using Heavy tatsu and DI in neutral. Did we not fix this?" Not fixed before: 0.18.0 / 0.19.1 kept OD
+  specials, Shoryukens, supers and close fireballs out of neutral, but every other special stayed, and the "unsafe"
+  factor (0.18.3) only applied to pokes. Within 3.5 Ryu's remaining specials were mostly the Tatsus (-15 / -13 / -13 on
+  block, Capcom) and L / M High Blade Kick (-11 / -8). Old fight data can tilt how often "special" is chosen, but cannot
+  pick a move the rules forbid: the fix is in the rules.
+- `neutral_policy.NEUTRAL_SPECIAL_MIN_BLOCK` = -3: a non-projectile special goes out in neutral only if it is not
+  punishable on block (Ryu: L Hashogeki -3, H Hashogeki +2); unknown on-block = not in neutral. When nothing qualifies
+  at that distance, "special" is not offered at all (before, an empty choice became a walk forward). The others stay
+  in combos, punishes and confirms.
+- Drive Impact from the neutral policy: only through an actual projectile (the opponent's move is one, or one is in
+  flight: `NeutralPolicy.op_projectile`, set by the fighter), from 1.5+, never against a Super bar. The wall DI (0.19.0)
+  and the DI punish of a long recovery are unchanged.
+- Test `tests/test_0205.py` (synthetic). Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

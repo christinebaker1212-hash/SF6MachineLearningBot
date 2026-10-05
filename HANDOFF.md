@@ -251,7 +251,10 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.20.5 (latest): punishes compare SA3 with routes by damage; a route goes on by its starter's measured hit
+**0.20.6 (latest): no punishable specials (Tatsus, L/M High Blade Kick) and no Drive Impact without a projectile
+from the neutral policy** (CLAUDE.md "0.20.6").
+
+**0.20.5: punishes compare SA3 with routes by damage; a route goes on by its starter's measured hit
 (counter / punish counter / late normal); PDR dashes once the parry is on screen; the move after a DI goes out on the
 measured free frame** (CLAUDE.md "0.20.5"). Check `route_hits` in the next batch; PDR / DI routes are retried on K.
 
