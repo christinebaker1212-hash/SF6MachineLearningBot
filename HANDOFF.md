@@ -251,7 +251,13 @@ splat id) in the fight summaries.
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**0.22.1 (latest): the takeover is OFF by default** (user: "let's just stop this ... I really should just leave it
+**0.22.2 (latest): no standing still after combos and supers** (user, watching the unattended run: "it pauses for a
+very long time after completing these combos ... especially worse after supers"). The combo executor's lab waits (up to 4 s
+after a route, up to 10 s after a super) also ran in matches; now a match route ends on its last hit (CLAUDE.md "0.22.2").
+The user's first unattended run on 0.22.1 (screenshots, partial): 12-3, Platinum 1 -> 2, wins over a Platinum 3 and a
+Platinum 2 twice. The full run (S + datasets\fights) is to come: measure it with the scorecard.
+
+**0.22.1: the takeover is OFF by default** (user: "let's just stop this ... I really should just leave it
 unattended"). Don't re-propose operator play; the user wants the bot to learn on its own, unattended.
 
 **0.22.0: operator takeover** (user: "a 'Take over' command that shows the bot how to fight against certain

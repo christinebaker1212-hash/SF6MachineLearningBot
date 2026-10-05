@@ -2967,6 +2967,24 @@ a session over the two real CPU fights); nothing here is verified in game.
   naturally, as it should." The code stays; a controller touch or F11 does nothing unless the setting is turned on.
   (The user had first suggested the Start button as the takeover / return button, then dropped the feature.)
 
+## 0.22.2: no standing still after a combo or a super (user, 2026-10-05)
+- User (watching the unattended run): "the biggest problem with every combo is that it pauses for a very long time after
+  completing these combos ... enemy players punish Ryu extremely because he just sits and stands there. He doesn't block,
+  he doesn't move ... after any verified combo in the combo lab, but especially worse after supers."
+- Cause (code, `combo_lab.perform_route`, shared by the lab and the fighter): two waits meant for the lab ran in matches
+  too, and the fighter made no decision while `perform_route` ran.
+  - after a route's last move: wait until the dummy is back to neutral or `END_TICKS` 240 (4 s). A knockdown ender
+    keeps the opponent out of neutral, and an opponent waking up with an attack is not neutral either, so the bot
+    usually stood the full 4 s.
+  - after a super connected: follow the cinematic until both players are idle for 30 lines, up to 10 s, for the damage
+    reading; any opponent action reset the count.
+- Fix: in matches (`confirm=True`) a route ends on its last move's hit (or as a `whiff` once that move can no longer hit:
+  start-up + 6 own frames), and a super ends on its connection; the fighter decides again on the next line (its busy
+  gate covers the bot's own recovery). The lab is unchanged. Tests (`tests/test_combo_lab.py`, frame simulator and a
+  stub reader, NOT the game): the route ends on the last hit; after a super `perform_route` returns within 2 lines (the
+  lab still follows it 30+). Not verified in game. The routes' measured damage in matches now covers the hits up to
+  the last move's first hit (the per-opponent route values use completion, not damage).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

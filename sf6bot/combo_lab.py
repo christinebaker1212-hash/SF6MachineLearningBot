@@ -780,6 +780,18 @@ class ComboRun:
             return None
         if self.rt[-1]["start"] is not None:
             self.ticks_after_last += max(dt, 0)
+            if self.confirm:
+                # a match (0.22.2, user: "it pauses for a very long time after completing these combos ... he just
+                # sits and stands there"): the route is over once its last move has hit, or can no longer hit. The
+                # lab waits for the dummy to recover (up to END_TICKS = 4 s) to read the whole combo; in a match the
+                # bot stood still that long (a knockdown ender keeps the opponent out of neutral) while the
+                # opponent got up and attacked. The fighter decides again at once (its busy gate covers recovery).
+                r_ = self.rt[-1]
+                if r_["contact"] is not None or not last.get("hitting"):
+                    self._finish(None, None)
+                elif r_["moving"] > (last.get("startup") or 8) + CONFIRM_SLACK or self.escape is not None:
+                    self._finish("whiff", len(self.steps) - 1)
+                return None
             if self.escape is not None or self.ticks_after_last > END_TICKS:
                 self._finish(None, None)
             return None
@@ -2191,8 +2203,10 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                                end_neutral=not run.steps[k].get("pdr"))
             if not ok:
                 break
-        if run.super_connected is not None:
-            # the super connected: follow the cinematic only for its damage (up to 10 s, until both idle)
+        if run.super_connected is not None and not confirm:
+            # the super connected: follow the cinematic only for its damage (up to 10 s, until both idle). Lab only:
+            # in a match this held the bot for up to 10 s after every super (0.22.2, user: "especially worse after
+            # supers"); the fighter goes back to deciding as soon as the super has connected
             calm, end = 0, clock.now() + 10.0
             while clock.now() < end and calm < 30 and not sess.stop_event.is_set():
                 try:

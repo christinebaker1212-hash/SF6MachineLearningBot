@@ -1364,3 +1364,73 @@ def test_bot_counts_as_free_on_any_idle_id_or_a_free_bar_cell():
     assert not run._is_free({"action_id": 856}, 10)
     run.bar.t.append((10, 0, 9))
     assert run._is_free({"action_id": 856}, 10)
+
+
+def test_in_a_match_the_route_ends_on_its_last_hit_not_when_the_opponent_recovers():
+    """0.22.2 (user: "it pauses for a very long time after completing these combos ... he just sits and stands there"):
+    the lab waits up to 4 s after the last move for the dummy to recover; in a match the route is over on the last
+    move's hit, so the fighter decides again at once."""
+    sim, steps = Sim(MOVES, lead=4), _steps(MOVES)
+    run = cl.ComboRun(steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True)
+    done_at = None
+    for _ in range(400):
+        line = sim.tick()
+        k = run.feed(line)
+        if run.done:
+            done_at = line["stage_timer"]
+            break
+        if k is None:
+            m = run.presend()
+            if m is not None:
+                run.rt[m]["motion_sent"] = line["stage_timer"]
+            continue
+        run.sent(k)
+        sim.send(k, 0 if run.rt[k].get("motion_sent") is not None else steps[k]["prefix"])
+    assert run.done and run.result()["success"]
+    assert run.rt[2]["contact"] is not None and done_at is not None and done_at <= run.rt[2]["contact"] + 1
+    # the lab, same route: still following the combo after the last hit
+    sim2 = Sim(MOVES, lead=4)
+    lab = cl.ComboRun(_steps(MOVES), {}, {NEUTRAL}, {DUMMY_IDLE}, set())
+    for _ in range(400):
+        line = sim2.tick()
+        k = lab.feed(line)
+        if k is not None:
+            lab.sent(k)
+            sim2.send(k, _steps(MOVES)[k]["prefix"])
+        if lab.rt[2]["contact"] is not None:
+            break
+    assert not lab.done
+
+
+def test_after_a_super_connects_a_match_route_returns_at_once():
+    """0.22.2 (user: "especially worse after supers"): the lab follows a super's cinematic for its damage (until both
+    are idle for 30 lines, up to 10 s); in a match perform_route returns as soon as the super has connected."""
+    import threading
+    from types import SimpleNamespace
+
+    def lines_after_contact(confirm):
+        sim = Sim(MOVES[:1], lead=4)
+        steps = [dict(_steps(MOVES[:1])[0], super_art=True, sequence="5+LP@3")]
+        got = {"n": 0, "after": 0}
+        run_ref = {}
+
+        class Q:
+            def get(self, timeout=None):
+                got["n"] += 1
+                if sim.cur is not None and sim.cur.get("hit") not in (None, "whiff") or got.get("hit"):
+                    got["hit"] = True
+                    got["after"] += 1
+                if got["n"] > 300:
+                    raise TimeoutError
+                return SimpleNamespace(ready=True, raw=sim.tick())
+        reader = SimpleNamespace(subscribe=lambda: Q(), unsubscribe=lambda q: None)
+        runner = SimpleNamespace(run=lambda seq, stop_event=None, end_neutral=True: (sim.send(0, 0), True))
+        sess = SimpleNamespace(stop_event=threading.Event(), controller=SimpleNamespace(set_facing=lambda f: None))
+        res = cl.perform_route(sess, reader, runner, steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=confirm,
+                               timeout=2.0)
+        run_ref["res"] = res
+        return got["after"], res
+    n_match, res = lines_after_contact(True)
+    assert res["success"] and n_match <= 2
+    n_lab, _ = lines_after_contact(False)
+    assert n_lab >= 30
