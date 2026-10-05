@@ -254,8 +254,9 @@ splat id) in the fight summaries.
    a super when it fits), not only when a poke's measured reach already covers it. Measure first: how many opponent
    whiffs near the bot had a known move and enough frames left, and what the bot did.
 2. **No Drive Impact while the opponent has Super meter.** A super beats a Drive Impact on reaction. Applies to
-   neutral DI reads, `di_wall` and DI punishes. To settle with the data: does it also cover DI-back against the
-   opponent's own DI?
+   neutral DI reads, `di_wall` and DI punishes. **NOT to DI-back** (user, 2026-10-05: "Keep the DI-back, it works.
+   Always DI back unless the amount of health on a counter DI would kill it"): the bot always answers the opponent's
+   Drive Impact with its own, except when the damage it would take from that exchange going wrong would kill it.
 3. **Burnout in the corner vs the opponent's Drive Impact: any Super Art.** A blocked Drive Impact against a burnt-out
    bot near its wall is a stun; an invincible super (any level the meter allows, SA1 first as the cheapest) avoids it
    and punishes. Needs the bot's burnout state, its back-to-wall distance and the opponent's DI id.
