@@ -211,5 +211,11 @@ def test_overheads_blocked_standing_lows_crouching(tmp_path):
     f = ScriptedFighter(FCFG, moves, seed=1)
     assert f.decide(state(me={"blockstun": 8}, op={"x": 0.9, "action_id": 925}), 0.0, 0).direction == 4
     assert f.decide(state(me={"blockstun": 8}, op={"x": 0.9, "action_id": 634}), 0.1, 0).direction == 1
-    d = f.decide(state(op={"x": 1.0, "action_id": 925}), 0.2, 0)
-    assert d.kind == "hold" and d.direction == 4
+    # 0.23.0: free on the kick's first frame, the bot hits it in its start-up (punish engine "interrupt"); once it is
+    # active, the bot blocks it standing
+    f = ScriptedFighter(FCFG, moves, seed=1)
+    su = moves[925]["startup"]
+    f.decide(state(op={"x": 1.0}, timer=599), 0.19, 0)
+    ds = [f.decide(state(op={"x": 1.0, "action_id": 925}, timer=600 + k), 0.2 + k / 60, 0) for k in range(su)]
+    assert ds[0].rule == "interrupt" and ds[0].timed
+    assert ds[-1].kind == "hold" and ds[-1].direction == 4

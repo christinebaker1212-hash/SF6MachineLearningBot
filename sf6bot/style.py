@@ -54,7 +54,7 @@ def motion(me: dict, op: dict, prev_op: dict | None) -> str:
     a = op.get("action_id")
     if (num(op.get("y")) or 0.0) > 0.05:
         return "air"
-    if isinstance(a, int) and a >= 450 and not 200 <= a < 400:
+    if isinstance(a, int) and a >= 450 and not 200 <= a < 400 and not 505 <= a < 530:   # 505-529: burnout walking
         return "attack"
     mx, ox, px = num(me.get("x")), num(op.get("x")), num((prev_op or {}).get("x"))
     if mx is None or ox is None or px is None:

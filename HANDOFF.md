@@ -4,7 +4,7 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-03: code version **0.17.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-05: code version **0.23.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
@@ -241,6 +241,17 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
+**0.23.0 (the diagnosis of the 0.22.5 run, built; user: "Build all of them, in that order ... Prioritize non-human levels of
+whiff punishes and reactions. Aim for a projected 80% winrate"):** the punish engine (every blocked / whiffed / falling move
+punished on the first frame it can be, any range, unknown ids from move timing learned from recordings), start-up interrupts,
+fireball play (jump onto the thrower, SA1 through it, walk in and parry), burnout ids, the reactive reversal (motion in the
+stun, button only if a meaty comes), throws teched after the connect, the light chain (2LP id 623, chain point), plus the
+incremental list (CLAUDE.md "0.23.0"). Projection (open loop over the 0.22.5 matches): ~57% calibrated (46-67%), from 28%;
+80% is not reached on paper (~6,000 hp of swing a match short). Next unattended run: check in the summaries / thoughts
+`punish_engine` (windows, taken, options, late), `interrupts`, `fireballs`, `reactive_reversal`, `throw_tech_after_connect`,
+and the scorecard against 0.22.5's. Not verified in game: all of it, especially the reactive reversal's pre-input motion,
+the post-connect tech window on the user's build, SA1 beating a fireball, and the jump-over clearance.
+
 **0.19.0:** the to-do list built from the 22 ranked matches: fewer jumps, less retreating into the corner,
 Drive Impact at the wall, throws on close parries, a later anti-air decision when the opponent is overhead, anti-air on
 airborne moves, SA3 on long whiffs. Not done: perfect parry (its id is unknown), opponent LP / MR (planned). CLAUDE.md "0.19.0".
@@ -257,7 +268,7 @@ punishes ("constantly sitting there and doing nothing during critical punish opp
 1.6, for known moves, and nothing punishes after it; follow-through ids and falling DPs are blocked through their recovery;
 burnout movement ids (510-524) count as attacks; fireballs are blocked for the thrower's whole animation; the light chain
 never completes (2LP as id 623); wake-up reversals (+1,183) are rarely chosen over delay tech (-306). Projected win rate
-with all of them fixed: ~48% (40-62%) at the same opponents, from 28%. Wait for the user to pick what to build.
+with all of them fixed: ~48% (40-62%) at the same opponents, from 28%. (Built in 0.23.0: see above.)
 
 **0.22.6: command grabs jumped, frozen matches** (user: "the Siberian Express is the worst of them. It absolutely
 refuses to jump before the moment of contact"; the opponent quit mid-round and the bot fought the frozen game for 47 minutes).
@@ -652,7 +663,8 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v5), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers) |
+| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed) |
+| Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
 The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.

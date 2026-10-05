@@ -605,6 +605,12 @@ def cmd_train(args, cfg):
     from .reach import build as build_reach
     reach = build_reach(root, log=print)
     rep["reach"] = reach
+    # 0.23.0: every opponent id's timing (total, on-block, active frames, follow-through ids) for the punish engine
+    try:
+        from .move_timing import build as build_timing
+        rep["move_timing"] = build_timing(root, log=print)
+    except Exception as e:                       # noqa: BLE001 - the shipped table stays in use
+        print(f"Move timing failed: {e}")
     wrep = train_win(root, log=print)
     from .combo_mining import build as mine_combos
     try:

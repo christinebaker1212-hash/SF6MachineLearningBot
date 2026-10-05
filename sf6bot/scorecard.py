@@ -36,7 +36,7 @@ def _bot_doing(b: dict) -> str:
     a = b.get("action_id")
     if (b.get("y") or 0) > 0.05:
         return "air"
-    if isinstance(a, int) and a >= 450 and not 200 <= a < 400:
+    if isinstance(a, int) and a >= 450 and not 200 <= a < 400 and not 505 <= a < 530:   # 505-529: burnout walking
         return "own move"
     if isinstance(a, int) and a < 33:
         return "blocking" if b.get("dir") in (1, 4, 7) else "not blocking"

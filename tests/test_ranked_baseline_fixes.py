@@ -191,7 +191,10 @@ def test_a_drive_impact_crumple_is_cashed_out_on_the_first_free_frame():
     assert f.super_stats["crumple"] == {"SA3 Shin Shoryuken": 1}
     assert _crumple(f, 30000, frames=5) == (None, None)                    # once per crumple
     assert _crumple(_fighter(), 10000, op_hp=1500)[1].name == "SA1 Shinku Hadoken"   # SA1 only when it kills
-    assert _crumple(_fighter(), 10000)[1].name == "H Shoryuken (crumple)"
+    # 0.23.0: without a super worth it, the punish engine's best combo that fits the crumple (here the config's
+    # 5HP > 623HP route), its first button timed to land on the bot's first free frame (was a lone H Shoryuken)
+    k2, d2 = _crumple(_fighter(), 10000)
+    assert d2.name == "5HP > 623HP" and d2.timed and k2 == 85 - _fighter().lead - 1
     far = _fighter()
     for k in range(90):
         d = far.decide(state(me={"action_id": 855, "super": 30000}, op={"x": 2.0, "action_id": 276}, timer=1000 + k),

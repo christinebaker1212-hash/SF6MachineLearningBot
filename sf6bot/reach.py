@@ -29,7 +29,8 @@ PROJECTILE_WINDOW = 90      # frames after the attacker's special: a hit may be 
 
 
 def _is_attack(aid) -> bool:
-    return isinstance(aid, int) and aid >= ATTACK_MIN and not 715 <= aid <= 725 and not 480 <= aid < 500
+    return (isinstance(aid, int) and aid >= ATTACK_MIN and not 715 <= aid <= 725 and not 480 <= aid < 500
+            and not 505 <= aid < 530)          # 0.23.0: 505-529 = walking / crouching in burnout
 
 
 def starts(rows: list[dict]) -> list[dict]:

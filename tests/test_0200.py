@@ -86,9 +86,22 @@ def test_burnouts_are_traced_to_what_drained_the_drive():
 
 # ---- whiff punishes by distance, spacing, backup anti-air ---------------------------------------------------------------
 
+def _own_only(f):
+    # 0.23.0: the punish engine's config options (sweep, H Tatsu, ...) off: only the bot's own catalogued pokes
+    f.c = dict(f.c, punish=dict(f.c["punish"], engine=[{"name": "-", "seq": "5+LP@3", "startup": 4, "reach": 0.0}]))
+    return f
+
+
 def test_a_whiff_out_of_reach_is_punished_after_a_dash():
-    f = _fighter(own=[{"id": 614, "name": "5MK", "intent": "poke", "seq": "5+MK@3", "startup": 9, "damage": 600}],
+    # with the config's options a long whiff at 2.0 gets H Tatsumaki (it travels; 1,200, knockdown)
+    g = _fighter(own=[{"id": 614, "name": "5MK", "intent": "poke", "seq": "5+MK@3", "startup": 9, "damage": 600}],
                  own_reach={614: 1.0})
+    g.opp[934] = {"name": "H Shoryuken", "startup": 5, "total": 70}
+    raw = state(me={"super": 0}, op={"x": 2.0, "action_id": 934, "action_frame": 15, "super": 20000}, timer=600)
+    g.observe_line(raw, 0)
+    assert g.decide(raw, 0.0, 0).rule == "whiff_punish"
+    f = _own_only(_fighter(own=[{"id": 614, "name": "5MK", "intent": "poke", "seq": "5+MK@3", "startup": 9,
+                                 "damage": 600}], own_reach={614: 1.0}))
     f.opp[934] = {"name": "H Shoryuken", "startup": 5, "total": 70}
     raw = state(me={"super": 0}, op={"x": 2.0, "action_id": 934, "action_frame": 15, "super": 20000},
                 timer=600)                                          # super meter: no Drive Impact punish
@@ -96,8 +109,8 @@ def test_a_whiff_out_of_reach_is_punished_after_a_dash():
     d = f.decide(raw, 0.0, 0)
     assert d.rule == "whiff_punish" and d.name.startswith("dash") and f.whiff_stats.get("stepped_in") == 1
     # too few frames left for the dash: nothing
-    f2 = _fighter(own=[{"id": 614, "name": "5MK", "intent": "poke", "seq": "5+MK@3", "startup": 9, "damage": 600}],
-                  own_reach={614: 1.0})
+    f2 = _own_only(_fighter(own=[{"id": 614, "name": "5MK", "intent": "poke", "seq": "5+MK@3", "startup": 9,
+                                  "damage": 600}], own_reach={614: 1.0}))
     f2.opp[934] = {"name": "H Shoryuken", "startup": 5, "total": 70}
     raw2 = state(me={"super": 0}, op={"x": 2.0, "action_id": 934, "action_frame": 50}, timer=600)
     f2.observe_line(raw2, 0)

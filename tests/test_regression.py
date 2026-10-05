@@ -66,7 +66,8 @@ def compute() -> dict:
               "action_id": rng.choice([1, 600, 930, 855, 11]), "hitstun": 0, "blockstun": 0, "facing_right": False}
         me = {"x": 0.0, "y": 0.0, "hitstun": 0, "blockstun": rng.choice([0, 0, 0, 3, 10]), "facing_right": True,
               "action_id": 1}
-        d = f.decide({"ready": True, "p1": me, "p2": op}, i / 60.0, 0)
+        # 0.23.0: with a round clock (every real line has one; the punish engine and fireball play track moves by it)
+        d = f.decide({"ready": True, "stage_timer": 1000 + i, "p1": me, "p2": op}, i / 60.0, 0)
         decisions.append([d.kind, d.rule, d.seq])
     out["fighter_decisions"] = _h(decisions)
     return out

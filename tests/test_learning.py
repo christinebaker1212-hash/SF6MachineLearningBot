@@ -184,15 +184,22 @@ def test_punish_uses_the_best_true_combo_that_starts_in_time(tmp_path):
     f = ScriptedFighter(fcfg, opp, book=book)
 
     def raw(aid, bs):
-        return {"stage_timer": 500, "p1": {"x": 0.0, "y": 0.0, "hp": 10000, "drive": 60000, "super": 0,
-                                           "blockstun": bs, "action_id": 170},
+        return {"stage_timer": 510 - bs, "p1": {"x": 0.0, "y": 0.0, "hp": 10000, "drive": 60000, "super": 0,
+                                                "blockstun": bs, "action_id": 170},
                 "p2": {"x": 1.0, "y": 0.0, "hp": 10000, "action_id": aid}}
-    f.decide(raw(925, 10), 1.0, 0)
-    d = f.decide(raw(925, 3), 1.1, 0)
+
+    def until_punish(fi, aid):
+        # 0.23.0 (the punish engine): blockstun counts down line by line; the route goes out on the line its first
+        # button lands on the bot's first free frame (input delay 4 + the route's first line)
+        for bs in range(12, 0, -1):
+            d_ = fi.decide(raw(aid, bs), 1.0 + (12 - bs) / 60, 0)
+            if d_.rule == "punish":
+                return d_
+        return d_
+    d = until_punish(f, 925)
     assert d.kind == "route" and d.route["route"] == "5HP > 623HP"          # -12: the 10F starter fits
     f2 = ScriptedFighter(fcfg, opp, book=book)
-    f2.decide(raw(926, 10), 1.0, 0)
-    d2 = f2.decide(raw(926, 3), 1.1, 0)
+    d2 = until_punish(f2, 926)
     assert d2.kind == "route" and d2.route["route"] == "2LP ~ 2LP > 236LK"  # -5: only the 4F jab fits
     assert f2.punish_stats == {"chances": 1, "taken": 1}
 

@@ -121,13 +121,17 @@ class ProjectileTimer:
         self.samples: dict = defaultdict(list)     # projectile action id -> [(distance, frames)]
         self.flight: dict | None = None            # {"id", "t0", "dist"} of the projectile in the air now
 
-    def thrown(self, aid: int, t0: int, dist: float) -> None:
-        self.flight = {"id": aid, "t0": t0, "dist": dist, "parried": False}
+    def thrown(self, aid: int, t0: int, dist: float, x0: float | None = None) -> None:
+        """A projectile thrown from `dist` away; `x0` = where the thrower stood (0.23.0: the bot may walk before it
+        arrives, so samples use the bot's distance from that spot at contact)."""
+        self.flight = {"id": aid, "t0": t0, "dist": dist, "parried": False, "x0": x0}
 
-    def contact(self, t: int) -> None:
+    def contact(self, t: int, bx: float | None = None, parried: bool = False) -> None:
+        """It arrived on frame t (the bot blocked, was hit or - 0.23.0 - parried it: the parry's hit freeze)."""
         f = self.flight
-        if f is not None and isinstance(t, int) and 0 < t - f["t0"] <= 180 and not f["parried"]:
-            self.samples[f["id"]].append((f["dist"], t - f["t0"]))
+        if f is not None and isinstance(t, int) and 0 < t - f["t0"] <= 180 and (parried or not f["parried"]):
+            d = abs(bx - f["x0"]) if bx is not None and f.get("x0") is not None else f["dist"]
+            self.samples[f["id"]].append((round(d, 3), t - f["t0"]))
             del self.samples[f["id"]][:-12]
         self.flight = None
 

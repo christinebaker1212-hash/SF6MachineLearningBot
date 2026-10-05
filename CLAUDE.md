@@ -3138,7 +3138,7 @@ All MOCK / replay-tested (`tests/test_0226.py`); not verified in game.
 - **Process priority** (`win32.prioritize_process`): this module's kernel32 with HANDLE / BOOL declared; a failure reports
   `priority_error` / `power_throttling_error` (GetLastError) in the startup line.
 
-## Diagnosis of the 0.22.5 run: missed punishes and the other errors (2026-10-05; nothing built yet)
+## Diagnosis of the 0.22.5 run: missed punishes and the other errors (2026-10-05; built in 0.23.0, below)
 User: "It also often will give up punish opportunities, such as blocked sweeps, whiffed heavy buttons, blocked Supers,
 blocked DPs ... it is constantly, constantly sitting there and doing nothing during critical punish opportunities", and
 "find and identify all of these errors". MEASURED on the 36 finished matches. Exact windows from Capcom's numbers where the
@@ -3213,6 +3213,100 @@ inferred map). Scripts in the session scratchpad.
   ~62%; +3,250 dealt / -3,950 taken a match central); one fix alone +2-3 points; 0.22.6 alone ~30%; the punish package
   ~36%. By opponents (model): grapplers 23% -> 34%, fireball Ryu 1% -> 41%, the rest 44% -> 64%. Climbing LP brings
   stronger opponents, so the rate drifts back toward 50%: LP is the measure.
+
+## 0.23.0: punish engine, fireball play, reactive reversals and techs, start-up interrupts, light chains (user, 2026-10-05)
+User: "Build all of them, in that order. Make incremental improvements where you can. Prioritize non-human levels of whiff
+punishes and reactions. Aim for a projected 80% winrate." The user also sent Capcom's frame pages for all 31 characters
+(same site build as the PC's imported data: nothing to change). Everything below is MOCK / replay-tested (`tests/test_0230.py`
+and updated older tests; `decide()` replayed open-loop over the 36 recorded 0.22.5 matches); nothing is verified in game.
+### Move timing learned from recordings (`sf6bot/move_timing.py`)
+- Per (character, action id), from every recording (both players): total (lowest value 3+ starts agree on, untouched and
+  uncancelled), on-block (the defender's first free frame minus the attacker's), start-up / last active frame (contact
+  frames), follow-through ids (an id that takes over by itself and never starts alone: Ryu's Shoryuken landing 940,
+  Zangief's 638), airborne, lead-ins (a hold that never ends by itself: Zangief's 637, 30 of 30), projectile speed.
+- MEASURED: the exported action_frame restarts inside some moves (H Shoryuken 934: 5-9, 5-21, 1-13, 6-14), so a move's
+  own frames are game ticks without hitstop (FrameClock's rule). Learned totals are within 2 frames of Capcom's on ~95%.
+- Projectiles: frames to contact = a + b x distance (Theil-Sen) from contacts beyond 1.5 with the thrower standing still;
+  a fit marks an unnamed id as a projectile. Ryu L / M / H Hadoken 17.9 / 13.1 / 9.0 frames a unit, Guile's Sonic Booms
+  19.1 / 9.9, Ken H 12.2, Akuma 9.6 ... JP's Embrace (a ranged grab: its "contact" is the damage) is excluded by needing a
+  stun to rise.
+- Shipped in `configs/move_timing/` (28 characters, 1,074 ids, 202 recordings); `sf6bot train` (menu B) rebuilds
+  `datasets/move_timing/` from this PC's recordings, which wins id by id. Erased with "training".
+### 1. The punish engine (`sf6bot/punish.py`, rule 0a)
+- One chain per opponent move (its follow-through ids included, rollbacks rewound); a window opens when it can no longer hit:
+  BLOCKED (also after blockstun, any range), WHIFFED (past its last active frame), a Shoryuken COMING DOWN (punished on the
+  landing; no longer an "airborne attack" to anti-air), a projectile's THROWER once the projectile is gone.
+- Timing: the opponent is free in min(total - own frames (+ hitstop), bot's first free frame - on-block); the button lands
+  after input delay + stale + the motion, never before the bot is free; start-up S lands if land + S <= free. Learned
+  numbers keep 2 frames of slack, an unconfirmed inferred name 1.
+- Options: the combo lab's TRUE combos (any hit type: a punish is a punish counter), `punish.engine` routes (5HP / 2HP / 5MP /
+  2MP / 2MK / 5LP / 2LP > 623HP on the game clock with hit confirm), sweep, 5HK, H Tatsu, L Shoryuken, SA3, SA1, own pokes;
+  a walk (<= 0.5), dash (<= 1.25) or Parry Drive Rush first for whiffs out of reach. Reach: measured, else
+  `punish.reach_fallback` (MEASURED: where Ryu's moves connected in the 202 recordings). Chosen by expected damage
+  (frames to spare -> 0.75 / 0.9 / 0.95) minus the cost of failing; sent `timed` (no busy gate) on the line its timing says.
+- Open-loop replay check (36 matches; the button's landing frame against the real window in the recording): 82% of blocked
+  punishes and 83% of whiff punishes in time (0.22.5: 8 of 30 blocked and 20 of 62 whiff windows punished).
+- Start-up INTERRUPTS: the opponent's move not active yet, the bot free: a strike active at least a frame before it
+  (counter hit). Not into moves Capcom notes as completely invincible / super armor / invincible to strikes
+  (`fighter.interrupt_class`), not into supers / DI / lead-ins; a move an interrupt lost to is not tried again that match.
+  Replay: 39 in 36 matches (the opponent's move had been blocked 30 times, hit the bot 2).
+### 2. Burnout movement ids
+- 505-529 are walking / crouching / standing in burnout (MEASURED 0.22.5): never "attacking" (the bot held down-back on 76%
+  of those frames) and not the bot's own moves (busy gate).
+### 3. Fireball play (`sf6bot/zoning.py`, rule 4z; replaces 0.22.4's burnout rule and 0.16.0's perfect-parry rule)
+- From the throw's first frame: the projectile's arrival from where the thrower stood: max(start-up, a + b x d), from this
+  match's sightings (also parried ones), else the recordings' fit, else a default speed. Replay: actual minus predicted
+  arrival over 415 contacts: median 0, p10 -2.3, p90 +2.1 frames.
+- Jump physics MEASURED (Ryu, 222 forward jumps): 5 frames to leave the ground, 37 airborne, 1.9 forward, gravity 0.0123;
+  projectiles hit airborne characters up to 0.75 high (34 of 34), so a jump clears when the bot is 0.8+ high while it passes.
+- Answers (each scored against the opponent as defence situation "fireball", priors ESTIMATES in `fireball:`): a forward jump
+  onto the thrower when it clears and the jump attack lands before the thrower recovers (a jump-in route on the game clock:
+  the lab's TRUE ones, else `j.HK , 5HP > 623HP`); SA1 through it when it comes out before the projectile arrives and
+  reaches the thrower in time (ASSUMPTION: the Shinku Hadoken beats a normal projectile); else WALK IN while it is far and
+  meet it with a timed PARRY (the Drive comes back; 1 bar kept) or a block when low; in burnout cancel it / jump it.
+- Rule 6 blocks a projectile only near its arrival; the range Denjin Charge never goes where the fastest known projectile
+  could hit it (and only from 3.5: 7 of 26 range charges were hit within 60 frames).
+- Replay, first answer per throw (584): walk in 406, SA1 55, jump onto the thrower 49, block 27, cancel 26, neutral jump 21,
+  parry 9.
+### 4. Reactive reversal (`fighter._reactive_reversal`) and pooled defence learning
+- With a reversal affordable at a wake-up / after-block / after-hit moment (SA3 lethal, OD Shoryuken, SA1, SA3): hold block,
+  input the MOTION during the stun, decide the BUTTON on the last line it lands on the first free frame: a NEW strike, throw or
+  command grab of the opponent on screen -> the button; nothing coming (shimmy, block, wait) -> the defence game without the
+  reversal. After a block only with 4+ Drive bars (or meter). Stops against an opponent after 3 tries averaging below -0.5.
+- Replay: 442 moments with a reversal ready, 71 reversals (the recorded opponent's attack then hit the bot 14 times and was
+  blocked 44), 147 held back.
+- `learning.Experience`: defence results and the opponents' answers are pooled across every other opponent (counted as at most
+  4 of this one's): each ranked match is a new human.
+### 5. The light chain
+- MEASURED (0.22.5): Ryu's 2LP chained from a 2LK that hit is id 623 (catalogued 622), starting on the 2LK's own frame 12,
+  ~14 frames after a press made in the hit freeze; it hit 5 of 5 and the route was stopped ("2LK ~ 2LP ~ 5LP > 623HP" 0 of 36).
+- Chained normals accept their next 2 uncatalogued ids (`NORMAL_VARIANT_SPAN`); a cancel / chain counts as "nothing came out"
+  only once the previous move has ended (the hit freeze is not waiting; matches had given up after 8 ticks).
+- Recorded lab timing is replayed with the presses moved by the input-delay difference (up to 2; ranked measured 3, the lab
+  4: it was not used at all). `LAB_RULES` = 0.23.0.
+### Throws teched after the connect (rule 00)
+- MEASURED (202 recordings, 1,670 throw start-ups): an LP+LK read 1-7 frames after the connect still teched most throws (92
+  teched, 29 landed; +8 and later: all 19 landed). The bot seeing its thrown state (721 / 725) techs at once.
+- 22 of the 38 throws that landed on the bot in the 0.22.5 run came while it was free, 25 with no LP+LK at all: a pressure
+  option (e.g. block, 12 frames) ran through the 5-frame start-up. Now a throw start-up stops any sequence without a throw
+  input, and an attack starting within its reach stops neutral walks / pokes (32 of the 84 pokes that hit a free bot caught it
+  walking forward).
+### Incremental
+- DI crumple without a super worth it: the engine's best route that fits (5HP > 623HP) instead of a lone H Shoryuken (30+ of 60).
+- Projectile damage goes to the projectile (was "walking (id 9)"); the bot's own moves need its own fresh press and no
+  command grab in progress (JP's Embrace put the bot in Ryu's L High Blade Kick id); `act_st` is recorded; punish chances are
+  counted once per move.
+### Projection (open loop; ESTIMATES on top of the measured counts)
+- `decide()` over the 36 recorded 0.22.5 matches, every new decision checked against the real recording (timing; whether the
+  recorded bot had already landed something there), values from Capcom / the config (routes x0.8 completion), adaptable gains
+  capped a match (jump-ins / reversals / interrupts 2 / 3 / 5), a realised share 0.5 / 0.7 / 0.9; 0.22.6's command-grab
+  jumps included (built after that run). The win model (147 ranked matches) is 6 points optimistic.
+- Central ~57% calibrated (model 63%; low ~46%, high ~67%), from 28%: +5,900 hp dealt and -3,100 taken a match. Biggest
+  parts: command grabs jumped 1,335, whiff punishes 1,301, fireball jump-ins 1,109, blocked punishes 924, fireballs parried
+  768, reactive reversals 754 + 215, SA1 694, interrupts 647 + 71, techs 534. By opponents: the rest 44% -> 73%, fireball
+  Ryu 1% -> 78%, grapplers 23% -> 33%.
+- 80% is NOT reached on paper: it needs ~6,000 more hp of swing a match at these opponents. Open loop: the opponents don't
+  adapt; better results bring stronger opponents (LP is the measure).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

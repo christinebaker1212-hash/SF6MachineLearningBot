@@ -69,7 +69,8 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
                        # previous move's late hit (multi-hit special, projectile), not this move's
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
-LAB_RULES = "0.20.5"
+NORMAL_VARIANT_SPAN = 2    # 0.23.0: ... after a chained normal's own id (Ryu's chained 2LP 623 after 622)
+LAB_RULES = "0.23.0"
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
 DELAY_START = 4
@@ -487,8 +488,14 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
             cat_ids.update((v.get(g) or {}).get("action_ids") or [])
     for st in plan:
         exp = st.get("expect_id")
-        if isinstance(exp, int) and (st.get("super_art") or exp >= 900) and not st.get("system"):
-            var = [i for i in range(exp + 1, exp + 1 + VARIANT_SPAN) if i not in cat_ids]
+        chained_normal = (isinstance(exp, int) and 600 <= exp < 715 and st.get("connector") == "~"
+                          and not st.get("target_combo") and not st.get("system"))
+        if isinstance(exp, int) and ((st.get("super_art") or exp >= 900) or chained_normal) and not st.get("system"):
+            # 0.23.0: a normal chained from another shows its own id too (MEASURED 0.22.5: Ryu's 2LP chained from a 2LK
+            # that hit is 623, not the catalogued 622; it came out and hit 5 of 5 times, and the route was stopped as a
+            # wrong move: "2LK ~ 2LP ~ 5LP > 623HP" finished 0 of 36)
+            var = [i for i in range(exp + 1, exp + 1 + (NORMAL_VARIANT_SPAN if chained_normal else VARIANT_SPAN))
+                   if i not in cat_ids]
             if var:
                 st["variant_ids"] = var
                 st["known_ids"] = list(st.get("known_ids") or []) + var
@@ -506,8 +513,12 @@ class ComboRun:
 
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
                  movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
-                 fixed: list | None = None, learned: dict | None = None, confirm: bool = False):
+                 fixed: list | None = None, learned: dict | None = None, confirm: bool = False,
+                 fixed_lead: int | None = None):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        # 0.23.0: the recorded send points were for the input delay of the lab run (`fixed_lead`); with another delay
+        # (ranked measured 3, the lab 4) every press moves by the difference, so it lands on the same game frame
+        self.fixed_shift = (lead - fixed_lead) if isinstance(fixed_lead, int) and isinstance(lead, int) else 0
         # `confirm` (matches, not the lab): the next move goes out only once the previous one has HIT. The
         # lab presses on the predicted contact; in the user's FT5 (2026-10-03) that meant a whiffed 2LK
         # was still followed by 2LP, 5LP and the Shoryuken ("whiff" 20+ times), and Ken punished it.
@@ -609,6 +620,18 @@ class ComboRun:
             self._land_est = y / -vy if vy < 0 else None
         return self._land_est
 
+    def _not_out(self, k: int, r: dict, st: dict, tick: int) -> bool:
+        """Step k was pressed and nothing has come out: give up? The hit freeze is not waiting. A cancel / chain pressed
+        during the previous move comes out at that move's cancel point, which can be well after the freeze (0.23.0,
+        MEASURED 0.22.5: Ryu's 2LP chained from a 2LK that hit appears on the 2LK's own frame 12, ~14 frames after a
+        press made in the freeze; matches gave up after 8 and "2LK ~ 2LP ~ 5LP > 623HP" finished 0 of 36): for those
+        it is "the previous move ended without it"."""
+        waited = tick - r["sent"] - r.get("hs_ticks", 0)
+        if st.get("trigger") == "contact" and k > 0 and isinstance(self.steps[k - 1].get("total"), int) \
+                and self.rt[k - 1]["start"] is not None:
+            return self.rt[k - 1]["moving"] >= self.steps[k - 1]["total"] + 2 and waited > st["prefix"] + self.lead
+        return waited > st["prefix"] + self.lead + (NOT_OUT_MATCH if self.confirm else 15)
+
     def _active(self) -> int | None:
         started = [k for k, r in enumerate(self.rt) if r["start"] is not None]
         return started[-1] if started else None
@@ -682,6 +705,8 @@ class ComboRun:
         k = self.pending
         if k is not None:
             r, st = self.rt[k], self.steps[k]
+            if (p1.get("hitstop") or 0) and dt > 0:
+                r["hs_ticks"] = r.get("hs_ticks", 0) + dt       # the hit freeze does not count as waiting
             pid, pfr = r["at_send"]
             allowed_move = st.get("system") == "dash" or st.get("allow_movement")
             known_prev = set(self.steps[k - 1].get("known_ids") or []) if k else set()
@@ -711,7 +736,7 @@ class ComboRun:
                 if st.get("system") == "drive_rush" and s_aid == exp:
                     r["exp_seen"] = s_tick
                 self.pending = None
-            elif tick - r["sent"] > st["prefix"] + self.lead + (NOT_OUT_MATCH if self.confirm else 15):
+            elif self._not_out(k, r, st, tick):
                 # a press that never came out: the lab allows 15 frames past the input delay (its search reads the
                 # reason); a match gives up sooner (0.22.4), so the bot is not left waiting for an eaten input
                 self._finish("not_out", k)
@@ -850,23 +875,24 @@ class ComboRun:
                 self._finish("whiff", n - 1)
             return None
         fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
+        dl = self.fixed_shift
         if fx and trig == "prev_free" and fx.get("prev_frame") is not None:
-            return n if pr["moving"] >= fx["prev_frame"] else None
+            return n if pr["moving"] >= fx["prev_frame"] - dl else None
         if fx:
             # replay the recorded success exactly (user, 0.11.5: "record that exact state and repeat it")
             if trig == "air" and not (self._vy is not None and self._vy < 0):
                 return None                   # still rising: a jump attack is pressed on the way DOWN
             if trig == "air" and fx.get("land") is not None:
-                return n if land is not None and land <= fx["land"] else None
+                return n if land is not None and land <= fx["land"] + dl else None
             if trig == "own_frame" and fx.get("prev_frame") is not None:
-                return n if pr["moving"] >= fx["prev_frame"] else None
+                return n if pr["moving"] >= fx["prev_frame"] - dl else None
             # a move after a jump-in's landing is replayed by its own rule below: the input delay and the offsets
             # are frozen in a replay, so it decides exactly as in the success. 0.20.1 and before replayed the
             # landing estimate recorded at the press, which kept the last AIRBORNE estimate when the press came
             # on or after landing: every replay pressed several frames early, in the air, and nothing came out
             # (user's K run, 2026-10-05: 'jHP , 5HP > ...' move 2 failed in every exact replay, worked when searched)
             if trig != "landing" and fx.get("after_prev_start") is not None:
-                return n if tick - pr["start"] >= fx["after_prev_start"] else None
+                return n if tick - pr["start"] >= fx["after_prev_start"] - dl else None
         if trig == "air":
             # jump-in: the attack should hit JUMP_DEPTH frames before landing (deep), so press when
             # landing is (start-up - 1 + depth + input delay) frames away; later offsets = deeper.
@@ -2147,7 +2173,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
 def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
-                  confirm: bool = False, on_first_hit=None) -> dict:
+                  confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2155,7 +2181,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     0.20.5): called once the starter has hit, with its measured kind (hits.classify_hit); it returns (steps, fixed,
     verdict): "switch" continues with those steps (same starter), "stop" ends the route after the hit, else keep."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed, learned=learned, confirm=confirm)
+                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead)
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout

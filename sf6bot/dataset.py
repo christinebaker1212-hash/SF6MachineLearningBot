@@ -20,7 +20,7 @@ from .game_state import character_name, decode_input_relative, file_stem, load_i
 
 PLAYER_FIELDS = ("chara", "hp", "hp_max", "hp_recoverable", "drive", "drive_wait", "super", "x", "y",
                  "facing_right", "action_id", "action_frame", "action_frames_total", "hitstop", "hitstun",
-                 "blockstun", "pose", "invuln", "input")
+                 "blockstun", "pose", "invuln", "input", "act_st")
 
 
 class DatasetBuilder:

@@ -68,6 +68,9 @@ throw_tech:
   # (720 / 724). Whether pressing LP+LK on seeing it is fast enough to tech is NOT known yet: our
   # input reaches the game 3-5 frames later. fight_summary counts the outcome.
   max_dist: 1.20
+  # 0.23.0: also after the connect (the bot in a thrown state, 721 / 725): MEASURED (202 recordings, 1,670 throw start-ups)
+  # an LP+LK read 1-7 frames after the connect still teched most throws (92 teched, 29 landed); from +8 none did (19)
+  after_connect: true
 # 0.18.0 input handling (MEASURED 0.17.5 ranked: Hadokens after walking forward came out as Shoryukens; ~27 of
 # ~70 Shoryuken motions were sent while the bot could not act; "6@2 2@2 3+HP" came out as 2HP when the down step
 # was missed, so motion steps are 3 frames)
@@ -75,6 +78,7 @@ throw_tech:
 # punishing DI with grabs, or HP")
 supers:
   crumple_ids: [276]        # MEASURED: the opponent after the bot's Drive Impact connects (18 of 18), 90-139 frames
+  crumple_min_frames: 112   # MEASURED (0.20.3, ranked recordings): the shortest crumple; a combo's first hit lands before it
   di_recovery_frames: 85    # MEASURED: the bot's own DI animation after the crumple starts (16 of 18)
   crumple_max_dist: 1.1     # MEASURED: the crumpled opponent is ~0.72 away
   sa3_max_dist: 1.3         # SA3 as a punish only this close (estimate)
@@ -95,6 +99,57 @@ punish:
     - {max_adv: -10, name: "5HP > 623HP", route: "5HP > 623HP", seq: "5+HP@3 5@8 6@3 2@3 3+HP@3"}
     - {max_adv: -7,  name: "Shoryuken (623HP)", seq: "6@3 2@3 3+HP@3"}
     - {max_adv: -4,  name: "5LP ~ 2LP ~ 5LP", route: "5LP ~ 2LP ~ 5LP", seq: "5+LP@3 5@7 2+LP@3 5@7 5+LP@3"}
+  # 0.23.0 the punish engine (sf6bot/punish.py; the options above are only used with `engine` empty). Every window the
+  # opponent leaves (a blocked move, a whiff past its active frames, a Shoryuken coming down) gets the option with the
+  # best expected damage that lands in it: the combo lab's TRUE combos first (they replace a route below with the same
+  # starter), these, the bot's own catalogued pokes, a walk / dash / Parry Drive Rush in for whiffs out of reach.
+  # Numbers are Capcom's (start-up, on block, damage; route damage = the two moves' listed damage, an ESTIMATE of the
+  # scaled total); `id` = the bot's action id of the first move (its measured reach, reach.py), else `reach_fallback`.
+  # Routes run on the game clock with hit confirm (combo_lab.perform_route): a blocked or whiffed starter sends no more.
+  engine:
+    - {name: "5HP > 623HP", route: "5HP > 623HP", starter: "Standing Heavy Punch", id: 608, startup: 10, damage: 2200,
+       on_block: -2, seq: "5+HP@3 5@8 6@3 2@3 3+HP@3"}
+    - {name: "2HP > 623HP", route: "2HP > 623HP", starter: "Crouching Heavy Punch", id: 630, startup: 9, damage: 2200,
+       on_block: -7, seq: "2+HP@3 5@7 6@3 2@3 3+HP@3"}
+    - {name: "5MP > 623HP", route: "5MP > 623HP", starter: "Standing Medium Punch", id: 605, startup: 6, damage: 2000,
+       on_block: -1, seq: "5+MP@3 5@5 6@3 2@3 3+HP@3"}
+    - {name: "2MP > 623HP", route: "2MP > 623HP", starter: "Crouching Medium Punch", id: 627, startup: 6, damage: 2000,
+       on_block: 0, seq: "2+MP@3 5@5 6@3 2@3 3+HP@3"}
+    - {name: "2MK > 623HP", route: "2MK > 623HP", starter: "Crouching Medium Kick", id: 640, startup: 8, damage: 1900,
+       on_block: -6, seq: "2+MK@3 5@6 6@3 2@3 3+HP@3"}
+    - {name: "5LP > 623HP", route: "5LP > 623HP", starter: "Standing Light Punch", id: 600, startup: 4, damage: 1500,
+       on_block: -1, seq: "5+LP@3 5@3 6@3 2@3 3+HP@3"}
+    - {name: "2LP > 623HP", route: "2LP > 623HP", starter: "Crouching Light Punch", id: 622, startup: 4, damage: 1500,
+       on_block: -1, seq: "2+LP@3 5@3 6@3 2@3 3+HP@3"}
+    - {name: "Crouching Heavy Kick", seq: "2+HK@3", starter: "Crouching Heavy Kick", id: 643, startup: 9, damage: 900,
+       on_block: -12}
+    - {name: "Standing Heavy Kick", seq: "5+HK@3", starter: "Standing Heavy Kick", id: 617, startup: 12, damage: 900,
+       on_block: 1}
+    - {name: "H Tatsumaki Senpu-kyaku", seq: "2@3 1@3 4+HK@3", starter: "H Tatsumaki Senpu-kyaku", id: 1005, startup: 16,
+       damage: 1200, on_block: -13}
+    - {move: punish_l_srk, starter: "L Shoryuken", id: 930, damage: 1100, on_block: -23}
+    - {move: sa3, reach: 1.3, on_block: -52}
+    - {move: sa1, reach: 4.5, projectile: true, on_block: -24}
+  # MEASURED: where each of Ryu's moves connected in the 202 recordings sent so far (90th percentile of the start distance
+  # of the starts that connected, minus 0.1); the bot's own measured reach (reach.py, menu B) wins where it is longer
+  reach_fallback:
+    Standing Light Punch: 1.4
+    Crouching Light Punch: 1.2
+    Standing Light Kick: 1.6
+    Crouching Light Kick: 1.3
+    Standing Medium Punch: 1.3
+    Crouching Medium Punch: 1.4
+    Standing Medium Kick: 1.8
+    Crouching Medium Kick: 1.75
+    Standing Heavy Punch: 1.8
+    Crouching Heavy Punch: 1.35
+    Standing Heavy Kick: 1.5
+    Crouching Heavy Kick: 2.05
+    L Shoryuken: 1.35
+    H Tatsumaki Senpu-kyaku: 2.4
+  pdr_frames: 24       # ESTIMATE: Parry Drive Rush from the parry's first frame to the normal's (parry out on its frame ~10,
+                       # the rush, the normal on rush frame ~11: combo_lab.RUSH_AT, a guess)
+  pdr_reach: 2.9       # ESTIMATE: how far a normal out of a Parry Drive Rush reaches from where the parry started
 # Opponents without a catalog: ids from the inferred move map (menu X, datasets/move_maps/), only at
 # this confidence or better. Capcom's on-block value + margin is used, so -4 on Capcom's page is
 # treated as -2 (no punish) and -12 as -10: punishes only where they have room to spare.
@@ -199,6 +254,40 @@ burnout:
   fireball_ref_dist: 2.75
   fireball_frames_per_unit: 10
   fireball_min_frames: 14
+# 0.23.0 fireball play (sf6bot/zoning.py; replaces the burnout rule above and 0.16.0's perfect parry rule). MEASURED 0.22.5:
+# against a fireball Ryu (0-4) the bot held down-back through 87-93% of the Hadoken animations, drifted 17-25 units back a
+# match, spent 227 s in burnout over 6 Ryu matches and lost 7 of 8 rounds on time. From the throw's first frame: jump over
+# it onto the thrower / SA1 through it when the frames say it lands, else walk in while it is far and meet it with a timed
+# parry (a block when low on Drive); in burnout cancel it or jump it. Values in thousands of hp are ESTIMATES (priors);
+# what each answer scores against the opponent takes over (situation "fireball", datasets/learning).
+fireball:
+  enabled: true
+  # the jump-in over a fireball, on the game clock (the combo lab's executor: the air button on the way down, the landing
+  # combo only after it hit); the combo lab's TRUE jump-in routes come first. damage: Capcom's listed damage of the three
+  # moves, an ESTIMATE of the scaled total
+  jump_routes:
+    - {name: "fireball jump: j.HK , 5HP > 623HP", route: "j.HK , 5HP > 623HP", seq: "9@3", damage: 2700}
+  jump_attack: "5+HK@3"     # without a planned route (no Capcom data): j.HK on the way down, below this height
+  air_attack_y: 0.9
+  jump_land_min: 0.2        # ESTIMATE: the forward jump (1.9, MEASURED) must land this close to the thrower ...
+  jump_land_max: 0.9        # ... and not past it (the lab's jump-ins start from travel + 0.3-0.9: 0.20.3)
+  jump_punish_value: 0.8    # share of the route's damage expected
+  jump_fail_cost: 0.3
+  sa1_value: 0.85           # ASSUMPTION: the Shinku Hadoken beats a normal projectile
+  super_bar_cost: 0.4
+  clash_move: hadoken_hp
+  clash_startup: 12         # Capcom: H Hadoken
+  clash_min_dist: 2.5
+  clash_value: -0.05        # outside burnout walking in and parrying gains ground and keeps the Drive
+  clash_value_burnout: 0.3
+  jump_over_value: -0.1
+  jump_over_value_burnout: 0.25
+  neutral_jump_min_tau: 8   # a neutral jump over it: the projectile passes at least this many frames into the jump
+  act_floor: 0.0
+  parry_min_drive: 10000    # a parried projectile gives the Drive back; one bar kept for a parry that misses
+  block_pad: 6              # block from this many frames (+ input delay) before it arrives
+  walk_stop: 0              # extra frames kept between the last walking line and the parry / block
+  walk_min_dist: 1.6
 # 0.20.7 (user, 2026-10-05: "It's using DI in fucking neutral. This is a travesty."): off. The bot's own Drive Impact
 # is now only the DI-back (the opponent's DI) and DI inside combo routes.
 di_punish:
@@ -283,6 +372,16 @@ defense:
     jab_bonus: 0.35
     guess_penalty: 0.3       # parry / Drive Reversal / reversal / jump on the opponent's turn
     parry_min_drive: 30000
+  # 0.23.0 the reactive reversal (fighter._reactive_reversal): with a reversal affordable at a wake-up / after-block / after-hit
+  # moment, its motion goes in during the stun and the button only if a strike, throw or command grab of the opponent is on
+  # screen on the last line it can still land on the first free frame (else the game above without the reversal). MEASURED
+  # 0.22.5: reversals on wake-up +1,183 hp each over 1.5 s (12, one lost), delay tech -306, block -303.
+  reactive_reversal:
+    enabled: true
+    after_block_min_drive: 40000   # after a block (no knockdown) the OD Shoryuken only with 4+ Drive bars (meter: any)
+    give_up_after: 3               # stop against this opponent after this many tries averaging below give_up_below
+    give_up_below: -0.5            # (thousands of hp: its meaties recover in time, safe jumps)
+    hold_direction: 3              # held between the motion and the button (the motion's last direction)
     meaty_id: 640            # Ryu 2MK
     meaty_max_dist: 1.25     # MEASURED 0.14.0: Ryu 2MK connected from up to 1.25 (7 contacts)
     oki_throw_max: 0.9
@@ -464,7 +563,9 @@ denjin:
   far_exposure: 15
   oki_share: 0.4           # charge instead of walking in for oki this often when oki is in reach
   far_share: 0.9           # ... and this often when it isn't
-  range: {enabled: true, min_dist: 3.0, chance: 0.12, roll_every_s: 0.5, max_approach: 0.02}
+  # 0.23.0: from 3.5 (was 3.0: 7 of 26 range charges in the 0.22.5 run were hit within 60 frames from 3.0-3.6), and never
+  # where the opponent's fastest known projectile could arrive before the charge ends
+  range: {enabled: true, min_dist: 3.5, chance: 0.12, roll_every_s: 0.5, max_approach: 0.02}
 # 0.20.3 (user: "Jump ins are supposed to be used after a successful DI stun"): the combo lab's TRUE jump-in routes after the
 # bot's Drive Impact crumples the opponent. MEASURED: the crumple lasts ~150 frames (112-159), ~70 left when the bot can
 # act, the opponent ~0.75 away -> a NEUTRAL jump (user's choice). ESTIMATES: stun_frames, jump_hit_frames (pre-jump +

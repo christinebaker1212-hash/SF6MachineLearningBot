@@ -35,7 +35,8 @@ _PUNCH, _KICK = {"LP", "MP", "HP"}, {"LK", "MK", "HK"}
 # 1200-1299. The 0.18.1 ranked session named E. Honda's 480 (a parry id) "Standing Heavy Punch", Luke's 717 (a throw id)
 # "Scrapper" and Guile's 668 (a normal's id) "H Sonic Boom": names from inputs alone, for charge characters above all.
 # An id outside these ranges is not named.
-ID_KINDS = ((480, 520, "system"), (600, 715, "normal"), (715, 730, "throw"), (850, 870, "di"),
+# 0.23.0: 505-529 are walking / crouching in burnout (MEASURED 0.22.5), not Drive moves
+ID_KINDS = ((480, 505, "system"), (600, 715, "normal"), (715, 730, "throw"), (850, 870, "di"),
             (900, 1200, "special"), (1200, 1300, "super"))
 
 

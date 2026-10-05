@@ -44,6 +44,9 @@ NICE = {"idle": "waiting", "walk_fwd": "walking forward", "walk_back": "walking 
 ZONE_NICE = {"close": "up close", "poke": "at poke range", "mid": "at mid range", "far": "from far away"}
 
 
+POOL_N = 4.0       # 0.23.0: other opponents' defence results / answers count as at most this many of this one's
+
+
 class Experience:
     def __init__(self, ds_root: Path, bot: str, opponent: str, decay: float = DECAY):
         self.decay = decay
@@ -58,6 +61,8 @@ class Experience:
         self.d.setdefault("matches", [])
         self.pending: list = []
         self.pending_def: list = []
+        self.others_def: dict = {}
+        self.others_resp: dict = {}
         self.others = self._other_opponents()
         self.match: dict = {"neutral": {}, "moves": {}, "routes": {}, "habits": {}, "intents": {},
                             "policy_sources": {}, "defense": {}, "responses": {}, "before": self.weights()}
@@ -75,6 +80,14 @@ class Experience:
             for k, e in (d.get("neutral") or {}).items():
                 s, n = out.get(k.split("|")[-1], (0.0, 0.0))
                 out[k.split("|")[-1]] = (s + e.get("sum", 0.0), n + e.get("n", 0))
+            # 0.23.0: the defence game's results and the opponents' answers, pooled the same way
+            for k, e in (d.get("defense") or {}).items():
+                s, n = self.others_def.get(k, (0.0, 0.0))
+                self.others_def[k] = (s + e.get("sum", 0.0), n + e.get("n", 0))
+            for sit, z in (d.get("responses") or {}).items():
+                acc = self.others_resp.setdefault(sit, {})
+                for kind, v in z.items():
+                    acc[kind] = acc.get(kind, 0.0) + float(v)
         return out
 
     # ---- what it has learned --------------------------------------------------------------------
@@ -107,13 +120,29 @@ class Experience:
         return math.exp(BETA * max(-1.5, min(1.5, v)))
 
     def defense_value(self, situation: str, option: str) -> tuple[float, float]:
-        """(sum, n) of what this defensive option scored in this situation against this opponent."""
+        """(sum, n) of what this defensive option scored in this situation against this opponent, plus (0.23.0) what it
+        scored against every other opponent, scaled to at most POOL_N tries: in ranked every match is a new human, and a
+        new opponent used to start from the payoff table alone."""
         e = self.d["defense"].get(f"{situation}|{option}") or {}
-        return e.get("sum", 0.0), e.get("n", 0)
+        s, n = e.get("sum", 0.0), e.get("n", 0)
+        ps, pn = self.others_def.get(f"{situation}|{option}", (0.0, 0.0))
+        if pn > 0:
+            w = min(1.0, POOL_N / pn)
+            s, n = s + ps * w, n + pn * w
+        return s, n
 
     def responses(self, situation: str) -> dict:
-        """What the opponent did after this kind of pressure moment: {throw, strike, shimmy, wait: count}."""
-        return dict(self.d["responses"].get(situation) or {})
+        """What the opponent did after this kind of pressure moment: {throw, strike, shimmy, wait: count}; 0.23.0: plus what
+        every other opponent did, scaled to at most POOL_N answers (a new opponent starts from how players at this rank
+        answered, not only the prior)."""
+        own = dict(self.d["responses"].get(situation) or {})
+        pool = self.others_resp.get(situation) or {}
+        tot = sum(pool.values())
+        if tot > 0:
+            w = min(1.0, POOL_N / tot)
+            for k, v in pool.items():
+                own[k] = round(own.get(k, 0.0) + v * w, 3)
+        return own
 
     def weights(self) -> dict:
         return {k: round(self.factor(*k.split("|")), 3) for k in self.d["neutral"]}
@@ -258,6 +287,27 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     if oa.get("used"):
         out.append(("learned", "Your answers I used: " + ", ".join(f"{k} {v}x" for k, v in oa["used"].items() if v)
                     + (f"; {oa['late']} came too late to time" if oa.get("late") else "") + "."))
+    tt = summary.get("throw_tech_after_connect") or {}
+    if tt.get("after_connect"):
+        out.append(("measured", f"Throws I teched after they had grabbed me (inside the window after the connect): "
+                                f"{tt['after_connect']} tries."))
+    rv = summary.get("reactive_reversal") or {}
+    if rv.get("moments"):
+        out.append(("measured", f"Reversals decided on the last frame: {rv['moments']} moments with one ready; the opponent "
+                                f"attacked into {rv.get('reversal', 0)} (reversal out), held back {rv.get('held', 0)} "
+                                "(no reversal into a shimmy or a block)."))
+    it_ = summary.get("interrupts") or {}
+    if it_.get("taken"):
+        out.append(("measured", f"Moves hit in their start-up (my button active first): {it_['taken']}"
+                                + (f"; {it_['lost']} lost to armor / invincibility (that move not tried again)"
+                                   if it_.get("lost") else "") + "."))
+    fb = summary.get("fireballs") or {}
+    if fb.get("thrown"):
+        out.append(("measured", f"{opp}'s projectiles: {fb['thrown']}. I jumped over onto the thrower "
+                                f"{fb.get('jump_punish', 0)}, went through with SA1 {fb.get('sa1', 0)}, parried "
+                                f"{fb.get('parry', 0)}, blocked {fb.get('block', 0)}, cancelled {fb.get('clash', 0)}, jumped "
+                                f"over {fb.get('jump_over', 0)}; walked in between them for {fb.get('walk_lines', 0) / 60:.1f} s"
+                                + (f"; busy with my own move {fb['busy']}x" if fb.get("busy") else "") + "."))
     bf = summary.get("burnout_fireballs") or {}
     if bf.get("fireballs"):
         out.append(("scripted", f"Fireballs while I was in burnout: {bf['fireballs']}; cancelled with my Hadoken "

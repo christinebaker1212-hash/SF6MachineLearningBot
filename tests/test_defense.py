@@ -103,9 +103,10 @@ def test_whiff_punish_only_in_reach_and_in_time_and_no_block_against_a_whiff():
     own = [{"name": "Standing Heavy Punch", "id": 608, "intent": "poke", "seq": "5+HP@3", "startup": 10, "damage": 800},
            {"name": "Crouching Medium Kick", "id": 640, "intent": "poke", "seq": "2+MK@3", "startup": 8, "damage": 500}]
     f = ScriptedFighter(FCFG, opp, seed=1, own=own, own_reach={608: 1.3, 640: 1.5}, opp_reach={640: 1.4})
-    # Ken's 2MK in its recovery (frame 14 of 30), it never touched the bot, at 1.4: 5HP reaches 1.3 -> 2MK
+    # Ken's 2MK in its recovery (frame 14 of 30), it never touched the bot, at 1.4: 5HP reaches 1.3 -> 2MK (0.23.0: the
+    # punish engine confirms it into a Shoryuken)
     d = f.decide(state(op={"x": 1.4, "action_id": 640, "action_frame": 14, "action_frames_total": 99}), 0.0, 0)
-    assert d.rule == "whiff_punish" and d.name == "Crouching Medium Kick" and f.whiff_stats["taken"] == 1
+    assert d.rule == "whiff_punish" and d.name in ("Crouching Medium Kick", "2MK > 623HP") and f.whiff_stats["taken"] == 1
     g = ScriptedFighter(FCFG, opp, seed=1, own=own, own_reach={608: 1.3, 640: 1.5}, opp_reach={640: 1.4})
     d = g.decide(state(op={"x": 1.4, "action_id": 640, "action_frame": 25, "action_frames_total": 99}), 0.0, 0)
     assert d.rule != "whiff_punish" and d.rule != "block"   # 5 frames left: too late; and no reason to block

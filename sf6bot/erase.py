@@ -11,8 +11,8 @@ from pathlib import Path
 TARGETS = {
     "runs": ("run reports, videos and logs", ["RUNS"]),
     "training": ("training data: recorded replays, merged replays, learned move ids, the trained networks (brain and "
-                 "win model) and their sample cache, measured move reach, combos found in recordings",
-                 ["replays", "merged", "move_maps", "models", "reach", "combos_mined"]),
+                 "win model) and their sample cache, measured move reach, combos found in recordings, move timing",
+                 ["replays", "merged", "move_maps", "models", "reach", "combos_mined", "move_timing"]),
     "fights": ("fight data: the bot's recorded matches, what it learned from them per opponent (incl. the command grab "
                "timings) and the ladder progress history", ["fights", "learning", "ladder", "grabs"]),
 }

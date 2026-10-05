@@ -229,13 +229,15 @@ def test_a_rushed_normal_is_four_frames_safer_and_not_punished():
     f = _fighter(opp_moves=dict(opp))
     _line(f, op={"x": 1.0, "action_id": 739}, timer=500)
     _line(f, op={"x": 1.0, "action_id": 605}, timer=501)
-    d = _line(f, me={"blockstun": 3, "action_id": 155}, op={"x": 1.0, "action_id": 605}, timer=510)
+    d = _line(f, me={"blockstun": 6, "action_id": 155}, op={"x": 1.0, "action_id": 605}, timer=510)
     assert f.op_move["rushed"] and f._block_adv(605) == -1
     assert d.rule != "punish" and f.rush_stats["punish_skipped"] == 1 and f.watch["sit"] == "after_rush_block"
     g = _fighter(opp_moves=dict(opp))                                     # the same move without a rush: punished
     _line(g, op={"x": 1.0, "action_id": 1}, timer=500)
     _line(g, op={"x": 1.0, "action_id": 605}, timer=501)
-    assert _line(g, me={"blockstun": 3, "action_id": 155}, op={"x": 1.0, "action_id": 605}, timer=510).rule == "punish"
+    # 0.23.0: the punish lands on exact frames: a -5 move leaves a 4-frame jab one frame to spare when its button is sent
+    # with the bot's first free frame `lead` (5) frames away
+    assert _line(g, me={"blockstun": 6, "action_id": 155}, op={"x": 1.0, "action_id": 605}, timer=510).rule == "punish"
 
 
 def test_after_blocking_a_rushed_normal_pressing_buttons_is_worth_less():
