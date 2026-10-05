@@ -269,6 +269,22 @@ splat id) in the fight summaries.
    active frame (start-up 5, Capcom) lands on the opponent's first standing frame (the measured 30-frame get-up). Check
    in the data whether the first standing frame is still throw-invulnerable (then one frame later).
 
+**Also chosen by the user for the next batch (2026-10-05, from a choice list; Critical Art was NOT picked):**
+5. **Batch scorecard** (build first): an automatic per-version report after each batch against the baseline: anti-air
+   hit rate, cross-up whiffs, jumps per minute, time cornered, damage ratio, throws taken, punish / whiff-punish rates.
+6. **Spacing vs pokes:** stay just outside the opponent's longest measured poke (reach.py) and whiff-punish it.
+   Ground normals were the largest share of damage taken in every batch (69% in 0.18.0).
+7. **Safe when near death:** when the opponent's best combo kills (the existing threat check), no jumps, no own Drive
+   Impacts, no unsafe moves; block / parry more.
+8. **Drive Reversal** from blockstun / wake-up (2 bars; never used, not catalogued yet: catalog it first).
+9. **Backup anti-air** when a DP is impossible (burnout, too far, too late): air-to-air or another normal, not only block.
+10. **Corner pressure:** throw / shimmy loops, meaties and combo-lab corner routes with the opponent cornered.
+11. **Drive Rush approach:** a rushed normal into a confirm or a throw as a mix-up from neutral.
+12. **Fireball play:** Hadokens from long range with an anti-air ready for jumps over them; none from punishable ranges.
+13. **Drive discipline:** count burnouts and their causes; keep a reserve unless the spend wins the round.
+14. **Round timer / life lead:** play safe late in a round when ahead on health (the round clock is not used yet).
+15. **Find the Perfect Parry id:** a short Training Mode test (dummy throwing fireballs, the bot parrying).
+
 **0.18.12:** match boundaries after rematches (a joined match's round no longer counts for the next one;
 results and recordings were shifted by a round in the user's second run, one false win). CLAUDE.md "0.18.12".
 
