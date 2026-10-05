@@ -3412,6 +3412,56 @@ nothing here is verified in game.
   (the real OCR output is not seen yet).
 - Not yet measured: the session's record, scorecard, `composer` / `errors` counters. Waiting for S and the fight files.
 
+## 0.24.x ranked run analysed (user, 2026-10-05): 61 recordings, 41-15 — the user's list checked
+MEASURED on the uploaded fights (0.24.1-0.24.4; 5 unfinished); opponents' moves named by a move map built from all 181
+ranked recordings + Capcom data. Analysis scripts were in the session scratchpad (not kept). Nothing built yet.
+| | 0.22.5 | 0.24.3 | 0.24.4 |
+|---|---|---|---|
+| record / win % | 10-26 / 28% | 24-9 / 73% | 13-6 / 68% |
+| damage dealt / taken | 0.84 | 1.35 | 1.20 |
+| openings a minute (mine / theirs) | 6.3 / 9.7 | 7.6 / 8.5 | 6.7 / 8.1 |
+| damage per opening (mine / theirs) | | 1397 / 921 | 1497 / 1036 |
+| thrown / match | 3.3 | 4.1 | 4.2 |
+| back to the wall % | 26 | 9 | 7 |
+- Against projectile-heavy opponents (> 8 projectiles a minute: Akuma x6, JP, Sagat, a fireball Ryu, Ken x3) **5-8**; against
+  everyone else **36-7**. Against zoners the bot is > 3.0 apart 32% of the time (12% otherwise) and walks back as much as
+  forward (10% / 11% of frames).
+- **Correction (user: "DIs were extremely successful"):** my first count said DI-backs lost 42 of 45; wrong measure (the
+  bot's DI armor absorbing the opponent's DI takes recoverable damage before the bot's DI lands). By the opponent's crumple:
+  39 of 45 DI-backs won. Armor damage is excluded from the counts below.
+- **Hits on the bot (671 openings, combos and armor excluded): 55% of the first-hit damage landed while the bot was in its
+  own move.** By own move: back throw 716 (66: 38 in its start-up = stuffed by a strike, 28 after = whiffed and punished),
+  2MK (44), 5HP (43, 32 in its start-up), 2LP (21), Whirlwind Kick (15), SA1 (15, after it was blocked / whiffed).
+- **Back throws (user: "almost always throws backwards"):** 171 back throws vs 87 forward. 148 back throws came with no
+  throw to tech: they are the defence options `tech` / `delay_tech` (`4+LP+LK`), which become a Somersault Throw when the
+  opponent did not throw. Landed throws with the opponent's back < 3.0 from its wall: 11 forward, 1 backward (not measured as
+  frequent; the back throws are the tech options).
+- **2LP against jump-ins = an input-order bug (MEASURED):** `Controller.apply` sends the keys pressed together in
+  alphabetical order, so 'HP' / 'LP' / 'MP' go before 'RIGHT'; the game sometimes reads the button a frame before forward:
+  the Shoryuken's final 3+P becomes 2+P (2LP 622 / 2HP). The split showed 39 times with the opponent on the right and 2 on
+  the left ('LEFT' sorts before 'LP'). Of 184 jump-ins landing within 1.6 the bot was free for 144: Shoryuken 21 (9 hit),
+  2LP 13 (9 times the bot was then hit), nothing / movement 88 (41 blocked, 25 hit), another normal 20 (12 hit).
+- **Wake-up supers:** 15 opponent supers started from a get-up; 7 hit the bot, all during its meaty 2MK (oki option).
+- **Raging Demon** (Akuma's CA Shun Goku Satsu, throw, needs <= 25% hp): 2-3 in the run, each landed (one on a Drive Parry).
+- **Akuma's charged Gou Hadoken** (ids 906 / 908 / 909 after the 903 / 904 hold): unnamed in the move map (hold-and-release
+  inputs are not matched), but `move_timing` knows them as projectiles (908: ~9.6 frames a unit). ~35 openings in 6
+  matches; traces show the bot walking forward into a charging Akuma and letting go of back 2 frames before the hit.
+- **Guard dropped during a move it had been blocking:** 94 openings (E. Honda 919, JP Triglav, Manon, Sagat Tiger Shots ...).
+- **Cross-ups on the ground:** 17 openings with the bot holding the old side or blocking during a switch. Facing is set every
+  line between decisions, but not while a held sequence (block / delay tech) runs.
+- **Overheads:** only ~4 openings by moves Capcom lists as overheads (unnamed ids not counted).
+- **Low pokes:** the 2MKs that hit the bot started 1.33-2.1 apart (p10-p90), almost all while the bot was in its own move
+  (back throw 13, 2MK 11, 5HP 9); rushed 2MKs were rare as openers.
+- **Punishes of blocked moves (-4 or worse, named, not projectiles):** -7 or worse within 2.0: 35 of 39 punished (0.22.5:
+  8 of 30 blocked windows); -4..-6 within 2.0: 36 of 170; beyond 2.0: 7 of 76 (Zangief / Ryu sweeps, H Tatsu).
+- **User's move rules:** Ingrid's forward teleport is Capcom's "Vanishing Sun (Forward)" (start-up 36, invincible 13-27,
+  airborne 21-46): the 0.18.6 rule matches `teleport|warp` and never applied. Ken's H Dragonlash Kick (start-up 28,
+  airborne 19-37, max height ~0.76): 13 within 3.0, 10 hit the bot with no answer, 3 Shoryukens all won; the airborne-move
+  anti-air needs height > 0.4, too late. L Jinrai: 18, 13 hit the bot with no answer.
+- **5HP > OD High Blade > 4HK > Shoryuken > SA3 stops at 4HK:** after OD High Blade the Axe Kick connected once (or not)
+  every time; the route cancels on its 2nd hit (`combo_rules.yaml: cancel_hit`, user rule 0.12.4), which never comes there.
+- **SA1 vs projectiles (0.23.0 "SA1 through it", an assumption):** 5 tries, all whiffed and 5 punished.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

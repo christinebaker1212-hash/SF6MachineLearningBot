@@ -15,9 +15,13 @@ the project stands, how to work with the user, and what to do next.
 Versus Human → Ranked, human-like inputs on) and said "I'll send the results after". No code work is in progress;
 the working tree is clean and pushed (d7c26c8).
 
-**Latest result (user screenshot, 2026-10-05):** the bot reached **Diamond, 19,053 LP**, winning 2-0 against a Diamond
-Zangief ("The newest updates were a resounding success"). Up from Platinum 2 / 14,340 LP after the 0.22.5 run. The
-session's full numbers (S + fight files) have not arrived yet.
+**Latest result (2026-10-05):** the bot reached **Diamond (19,053 LP)**. The run's 61 recordings: **41-15** (0.24.3 73%,
+0.24.4 68%), 36-7 against non-zoners, 5-8 against projectile-heavy opponents. The user's 17 observations were measured
+(CLAUDE.md "0.24.x ranked run analysed"); findings reported, **nothing built yet: waiting for the user's pick**. Top
+findings: Shoryuken motions read as 2LP / 2HP (key order in `Controller.apply`, opponent on the right); back throws from
+the `tech` / `delay_tech` options (4+LP+LK) stuffed or shimmied; 55% of the damage taken lands during the bot's own move;
+zoners; Ingrid's override never matched ("Vanishing Sun (Forward)"); Dragonlash needs a Shoryuken from its start-up.
+DI-backs work (39 of 45 crumples; my first count was wrong).
 
 **What this segment built (all MOCK / replay-tested, none verified in game yet):**
 | version | what | what to look for in the results |
