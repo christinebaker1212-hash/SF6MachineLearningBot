@@ -77,11 +77,15 @@ result_menu:
 # (read from the screen: screen_text.py). Then: F (OK), F (Ranked Match), Esc (back: searching again). User, 2026-10-04.
 menu_watch:
   enabled: true
-  every_s: 2.0
-  error_phrase: "A communication error has occurred"
-  steps: [["F", 0.0], ["F", 1.5], ["ESC", 1.5]]   # key, seconds to wait before it
-  cooldown_s: 5
-  max_tries: 6        # in a row without a battle in between (user: up to 3 errors before it works); then it waits and logs
+  every_s: 1.0        # screen reads while no fight is running (menus, loading, a frozen / disconnected battle)
+  # 0.22.5 (user): each box SF6 shows is cleared as it appears (checked in this order):
+  #   "A matchmaking error has occurred" (red box) -> F, then Esc (the ranked search restarts)
+  #   "A communication error has occurred" (Caution + error code; one or two boxes) -> F
+  rules:
+    - {what: matchmaking error, phrase: "A matchmaking error has occurred", steps: [["F", 0.0], ["ESC", 1.0]]}
+    - {what: communication error, phrase: "A communication error has occurred", steps: [["F", 0.0]]}
+  cooldown_s: 1.5     # read again this soon after a press: the next box (or the screen behind) is there by then
+  max_tries: 12       # in a row without a fight in between; then it waits and logs
 # 0.20.1: LP / MR / rank read from the screen in ranked (VS screen, result screen, Fighting Ground; never in a fight):
 # progress.md "LP and MR". Needs the same screen reading as menu_watch.
 ladder_read:

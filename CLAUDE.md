@@ -3043,6 +3043,26 @@ Otherwise, it will just die from chip damage." All MOCK / unit-tested; not verif
   projectiles differ; their own times are learned in the match.
 - `fight_summary.burnout_fireballs` {fireballs, clash, jump_fwd, jump_neutral, blocked} and a thoughts line.
 
+## 0.22.5: SF6's error boxes cleared as they appear (user, 2026-10-05)
+- User: "a pop-up that says, caution, a communication error has occurred. Then ... an error code ... If the bot doesn't know
+  to press F at this moment, this notice will never clear. Then, sometimes, another box will pop up saying a communication
+  error has occurred, and the bot must press F again ... sometimes one, and ... sometimes two. If it's two, a red box will
+  say a matchmaking error has occurred, canceling matchmaking. If that has happened, the bot needs to press F and then
+  escape. And then that will restart the ranked match search."
+- What was wrong (0.18.8 / 0.18.9 `MenuWatch`): it read the screen only while the game reported NO battle, so a box that
+  came up while a match was loading (the game reports a battle, players not ready) or over a battle frozen by a
+  disconnect was never read; and any communication error got the fixed F, F, Esc.
+- Now (`result_menu.MenuWatch`, `configs/default.yaml: menu_watch.rules`), read every 1 s whenever no fight is running
+  (no battle, loading, or a battle whose clock has not moved for 2.5 s; also after 2 s without any game state), each box
+  is cleared with its own keys, then read again 1.5 s later:
+  - "A matchmaking error has occurred" (checked first) -> F, then Esc (the ranked search restarts)
+  - "A communication error has occurred" -> F (one box or two: each read clears what is there)
+  - at most 12 in a row without a fight in between, then it waits and logs. Logged in `fight_status.json:
+    communication_errors` (what, keys, the screen text) and the status log.
+- Tests: the user's sequences (one box; two boxes + the matchmaking box), the matchmaking box first when both texts read,
+  never during a fight; a MOCK ranked session where the boxes appear while the match loads. The OCR of these boxes
+  (wording, the red box) is not verified in game: the screen text of each press is logged to check it.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

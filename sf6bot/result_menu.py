@@ -87,30 +87,47 @@ class ResultMenu:
         return why
 
 
-MENU_DEFAULTS = {"enabled": True, "every_s": 2.0, "error_phrase": "A communication error has occurred",
-                 "steps": [["F", 0.0], ["F", 1.5], ["ESC", 1.5]], "cooldown_s": 5.0, "max_tries": 6}
+# 0.22.5 (user, 2026-10-05): what SF6 shows and what clears it, checked in this order on every read:
+#   - "A matchmaking error has occurred" (red box, canceling matchmaking) -> F, then Esc: the ranked search starts again
+#   - "A communication error has occurred" ("Caution", an error code; sometimes one box, sometimes two) -> F
+MENU_RULES = [
+    {"what": "matchmaking error", "phrase": "A matchmaking error has occurred", "steps": [["F", 0.0], ["ESC", 1.0]]},
+    {"what": "communication error", "phrase": "A communication error has occurred", "steps": [["F", 0.0]]},
+]
+MENU_DEFAULTS = {"enabled": True, "every_s": 1.0, "rules": MENU_RULES, "cooldown_s": 1.5, "max_tries": 12}
 
 
 class MenuWatch:
-    """0.18.8 (user, 2026-10-04): outside a battle the bot presses nothing, except when SF6 shows "A communication error
-    has occurred." Then: F (OK), F (Ranked Match), Esc (back to Fighting Ground, searching again), repeated while the error
-    keeps coming back (user: it can take up to three errors before Ranked Match + Esc works), `cooldown_s` apart, at most
-    `max_tries` in a row (then it waits for a battle and logs it). Read from the screen (screen_text.py): the game state
-    shows no difference."""
+    """0.18.8 / 0.22.5: the bot presses nothing outside a fight except to clear SF6's error boxes, read from the screen
+    (screen_text.py; the game state shows no difference). User, 2026-10-05: "a pop-up that says, caution, a communication
+    error has occurred ... an error code ... If the bot doesn't know to press F at this moment, this notice will never
+    clear. Then, sometimes, another box will pop up saying a communication error has occurred, and the bot must press F
+    again ... sometimes one, and ... sometimes two. If it's two, a red box will say a matchmaking error has occurred,
+    canceling matchmaking. If that has happened, the bot needs to press F and then escape. And then that will restart the
+    ranked match search."
+    Each read clears what is on screen NOW (the matchmaking error first: it may sit over a communication error's text),
+    then reads again `cooldown_s` later, so one box, two boxes and the red box all clear in turn. At most `max_tries` in a
+    row without a fight in between (then it waits and logs). 0.18.8 pressed F, F, Esc for any communication error, and
+    read only while the game reported no battle: a box shown while a match was loading (or after a disconnect froze the
+    battle) was never read."""
 
     def __init__(self, cfg: dict | None = None):
-        self.c = {**MENU_DEFAULTS, **(cfg or {})}
+        c = {**MENU_DEFAULTS, **(cfg or {})}
+        c.pop("error_phrase", None)
+        c.pop("steps", None)                               # 0.18.8 keys: the rules replace them
+        self.c = c
         self.next_read = 0.0
         self.last_fix = None
         self.tries = 0
         self.log: list[dict] = []
 
-    def tick(self, now: float, in_battle: bool, can_press: bool, read_text) -> list | None:
-        """Call on state lines. `read_text()` -> the screen's text or None. Returns the key steps to perform, or None."""
+    def tick(self, now: float, fighting: bool, can_press: bool, read_text) -> list | None:
+        """Call on state lines. `fighting` = a fight is running (the game state moving in a battle): nothing is read or
+        pressed. `read_text()` -> the screen's text or None. Returns the key steps to perform, or None."""
         if not self.c.get("enabled", True):
             return None
-        if in_battle:
-            self.tries = 0                              # a battle: the search worked
+        if fighting:
+            self.tries = 0                              # a fight: the search worked
             return None
         if now < self.next_read or not can_press:
             return None
@@ -123,9 +140,11 @@ class MenuWatch:
         if not text:
             return None
         from .screen_text import contains
-        if not contains(text, self.c["error_phrase"]):
+        rule = next((r for r in self.c["rules"] if contains(text, r["phrase"])), None)
+        if rule is None:
             return None
         self.tries += 1
         self.last_fix = now
-        self.log.append({"try": self.tries, "text": " ".join(text.split())[:160]})
-        return [tuple(s) for s in self.c["steps"]]
+        self.log.append({"try": self.tries, "what": rule["what"], "keys": [k for k, _ in rule["steps"]],
+                         "text": " ".join(text.split())[:160]})
+        return [tuple(s) for s in rule["steps"]]

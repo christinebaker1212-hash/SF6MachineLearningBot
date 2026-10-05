@@ -2572,6 +2572,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                      source="scripted")
         if eng_:
             screen_reader = lambda: screen_text.read_game_screen(cfg)          # noqa: E731
+    if screen_reader is None and mwatch is not None and getattr(sess, "screen_text", None) is not None:
+        screen_reader = sess.screen_text            # tests: a scripted screen
     # 0.20.1 (user): LP / MR / rank read from the screen (VS screen, result screen, Fighting Ground), never in a fight
     ladder = None
     if versus == "ranked" and screen_reader is not None and (cfg.get("ladder_read") or {}).get("enabled", True):
@@ -2756,6 +2758,29 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             except OSError:
                 pass
 
+    clock_seen = {"timer": None, "moved": 0.0}
+
+    def menu_check(fighting: bool) -> None:
+        """SF6's error boxes (communication / matchmaking error), read from the screen whenever no fight is running
+        (result_menu.MenuWatch): each box is cleared with its own keys."""
+        if mwatch is None or (screen_reader is None and not sess.mock):
+            return
+        steps_ = mwatch.tick(clock.now(), fighting, c.armed, screen_reader or (lambda: None))
+        if not steps_:
+            return
+        for key_, wait_ in steps_:
+            clock.precise_sleep_until(clock.now() + float(wait_))
+            c.backend.send([(key_, True)])
+            clock.precise_sleep_until(clock.now() + 0.06)
+            c.backend.send([(key_, False)])
+        what_ = mwatch.log[-1].get("what", "error")
+        keys_ = ", ".join(k for k, _ in steps_)
+        wait["log"].append({"t": round(clock.now() - t_start, 1), "status": f"{what_} on screen: pressed {keys_}",
+                            **mwatch.log[-1]})
+        print(f"[menu] {what_} on screen (try {mwatch.tries}): pressed {keys_}")
+        sess.narrate(f"{what_.capitalize()}: pressed {keys_}" + (" (searching again)." if "ESC" in keys_ else "."),
+                     source="scripted")
+
     def finish_match() -> None:
         nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0, learner
         data, cur["data"] = cur["data"], DatasetBuilder(need_match_start=True)
@@ -2922,6 +2947,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     if match_end_t is not None and clock.now() - match_end_t > 3.0:
                         batch = []          # no more lines after the match: close it anyway
                     else:
+                        if clock.now() - wait["last_line"] > 2.0:
+                            menu_check(False)      # no game state at all: an error box may be up
                         if clock.now() - wait["last_line"] > 5.0:
                             status("no game state from SF6 for 5 s+" + (
                                    ": in an online match the official REFramework switches Lua off; the research "
@@ -3073,20 +3100,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             st = batch[-1]
             t = st.t_recv
             p1d, p2d = st.raw.get("p1") or {}, st.raw.get("p2") or {}
-            if mwatch is not None and (screen_reader is not None or sess.mock):
-                steps_ = mwatch.tick(clock.now(), bool(st.in_battle), c.armed, screen_reader or (lambda: None))
-                if steps_:
-                    for key_, wait_ in steps_:
-                        clock.precise_sleep_until(clock.now() + float(wait_))
-                        c.backend.send([(key_, True)])
-                        clock.precise_sleep_until(clock.now() + 0.06)
-                        c.backend.send([(key_, False)])
-                    entry_ = {"t": round(clock.now() - t_start, 1), "status": "communication error: pressed "
-                              + ", ".join(k for k, _ in steps_), **mwatch.log[-1]}
-                    wait["log"].append(entry_)
-                    print(f"[menu] communication error on screen (try {mwatch.tries}): pressed "
-                          + ", ".join(k for k, _ in steps_))
-                    sess.narrate("Communication error: OK, Ranked Match, back (searching again).", source="scripted")
+            tmr_ = st.raw.get("stage_timer")
+            if tmr_ != clock_seen["timer"]:
+                clock_seen.update(timer=tmr_, moved=clock.now())
+            # 0.22.5: a fight is running only while the battle's clock moves; menus, loading and a battle frozen by a
+            # disconnect are where SF6's error boxes appear
+            menu_check(bool(st.in_battle) and bool(st.ready) and clock.now() - clock_seen["moved"] < 2.5)
             if ladder is not None:
                 phase_ = ("menu" if not st.in_battle else
                           "result" if (match_end_t is not None or (rmenu is not None and rmenu.t_end is not None)) else

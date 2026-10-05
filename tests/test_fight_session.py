@@ -182,3 +182,47 @@ def test_ranked_confirms_the_result_screen_and_never_presses_in_menus(cfg, tmp_p
          [(tg, round(t0 - timeline[0][0], 3)) for t0, tg in timeline])
     assert sum(tag_at(e[0]) == "match" for e in f_downs) <= 2
     assert any(x["status"].startswith("pressed F") for x in status["status_log"])
+
+
+def test_ranked_clears_an_error_box_shown_while_a_match_is_loading(cfg, tmp_path, monkeypatch):
+    """0.22.5 (user): a communication error can come up while the match loads (the game reports a battle, players not
+    ready); 0.18.8 read the screen only when the game reported no battle, so the box never cleared. Now: F, and the
+    matchmaking error after it: F + Esc. Nothing is pressed while the fight runs."""
+    import sf6bot.session as sm
+    from sf6bot.input_backend import MockInputBackend
+    from tests.test_learning import _datasets, _ryu_catalog
+    ds = _datasets(tmp_path)
+    _ryu_catalog(ds)
+    loading = [{"in_battle": True, "ready": False, "stage_timer": 0, "round": 0, "_tag": "loading", "_pause": 0.01}] * 400
+    fight = [dict(r, _tag="fight") for r in _rows("fight_2026-10-02_cpu4_ken.jsonl.gz")]
+    lines = loading + fight + [{"in_battle": False, "ready": False, "_tag": "menu"}] * 100
+    readers = []
+
+    def open_reader(c, on_state=None):
+        readers.append(_Reader(on_state, lines, 0.00025).start())
+        return readers[-1]
+    monkeypatch.setattr(fi, "open_state_reader", open_reader)
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    cfg["datasets"] = {"root": str(ds)}
+    cfg["fighter"] = {"config_dir": str(Path(__file__).parent.parent / "configs" / "fighter")}
+    cfg["menu_watch"] = {"every_s": 0.2, "cooldown_s": 0.3}
+    cfg["ladder_read"] = {"enabled": False}
+    boxes = iter(["Caution A communication error has occurred. Error code: 50709-10005",
+                  "A communication error has occurred.",
+                  "A matchmaking error has occurred. Canceling matchmaking."])
+
+    def screen():
+        st = readers[0].latest() if readers else None
+        if st is None or st.raw.get("_tag") != "loading":
+            return "Ranked Match Searching for opponent..."
+        return next(boxes, "Ranked Match Searching for opponent...")
+    with Session(cfg, "error_box_test", mock=True) as s:
+        s.screen_text = screen
+        fi.run_fight(s, cfg, 30.0, player=0, matches=1, versus="ranked")
+        status = json.loads((s.recorder.dir / "fight_status.json").read_text())
+    errs = status["communication_errors"]
+    assert [e["what"] for e in errs] == ["communication error", "communication error", "matchmaking error"]
+    assert [e["keys"] for e in errs] == [["F"], ["F"], ["F", "ESC"]]
+    esc = [e for e in inp.log if e[1] == "ESC" and e[2]]
+    assert len(esc) == 1

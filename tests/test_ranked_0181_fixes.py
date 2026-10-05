@@ -353,30 +353,47 @@ def test_a_rematch_stops_the_result_screen_presses():
     assert m3.tick(9.0, True, True, True, True, 2, 2700) is None
 
 
-def test_a_communication_error_on_fighting_ground_is_cleared_and_nothing_else_is_pressed():
+def test_error_boxes_are_cleared_as_they_appear_and_nothing_else_is_pressed():
+    """0.22.5 (user): "caution, a communication error has occurred ... an error code" -> F; sometimes a second one -> F
+    again; after two, the red "a matchmaking error has occurred, canceling matchmaking" -> F then Esc (the search
+    restarts). Boxes are read whenever no fight is running, including while the game still reports a battle."""
     from sf6bot.result_menu import MenuWatch
     from sf6bot.screen_text import contains
     # OCR text as Windows might read the user's photo (slips included)
     err = "FIGHTING GROUND Caution A communication error has occurred. Error code: 50709-10005 R3152-AAA-AAEA:B1E OK"
+    mm = "FIGHTING GROUND A matchmaking error has occurred. Canceling matchmaking. OK"
     assert contains(err, "A communication error has occurred")
     assert contains("A cornmunication error has occurred", "A communication error has occurred")   # one OCR slip
     assert not contains("FIGHTING GROUND Ranked Match Casual Match Searching for opponent... F Confirm Esc Back",
                         "A communication error has occurred")
-    w = MenuWatch({"every_s": 2.0, "cooldown_s": 20, "max_tries": 3})    # (defaults: 5 s apart, 6 tries)
+    w = MenuWatch()
     searching = "FIGHTING GROUND ARCADE PRACTICE VERSUS ONLINE Ranked Match Searching for opponent..."
-    assert all(w.tick(t, False, True, lambda: searching) is None for t in range(0, 60))      # normal search: nothing
-    steps = w.tick(60.0, False, True, lambda: err)
-    assert steps == [("F", 0.0), ("F", 1.5), ("ESC", 1.5)] and w.log[-1]["try"] == 1
-    assert w.tick(70.0, False, True, lambda: err) is None                                  # cooldown
-    assert w.tick(81.0, False, True, lambda: err) is not None
-    assert w.tick(102.0, False, True, lambda: err) is not None
-    assert w.tick(125.0, False, True, lambda: err) is None                                 # 3 tries: stop and log
-    assert w.tick(130.0, True, True, lambda: err) is None and w.tries == 0                  # a battle: reset
-    d = MenuWatch()                                                                         # the error comes back 3 times
-    tries = [t for t in range(0, 40, 2) if d.tick(float(t), False, True, lambda: err)]
-    assert tries == [0, 6, 12, 18, 24, 30] and d.tick(40.0, False, True, lambda: err) is None
-    assert MenuWatch().tick(0.0, False, False, lambda: err) is None                         # SF6 not focused
-    assert MenuWatch().tick(0.0, True, True, lambda: err) is None                           # never in a battle
+    assert all(w.tick(float(t), False, True, lambda: searching) is None for t in range(0, 30))  # normal search: nothing
+    # two communication errors, then the matchmaking error, then the search again
+    screens = iter([err, err, mm, searching, searching])
+    presses = []
+    t = 30.0
+    for _ in range(12):
+        steps = w.tick(t, False, True, lambda: next(screens, searching))
+        if steps:
+            presses.append([k for k, _ in steps])
+        t += 1.0
+    assert presses == [["F"], ["F"], ["F", "ESC"]]
+    assert [e["what"] for e in w.log] == ["communication error", "communication error", "matchmaking error"]
+    # one box only: one F, nothing more
+    one = MenuWatch()
+    screens1 = iter([err, searching, searching, searching])
+    got = [one.tick(float(t), False, True, lambda: next(screens1, searching)) for t in range(0, 8)]
+    assert [g for g in got if g] == [[("F", 0.0)]]
+    # the matchmaking box is checked first even if the old box's text is still read with it
+    assert MenuWatch().tick(0.0, False, True, lambda: err + " " + mm) == [("F", 0.0), ("ESC", 1.0)]
+    assert MenuWatch().tick(0.0, False, False, lambda: err) is None                          # SF6 not focused
+    assert MenuWatch().tick(0.0, True, True, lambda: err) is None                            # never during a fight
+    cap = MenuWatch({"max_tries": 3, "cooldown_s": 0})
+    assert sum(1 for t in range(10) if cap.tick(float(t), False, True, lambda: err)) == 3       # then it waits and logs
+    assert cap.tick(20.0, True, True, lambda: err) is None and cap.tries == 0                 # a fight: reset
+    # a 0.18.8 local config with the old keys still loads
+    assert MenuWatch({"error_phrase": "x", "steps": [["F", 0]]}).tick(0.0, False, True, lambda: mm)
 
 
 # ---- 0.18.11: the bot checks its side from its own presses ---------------------------------------------------------------
