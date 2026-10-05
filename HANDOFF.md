@@ -241,17 +241,23 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.19.0 (latest):** the to-do list built from the 22 ranked matches: fewer jumps, less retreating into the corner,
+**0.19.0:** the to-do list built from the 22 ranked matches: fewer jumps, less retreating into the corner,
 Drive Impact at the wall, throws on close parries, a later anti-air decision when the opponent is overhead, anti-air on
 airborne moves, SA3 on long whiffs. Not done: perfect parry (its id is unknown), opponent LP / MR (planned). CLAUDE.md "0.19.0".
 Next ranked session: check the new thoughts lines and `anti_air`, `parry_throws`, `di_wall` (with `after_ids`: the wall
 splat id) in the fight summaries.
 
-**0.19.1 (latest):** the 0.19.0 batch (34 matches, 10-24) analysed: reversal timing (stun + hitstop), the Hadoken ->
+**0.19.1:** the 0.19.0 batch (34 matches, 10-24) analysed: reversal timing (stun + hitstop), the Hadoken ->
 Shoryuken motion bug, neutral fireballs only from 3.5+, honest anti-air counts (CLAUDE.md "0.19.0 session"). The saved
 list below is the next build (the user sent the batch it was waiting for).
 
-**Saved for the next batch of fights (user, 2026-10-05): build these with that data.**
+**0.20.0 (latest): the saved list below is BUILT** (CLAUDE.md "0.20.0"; all MOCK / replay-tested). Next ranked batch:
+read the scorecard at the top of S (0.20.0 vs 0.19.x), the new thoughts lines (DI rules, throws held, safe mode,
+burnouts, corner pressure, Drive Rushes in, step-in whiff punishes, air-to-air) and the route traces. Ask the user to
+run C -> 7 (dummy perfect parries everything) once: it finds the Perfect Parry id. Drive Reversal / corner / rush
+payoffs are estimates: watch `defense` option counts and their measured results per opponent.
+
+**Saved for the next batch of fights (user, 2026-10-05) — built in 0.20.0:**
 1. **True whiff punishes from the move and the distance.** The bot knows which move the opponent whiffed (catalog / move
    map / live names) and how far away it is: punish every whiff whose remaining recovery allows it, with the best own
    move that reaches from that distance (a longer poke, a step forward first, Drive Rush, Drive Impact, a projectile or

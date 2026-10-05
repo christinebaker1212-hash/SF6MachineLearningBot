@@ -116,7 +116,8 @@ def test_defence_timing_includes_the_hitstop():
 
     def first_wait(hitstop):
         f = _fighter()
-        d = f.decide(state(me={"blockstun": 6, "hitstop": hitstop, "action_id": 160, "super": 0},
+        # drive 1.5 bars: no Drive Reversal (0.20.0), which is input 8 frames before the stun ends on purpose
+        d = f.decide(state(me={"blockstun": 6, "hitstop": hitstop, "action_id": 160, "super": 0, "drive": 15000},
                            op={"x": 0.9, "action_id": 600}, timer=500), 0.0, 0)
         assert (d.rule or "").startswith("defense"), d
         n = 0

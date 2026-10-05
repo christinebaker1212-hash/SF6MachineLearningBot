@@ -65,7 +65,8 @@ ACTIONS: list[Action] = [
     Action("catalog", "train", "Move catalog", "Training Mode, bot = P1, dummy standing.",
            [Option("guard", "Dummy guard", choices=[("None", "none"), ("All", "all"), ("Both (asks)", "both"),
                                                     ("Re-test some", "some"), ("Counter hit", "counter_hit"),
-                                                    ("Punish counter", "punish_counter")], default="none"),
+                                                    ("Punish counter", "punish_counter"),
+                                                    ("Perfect parry ids", "parry")], default="none"),
             Option("moves", "Moves", kind="text", default="", hint="re-test: names, comma separated")], menu="C"),
     # ---- COMBOS ------------------------------------------------------------------------------------------
     Action("combo_lab", "combos", "Combo lab",

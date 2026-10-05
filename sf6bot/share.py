@@ -31,10 +31,14 @@ def compact_fights(text: str) -> str:
                                 "routes_stopped": m.get("routes_stopped"), "interrupted": m.get("interrupted"),
                                 "top_decisions": dict(sorted((m.get("decisions") or {}).items(),
                                                              key=lambda kv: -kv[1])[:8])}, default=str))
+    # 0.20.0: the last matches' stopped combos step by step (route executor traces)
+    for i, m in list(enumerate(ms, 1))[-3:]:
+        for line in (m.get("route_traces") or [])[-5:]:
+            rows.append(f"  match {i} combo trace: {line}")
     return "\n".join(rows)
 
 
-def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) -> Path:
+def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False, ds_root: str | Path | None = None) -> Path:
     root = Path(root)
     runs = sorted([d for d in root.iterdir() if d.is_dir() and (d / "meta.json").exists()
                    and (include_mock or not d.name.endswith("_MOCK"))], key=lambda d: d.name)[-last:]
@@ -46,6 +50,12 @@ def build(root: str | Path = "runs", last: int = 6, include_mock: bool = False) 
     si = root / "sysinfo.txt"
     if si.exists():
         out += ["", "--- sysinfo ---", si.read_text(encoding="utf-8", errors="replace").strip()]
+    if ds_root is not None and (Path(ds_root) / "fights").exists():
+        try:                                     # 0.20.0: the per-version scorecard first
+            from .scorecard import write as _score
+            out += ["", _score(Path(ds_root))]
+        except Exception as e:                   # noqa: BLE001 - a report, never stops S
+            out += ["", f"(scorecard not built: {e})"]
     for d in runs:
         out += ["", f"##### RUN {d.name} #####"]
         for name in ("report.md", "acceptance_checklist.md", "exporter_info.json", "reframework_status.json", "watch_summary.json", "input_map.json", "dataset_meta.json", "catalog_result.json", "fight_summary.json", "fight_status.json", "combo_lab.md", "brain_report.md", "win_report.md", "progress.md", "thoughts.md"):

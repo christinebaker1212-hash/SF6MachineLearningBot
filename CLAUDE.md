@@ -2587,6 +2587,58 @@ Scorecard against 0.18.10's 22 correctly-sided matches (same measurement code; M
 - Not yet explained: hit-confirmed routes "2MK > 236MK" stopped as "not_out" while M High Blade Kick (1027) did come
   out in the recordings (route executor traces needed, not in the fights zip).
 
+## 0.20.0: the saved list (user, 2026-10-05: "build the saved list", one push)
+All MOCK / replay-tested (`tests/test_0200.py`; `decide()` replayed over the 24 ranked recordings of 0.18.10 with the
+Ryu catalog and the measured reach); nothing here is verified in game. Numbers marked ESTIMATE are config values.
+- **Scorecard** (`sf6bot/scorecard.py`, `sf6bot scorecard`, first in S): the same measurements for every bot version
+  from datasets/fights (record, damage ratio, jumps / min, time cornered, blockstun, throws, openings and damage by
+  opener, jump-ins met by a Shoryuken / that hit the bot, Shoryukens whiffed in neutral, Shoryuken inputs lost,
+  Hadokens and from where). Wrong-side and joined-late files are left out; per-file results cached. It reproduces the
+  0.18.10 vs 0.19.0 table. Failed hit-confirmed routes in matches keep a step-by-step trace (`route_traces`, S shows
+  the last 3 matches'), to explain "2MK > 236MK: not_out".
+- **Drive Impact rules (user):** DI-back always, unless losing the exchange would kill (the DI's hit 1000 + the
+  opponent's best follow-up with its meter, assess.threat, else 2000: ESTIMATES) -> block. No own Drive Impact (wall DI,
+  DI punish, neutral) while the opponent has a Super bar (`di_rules.opp_super_min`). In burnout with the wall <= 1.5
+  behind, the opponent's Drive Impact gets a Super Art (SA1 first). DI-back may spend into burnout (`reserve=0`).
+- **Meaty throws wait for the opponent to stand (user):** MEASURED 0.19.0: 12 throws started 13-20 frames before the
+  opponent stood; none landed. A throw (LP+LK) is held while the opponent is in a block / hit reaction, knockdown or
+  get-up (ids 150-399) unless its active frame reaches the measured 30-frame get-up's end. Throw techs and the defence
+  game's options are not held. `throws_held`.
+- **Safe mode** (`fighter._safe_mode`): "near death" (the opponent's best damage with its meter kills) or "protecting a
+  lead" (<= 20 s left of 99, ahead by 1000+). No jumps, Drive Impact or Drive Rush in neutral, fewer unsafe pokes, more
+  blocking / crouching (`neutral_policy.SAFE_FACTOR`); no wall DI or air-to-air. Seconds per mode in `safe_mode_s`.
+- **Drive discipline:** optional spends keep a bar (`drive_reserve` 10000; DI-back exempt). Every Drive loss is
+  attributed (parry / DI / Drive Rush / blocking / being hit / OD move) and each burnout gets its main drain over the 4 s
+  before (`drive`).
+- **Whiff punishes from the move and the distance (user):** out of every poke's measured reach, the bot steps in first
+  when the whiffed move's frames left (its Capcom / catalog total) allow: walk (gap <= 0.5, MEASURED 0.047 a frame) or a
+  dash (gap <= 1.25, MEASURED 21 frames). `whiff_punishes.stepped_in`. Needs the opponent's move totals (catalog C /
+  move map).
+- **Spacing vs pokes:** the neutral policy knows the opponent's longest measured ground normal (reach.py): just inside
+  it -> walk back more / forward less; just outside -> hold (idle, crouch); far beyond -> walk forward more
+  (`neutral_policy.SPACING`, ESTIMATES).
+- **Backup anti-air:** an opponent coming down 1.3-2.2 away (out of the Shoryuken's range), falling through 1.0-2.0 and
+  landing in 12-24 frames -> forward-jump MP (`anti_air.air_to_air`, ESTIMATES). Replayed: ~1 per match.
+- **Corner pressure** (`defense.corner_pressure`, situation `corner`): the opponent's back <= 1.5 from its wall, in
+  blockstun from the bot's move within 1.3, and the bot not minus (its catalogued recovery ends no later than the
+  opponent's stun + hitstop): frame trap / throw / shimmy / block from the per-opponent game, timed to the opponent's
+  first free frame. Payoffs ESTIMATES.
+- **Drive Rush in** (`drive_rush_in`): from 1.8-3.0, 3+ Drive bars, not in safe mode, not against a Super bar: a roll
+  every 0.5 s at 8%, 5 s cooldown: Parry Drive Rush (the lab's PDR input) into 5MP / 2MK / a throw. A blocked rushed
+  normal is +4: the existing own-rush pressure follows. Replayed: ~0.8 per match. The normal's press frame in the rush
+  is a guess.
+- **Drive Reversal** (defence option `drive_reversal`, 6+HP+HK, 2 bars): only after a block or on wake-up, input 8
+  frames before the stun ends. First payoffs made it 102 of ~550 replayed moments; lowered to throw 0 / strike +0.1 /
+  shimmy -0.3 / wait -1.0 (26 of ~550). `Defense` options can name their `situations`.
+- **Perfect Parry ids, the user's method** (`catalog --guard parry`, menu C -> 7, panel Move catalog -> Perfect parry
+  ids): the dummy set to perfect parry everything; per move the dummy's ids after contact (`dummy_ids`, `parry_ids`) and
+  how long the bot's move stood still outside hitstop (`attacker_frozen`). A parry-range id (480-519, not 480) seen
+  after >= 60% of parried moves (2+) is the Perfect Parry id: saved to `datasets/catalog/perfect_parry.json`; the
+  fighter then counts its own perfect parries after a timed projectile parry (`assessment.perfect_parry.perfect`).
+- Not built: fireball play beyond 0.19.1's 3.5 minimum distance; corner combo-lab routes in the corner moment.
+- Test updates: `tests/test_fighter.py` expected the pre-0.19.0 cross-up and anti-air rules (both failed on 0.19.1
+  already): an overhead cross-up may be `block_overhead`, and airborne attacks are anti-aired.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

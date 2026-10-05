@@ -45,7 +45,8 @@ def test_cross_up_is_blocked_toward_the_landing_side():
     f = ScriptedFighter(FCFG, seed=1)
     f.decide(state(op={"x": 0.40, "y": 1.6, "action_id": 37}, timer=500), 0.0, 0)
     d = f.decide(state(op={"x": 0.30, "y": 1.5, "action_id": 37}, timer=501), 0.02, 0)   # lands ~0.65 past the bot
-    assert d.rule == "block_crossup" and d.direction == 4 and d.facing is Facing.LEFT
+    # 0.19.0: this close and this high it is "overhead" (block toward the landing side, decide again next line)
+    assert d.rule in ("block_crossup", "block_overhead") and d.direction == 4 and d.facing is Facing.LEFT
 
 
 def test_throw_startup_is_teched_not_blocked():
@@ -93,7 +94,8 @@ def test_real_fights_reactions():
                     and not r["p1"]["hitstun"]:
                 throws += 1
                 techs += d.rule == "throw_tech"
-            if d.rule == "anti_air" and op["action_id"] not in f.jump_ids:
+            # 0.19.0: airborne attacks (Hooligan, Demon Flip, air Tatsu) are anti-aired like jumps
+            if d.rule == "anti_air" and op["action_id"] not in f.jump_ids and not f._air_move(op):
                 aa_bad += 1
             prev_op = op["action_id"]
         assert throws >= 4 and techs == throws, (name, throws, techs)

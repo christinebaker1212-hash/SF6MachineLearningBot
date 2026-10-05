@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .config import load_config
 
@@ -641,8 +642,15 @@ def cmd_video(args, cfg):
 
 def cmd_share(args, cfg):
     from .share import build
-    p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock)
+    p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock,
+              ds_root=(cfg.get("datasets") or {}).get("root", "datasets"))
     print(f"Wrote {p} ({p.stat().st_size // 1024} KB). Paste its contents to Claude.")
+
+
+def cmd_scorecard(args, cfg):
+    from .scorecard import write
+    root = Path((cfg.get("datasets") or {}).get("root", "datasets"))
+    print(write(root, root / "scorecard.md"))
 
 
 def _print_report(s):
@@ -748,8 +756,9 @@ def main(argv=None):
     p.set_defaults(fn=cmd_dataset_from_run)
 
     p = sub.add_parser("catalog", help="measure the current character's moves in Training Mode (bot = P1)")
-    p.add_argument("--guard", choices=["none", "all"], required=True,
-                   help="what the Training Mode dummy is set to: none = gets hit, all = blocks everything")
+    p.add_argument("--guard", choices=["none", "all", "parry"], required=True,
+                   help="what the Training Mode dummy is set to: none = gets hit, all = blocks everything, parry = "
+                        "perfect parries everything (records the Perfect Parry ids)")
     p.add_argument("--only", default="", help="comma-separated move names, e.g. 5LP,2MK")
     p.add_argument("--generic", action="store_true",
                    help="use the generic inputs even if Capcom frame data was imported (menu F)")
@@ -853,6 +862,8 @@ def main(argv=None):
     sub.add_parser("move-map", help="infer which action id is which move from recorded inputs + Capcom "
                    "move lists (datasets/move_maps)").set_defaults(fn=cmd_move_map)
 
+    p = sub.add_parser("scorecard", help="the same measurements per bot version from datasets/fights (also in S)")
+    p.set_defaults(fn=cmd_scorecard)
     p = sub.add_parser("share", help="bundle recent reports into runs/for_claude.txt (small, pasteable)")
     p.add_argument("--last", type=int, default=6, help="number of most recent runs to include")
     p.add_argument("--include-mock", action="store_true")

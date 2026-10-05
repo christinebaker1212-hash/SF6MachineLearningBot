@@ -302,7 +302,8 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     wp = summary.get("whiff_punishes") or {}
     if wp.get("chances") or wp.get("taken"):
         out.append(("measured", f"{opp}'s moves that whiffed near me: {wp.get('chances', 0)}; I whiff-punished "
-                                f"{wp.get('taken', 0)}."))
+                                f"{wp.get('taken', 0)}"
+                                + (f" ({wp['stepped_in']} after stepping in)" if wp.get("stepped_in") else "") + "."))
     a = summary.get("assessment") or {}
     if a.get("lethal_chances") or a.get("threatened_lethal"):
         out.append(("measured", f"Kill checks: I had a killing combo available {a.get('lethal_chances', 0)} times and went "
@@ -314,7 +315,8 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{di['chances']}; taken {di.get('taken', 0)}."))
     pp = a.get("perfect_parry") or {}
     if pp.get("tries"):
-        out.append(("measured", f"Perfect Parry tries on projectiles (timed from learned arrival times): {pp['tries']}."))
+        out.append(("measured", f"Perfect Parry tries on projectiles (timed from learned arrival times): {pp['tries']}"
+                                + (f", perfect {pp['perfect']}" if pp.get("perfect") else "") + "."))
     out += defense_thoughts(summary.get("defense") or {}, opp, exp)
     su = summary.get("supers") or {}
     cr = su.get("crumple_followups") or {}
@@ -330,12 +332,18 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{dr.get('opp_rushed_blocked', 0)}; punishes not tried because the +4 made the move safe: "
                                 f"{dr.get('punish_skipped', 0)}; my own blocked rush normals turned into pressure: "
                                 f"{dr.get('own_moments', 0)}."))
+    if dr.get("own_rush_in"):
+        out.append(("scripted", f"Drive Rushes in from mid range: {dr['own_rush_in']} ("
+                                + ", ".join(f"{k.split(':', 1)[1]} x{v}" for k, v in dr.items() if k.startswith("rush_in:"))
+                                + ")."))
     aa = summary.get("anti_air") or {}
     if any(aa.values()):
         out.append(("scripted", f"Anti-air: Shoryukens sent on jumps {aa.get('anti_air', 0)}, on airborne moves "
                                 f"{aa.get('air_moves', 0)}; held block with {opp} overhead (too close to call) "
                                 f"{aa.get('held_overhead', 0)}; jumps I could not answer (still in my own move or "
-                                f"stunned) {aa.get('busy', 0)}."))
+                                f"stunned) {aa.get('busy', 0)}"
+                                + (f"; air-to-air out of Shoryuken range {aa['air_to_air']}" if aa.get("air_to_air") else "")
+                                + "."))
     pt = summary.get("parry_throws") or {}
     if pt.get("chances"):
         out.append(("scripted", f"{opp} held Drive Parry within throw range {pt['chances']} times; I threw {pt.get('taken', 0)}."))
@@ -344,6 +352,28 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         out.append(("scripted", f"Drive Impact with {opp}'s back to the wall: {dw.get('taken', 0)} of {dw.get('chances', 0)} "
                                 "chances" + (f"; what followed: {', '.join(dw['after_ids'])}" if dw.get("after_ids") else "")
                                 + "."))
+    dd = summary.get("drive_impact_rules") or {}
+    if any(dd.values()):
+        out.append(("scripted", f"Drive Impact rules: DI-backs {dd.get('di_back', 0)}, blocked instead because losing the "
+                                f"exchange would kill {dd.get('di_back_skipped_lethal', 0)}; my own DIs held because {opp} "
+                                f"had Super meter {dd.get('own_di_skipped_meter', 0)}; supers against a DI in corner "
+                                f"burnout {dd.get('burnout_super', 0)}."))
+    th = summary.get("throws_held") or {}
+    if th.get("held_not_standing"):
+        out.append(("scripted", f"Throws held until {opp} was standing (not thrown at a downed or reeling opponent): "
+                                f"{th['held_not_standing']}."))
+    sm = summary.get("safe_mode_s") or {}
+    if sm:
+        out.append(("scripted", "Played safe (no jumps, Drive Rush or Drive Impact): "
+                                + ", ".join(f"{k} {v:.0f} s" for k, v in sm.items()) + "."))
+    dv = summary.get("drive") or {}
+    if dv.get("burnouts"):
+        cz = sorted((dv.get("causes") or {}).items(), key=lambda kv: -kv[1])
+        out.append(("measured", f"Burnouts: {dv['burnouts']}; what drained the Drive most in the 4 s before: "
+                                + ", ".join(f"{k} x{v}" for k, v in cz[:4]) + "."))
+    cp = summary.get("corner_pressure") or {}
+    if cp.get("moments"):
+        out.append(("scripted", f"Corner pressure turns (cornered {opp} blocking, me not minus): {cp['moments']}."))
     cg = summary.get("command_grabs") or {}
     if cg.get("seen") or cg.get("grabbed"):
         out.append(("measured", f"{opp}'s command grabs: started {cg.get('seen', 0)}, landed on me {cg.get('grabbed', 0)}; "

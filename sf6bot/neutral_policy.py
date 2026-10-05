@@ -42,6 +42,13 @@ BACK_INTENTS = ("walk_back", "dash_back", "jump_back")
 # (net -408 hp per fireball at 1.5-2.0); from 3.5+ the jump rarely reached it (net +223 at 3.5-4.0). A Shoryuken
 # anti-air can't come out of a fireball's recovery, so neutral fireballs only from this far.
 FIREBALL_MIN_DIST = 3.5
+# 0.20.0: spacing around the opponent's longest poke r: (distance - r band, factors). ESTIMATES.
+SPACING = (((-0.35, 0.05), {"walk_back": 1.5, "walk_fwd": 0.6, "idle": 0.8}),
+           ((0.05, 0.5), {"idle": 1.3, "crouch": 1.2, "walk_fwd": 0.8}),
+           ((0.8, 99.0), {"walk_fwd": 1.3}))
+# 0.20.0: when the opponent's next combo would kill, or late in a round with a lead, play safe (ESTIMATES)
+SAFE_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.2, "drive_impact": 0.0, "drive_rush": 0.0,
+               "dash_fwd": 0.3, "poke": 0.6, "crouch": 1.8, "walk_back": 1.4}
 WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, factor for retreating)
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
@@ -120,6 +127,8 @@ class NeutralPolicy:
         self.explore = float(c.get("explore", 0.08))
         self.intent_factor = {**INTENT_FACTOR, **(c.get("intent_factor") or {})}
         self.fireball_min = float(c.get("fireball_min_dist", FIREBALL_MIN_DIST))
+        self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
+        self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
         # win_model.WinModel (0.16.0): what followed each choice in the bot's own matches; it re-weights the
         # copy-a-player suggestion toward choices that won exchanges, as far as its held-out trust allows
         self.win = win
@@ -155,6 +164,8 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "drive_impact" and not (op is not None and it.category(op) in DI_WHEN and dist >= DI_MIN_DIST):
                 ok[i] = False
+            elif name == "drive_impact" and op is not None and (num(op.get("super")) or 0) >= 10000:
+                ok[i] = False                  # 0.20.0 (user): a super beats a Drive Impact on reaction
             elif name in ("poke", "special", "air_attack") and not any(m["intent"] == name for m in self.moves):
                 ok[i] = False
         return ok
@@ -162,7 +173,19 @@ class NeutralPolicy:
     def style(self, me: dict, op: dict) -> np.ndarray:
         """Fixed factors on the choices: fewer jumps; less retreating with the wall close behind (0.19.0)."""
         f = np.array([self.intent_factor.get(n, 1.0) for n in it.INTENTS])
+        if self.safe:
+            for n, k in SAFE_FACTOR.items():
+                f[it.INTENTS.index(n)] *= k
         mx, ox = num(me.get("x")), num(op.get("x"))
+        if self.opp_poke and mx is not None and ox is not None:
+            # 0.20.0 (user's pick "spacing vs pokes"): hover just outside the opponent's longest poke, so its pokes whiff
+            # (and get whiff-punished): step out when just inside it, hold just outside, close in from far. ESTIMATES.
+            d, r = abs(ox - mx), self.opp_poke
+            for band, facs in SPACING:
+                if band[0] <= d - r < band[1]:
+                    for n, k in facs.items():
+                        f[it.INTENTS.index(n)] *= k
+                    break
         if mx is not None and ox is not None:
             behind = it.WALL - mx if mx > ox else mx + it.WALL      # room between the bot and the wall behind it
             for lim, fac in WALL_STEPS:

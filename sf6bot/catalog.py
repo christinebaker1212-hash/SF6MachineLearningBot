@@ -441,6 +441,68 @@ def hit_bonus(moves: dict, hit: str) -> dict:
     return {"per_move": per, "median": vals[len(vals) // 2] if vals else None}
 
 
+PARRY_IDS = range(480, 520)      # parry / Drive ids (MEASURED: parry 480/482, Drive Rush 500/501 Ken)
+
+
+def parry_reaction(states: list[dict], neutral_d: set, t_from: float) -> dict:
+    """0.20.0 (user: "force every move to be perfect parried by the dummy, so it can instantly learn the IDs"): what the
+    dummy (p2) did after the bot's move with Training Mode's dummy set to Perfect Parry, and how long the bot's own
+    move stood still outside hitstop (a Perfect Parry freezes the attacker). Pure, unit tested."""
+    ids, prev, frozen, prev_fr, prev_a = [], None, 0, None, None
+    for s in states:
+        if (s.get("t") or 0) < t_from - 0.2:
+            continue
+        p1, p2 = s.get("p1") or {}, s.get("p2") or {}
+        a = p2.get("action_id")
+        if a is not None and a != prev and a not in neutral_d:
+            ids.append(a)
+        prev = a
+        fr, ba = p1.get("action_frame"), p1.get("action_id")
+        if (ba == prev_a and fr is not None and fr == prev_fr and isinstance(ba, int) and ba >= 450
+                and not (p1.get("hitstop") or 0) and not (p2.get("hitstop") or 0)):
+            frozen += 1
+        prev_fr, prev_a = fr, ba
+    parry = [a for a in ids if isinstance(a, int) and a in PARRY_IDS]
+    return {"dummy_ids": ids[:12], "parry_ids": parry, "parried": bool(parry), "attacker_frozen": frozen,
+            "result": "parried" if parry else "not parried"}
+
+
+def perfect_parry_summary(results: dict) -> dict:
+    """Across the parry run: the parry-range ids the dummy showed (counted per move), and the Perfect Parry id(s):
+    a parry id seen after most parried moves that is not the plain parry (480) start."""
+    from collections import Counter
+    cnt: Counter = Counter()
+    parried = 0
+    for r in results.values():
+        if r.get("parried"):
+            parried += 1
+            cnt.update(set(r.get("parry_ids") or []))
+    ids = sorted(a for a, n in cnt.items() if a != 480 and parried and n >= max(2, 0.6 * parried))
+    return {"moves": len(results), "parried": parried, "dummy_ids": cnt.most_common(), "ids": ids}
+
+
+def save_perfect_parry_ids(root: Path, pp: dict, bot: str) -> None:
+    """datasets/catalog/perfect_parry.json: the ids the fighter counts as a Perfect Parry (its own, after a timed
+    parry). System ids are shared across characters (parry 480/482 measured for Ryu, Ken, Jamie...): one file."""
+    if not pp.get("ids"):
+        return
+    p = root / "perfect_parry.json"
+    try:
+        d = json.loads(p.read_text()) if p.exists() else {}
+    except (OSError, ValueError):
+        d = {}
+    d.update(ids=pp["ids"], dummy_character=pp.get("dummy_character"), measured_with=bot,
+             time=time.strftime("%Y-%m-%d %H:%M:%S"), sf6bot_version=__import__("sf6bot").__version__)
+    p.write_text(json.dumps(d, indent=2))
+
+
+def perfect_parry_ids(ds_root: Path) -> set:
+    try:
+        return set(json.loads((Path(ds_root) / "catalog" / "perfect_parry.json").read_text()).get("ids") or [])
+    except (OSError, ValueError):
+        return set()
+
+
 def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = None,
                 generic: bool = False, hit: str = "normal") -> Path | None:
     name, chara = "Unknown", None
@@ -484,7 +546,9 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
 
         neutral_a, neutral_d, movement = learn_ids(sess, reader, reset)
         first_ids: dict = {}
-        checked = False         # Training Mode settings, checked on the first move that connects (0.11.12)
+        # Training Mode settings, checked on the first move that connects (0.11.12); not for the parry run (0.20.0)
+        checked = guard == "parry"
+        dummy_chara = st.p2.get("chara")
         for mv in plan:
             mname, seq_text, approach = mv["name"], mv["sequence"], mv["approach"]
             if only and mname not in only:
@@ -560,6 +624,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                                    "hit" if (guard == "none" or is_throw) else "block")
                 else:
                     r["result"] = "unknown (frame meter did not update)"
+                if guard == "parry":
+                    r.update(parry_reaction(pre + post, neutral_d, t_last_press))
                 r["damage"] = own.get("damage")
                 r["frame_meter_raw"] = fm_raw
                 if not checked and r.get("result") in ("hit", "block"):
@@ -643,6 +709,15 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
         data["skipped_capcom_rows"] = skipped
     for k, v in results.items():
         data["moves"].setdefault(k, {})[guard_key(guard, hit)] = v
+    if guard == "parry":
+        pp = perfect_parry_summary(results)
+        pp["dummy_character"] = character_name(dummy_chara) if isinstance(dummy_chara, int) else None
+        data["perfect_parry"] = pp
+        save_perfect_parry_ids(root, pp, name)
+        print(f"Perfect Parry: {pp['parried']} of {pp['moves']} moves parried; the dummy's ids after contact: "
+              + (", ".join(f"{a} x{n}" for a, n in pp["dummy_ids"][:6]) or "none")
+              + (f". Perfect Parry id(s): {pp['ids']}" if pp["ids"] else
+                 ". No id told a Perfect Parry apart from a normal parry yet."))
     if hit != "normal":
         data.setdefault("hit_bonus", {})[hit] = hit_bonus(data["moves"], hit)
         hb = data["hit_bonus"][hit]
