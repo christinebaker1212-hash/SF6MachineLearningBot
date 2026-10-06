@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.31.2**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.31.3**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.31.2 is pushed** (CLAUDE.md "0.31.2"): no tech guesses at pressure moments (guesses averaged -555 hp after a block; reaction techs tech ~90% of normal throws); the reaction tech is held 2 frames when it would land exactly on the first free frame; Blanka / Chun-Li / Mai / Viper / Elena / Dhalsim throws recognised after the connect.
+**State:** **0.31.3 is pushed** (CLAUDE.md "0.31.3"): the catalog holds the button for the Denjin SA2 Lv2 / Lv3 rows (they were performed as Lv1); the user is re-running C with Ryu. A diagnosis of 17 uploaded fights (fights_5) and research into Ryu's answers per character are running.
+
+**Before that:** **0.31.2 is pushed** (CLAUDE.md "0.31.2"): no tech guesses at pressure moments (guesses averaged -555 hp after a block; reaction techs tech ~90% of normal throws); the reaction tech is held 2 frames when it would land exactly on the first free frame; Blanka / Chun-Li / Mai / Viper / Elena / Dhalsim throws recognised after the connect.
 
 **Before that:** **0.31.1 is pushed** (CLAUDE.md "0.31.1"): after 6 Master matches (1-5 vs Guile x3, Terry x2, M. Bison): Guile's throws have their own ids (700 / 701, victim 706 / 710: never teched before; now `throws.py` per opponent), no projectile parry with the thrower within 2.5 (Guile threw the parrying bot 7 times for 2,040), ranked progress leaves out the Versus Human sets, and MR / LP are read from the result screen's real wording.
 

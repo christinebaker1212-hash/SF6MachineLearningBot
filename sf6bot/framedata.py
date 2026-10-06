@@ -788,6 +788,10 @@ def chain_plans(framedata: dict) -> dict:
                 # '[Denjin Charge]Hadoken': the move done while the parent's state is active
                 parent = rows[mb.group(1)]
                 cseq = child_seq(inp)
+                if cseq and m.get("hold_frames"):
+                    # 0.31.3: a level row of a state variant ('[Denjin Charge]SA2 ... (Lv2)') keeps its button held like
+                    # the plain level row (before, all three Denjin SA2 rows were performed as the tapped Lv1)
+                    cseq = held(cseq, m["hold_frames"])
                 tot = parent.get("total_n") or 40
                 if cseq:
                     out[name] = {"parent": parent["name"], "kind": "state_variant",

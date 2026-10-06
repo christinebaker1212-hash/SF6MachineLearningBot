@@ -4084,6 +4084,15 @@ ranked recordings 0.23.0-0.31.0 (both players' input masks; the bot's LP+LK pres
 - The regression fingerprint `fighter_decisions` changed for exactly two delay techs (now a jab and a block).
 - Tests: `tests/test_0311.py` (and the tech-learning tests switch the options on). Not verified in game.
 
+## 0.31.3: the catalog holds the button for the Denjin SA2 levels (user, 2026-10-06)
+- User: "I'll also re-run C with Ryu so he gets the updated Denjin charge SA2 knowledge." Checked first: the catalog performed
+  `[Denjin Charge]SA2 Shin Hashogeki（Lv2）` and `（Lv3）` with exactly the tapped Lv1 input (no hold), so all three Denjin rows
+  would have recorded Lv1's id and frame data under three names. The plain SA2 Lv2 / Lv3 rows were held correctly (0.29.0).
+- Cause: `framedata.chain_plans` builds a '[State] Move' row from its plain input (`child_seq`), which dropped the row's
+  `hold_frames`. Now the held tail is added (`held`), as for the plain level rows: Lv2 `... 4+HP@3 5+HP@21`, Lv3
+  `... 4+HP@3 5+HP@45` after Denjin Charge and the wait. The combo lab already held them (`combo_lab`, 0.29.0).
+- Only Ryu's catalog plan changed (regression fingerprint `catalog_plan:ryu` updated). Test `tests/test_0313.py`. Not run in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
