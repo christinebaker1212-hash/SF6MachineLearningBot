@@ -3711,6 +3711,38 @@ policy: a copy-a-player brain trained on the recordings + the shipped Legend sty
   opponent picked Quit). The bot's F presses go to the first option (0.18.9 / 0.18.11); no change needed.
 - Not yet measured: the 0.27.0 run's record and scorecard (waiting for S and the fight files).
 
+## 0.27.0 ranked run analysed (user, 2026-10-06): 18 matches, 17-1, Diamond -> Master
+MEASURED on the 18 uploaded fight files (all 0.27.0, none unfinished) and the session log the user pasted (no S file: see
+below). Same scorecard code as the earlier tables.
+| | 0.24.3 | 0.24.4 | 0.26.0 | 0.27.0 |
+|---|---|---|---|---|
+| record / win % | 24-9 / 73% | 13-6 / 68% | 22-10 / 69% | 17-1 / 94% |
+| damage dealt / taken | 1.35 | 1.20 | 1.23 | 1.94 |
+| openings a minute (mine / theirs) | 7.6 / 7.1 | 6.7 / 7.9 | 6.5 / 7.0 | 7.4 / 5.5 |
+| damage per opening (mine / theirs) | 1397 / 1099 | 1497 / 1065 | 1494 / 1140 | 1585 / 1101 |
+| thrown / match | 4.1 | 4.2 | 4.3 | 3.6 |
+| back to the wall % | 9 | 7 | 20 | 10 |
+| after blocking: pressed % / thrown % | 31 / 5 | 32 / 9 | 27 / 5 | 24 / 7 |
+| jump-ins near: hit the bot % (n) | 25 | 17 | 15 (74) | 28 (43) |
+- Ladder (session log, OCR): 23,370 LP at the start, about +50 a win, 24,188 after match 17; match 18 gave +1,050 (the
+  promotion) = **25,238 LP, Master** (the user's screenshot). The 10-win streak is matches 9-18.
+- By opponent: Akuma 4-1, Juri 3-0, A.K.I. 2-0, Ingrid 2-0, Ryu 2-0, Manon / JP / Luke / Guile 1-0 each.
+- The 0.27.0 projection was ~73-76%; 17-1 is above it, but 18 matches is a small sample (the 95% range of a 94% result
+  over 18 is roughly 73-99%).
+- What moved most: the opponents' openings a minute dropped 7.0 -> 5.5 (crouch-blocking stance, fewer tech guesses), the
+  time cornered halved (20% -> 10%), and the bot's damage per opening rose to 1,585.
+- **The one loss is the old weak spot, a zoning Akuma (match 8, 0-2):** 37 H Gou Hadokens from far away; H Gou Hadoken
+  did 5,482 of the 20,222 damage taken, 2MK 3,200; "punishable moves I blocked 7, punished 1".
+- Small counts, not yet a trend: jump-ins near the bot that hit it 12 of 43 (28%; 0.26.0 11 of 74); anti-air Shoryukens
+  30 of 40 hit (0.26.0 57 of 70). Openings that started with the bot holding back: 53, 30.8k damage; at the hit it was
+  often no longer holding back (direction 5 / 6 / 2 / 3 in 29 of 53). Manon's super 1218 counted 7 times (its hits).
+- **Why S did not work:** S builds the scorecard first; 0.27.0 raised its cache version, so every fight file on the PC
+  is measured again (here ~0.2 s a file; slower on the Ally, several hundred files), with no progress printed, and the
+  cache is saved only at the end. STOPping it loses that work, so the next S starts over. Letting one S finish fills the
+  cache; later ones are quick. A fix (progress lines, cache saved as it goes) was offered, not built.
+- Minor (log): after every KO the status line reads "the round started before I was watching" until the next round
+  starts (the wording of the between-rounds wait; harmless). Two input-delay readings of 17-19 frames out of 700.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -19,8 +19,10 @@ fight files. Ask for a fresh S (menu S / SEND TO CLAUDE) before they purge runs.
 
 **Results so far:**
 - **MASTER (2026-10-06, user's screenshot): 25,238 LP, 1500 MR, on a 10-win streak with 0.27.0, unattended.** The project's
-  long-term goal is met (CLAUDE.md "Master reached"). From here MR is the measure; the 0.27.0 run's S and fight files are
-  still to come.
+  long-term goal is met (CLAUDE.md "Master reached"). That run: **18 matches, 17-1**, damage ratio 1.94 (CLAUDE.md
+  "0.27.0 ranked run analysed"). The one loss: a zoning Akuma. From here MR is the measure.
+- S hung on the user's PC after 0.27.0 (the scorecard re-measures every fight once after its cache-version bump, no
+  progress shown, cache saved only at the end): tell the user to let one S finish.
 - Platinum 1 (2026-10-03) → Diamond, 19,053 LP (2026-10-05) → 21,592 LP after the 0.25.0 run → **Diamond 4** at the 0.26.0
   run's peak (user).
 - 0.24.x run: 41-15. 0.25.0 run: 26-8 (76%). **0.26.0 run: 22-10 (69%)**, damage ratio 1.23, against stronger players.
