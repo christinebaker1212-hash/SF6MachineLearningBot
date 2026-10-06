@@ -4133,6 +4133,18 @@ ranked recordings 0.23.0-0.31.0 (both players' input masks; the bot's LP+LK pres
   out and the next), the config routes, F10 stopping a try on its next line with no settle wait, a skip after a success, the
   lift by K -> 4, and a MOCK match over the real CPU fight. Not run in game.
 
+## 0.31.5: F10 presses "/" at once (user, 2026-10-06)
+- User: "I do skip combos with F10. But I would also like for it to immediately skip with no delay to the next combo,
+  forcing the bot to press /."
+- After 0.31.4 the skip still waited before the next combo: the next route's reset first waited for both players to land
+  and leave hit / juggle / knockdown reactions (`catalog.settle`, up to 3 s, e.g. after a combo ender's knockdown).
+- Now an F10 skip presses the Training Mode reset ("/") at once (`reset(..., now=True)`: no settle; the positions are
+  still read back and "/" pressed again if they did not come back), and the next route starts from that reset instead of
+  pressing it again (`set_position` uses `state["fresh_reset"]` when the position matches, within `FRESH_RESET_S` 5 s; a
+  corner route after a midscreen skip resets for itself; the Training Mode check before a pass clears it).
+- Tests `tests/test_0314.py` (the reset goes out on the skip with `now`, the next route uses it, `reset(now=True)` does not
+  wait for the players to land, an ordinary reset still does). Not run in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

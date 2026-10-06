@@ -270,7 +270,7 @@ def make_reset(sess, cfg: dict, reader):
             c.apply(InputState(), tag="reset_hold_end")
         sess.stop_event.wait(1.3)
 
-    def reset(hold: int | None = None):
+    def reset(hold: int | None = None, now: bool = False):
         """`hold`: a SCREEN direction (numpad, 4 = left) held while resetting picks the position (user,
         0.11.3): 2 = midscreen with the player on the left, 8 = midscreen on the right, 4 / 1 = left
         corner, 6 / 3 = right corner.
@@ -279,11 +279,16 @@ def make_reset(sess, cfg: dict, reader):
         switch, and the bot will get confused"): the reset waits until both players have landed and left hit
         reaction (a bouncing / knocked-down dummy), the positions are read back and the reset is pressed again
         if they did not come back, and the facing is set from POSITIONS (the facing flag lags behind a side
-        switch, measured 0.8.0; the walk to the dummy then went the wrong way)."""
+        switch, measured 0.8.0; the walk to the dummy then went the wrong way).
+
+        `now` (0.31.5, the operator's F10 skip; user: "immediately skip with no delay to the next combo,
+        forcing the bot to press /"): "/" goes out at once, without waiting for the players to land; the
+        positions are still read back and the reset pressed again if they did not come back."""
         if not c.armed:  # never send the reset key to another window (focus lost / paused)
             if not sess.wait_armed(timeout=10):
                 raise InterruptedError("not armed")
-        settle(reader, sess)
+        if not now:
+            settle(reader, sess)
         for attempt in range(3):
             press(hold)
             if reset_ok(reader.latest(), hold):

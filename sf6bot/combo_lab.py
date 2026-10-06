@@ -1709,16 +1709,25 @@ def _positions(reader):
     return num(st.p1.get("x")), num(st.p2.get("x"))
 
 
-def set_position(sess, reader, reset, position: str, state: dict) -> str:
+FRESH_RESET_S = 5.0     # an F10 skip's reset (0.31.5) still counts for the next route this long after it
+
+
+def set_position(sess, reader, reset, position: str, state: dict, now: bool = False) -> str:
     """Training Mode position by the hold-direction reset (user, 0.11.3). Corner: the hold that puts the
     DUMMY against the wall is found once (positions read back) and remembered; if none does, the bot
-    walks the dummy into the corner. Returns how it was done."""
+    walks the dummy into the corner. Returns how it was done. `now` (0.31.5): the operator's F10 skip, "/"
+    at once (no wait for the players to land); the next route then uses that reset instead of pressing
+    "/" again."""
+    fresh = state.pop("fresh_reset", None)
+    if not now and fresh is not None and fresh[0] == position and clock.now() - fresh[1] <= FRESH_RESET_S:
+        return fresh[2]                            # the F10 skip has just reset to this position
+    kw = {"now": True} if now else {}
     if position != "corner":
-        reset(2)                                   # midscreen, player on the left
+        reset(2, **kw)                             # midscreen, player on the left
         return "reset+down"
     holds = [state["corner_hold"]] if state.get("corner_hold") else list(CORNER_HOLDS)
     for h in holds:
-        reset(h)
+        reset(h, **kw)
         bx, dx = _positions(reader)
         if bx is not None and dx is not None and abs(dx) > abs(bx) and abs(dx) > 3.0 and bx * dx > 0:
             state["corner_hold"] = h
@@ -2193,6 +2202,14 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         # F10 right after the route's last try (its F9 window, or the confirm repeats just ended): that route is skipped
         skipped_by_operator = True
         print("  operator (F10): skipping this route; it is kept out of matches")
+    if skipped_by_operator and not sess.stop_event.is_set() and reset is not None:
+        # 0.31.5 (user: "immediately skip with no delay to the next combo, forcing the bot to press /"): "/" at once,
+        # without waiting for the dummy to land; the next route starts from this reset instead of pressing it again
+        try:
+            how_now = set_position(sess, reader, reset, _position(combo), state, now=True)
+            state["fresh_reset"] = (_position(combo), clock.now(), how_now)
+        except InterruptedError:
+            pass                                   # focus lost: the next route resets when the game is back
     summ = _summary(attempts, plan, combo)
     summ["operator_overrides"] = sum(1 for a in attempts if a.get("operator_override"))
     summ["plan_fp"] = plan_fingerprint(plan)
@@ -2374,6 +2391,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     ids = learn_ids(sess, reader, reset)
                 if rnd == 0:
                     # the Training Mode settings this pass needs, checked with one jab (0.11.12)
+                    lab_state.pop("fresh_reset", None)         # the check's jab moves the players
                     pf = preflight(sess, reader, runner, reset, hit_pass, guard, capcom)
                     checks.append({"pass": hit_pass, **pf})
                     setup_notes.append(f"Training Mode check ({PASS_TEXT[hit_pass]}): "

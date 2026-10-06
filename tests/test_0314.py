@@ -226,3 +226,52 @@ def test_a_match_never_uses_a_skipped_combo(cfg, tmp_path, monkeypatch):
     assert {"2HP > 623HP", "2LK ~ 2LP ~ 5LP"} <= set(out["routes_on_game_clock"])      # the others stay
     performed = set(out.get("routes_completed") or {}) | {k.split(":")[0] for k in out.get("routes_stopped") or {}}
     assert not {"2MK > 236MP", "5HP > 623HP"} & performed
+
+
+def test_f10_presses_reset_at_once_and_the_next_route_starts_from_it(monkeypatch):
+    """0.31.5 (user: "immediately skip with no delay to the next combo, forcing the bot to press /")."""
+    settles: list = []
+    _patch(monkeypatch, {1: 10}, settles)
+    sp: list = []
+    monkeypatch.setattr(cl, "set_position", lambda *a, **k: sp.append(k.get("now", False)) or "reset+down")
+    state: dict = {}
+    summ = cl._test_route(_sess(), _Reader(), None, lambda *a, **k: None, {"route": "2LP , 5MP > 236MK"},
+                          {"steps": _steps(MOVES)}, 40, 2, ({NEUTRAL}, {DUMMY_IDLE}, set()), "after_first_hit",
+                          state=state)
+    assert summ["skipped_by_operator"] and sp == [False, True]      # the try's own setup, then "/" at once on F10
+    assert state["fresh_reset"][0] == "midscreen"
+
+
+def test_the_route_after_a_skip_uses_its_reset(monkeypatch):
+    calls: list = []
+
+    def reset(hold=None, now=False):
+        calls.append((hold, now))
+    state: dict = {}
+    how = cl.set_position(None, None, reset, "midscreen", state, now=True)
+    assert calls == [(2, True)]
+    state["fresh_reset"] = ("midscreen", cl.clock.now(), how)
+    assert cl.set_position(None, None, reset, "midscreen", state) == how and calls == [(2, True)]   # no second "/"
+    state["fresh_reset"] = ("midscreen", cl.clock.now(), how)
+    monkeypatch.setattr(cl, "_positions", lambda reader: (-6.0, -7.4))       # the dummy against the left wall
+    cl.set_position(None, None, reset, "corner", state)
+    assert calls[-1] == (6, False) and "fresh_reset" not in state             # a corner route resets for itself
+
+
+def test_reset_now_does_not_wait_for_the_players_to_land(monkeypatch):
+    from sf6bot import catalog
+    settled: list = []
+    monkeypatch.setattr(catalog, "settle", lambda reader, sess, max_s=3.0: settled.append(1))
+    monkeypatch.setattr(catalog, "face_opponent", lambda sess, reader: None)
+    monkeypatch.setattr(catalog, "reset_ok", lambda st, hold: True)
+    monkeypatch.setattr(catalog.time, "sleep", lambda s: None)
+    sent: list = []
+    backend = types.SimpleNamespace(name="sendinput", send=lambda evs: sent.append(evs))
+    ctrl = types.SimpleNamespace(backend=backend, armed=True, set_facing=lambda f: None, apply=lambda *a, **k: None)
+    stop = types.SimpleNamespace(wait=lambda t=None: False, is_set=lambda: False)
+    sess = types.SimpleNamespace(controller=ctrl, stop_event=stop, wait_armed=lambda timeout=0: True)
+    reset, _, key = catalog.make_reset(sess, {"training": {"reset_key": "SLASH"}}, types.SimpleNamespace(latest=lambda: None))
+    reset(2, now=True)
+    assert settled == [] and [("SLASH", True)] in sent and [("SLASH", False)] in sent
+    reset(2)
+    assert settled == [1]                                                   # an ordinary reset still waits

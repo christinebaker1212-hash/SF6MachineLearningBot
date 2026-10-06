@@ -4,14 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.31.4**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.31.5**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.31.4 is pushed** (CLAUDE.md "0.31.4"): a combo the user skips with F10 in the combo lab is a ban on that sequence of moves (`route_bans.py`, kept in the lab file's `operator_skips`): never in the route book, never composed, the config's own routes that perform it are left out of the match; F10 stops the try at once. The user uploaded a FT5 they played as Ken against the bot (fights_6, 2-3: "I expertly took advantage of its current weaknesses ... This is the kind of behavior we need to target"): being analysed. The fights_5 diagnosis and the research into Ryu's answers per character (two multi-agent runs) were STOPPED with no results when a turn was interrupted (2026-10-06 23:10:59 UTC; an interrupt stops the background runs of that turn): ~1.37M tokens spent, 4 of 21 agents started, none finished. To be redone directly (not as multi-agent runs).
+**State:** **0.31.5 is pushed** (CLAUDE.md "0.31.5"): an F10 skip in K presses "/" at once and the next combo starts from that reset. **0.31.4** (CLAUDE.md "0.31.4"): a combo the user skips with F10 in the combo lab is a ban on that sequence of moves (`route_bans.py`, kept in the lab file's `operator_skips`): never in the route book, never composed, the config's own routes that perform it are left out of the match; F10 stops the try at once. The user uploaded a FT5 they played as Ken against the bot (fights_6, 2-3: "I expertly took advantage of its current weaknesses ... This is the kind of behavior we need to target"): being analysed. The fights_5 diagnosis and the research into Ryu's answers per character (two multi-agent runs) were STOPPED with no results when a turn was interrupted (2026-10-06 23:10:59 UTC; an interrupt stops the background runs of that turn): ~1.37M tokens spent, 4 of 21 agents started, none finished. To be redone directly (not as multi-agent runs).
 
 **Before that:** **0.31.3 is pushed** (CLAUDE.md "0.31.3"): the catalog holds the button for the Denjin SA2 Lv2 / Lv3 rows (they were performed as Lv1); the user is re-running C with Ryu.
 
