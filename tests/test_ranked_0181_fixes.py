@@ -182,6 +182,7 @@ def test_a_command_grab_is_its_own_answer_and_shifts_the_defence():
     assert f.defense.has_cmd_grab and f.defense.odds("after_block")["cmd_grab"] > 0
     # this Zangief grabs at every moment
     f.defense.c["prior"] = {"throw": 0.1, "strike": 0.1, "shimmy": 0.1, "wait": 0.1, "cmd_grab": 5.0}
+    f.defense.c["prior_by_situation"] = {}          # 0.27.0: the per-situation priors would take precedence
     v = f.defense.values("after_block", lambda a: True, lambda n, oc: {"seq": "x"})
     assert v["jump"] > v["block"] and v["reversal"] > v["delay_tech"] and v["parry"] < v["block"]
 

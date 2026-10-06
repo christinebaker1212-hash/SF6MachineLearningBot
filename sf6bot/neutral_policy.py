@@ -24,6 +24,11 @@ MACROS = {      # movement intents: short macro actions (decided again right aft
 }
 AIR_ATTACK_MAX_Y = 1.3     # jump attacks only below this height on the way down (apex ~2.1, measured)
 REACH_MARGIN = 0.1        # a move is chosen up to this far beyond its measured reach
+# 0.27.0: the farthest a light poke is thrown from in NEUTRAL (centre to centre; whiff punishes and combos are not limited).
+# MEASURED (0.26.0 ranked, 33 Diamond matches, the opponent not attacking): 2LP from 1.25-1.75 -247 hp per try (6: 4
+# whiffs), 5LP -112 (9), 5LK from 1.75-2.25 -33 (12: 7 whiffs); within those distances 5LP +552, 5LK +341, 2MK +679
+NEUTRAL_MAX_DIST = {"Crouching Light Punch": 1.25, "Standing Light Punch": 1.25, "Standing Light Kick": 1.75,
+                    "Crouching Light Kick": 1.4}
 SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 # 0.18.0: resource and reaction moves never come from random sampling (MEASURED 0.17.5 ranked: SA1 8 times, 8 whiffs;
 # Drive Impact 11, 6 whiffs; Drive Parry 47, 23 with nothing to parry; OD Hadoken 18). They need a reason:
@@ -48,10 +53,23 @@ FIREBALL_MIN_DIST = 3.5
 SPACING = (((-0.35, 0.05), {"walk_back": 1.5, "walk_fwd": 0.6, "idle": 0.8}),
            ((0.05, 0.5), {"idle": 1.3, "crouch": 1.2, "walk_fwd": 0.8}),
            ((0.8, 99.0), {"walk_fwd": 1.3}))
+# 0.27.0: stance by distance (absolute, centre to centre), MEASURED on the 0.26.0 ranked run (33 Diamond matches; the
+# bot free and grounded): openings the bot TOOK / LANDED per second in each stance. 1.0-1.5: walking forward took 0.90 /
+# landed 1.00, standing 0.50 / 0.27, walking back 0.70 / 0.13, crouch-blocking 0.22 / 0.38 (its whiff punishes);
+# 1.5-2.0: walking back 0.07 / 0.17, crouch-blocking 0.03 / 0.56. In hp a second (the bot's openings ~1,490, theirs ~1,200):
+# at 1.0-1.5 walking forward +420 (it walks in and lands 2MK / 2MP), crouch-blocking +305, standing -195, walking back -640;
+# at 1.5-2.0 crouch-blocking +805, standing +755, walking forward +405, walking back +180. So: no standing still or backing
+# up into their pokes inside 1.5 (crouch-block instead), and less backing up at 1.5-2.0
+STANCE = (((1.0, 1.5), {"walk_back": 0.4, "idle": 0.5, "crouch": 1.6}),
+          ((1.5, 2.0), {"walk_back": 0.5, "crouch": 1.3}))
 # 0.20.0: when the opponent's next combo would kill, or late in a round with a lead, play safe (ESTIMATES)
 SAFE_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.2, "drive_impact": 0.0, "drive_rush": 0.0,
                "dash_fwd": 0.3, "poke": 0.6, "crouch": 1.8, "walk_back": 1.4}
 WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, factor for retreating)
+# 0.27.0: with the wall this close behind, walk OUT (forward) more. MEASURED (0.26.0 ranked, 33 Diamond matches): the bot's
+# back within 1.5 of its wall 20% of the time (0.24.x: 7-12%), taking 188 hp a second there and dealing 103 (midscreen
+# 118 / 186); it walked back into the corner itself 28 times
+CORNER_OUT = (1.5, {"walk_fwd": 1.6, "idle": 0.7})
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
 # 0.21.0: MEASURED 7 ranked matches on 0.20.5 / 0.20.6: ~2.3 parries a minute, many mid-blockstring, and 3 burnouts. A
@@ -249,6 +267,13 @@ class NeutralPolicy:
                     for n, k in facs.items():
                         f[it.INTENTS.index(n)] *= k
                     break
+        if mx is not None and ox is not None:
+            d_ = abs(ox - mx)
+            for (lo, hi), facs in STANCE:
+                if lo <= d_ < hi:
+                    for n, k in facs.items():
+                        f[it.INTENTS.index(n)] *= k
+                    break
         if self.zoner and mx is not None and ox is not None and abs(ox - mx) > ZONER_DIST:
             # 0.25.0: against a projectile-heavy opponent, close the distance between its projectiles. MEASURED (61 ranked
             # matches on 0.24.x): 5-8 against opponents throwing > 8 projectiles a minute (36-7 against the rest); there
@@ -262,6 +287,9 @@ class NeutralPolicy:
                     for n in BACK_INTENTS:
                         f[it.INTENTS.index(n)] *= fac
                     break
+            if behind <= CORNER_OUT[0]:
+                for n, k in CORNER_OUT[1].items():
+                    f[it.INTENTS.index(n)] *= k
         return f
 
     def _lethal_super(self, me: dict, op: dict | None) -> bool:
@@ -290,6 +318,8 @@ class NeutralPolicy:
         su = m.get("startup")
         if not m.get("projectile") and self.in_their_range(dist) and isinstance(su, int) \
                 and su > self.style_in_range_max_startup:
+            return False
+        if dist > NEUTRAL_MAX_DIST.get(m["name"], 99.0):
             return False
         r = self.reach.get(m["id"]) if self.reach else None
         return r is None or m.get("projectile") or dist <= r + REACH_MARGIN
@@ -459,6 +489,8 @@ class NeutralPolicy:
         move) is shorter than the distance. Projectiles and air attacks pass."""
         if dist is None or m.get("projectile") or m["intent"] == "air_attack":
             return True
+        if dist > NEUTRAL_MAX_DIST.get(m.get("name"), 99.0):
+            return False
         r = self.reach.get(m["id"])
         if r is None:
             # 0.18.0: no measurement is no licence: a cautious default (reach.LiveReach.UNMEASURED)

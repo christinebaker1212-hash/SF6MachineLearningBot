@@ -103,7 +103,8 @@ class Defense:
         return self.sets.get(situation) or (self.options, self.payoff)
 
     def odds(self, situation: str) -> dict:
-        prior = dict(self.c.get("prior") or {k: 1.0 for k in RESPONSES})
+        prior = dict((self.c.get("prior_by_situation") or {}).get(situation) or self.c.get("prior")
+                     or {k: 1.0 for k in RESPONSES})
         if not self.has_cmd_grab:
             prior["cmd_grab"] = 0.0           # no command grab in this opponent's move list: only what is seen counts
         seen = self.exp.responses(situation) if self.exp is not None else {}

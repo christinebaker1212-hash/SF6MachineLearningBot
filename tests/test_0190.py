@@ -101,7 +101,7 @@ def test_fewer_jumps_and_less_retreating_into_the_corner():
     assert mid[jf] == INTENT_FACTOR["jump_fwd"] < 1 and mid[it.INTENTS.index("walk_back")] == 1.0
     cornered = pol.style({"x": -6.8}, {"x": -4.8})        # 0.85 of room behind the bot
     assert cornered[it.INTENTS.index("walk_back")] < 0.2 and cornered[it.INTENTS.index("dash_back")] < 0.2
-    assert cornered[it.INTENTS.index("walk_fwd")] == 1.0
+    assert cornered[it.INTENTS.index("walk_fwd")] >= 1.0           # 0.27.0: walks out of the corner (CORNER_OUT)
     # jumps are picked far less often than without the factors (exploration never jumps)
     old = NeutralPolicy(_Brain(), [], cfg={"intent_factor": {"jump_fwd": 1, "jump_neutral": 1, "jump_back": 1},
                                            "explore": 0.3}, seed=1)

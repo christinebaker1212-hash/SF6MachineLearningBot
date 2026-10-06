@@ -3615,6 +3615,88 @@ bot's 2MK > SA1 from the user's ranked match with the exported frames frozen as 
   (2,200-2,500, likely command grabs; no Alex catalog here to name them). Throws on the bot: 51 landed of 119 seen.
 - The 2MP > Drive Rush cancel routes never pressed the normal after the rush (6 times, 33-frame rushes): not traced further.
 
+## 0.26.0 ranked run analysed (user, 2026-10-06): 33 recordings, 22-10 — Diamond 4 at the peak
+The user: "These Diamond 4 fights show new weaknesses, but also some strengths. Let's capitalize on what works, and reduce
+what doesn't. These players are smarter, more skilled than the Platinums ... It must adapt accordingly"; "Diamond 4 at the
+peak ... now Master must be the next frontier." No S file for this run (the runs were purged; the S file sent was from the
+0.22.5 run); the unfinished Ryu mirror was a rage quit (no result). MEASURED on the 33 fight files (all 0.26.0). Analysis
+scripts were in the session scratchpad (not kept).
+| | 0.24.3 | 0.24.4 | 0.25.0 | 0.26.0 |
+|---|---|---|---|---|
+| record / win % | 24-9 / 73% | 13-6 / 68% | 26-8 / 76% | 22-10 / 69% |
+| damage dealt / taken | 1.35 | 1.20 | 1.31 | 1.23 |
+| damage per opening (mine) | 1397 | 1497 | 1399 | 1494 |
+| thrown / match | 4.1 | 4.2 | 3.3 | 4.3 |
+| back to the wall % | 9 | 7 | 12 | 20 |
+| jump-ins near: met a Shoryuken / hit the bot % | 9 / 25 | 11 / 17 | | 16 / 15 |
+- By opponent: Ingrid 4-0, Jamie 5-2, Mai 2-1, Ken 2-0, Ed 2-0, Yasmine 2-0, Luke 2-1, Zangief 1-0, Sagat 1-0; Marisa 0-2,
+  A.K.I. 0-1, Alex 0-1, E. Honda 0-1, Akuma 1-1.
+- **Strengths:** SA1 in combos 46 hits for 71,120 (0.26.0's super-freeze fix works); DI-backs 12; whiff punishes with 5HP
+  (+1,200-1,400 hp per try at 1.25-1.75); in true neutral 2MK at 1.25-1.75 +679 per try (24), 2MP +422, 5LK +341, 5LP within
+  1.25 +552; crouch-blocking at 1.5-2.0 lands 0.56 openings a second and takes 0.03 (its whiff punishes); reversals +1,250
+  (after a block, 12) and +1,740 (wake-up, 10).
+- **The bot's own throws were the biggest leak:** 69 openings during its forward / back throw, ~102k combo damage (~a fifth of
+  all damage taken). They were the defence game's tech options: after a block close up the opponents STRUCK 330 times, threw
+  18, shimmied 11 (after a hit 158 / 10 / 2; wake-up 70 / 9 / 12, 6 waits; walking in 50 / 36 / 4, 30 waits); the tech after a
+  block averaged -540 hp (53, hit 45 times), on wake-up -353 (33). The prior assumed throw 30% everywhere.
+- **Combo supers blocked:** 16 of 77 (+ 3 whiffs): SA1 hit when the opponent had 9+ frames of hitstun (+ hitstop) at the
+  row before it started, blocked at 7 or less. Causes: cancels into SA1 pressed ~18-22 frames after a light's hit (2LP / 5LP /
+  5LK), and links from a Hashogeki (opponent stun 2 left) with no window.
+- **Drive Impacts with no blockstun before them: 10** (the user's no-DI-in-neutral rule): Drive Reversal inputs (6+HP+HK)
+  that reached the game after the bot's blockstun ended came out as a forward Drive Impact (3,560 dealt, 4,200 taken). 15
+  real Drive Reversals from block (850) and 2 on wake-up (852) were fine.
+- **Neutral stance (openings taken / landed a second, the bot free and grounded):** 1.0-1.5 apart: walking forward 0.90 /
+  1.00, standing 0.50 / 0.27, walking back 0.70 / 0.13, crouch-blocking 0.22 / 0.38. In hp a second (the bot's openings ~1,490,
+  theirs ~1,200): walking forward +420, crouch-blocking +305, standing -195, walking back -640; 1.5-2.0: crouch-blocking +805,
+  standing +755, walking forward +405, walking back +180.
+- **Anti-air:** 12 Shoryukens at jump-ins landing near: 3 hit, 8 whiffed on jumps that crossed over (sent around take-off,
+  the opponent 0.4-0.8 in front and rising; 9,020 hp taken in the 2 s after). An open-loop replay does not reproduce the rule
+  that sent them.
+- **Corner:** the bot's back within 1.5 of its wall 20% of the time; there it took 188 hp a second and dealt 103 (midscreen
+  118 / 186). Entries: hit 80, blocking pushback 52, walking back 28, other 33.
+- **Light pokes from too far:** 2LP from 1.25-1.75 -247 per try (4 of 6 whiffed), 5LP -112, 5LK from 1.75-2.25 -33.
+- **Missing opponent data:** Marisa had no move map; E. Honda's two most damaging ids (610: 14,210; 999 Sumo Smash, airborne,
+  start-up 32: 9,400) were unnamed.
+- The scorecard counted A.K.I.'s poison ticks (562 of ~8 hp in one match) and chip as openings: "openings against 18.6 a
+  minute, 428 per opening" for 0.26.0 is that artefact.
+
+## 0.27.0: adapting to Diamond (user, 2026-10-06: "capitalize on what works, and reduce what doesn't")
+All MOCK / replay-tested (`tests/test_0270.py`; `decide()` replayed open-loop over the 33 recordings, also with the neutral
+policy: a copy-a-player brain trained on the recordings + the shipped Legend style table); nothing verified in game.
+- **Defence game priors per situation** (`defense.prior_by_situation`, `Defense.odds`), from the counts above, total weight 5
+  as before so each opponent's own answers take over: after a block / a Drive Rush block strike 4.55 / throw 0.25 / shimmy 0.15
+  / wait 0.05; after a hit 4.6 / 0.3 / 0.06 / 0.04; wake-up 3.6 / 0.45 / 0.6 / 0.35; walking in 2.1 / 1.5 / 0.15 / 1.25. The
+  delay-tech bonus on the opponent's turn 0.5 -> 0.2 (`turns.bonus`). Replay (option onsets): delay tech 298 -> 77, back dash
+  97 -> 22, jab 60 -> 27; block 118 -> 272, defence-game reversal 4 -> 42, parry 15 -> 64. Real throws are still teched on
+  sight (rule 00 after the connect, the throw-start reaction).
+- **Reactive reversal after a block with 3 Drive bars** (was 4; `reactive_reversal.after_block_min_drive` 30000).
+- **No combo move the opponent's stun can't cover** (`combo_lab.ComboRun._no_window`, matches only): a step goes out only
+  while the opponent's grounded hitstun + hitstop, minus the input delay and what is left of its motion, covers its start-up
+  (supers: + `LINK_SUPER_MARGIN` 0; other moves: `LINK_MARGIN` -1, a frame of tolerance so 1-frame links still go). Else the
+  route ends on the hit it has (`fail.kind: "late"`, `late_skips`); the composer learns the transition as failed. Juggles are not
+  checked.
+- **Drive Reversal only inside blockstun** (`fighter.drive_reversal_late`): not chosen when the input would land after the
+  stun (`_commit_defense`), and dropped while it waits when the bot is no longer blocking or the stun ends before the input
+  lands (fight loop `stop_check`; `di_stats.drive_reversal_dropped`). On a get-up (ids 300-349) it still goes.
+- **Neutral stance** (`neutral_policy.STANCE`): 1.0-1.5 apart walking back x0.4, standing x0.5, crouch-blocking x1.6 (walking
+  forward unchanged); 1.5-2.0 walking back x0.5, crouch-blocking x1.3. Replay with the policy: at 1.0-1.5 walking back 9% -> 3%,
+  crouch-blocking 68% -> 77%; at 1.5-2.0 walking back 14% -> 7%, crouch-blocking 61% -> 71%.
+- **Light pokes in neutral only from their measured winning range** (`neutral_policy.NEUTRAL_MAX_DIST`: 2LP / 5LP 1.25, 2LK
+  1.4, 5LK 1.75); whiff punishes and combos are not limited.
+- **The corner:** no back dash or shimmy option with the bot's back within 2.0 of its wall (`turns.no_retreat_wall`); in
+  neutral with the back within 1.5 walking forward x1.6, standing x0.7 (`CORNER_OUT`, on top of 0.19.0's less retreating).
+- **No Shoryuken at a rising jump that lands behind** (`fighter._aa_cross_guard`, every rule but the user's move answers):
+  block toward the landing side instead (counted as `anti_air.cross_guard` in the match summary).
+- **Move timing rebuilt** from all 296 recordings (`configs/move_timing/`, 30 characters, 1,074 -> 1,323 ids): Marisa 25, Ingrid
+  36, Elena 8 new; E. Honda 999 (Sumo Smash: airborne, start-up 32) and 610 (start-up 10, -3 on block) known.
+- **Scorecard** (cache v3): chip on block and damage ticks under 50 hp are not openings.
+- **Projection (open loop, ESTIMATES on measured opportunity counts):** per match, defence after a block / wake-up ~760 hp,
+  more reversals ~430 (counted at 30%), stance ~560 (counted at 50%), no late supers ~270, no cross-over Shoryukens ~270,
+  corner ~280, light pokes ~90, stray DIs ~20: ~2,700 hp of swing a match, applied at 50 / 75 / 100%. The win model (147 ranked
+  matches; on these 32 finished ones it gives 64% vs the real 69%) goes from 64% to ~70% (68-72%), so roughly **73-76% real
+  at the same Diamond opponents**. As the bot climbs toward Master the opponents get stronger and the rate drifts toward 50%:
+  LP is the measure. Master stays an aim, not a promise.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

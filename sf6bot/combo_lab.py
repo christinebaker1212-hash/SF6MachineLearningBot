@@ -45,6 +45,12 @@ CONFIRM_SLACK = 6      # matches (confirm): a move with no hit this many own fra
 # neutral it cannot tell, so a super gets this much more before it counts as a whiff. Before, every super ender of a
 # hit-confirmed route was judged a whiff online (and the combo composer learned that supers never connect).
 SUPER_FREEZE = 56
+# 0.27.0: a move of a match combo goes out only while the opponent's grounded hitstun will outlast its start-up. MEASURED
+# (0.26.0 ranked, 33 Diamond recordings, 77 combo supers): SA1 hit every time the opponent still had 9+ frames of hitstun
+# (+ hitstop) when it started and was blocked at 7 or less (16 of them: cancels pressed late after a light, links after
+# a Hashogeki with no window); a blocked super costs the bar and a full punish. Juggles (no hitstun) are not checked.
+LINK_SUPER_MARGIN = 0   # supers need start-up + this many frames of the opponent's stun left at their first frame
+LINK_MARGIN = -1        # other moves: start-up + this (a frame of tolerance: a 1-frame link must still go out)
 SWITCH_MOTION_MAX = 3   # 0.26.0: frames of motion a first-hit switch may still add before a cancel's button
 RUSH_AT = 11           # GUESS: frame of a Drive Rush on which the next normal is pressed
 OFFSET_RANGE = (-4, 6)
@@ -894,6 +900,9 @@ class ComboRun:
             return None
         land = self._ticks_to_land(p1, tick)
         k_ = self._due(tick, p1, land)
+        if self.confirm and k_ and self._no_window(k_, p2):
+            self._finish("late", k_)
+            return None
         if self.confirm and not self.done and k_ is None and self.pending is None:
             # a match (0.22.4, the audit after 0.22.2): the bot back to neutral with the route's next input still not
             # due means the link window has passed (a link is pressed BEFORE the bot is free, by the input delay). The
@@ -905,6 +914,26 @@ class ComboRun:
             else:
                 self._free_ticks = 0
         return k_
+
+    def _no_window(self, n: int, p2: dict) -> bool:
+        """0.27.0, matches only: True when step n's input would start its move after the opponent's grounded hitstun
+        (hitstun + hitstop, both stand still in hitstop) can still cover the move's start-up: the move would be blocked.
+        The move starts after the input delay and what is left of its motion; a juggled opponent (no hitstun) is not
+        checked. See LINK_SUPER_MARGIN."""
+        st = self.steps[n]
+        if not st.get("hitting") or not isinstance(st.get("startup"), int):
+            return False
+        a = p2.get("action_id")
+        stun = int(num(p2.get("hitstun")) or 0)
+        if not (isinstance(a, int) and 200 <= a < 230) or stun <= 0:
+            return False
+        motion = 0 if self.rt[n].get("motion_sent") is not None else int(st.get("prefix") or 0)
+        left = stun + int(num(p2.get("hitstop")) or 0) - self.lead - motion
+        need = st["startup"] + (LINK_SUPER_MARGIN if st.get("super_art") else LINK_MARGIN)
+        if left < need:
+            self.late_skips = getattr(self, "late_skips", 0) + 1
+            return True
+        return False
 
     def _next(self) -> int:
         return next((k for k, r in enumerate(self.rt) if r["sent"] is None), len(self.rt) - 1)
@@ -1159,6 +1188,7 @@ class ComboRun:
             px, qx = num(p.get("x")), num(q.get("x"))
             return None if px is None or qx is None else (qx > px)
         out = {"success": fail is None, "fail": fail, "hits": len(self.hits), "super_connected": self.super_connected,
+               "late_skips": getattr(self, "late_skips", 0),
                "damage": (num(d0.get("hp")) - self.min["dummy_hp"]) if num(d0.get("hp")) is not None and "dummy_hp" in self.min else None,
                "drive_spent": (num(b0.get("drive")) - self.min["bot_drive"]) if num(b0.get("drive")) is not None and "bot_drive" in self.min else None,
                "super_spent": (num(b0.get("super")) - self.min["bot_super"]) if num(b0.get("super")) is not None and "bot_super" in self.min else None,

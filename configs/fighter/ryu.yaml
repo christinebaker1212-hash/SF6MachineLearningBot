@@ -390,6 +390,16 @@ defense:
   # starting odds of the opponent's answer (counts are added per opponent, learning.Experience)
   # cmd_grab counts only against opponents that have a ground command grab (0.18.4)
   prior: {throw: 1.5, strike: 1.5, shimmy: 0.5, wait: 1.5, cmd_grab: 1.0}
+  # 0.27.0 per situation, MEASURED (0.26.0 ranked, 33 Diamond matches; the opponent within 1.4, its next action): after
+  # a block strike 330 / throw 18 / shimmy 11 / wait 2; after a hit 158 / 10 / 2 / 1; on the bot's wake-up 70 / 9 / 12
+  # / 6; walking in close 50 / 36 / 4 / 30. Same total weight as `prior` (5), so each opponent's own answers still take
+  # over. The bot's tech guess after a block averaged -540 hp there (53 tries, hit 45 times), a reversal +1,250
+  prior_by_situation:
+    after_block:      {strike: 4.55, throw: 0.25, shimmy: 0.15, wait: 0.05, cmd_grab: 1.0}
+    after_rush_block: {strike: 4.55, throw: 0.25, shimmy: 0.15, wait: 0.05, cmd_grab: 1.0}
+    after_hit:        {strike: 4.6, throw: 0.3, shimmy: 0.06, wait: 0.04, cmd_grab: 1.0}
+    wakeup:           {strike: 3.6, throw: 0.45, shimmy: 0.6, wait: 0.35, cmd_grab: 1.0}
+    approach:         {strike: 2.1, throw: 1.5, shimmy: 0.15, wait: 1.25, cmd_grab: 1.0}
   options:
     block:      {seq: "1@12"}
     # 0.25.0: the throw's direction is set when the option goes out (fighter.throw_direction): forward, back only with the
@@ -448,8 +458,9 @@ defense:
   # ESTIMATES.
   turns:
     enabled: true
-    bonus: 0.5
+    bonus: 0.2               # 0.27.0: was 0.5 (Diamond opponents strike after a block 92% of the time: block > tech)
     jab_bonus: 0.35
+    no_retreat_wall: 2.0     # 0.27.0: no back dash / shimmy option with the bot's back this close to its wall
     guess_penalty: 0.3       # parry / Drive Reversal / reversal / jump on the opponent's turn
     parry_min_drive: 30000
   # 0.23.0 the reactive reversal (fighter._reactive_reversal): with a reversal affordable at a wake-up / after-block / after-hit
@@ -458,7 +469,9 @@ defense:
   # 0.22.5: reversals on wake-up +1,183 hp each over 1.5 s (12, one lost), delay tech -306, block -303.
   reactive_reversal:
     enabled: true
-    after_block_min_drive: 40000   # after a block (no knockdown) the OD Shoryuken only with 4+ Drive bars (meter: any)
+    after_block_min_drive: 30000   # after a block (no knockdown) the OD Shoryuken only with 3+ Drive bars (meter: any)
+                                   # 0.27.0: was 4 bars. MEASURED (0.26.0 ranked): reversals after a block +1,250 hp
+                                   # each (12), on wake-up +1,740 (10); the OD Shoryuken costs 2 bars, 1 stays
     give_up_after: 3               # stop against this opponent after this many tries averaging below give_up_below
     give_up_below: -0.5            # (thousands of hp: its meaties recover in time, safe jumps)
     hold_direction: 3              # held between the motion and the button (the motion's last direction)

@@ -485,7 +485,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.drive_stats = {"burnouts": 0, "causes": {}}
         self._drive_hist: list = []
         self._drive_prev = None
-        self.di_stats = {"di_back": 0, "di_back_skipped_lethal": 0, "own_di_skipped_meter": 0, "burnout_super": 0}
+        self.di_stats = {"di_back": 0, "di_back_skipped_lethal": 0, "own_di_skipped_meter": 0, "burnout_super": 0,
+                         "drive_reversal_dropped": 0}
         self._aa_overhead_for = None
         self._aa_busy_for = None
         self._aa_ready_for = None             # 0.21.0: the jump the bot held still for (counted once)
@@ -869,10 +870,43 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 return Decision("none", reason=f"busy: {why}")
         if d.kind in ("seq", "route") and self._throw_too_early(d, raw, me_i):
             return Decision("none", reason="throw held: the opponent is not standing yet")
+        cg = self._aa_cross_guard(d, raw, me_i)
+        if cg is not None:
+            return cg
         if d.rule == "anti_air" and d.kind == "seq":
             k_ = getattr(self, "_aa_kind", "anti_air")
             self.aa_stats[k_] = self.aa_stats.get(k_, 0) + 1
         return d
+
+    def _aa_cross_guard(self, d: Decision, raw: dict, me_i: int) -> Decision | None:
+        """0.27.0: no Shoryuken, from any rule, at a jumping opponent who is still RISING and whose predicted landing is
+        behind the bot (it passes over Ryu). MEASURED (0.26.0 ranked, 33 Diamond matches): of 12 Shoryukens that went out
+        at jump-ins landing near the bot, 8 whiffed, every one of them on a jump that crossed over; they were sent around
+        take-off with the opponent 0.4-0.8 in front, rising. The bot blocks toward the landing side instead (decided again
+        every line). Not for the user's move answers (Dragonlash, Vanishing Sun) or juggles."""
+        if d.kind not in ("seq", "route") or d.rule in ("move_answer", "answer_wait") or not self.vel_ok:
+            return None
+        name = d.name or ""
+        seq = d.seq if isinstance(d.seq, str) else ""
+        if "Shoryuken" not in name and not re.search(r"(^|\s)6@\d+ 2@\d+ 3\+[LMH]?P", seq):
+            return None
+        me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
+        if (_num(op.get("y")) or 0.0) <= 0.3 or self.op_vy <= 0 or not self._jumping(op):
+            return None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None:
+            return None
+        aa = self.c["anti_air"]
+        t_land = landing_frames(_num(op.get("y")) or 0.0, self.op_vy, float(aa.get("gravity", 0.0123)))
+        pdx, dx = ox + self.op_vx * t_land - mx, ox - mx
+        if pdx * dx > 0 and abs(pdx) >= float(aa.get("side_dead", 0.05)):
+            return None                                   # lands in front: the Shoryuken can hit
+        self.aa_stats["cross_guard"] = self.aa_stats.get("cross_guard", 0) + 1
+        if d.rule == "anti_air":
+            self.aa_done_for_jump = False                 # decide again on a later line
+        return Decision("hold", direction=4, facing=Facing.RIGHT if pdx > 0 else Facing.LEFT, rule="aa_cross_guard",
+                        reason=f"{name or 'Shoryuken'} held: the jump is still rising and lands behind me "
+                               f"({pdx:+.2f}); blocking toward the landing side")
 
     def _throw_too_early(self, d: Decision, raw: dict, me_i: int) -> bool:
         """0.20.0 (user: "it mistimes meaty grabs constantly, choosing to grab as soon as the opponent is on the ground. It
@@ -2250,6 +2284,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         wait = None if rem is None else max(0, int(rem) - self.lead - self.stale)
         exclude, bonus, turn = self._turn(sit, me, op, dist)
         exclude = set(exclude) | set(extra_exclude)
+        if rem is not None and sit != "wakeup" and int(rem) - self.lead - self.stale < 2:
+            exclude.add("drive_reversal")      # 0.27.0: it would land after the blockstun, as a Drive Impact
         ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
                                  lambda name, oc: self._resolve_option(me, op, oc), wait=wait,
                                  exclude=exclude, bonus=bonus)
@@ -2296,6 +2332,14 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return set(), {}, ""
         b = float(tc.get("bonus", 0.5))
         ex, bonus, turn = set(), {}, ""
+        # 0.27.0: no retreating options with the wall close behind (they walk the bot into the corner: MEASURED 0.26.0
+        # ranked, cornered 20% of the time, 188 hp a second taken there vs 118 midscreen)
+        from .intents import WALL
+        mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
+        if mx_ is not None and ox_ is not None:
+            behind_ = WALL - mx_ if mx_ > ox_ else mx_ + WALL
+            if behind_ <= float(tc.get("no_retreat_wall", 2.0)):
+                ex |= {"back_dash", "shimmy"}
         if (_num(me.get("drive")) or 0) < int(tc.get("parry_min_drive", 30000)):
             ex.add("parry")
         if sit in ("after_block", "after_rush_block", "after_hit", "wakeup"):
@@ -3148,6 +3192,20 @@ def seq_prefix(seq: str) -> int:
             return n
         n += int(fr or 1)
     return n
+
+
+def drive_reversal_late(me: dict, arrive: int) -> str | None:
+    """0.27.0: why a Drive Reversal sent now would come out as a Drive Impact, or None. It needs the bot still in
+    blockstun when the input reaches the game (`arrive` frames: input delay + stale state), or in a get-up (wake-up
+    Drive Reversal, id 852 measured)."""
+    a = me.get("action_id")
+    if isinstance(a, int) and 300 <= a < 350:
+        return None
+    if (_num(me.get("blockstun")) or 0) <= 0:
+        return "drive reversal: no longer blocking"
+    if stun_left(me) < max(1, arrive):
+        return "drive reversal: blockstun ends before the input lands"
+    return None
 
 
 def stun_left(me: dict) -> int:
@@ -4320,12 +4378,25 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 # (0.24.x ranked): 17 hits with the bot still blocking toward the old side after the opponent crossed under
                 # it on the ground; facing was set between decisions only, not while a held sequence ran
                 hold_like = d.kind == "seq" and d.facing is None and not _has_motion(d.seq or "")
+                # 0.27.0: a Drive Reversal (6+HP+HK) only works in blockstun (or on a get-up); pressed once the bot is
+                # free it is a forward Drive Impact. MEASURED (0.26.0 ranked, 33 recordings): 10 Drive Impacts with no
+                # blockstun before them (3,560 dealt, 4,200 taken), the user's no-DI-in-neutral rule broken
+                dr_live = d.rule == "defense:drive_reversal"
 
-                def stop_check(neutral_=neutral, techless_=techless, hold_like_=hold_like):
+                def stop_check(neutral_=neutral, techless_=techless, hold_like_=hold_like, dr_=dr_live):
                     # 0.22.0: a takeover stops any sequence between two inputs; neutral ones also stop for urgent events
                     tk_ = tk.check()
                     if tk_:
                         return tk_
+                    if dr_:
+                        latest_ = reader.latest()
+                        if latest_ is not None:
+                            r_ = latest_.raw
+                            me_ = r_.get(f"p{side['i'] + 1}") or {}
+                            why_dr = drive_reversal_late(me_, fighter.lead + fighter.stale)
+                            if why_dr:
+                                fighter.di_stats["drive_reversal_dropped"] += 1
+                                return why_dr
                     if hold_like_:
                         latest_ = reader.latest()
                         if latest_ is not None:

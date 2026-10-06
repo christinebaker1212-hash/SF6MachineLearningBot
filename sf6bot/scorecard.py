@@ -28,7 +28,7 @@ JUMP = set(range(33, 41))
 DP = set(range(930, 938))
 HADO = set(range(900, 912))
 RUSH = {500, 501, 739, 740, 741}
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def _bot_doing(b: dict) -> str:
@@ -131,7 +131,10 @@ def measure(rows: list[dict], me: str, op: str) -> Counter:
                 c["openings_dealt"] += 1
         if dt > 0:
             c["taken"] += dt
-            fresh = not (200 <= (pa or 0) < 400 or (p[me].get("hitstun") or 0) > 0 or 720 <= (pa or 0) < 730)
+            # 0.27.0: not chip on block or a damage-over-time tick (A.K.I.'s poison: 562 ticks of ~8 hp in one 0.26.0 match
+            # counted as openings, 18.6 a minute)
+            fresh = not (200 <= (pa or 0) < 400 or (p[me].get("hitstun") or 0) > 0 or 720 <= (pa or 0) < 730
+                         or (p[me].get("blockstun") or 0) > 0 or (b.get("blockstun") or 0) > 0 or dt < 50)
             if fresh:
                 j = i
                 while j > 0 and rows[j][op].get("action_id") == oa:

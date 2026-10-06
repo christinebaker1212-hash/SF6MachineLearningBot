@@ -124,7 +124,10 @@ def test_spacing_hovers_outside_the_opponents_longest_poke():
     inside = pol.style({"x": 0.0}, {"x": 1.4})
     outside = pol.style({"x": 0.0}, {"x": 1.8})
     far = pol.style({"x": 0.0}, {"x": 3.0})
-    assert inside[wb] > 1.0 > inside[wf] and outside[wf] < 1.0 and far[wf] > 1.0
+    # 0.27.0: just inside its poke the bot crouch-blocks rather than walking back (MEASURED at Diamond, 1.0-1.5: walking
+    # back was opened 0.70 a second and landed 0.13; crouch-blocking 0.22 / 0.38)
+    ci = it.INTENTS.index("crouch")
+    assert inside[ci] > 1.0 > inside[wf] and outside[wf] < 1.0 and far[wf] > 1.0
     f = _fighter(opp_reach={605: 1.3, 640: 1.6, "air:651": 2.5, 900: 9.0})
     assert f.opp_poke_reach() == 1.6                                 # ground normals only
 

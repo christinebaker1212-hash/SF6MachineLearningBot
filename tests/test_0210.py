@@ -197,7 +197,7 @@ def test_whose_turn_it_is_decides_the_defence_options():
     f = ScriptedFighter(FCFG, seed=1, opp_moves={605: {"name": "5MP", "block_adv": 1}, 600: {"name": "5LP", "block_adv": -3}})
     me = {"drive": 60000}
     ex, bonus, turn = f._turn("after_block", me, {"action_id": 605}, 1.0)
-    assert {"jab", "tech"} <= ex and bonus["delay_tech"] == 0.5 and turn == "their turn (-1)"
+    assert {"jab", "tech"} <= ex and bonus["delay_tech"] == FCFG["defense"]["turns"]["bonus"] and turn == "their turn (-1)"
     assert all(bonus[g] == -0.3 for g in ("parry", "drive_reversal", "reversal", "jump"))     # guesses: rarer
     ex, bonus, turn = f._turn("after_block", me, {"action_id": 777}, 1.0)          # unknown move: their turn
     assert {"jab", "tech"} <= ex and turn == "their turn"
@@ -224,7 +224,10 @@ def test_a_minus_bot_never_jabs_or_techs_out_of_blockstun():
         if (d.rule or "").startswith("defense:"):
             picks.append(d.rule)
     assert picks and not ({"defense:jab", "defense:tech"} & set(picks))
-    assert picks.count("defense:delay_tech") > len(picks) / 3
+    # 0.27.0: MEASURED at Diamond, the opponent strikes after a block 92% of the time: blocking and the invincible guesses
+    # replace the delay tech as the usual answers (the delay tech averaged -540 hp there)
+    safe = sum(picks.count(f"defense:{o}") for o in ("block", "reversal", "parry", "delay_tech", "drive_reversal"))
+    assert safe >= 0.8 * len(picks)
 
 
 # ---- anti-air readiness and the wake-up anti-air ----------------------------------------------------------------------
