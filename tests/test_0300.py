@@ -85,17 +85,22 @@ def _di_fighter():
     from tests.test_0240 import CAP, FCFG, _book, cc
     from sf6bot.fighter import ScriptedFighter
     book = _book()
+    for e in book:
+        if e["route"] == "2MK > 236MK > 623HP":
+            # user: "M High Blade won't connect into H Shoryuken outside of the corner" (the Ryu page lists every
+            # 236MK , 623 route as Corner)
+            e["position"] = "corner"
     comp = cc.build(book, CAP)
     f = ScriptedFighter(FCFG, seed=1, book=book + comp.entries)
     f.composer, f.lead = comp, 5
     return f
 
 
-def _after_di(f, meter, drive=60000, op_hp=10000, op_a=276, x=0.72):
+def _after_di(f, meter, drive=60000, op_hp=10000, op_a=276, x=0.72, me_x=0.0):
     from tests.test_defense import state
     for k in range(120):
-        d = f.decide(state(me={"action_id": 855 if k < 85 else 1, "super": meter, "drive": drive},
-                           op={"x": x, "action_id": op_a, "hp": op_hp}, timer=1000 + k), k / 60, 0)
+        d = f.decide(state(me={"x": me_x, "action_id": 855 if k < 85 else 1, "super": meter, "drive": drive},
+                           op={"x": me_x + x, "action_id": op_a, "hp": op_hp}, timer=1000 + k), k / 60, 0)
         if d.rule == "crumple_followup":
             return k, d
     return None, None
@@ -125,9 +130,11 @@ def test_crumple_follow_up_depends_on_the_super_the_bot_has():
     f = _di_fighter()
     _after_di(f, 30000)
     assert f.super_stats["stuns_seen"] == 1 and list(f.super_stats["crumple_estimates"].values())[0] > 4000
-    # never into burnout: with one Drive bar no Drive Rush route
+    # never into burnout: with one Drive bar no Drive Rush route; M High Blade , Shoryuken only in the corner
     k3, d3 = _after_di(_di_fighter(), 30000, drive=10000)
-    assert "DRC" not in d3.name and d3.name.endswith("236236K")
+    assert "DRC" not in d3.name and "236MK" not in d3.name
+    k4, d4 = _after_di(_di_fighter(), 30000, drive=10000, me_x=6.9)          # the opponent's back to the wall
+    assert d4.name == "2MK > 236MK > 623HP , 236236K"
 
 
 def test_only_the_crumple_counts_not_other_stun_reactions():

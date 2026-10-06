@@ -3915,7 +3915,12 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
   - a kill wins (the surest, then the fewest bars). Timed by the punish engine so the first hit lands on the bot's first free
     frame and before the stun can end. Without the composer (no Capcom data) the old rule stays.
   - On the synthetic test book: 0 or 1 bars -> 5HP > DRC 5HK , 5HP > 623HP (~2,900); 2 bars -> SA2 (2,800); 3 bars ->
-    5HP > DRC 5HK , 5HP > 623HP , SA3 (~4,900); 3 bars and 1 Drive bar -> 2MK > 236MK > 623HP , SA3 (~4,500).
+    5HP > DRC 5HK , 5HP > 623HP , SA3 (~4,900); 3 bars and 1 Drive bar -> SA2 midscreen, 2MK > 236MK > 623HP , SA3 (~4,500)
+    only with the opponent cornered. User: "M High Blade won't connect into H Shoryuken outside of the corner"; the Ryu
+    page lists every 236MK , 623 route as Corner, so in the real book that transition is corner-only (a composed
+    transition is used midscreen only if some midscreen route verified it). The first test book had it midscreen (my
+    error in the test data, not the bot's logic); fixed.
+  - SA2 Lv1 is counted as one hit (Capcom lists one active range); if it is really several hits it is overvalued here.
 - **Recognising it:** the crumple (id 276, MEASURED: 18 of 18 after the bot's DI connects; 39 of 45 DI-backs in the 0.24.x
   run) within 1.1, as before. User: "I'm not talking about wall splats where it stuns": a first version also took any
   250-299 reaction after the bot's DI as a wall splat (unmeasured); taken out again in 0.30.2.
