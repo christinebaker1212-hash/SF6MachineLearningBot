@@ -7,6 +7,8 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **MASTER REACHED (2026-10-06, user's result screen): the long-term goal is met.** Ranked, unattended, 0.27.0, on a
+  10-win streak: Master, 25,238 LP (+1,050 for the promotion), 1500 MR. Details: "Master reached" below.
 - **Milestone 1: COMPLETE (2026-10-01).** Acceptance passed both sides; latency measured;
   F8, F7 and focus-loss release confirmed by the user (Ryu idle after Alt-Tab). Thumbstick kill
   untested.
@@ -3696,6 +3698,18 @@ policy: a copy-a-player brain trained on the recordings + the shipped Legend sty
   matches; on these 32 finished ones it gives 64% vs the real 69%) goes from 64% to ~70% (68-72%), so roughly **73-76% real
   at the same Diamond opponents**. As the bot climbs toward Master the opponents get stronger and the rate drifts toward 50%:
   LP is the measure. Master stays an aim, not a promise.
+
+## Master reached (user, 2026-10-06)
+- User: "Claude, Ryu hit Master on a 10 win streak. We did it!" Result screen (MEASURED from the screenshot, one match):
+  WON, 10-Win Streak, **Master, 25,238 LP (+1,050), 1500 MR**; the opponent was a Diamond 4 (name not recorded).
+- Path: Platinum 1 (2026-10-03) -> Diamond 19,053 LP (2026-10-05) -> 21,592 LP (0.25.0 run) -> Diamond 4 (0.26.0 run) ->
+  Master (0.27.0). Reached in ranked on the user's account under Capcom's written approval, with the bot unattended.
+- What this is and isn't (M5's distinction): it is "achieved Master rank". 1500 MR is Master's starting rating; from here MR
+  is the measure, and matchmaking by MR pulls the win rate toward 50%. "Competitive with top Master players" is a separate,
+  open claim.
+- The result screen here offered "Request Rematch" / "Quit" / "Fight in Custom Room" with Request Rematch highlighted (the
+  opponent picked Quit). The bot's F presses go to the first option (0.18.9 / 0.18.11); no change needed.
+- Not yet measured: the 0.27.0 run's record and scorecard (waiting for S and the fight files).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

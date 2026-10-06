@@ -18,6 +18,9 @@ The unfinished Ryu mirror was a rage quit. Next, the user runs `update.bat`, sta
 fight files. Ask for a fresh S (menu S / SEND TO CLAUDE) before they purge runs.
 
 **Results so far:**
+- **MASTER (2026-10-06, user's screenshot): 25,238 LP, 1500 MR, on a 10-win streak with 0.27.0, unattended.** The project's
+  long-term goal is met (CLAUDE.md "Master reached"). From here MR is the measure; the 0.27.0 run's S and fight files are
+  still to come.
 - Platinum 1 (2026-10-03) → Diamond, 19,053 LP (2026-10-05) → 21,592 LP after the 0.25.0 run → **Diamond 4** at the 0.26.0
   run's peak (user).
 - 0.24.x run: 41-15. 0.25.0 run: 26-8 (76%). **0.26.0 run: 22-10 (69%)**, damage ratio 1.23, against stronger players.
