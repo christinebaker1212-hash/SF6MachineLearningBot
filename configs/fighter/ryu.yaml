@@ -420,8 +420,12 @@ defense:
     block:      {seq: "1@12"}
     # 0.25.0: the throw's direction is set when the option goes out (fighter.throw_direction): forward, back only with the
     # bot's own back within back_throw_wall of its wall (MEASURED 0.24.x: 148 back throws with nothing to tech)
-    delay_tech: {seq: "1@4 4+LP+LK@3 1@8"}     # hold down-back, then throw: late enough to block a strike
-    tech:       {seq: "4+LP+LK@3 1@8"}
+    # 0.31.1: both tech GUESSES off. MEASURED (ranked 0.26.0-0.31.0, the next 90 frames): a throw pressed after a block
+    # with no throw coming averaged -555 hp (86), on wake-up -378 (47); it met a throw 5 times. Held block with a throw
+    # coming -152 (19), and techs on REACTION (rules 2 / 00: the start-up or the thrown state) -22 / -44 (24): those
+    # tech 90% of normal throws. So the bot blocks and techs what it sees.
+    delay_tech: {seq: "1@4 4+LP+LK@3 1@8", enabled: false}     # hold down-back, then throw
+    tech:       {seq: "4+LP+LK@3 1@8", enabled: false}
     jab:        {seq: "2+LP@3 1@6"}
     back_dash:  {seq: "4@3 5@2 4@3"}
     jump:       {seq: "8@4"}

@@ -179,6 +179,7 @@ def test_a_command_grab_is_its_own_answer_and_shifts_the_defence():
     plain = _fighter()
     assert plain.defense.odds("after_block")["cmd_grab"] == 0.0           # no grappler: no command grabs expected
     f = _fighter(opp_moves=dict(GRAB))
+    _tech_on(f)
     assert f.defense.has_cmd_grab and f.defense.odds("after_block")["cmd_grab"] > 0
     # this Zangief grabs at every moment
     f.defense.c["prior"] = {"throw": 0.1, "strike": 0.1, "shimmy": 0.1, "wait": 0.1, "cmd_grab": 5.0}
@@ -247,6 +248,7 @@ def test_after_blocking_a_rushed_normal_pressing_buttons_is_worth_less():
     _line(f, op={"x": 0.9, "action_id": 605}, timer=501)
     d = _line(f, me={"blockstun": 4, "action_id": 155}, op={"x": 0.9, "action_id": 605}, timer=505)
     assert d.rule.startswith("defense:") and f.watch["sit"] == "after_rush_block"
+    _tech_on(f)
     a, b = f.defense.values("after_block"), f.defense.values("after_rush_block")
     assert b["jab"] < a["jab"] and b["tech"] < a["tech"] and b["block"] >= a["block"]
 
@@ -475,3 +477,11 @@ def test_a_match_counts_only_rounds_after_its_start():
     for k, raw in enumerate(prev_match_round + match):
         b.add(raw, k / 60)
     assert b.duplicates == 0 and len(b.rows) == len(match) and b.prior_lines_dropped == len(prev_match_round)
+
+
+def _tech_on(f):
+    """0.31.1: the tech guesses are off by default; these tests check how they are valued when on."""
+    import copy
+    f.defense.options = copy.deepcopy(f.defense.options)
+    for k in ("tech", "delay_tech"):
+        f.defense.options[k]["enabled"] = True

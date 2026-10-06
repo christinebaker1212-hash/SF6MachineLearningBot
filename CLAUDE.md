@@ -7,7 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
-- **First Master matches (0.31.0, 2026-10-06): 1-5 against ~1460 MR players; 0.31.1 fixes found there (section "0.31.1").**
+- **First Master matches (0.31.0, 2026-10-06): 1-5 against ~1460 MR players; fixes in 0.31.1 and 0.31.2 (throw defence).**
 - **MASTER REACHED (2026-10-06, user's result screen): the long-term goal is met.** Ranked, unattended, 0.27.0, on a
   10-win streak: Master, 25,238 LP (+1,050 for the promotion), 1500 MR. Details: "Master reached" below.
 - **Milestone 1: COMPLETE (2026-10-01).** Acceptance passed both sides; latency measured;
@@ -4056,6 +4056,33 @@ on the 6 uploaded fight files (5 on 0.31.0, 1 on 0.30.2; Master opponents ~1450-
 - Not changed (seen): the bot's own throw / tech options being hit, Terry's throws landing with LP+LK pressed during
   the bot's get-up, the other characters' throw victim ids.
 - Tests: `tests/test_0311.py`. Not verified in game.
+
+## 0.31.2: throw defence: block and tech on reaction, no tech guesses (user, 2026-10-06)
+User: "we need to look these things over if we ever want to get the bot back to 1500, or even High Master." MEASURED on the
+ranked recordings 0.23.0-0.31.0 (both players' input masks; the bot's LP+LK press = the frame the game read both buttons).
+- **Reaction techs work:** an opponent's normal throw with the bot pressing LP+LK from 1 frame before to 3 frames after
+  the connect was teched ~90% of the time (free 102 / 111, blockstun 40 / 44, hitstun 20 / 21). Rules 2 (the throw's start-up)
+  and 00 (the thrown state) do this.
+- **Tech GUESSES lose:** after the bot's blockstun ended with the opponent within 1.4, the next 90 frames, damage dealt -
+  taken:
+  - a tech guess (LP+LK with no throw start-up seen first): -555 with no throw coming (86 times), 0 when a throw came (4)
+  - holding block: +10 with no throw (320), -152 when a throw came (19, many teched on reaction)
+  - a tech on reaction: -22 (13)
+  - on the bot's wake-up: guess -378 (47); block with a throw coming +412 (5); reaction -44 (11)
+  - The `tech` and `delay_tech` defence options are now off (`enabled: false` in configs/fighter/ryu.yaml;
+    `Defense.values` skips disabled options): at pressure moments the bot blocks (or uses its other options) and techs what
+    it sees.
+- **The first free frame:** a press read exactly on the connect frame, when the connect was the bot's first free frame,
+  teched 9 of 18 (after blockstun 4 / 7, wake-up 5 / 11); one frame earlier 17 / 17, one to three frames later 26 / 30. Free
+  beforehand, the connect frame is fine (24 / 26). The start-up reaction (rule 2) now holds 2 frames when its input would
+  reach the game exactly on the bot's first free frame after blockstun or its get-up (`fighter._tech_wait`).
+- **Punish-counter throws can't be teched:** throws connecting as 722 / 726 (the bot in recovery: a Shoryuken, a super, a
+  Drive Parry) landed every time whatever the bot pressed (2,040 damage). Not changed beyond 0.31.1's projectile parries.
+- **Victim ids that are the bot's own throw connects** (Blanka 720 / 726; Chun-Li, Mai, Viper, Elena 726; Dhalsim 722):
+  they count as being thrown when the bot did not come into them from its own throw start-up (715 / 716 / 717)
+  (`fighter.being_thrown`, `throws.ambiguous_for`). Checked on the recordings of those characters: 81 of 84 agree.
+- The regression fingerprint `fighter_decisions` changed for exactly two delay techs (now a jab and a block).
+- Tests: `tests/test_0311.py` (and the tech-learning tests switch the options on). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

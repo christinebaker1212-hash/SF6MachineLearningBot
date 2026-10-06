@@ -45,3 +45,9 @@ def ids_for(opponent: str | None, startup=None, thrown=None, own: set | None = N
     own = OWN_DEFAULT if own is None else own
     t |= {a for a in e.get("thrown") or () if a not in own}
     return s, t
+
+
+def ambiguous_for(opponent: str | None, own: set | None = None) -> set:
+    """The opponent's victim ids that are also the bot's own throw ids (told apart by where the bot came from)."""
+    own = OWN_DEFAULT if own is None else own
+    return {a for a in (BY_CHARACTER.get(opponent or "") or {}).get("thrown") or () if a in own}

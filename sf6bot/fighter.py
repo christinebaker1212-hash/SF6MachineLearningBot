@@ -424,6 +424,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.defense = Defense(fcfg["defense"], experience, seed) if fcfg.get("defense") else None
         self._pressure_fired = False
         self._my_act, self._my_act_t0, self._hit_by, self._prev_hs = None, None, None, 0
+        self._my_prev_act = None
+        self.thrown_ambiguous: set = set()   # 0.31.1: victim ids that are also the bot's own throw connects
         self._approach_fired = False
         self._their_wake_fired = None
         self._crumple_t0, self._crumple_done = None, False
@@ -826,15 +828,25 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
     def set_opponent_throws(self, opponent: str | None) -> None:
         """0.31.1: the opponent character's own throw ids (throws.py, MEASURED; Guile's are 700 / 701, victim 706 / 710).
         Updates the grab watch's reaction ids too."""
-        from .throws import ids_for
+        from .throws import ambiguous_for, ids_for
         self.throw_ids, self.thrown_ids = ids_for(opponent, *self._base_throws)
+        self.thrown_ambiguous = ambiguous_for(opponent) - self.thrown_ids
         if getattr(self, "grab_watch", None) is not None and hasattr(self.grab_watch, "reaction_ids"):
             self.grab_watch.reaction_ids = set(self.hit_ids) | set(self.thrown_ids)
 
+    def being_thrown(self, me: dict) -> bool:
+        """The bot in a thrown state. 0.31.1: some characters' throws put the bot in an id that is also one of its OWN
+        throw connects (Blanka 720 / 726; Chun-Li, Mai, Viper, Elena 726; Dhalsim 722, MEASURED): that id counts as being
+        thrown only when the bot did not come into it from its own throw start-up (715 / 716)."""
+        a = me.get("action_id")
+        if a in self.thrown_ids:
+            return True
+        return a in self.thrown_ambiguous and self._my_act == a and self._my_prev_act not in OWN_THROW_STARTUP
+
     def _thrown_tech(self, me: dict, op: dict) -> Decision | None:
         tc = self.c.get("throw_tech") or {}
-        if not tc.get("after_connect", True) or me.get("action_id") not in self.thrown_ids:
-            if me.get("action_id") not in self.thrown_ids:
+        if not tc.get("after_connect", True) or not self.being_thrown(me):
+            if not self.being_thrown(me):
                 self._thrown_for = None
             return None
         if self._thrown_for is not None or not self._ok("throw"):
@@ -843,6 +855,22 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.tech_stats["after_connect"] = self.tech_stats.get("after_connect", 0) + 1
         return Decision("seq", "Throw tech (grabbed)", "5+LP+LK@3", rule="throw_tech_late", timed=True,
                         reason=f"thrown (action {me.get('action_id')}): teching inside the window after the connect")
+
+    def _tech_wait(self, me: dict, tmr) -> int:
+        """0.31.1: frames to hold before a reaction tech so it does not reach the game exactly on the bot's first free frame
+        after blockstun or its get-up. MEASURED (ranked 0.23.0-0.31.0, normal throws): a press read on the connect frame
+        when the connect was the first free frame teched 9 of 18 (after blockstun 4 / 7, wake-up 5 / 11); one frame
+        earlier 17 of 17, one to three frames later 26 of 30. Free beforehand, the connect frame is fine (24 of 26)."""
+        free_in = stun_left(me)
+        aid = me.get("action_id")
+        if not free_in:
+            wf = ((self.c.get("defense") or {}).get("wakeup_frames") or {}).get(aid)
+            if wf and isinstance(tmr, int) and isinstance(self._my_act_t0, int) and self._my_act == aid:
+                free_in = max(0, int(wf) - (tmr - self._my_act_t0))
+        if free_in <= 0:
+            return 0
+        arrive = int(self.lead + self.stale)
+        return 2 if arrive == free_in else 0
 
     def _throw_coming(self, op: dict, dist: float) -> bool:
         return op.get("action_id") in self.throw_ids and dist <= self.c["throw_tech"]["max_dist"]
@@ -1113,7 +1141,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         #    down-back here (rule 5 counted the throw as an attack): throws were 42-62% of its damage.
         if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05 and self._ok("throw"):
             self.tech_handled = op_act
-            return self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
+            d = self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
+            w = self._tech_wait(me, raw.get("stage_timer"))
+            if w:
+                d.seq = f"1@{w} " + d.seq
+                d.reason += f" (held {w}F: not on my first free frame)"
+            return d
         if op_act not in self.throw_ids:
             self.tech_handled = None
 
@@ -2715,6 +2748,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         Fed from every line (observe_line) and from decisions; repeated lines change nothing."""
         aid, hs = me.get("action_id"), _num(me.get("hitstun")) or 0
         if aid != self._my_act:
+            self._my_prev_act = self._my_act
             self._my_act, self._my_act_t0 = aid, tmr
         if hs > self._prev_hs:
             self._hit_by = op.get("action_id")
@@ -3412,6 +3446,9 @@ def drive_reversal_late(me: dict, arrive: int) -> str | None:
     if stun_left(me) < max(1, arrive):
         return "drive reversal: blockstun ends before the input lands"
     return None
+
+
+OWN_THROW_STARTUP = {715, 716, 717}
 
 
 def stun_left(me: dict) -> int:

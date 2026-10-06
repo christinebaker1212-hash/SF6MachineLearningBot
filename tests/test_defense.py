@@ -55,7 +55,7 @@ def test_reach_is_measured_from_where_moves_started_and_connected():
 
 def test_defense_follows_what_this_opponent_does_after_pressure(tmp_path):
     exp = Experience(tmp_path, "Ryu", "Ken")
-    d = Defense(FCFG["defense"], exp, seed=3)
+    d = Defense(with_tech(FCFG["defense"]), exp, seed=3)
     before = d.values("after_block")
     for _ in range(12):
         exp.response("after_block", "throw")            # this opponent throws after a blockstring
@@ -161,3 +161,12 @@ def test_state_lines_with_nan_or_inf_are_read_not_dropped(tmp_path):
     r.stop()
     assert [g.raw["f"] for g in got] == [1, 2] and got[0].raw["p1"]["x"] is None
     assert r.repaired == 1 and r.parse_errors == 1 and "broken" in r.last_bad
+
+
+def with_tech(dcfg):
+    """0.31.1: the tech guesses are off by default; these tests check how they would be learned."""
+    import copy
+    d = copy.deepcopy(dcfg)
+    for k in ("tech", "delay_tech"):
+        d["options"][k]["enabled"] = True
+    return d

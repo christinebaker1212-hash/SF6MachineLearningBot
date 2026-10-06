@@ -73,3 +73,33 @@ def test_ranked_trends_leave_out_the_versus_human_sets():
     assert len(keep) == 3 and other == 9
     keep, other = same_mode(hist, [{"mode": "offline"}])
     assert len(keep) == 12 and other == 0
+
+
+def test_tech_guesses_are_off_and_never_chosen():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    opts = FCFG["defense"]["options"]
+    assert opts["tech"]["enabled"] is False and opts["delay_tech"]["enabled"] is False
+    picks = {f.defense.choose("after_block")["option"] for _ in range(200)}
+    assert not picks & {"tech", "delay_tech"} and "block" in picks
+
+
+def test_reaction_tech_is_not_sent_onto_the_first_free_frame():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead, f.stale = 4, 0
+    assert f._tech_wait({"blockstun": 4, "hitstop": 0, "action_id": 170}, 100) == 2      # would land on frame 4
+    assert f._tech_wait({"blockstun": 6, "hitstop": 0, "action_id": 170}, 100) == 0      # lands while still in stun
+    assert f._tech_wait({"action_id": 5}, 100) == 0                                       # free: frame 0 is fine
+    f._track_self({"action_id": 340}, {}, 74)                                             # get-up began at 74, lasts 30
+    assert f._tech_wait({"action_id": 340}, 100) == 2
+
+
+def test_ambiguous_victim_ids_count_as_thrown_only_without_the_bots_own_throw():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.set_opponent_throws("Chun-Li")
+    assert 726 in f.thrown_ambiguous and 726 not in f.thrown_ids
+    f._track_self({"action_id": 5}, {}, 10)
+    f._track_self({"action_id": 726}, {}, 11)
+    assert f.being_thrown({"action_id": 726})                                            # Chun-Li threw the bot
+    f._track_self({"action_id": 716}, {}, 20)
+    f._track_self({"action_id": 726}, {}, 25)
+    assert not f.being_thrown({"action_id": 726})                                        # the bot's own back throw

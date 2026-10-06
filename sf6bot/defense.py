@@ -120,7 +120,7 @@ class Defense:
         out = {}
         options, payoff = self._set(situation)
         for name, oc in options.items():
-            if name in exclude:
+            if name in exclude or oc.get("enabled") is False:
                 continue
             if oc.get("situations") and situation not in oc["situations"]:
                 continue                       # an option only some moments allow (0.20.0: Drive Reversal in blockstun)

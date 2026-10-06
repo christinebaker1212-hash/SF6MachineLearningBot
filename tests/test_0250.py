@@ -65,6 +65,8 @@ def test_a_defence_tech_goes_out_forward_midscreen():
     f.lead = 5
     f.defense.c["temperature"] = 0.05
     f.defense.payoff["tech"] = {"throw": 9, "strike": 9, "shimmy": 9, "wait": 9}
+    f.defense.options = copy.deepcopy(f.defense.options)
+    f.defense.options["tech"]["enabled"] = True                   # 0.31.1: off by default; its direction still matters
     f.c = copy.deepcopy(f.c)
     f.c["defense"]["turns"]["enabled"] = False
     d = f.decide(state(me={"blockstun": 4, "action_id": 155}, op={"x": 0.9, "action_id": 1}), 0.0, 0)
