@@ -3762,6 +3762,22 @@ thrown 20. Analysis scripts in the session scratchpad. Nothing built yet.
   - Cause 2 (setting): with human limits ON the switch to a standing block waits a sampled reaction around 21F
     (`human_limits.per_kind.guard`), which is longer than this 20F overhead.
 
+## The user (Akuma) vs the bot, human limits OFF (2026-10-06): 0-4 (the set stopped at 0-4)
+MEASURED on the 4 uploaded fight files and the S excerpt (0.27.0, Versus Human offline, human limits off). The user:
+"You cannot fucking fight this thing up close, he's a demon."
+- Up close the bot nearly won: match 1 dealt 16,960 (the user's Akuma at 40 hp and 1,000 hp at the two KOs), match 2 13,740.
+  The user then zoned: matches 3 and 4, 88 and 100+ L Gou Hadokens from far away, the bot dealt 0 and took 20,000 each,
+  almost all from L Gou Hadoken (counter hits, 840 each).
+- **Cause (a bug): the punish engine answers a blocked or parried fireball with H Tatsumaki from 1.9-2.7 away.** 56 of the
+  bot's 58 H Tatsumakis (id 1005) in matches 2-4 were hit by the next fireball (52 of them after Akuma's 900 -> 906, the L Gou
+  Hadoken): ~44,000 of the 80,000 damage taken in the set. `punish.py` opens a window on the thrower's remaining frames
+  (learned total 38 from 906, or Capcom's 46) once the fireball is blocked / gone, and H Tatsumaki (start-up 16, airborne
+  frames 10-61, Capcom) fits the frames but not the travel to a thrower 2+ away who is already throwing again (900 is a
+  holdable lead-in); projectiles hit airborne characters up to 0.75 high (MEASURED 0.23.0).
+- Defence against the fireballs otherwise held: parried 19 / 39 (perfect 8 / 6), blocked 21 / 51. The bot has no way in
+  against full-screen fireballs (jump-ins off by the user's rule, SA1 through off since 0.25.0): it walked in between them
+  for 1.4 s / 3.9 s a match.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
