@@ -4426,7 +4426,19 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["cfn_configured"] = bool((cfg.get("ranked") or {}).get("cfn"))
                 opp_moves, label = opponent_moves(summary["opponent"], ds_root, fcfg)
                 summary["opponent_catalog"] = label or False
-                book = build_book(summary["character"], ds_root)
+                # 0.31.4: combos the operator skipped in the combo lab (F10) are never used: not in the book, not composed
+                # (combo_compose), and the config's own routes that perform one are left out of this match (mcfg)
+                from . import route_bans
+                bans_ = route_bans.load(ds_root, summary["character"])
+                book_stats_: dict = {}
+                book = build_book(summary["character"], ds_root, stats=book_stats_)
+                mcfg, cfg_banned_ = route_bans.apply_to_config(fcfg, bans_, summary["character"], ds_root)
+                if bans_:
+                    summary["operator_skips"] = {"combos": len(bans_), "book_left_out": book_stats_.get("banned", 0),
+                                                 "config_left_out": cfg_banned_}
+                    sess.narrate(f"Combos you skipped in the combo lab (F10): {len(bans_)}, never used here ("
+                                 f"{book_stats_.get('banned', 0)} lab routes and {len(cfg_banned_)} of my own routes left "
+                                 f"out{': ' + ', '.join(cfg_banned_) if cfg_banned_ else ''}).", source="scripted")
                 # 0.24.0: longer combos spliced from the book's verified transitions, by resources (combo_compose.py)
                 composer = None
                 try:
@@ -4479,7 +4491,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if policy is not None:
                     policy.reach = cur["live_reach"]
                 summary["reach_known"] = {"own": len(own_reach), "opponent": len(opp_reach)}
-                fighter = ScriptedFighter(fcfg, opp_moves, policy=policy, book=book, experience=exp,
+                fighter = ScriptedFighter(mcfg, opp_moves, policy=policy, book=book, experience=exp,
                                           own=own_moves(summary["character"], ds_root), own_reach=own_reach,
                                           opp_reach=opp_reach)
                 if meter is not None and meter.lead() is not None:
@@ -4544,11 +4556,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     fighter.opp_combos = load_mined(ds_root, summary["opponent"])
                 except Exception as e:                   # noqa: BLE001 - assessment is optional
                     print(f"(opponent threat data unavailable: {e})")
-                plans = route_plans(fcfg, summary["character"], ds_root)
+                plans = route_plans(mcfg, summary["character"], ds_root)
                 summary["routes_on_game_clock"] = sorted(plans)
                 # 0.21.0: neutral from the style table of the bot's character (Legend Ryu replays ship in configs/style;
                 # B rebuilds it from the user's replays); a Drive Rush from it uses the drive_rush_in options
-                fighter.rush_options = {o["follow"]: o for o in (fcfg.get("drive_rush_in") or {}).get("options") or []
+                fighter.rush_options = {o["follow"]: o for o in (mcfg.get("drive_rush_in") or {}).get("options") or []
                                         if o.get("follow") and o.get("seq")}
                 if policy is not None:
                     from . import style as style_

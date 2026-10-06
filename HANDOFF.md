@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.31.3**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.31.4**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.31.3 is pushed** (CLAUDE.md "0.31.3"): the catalog holds the button for the Denjin SA2 Lv2 / Lv3 rows (they were performed as Lv1); the user is re-running C with Ryu. A diagnosis of 17 uploaded fights (fights_5) and research into Ryu's answers per character are running.
+**State:** **0.31.4 is pushed** (CLAUDE.md "0.31.4"): a combo the user skips with F10 in the combo lab is a ban on that sequence of moves (`route_bans.py`, kept in the lab file's `operator_skips`): never in the route book, never composed, the config's own routes that perform it are left out of the match; F10 stops the try at once. The user uploaded a FT5 they played as Ken against the bot (fights_6, 2-3: "I expertly took advantage of its current weaknesses ... This is the kind of behavior we need to target"): being analysed. The fights_5 diagnosis and the research into Ryu's answers per character (two multi-agent runs) were STOPPED with no results when a turn was interrupted (2026-10-06 23:10:59 UTC; an interrupt stops the background runs of that turn): ~1.37M tokens spent, 4 of 21 agents started, none finished. To be redone directly (not as multi-agent runs).
+
+**Before that:** **0.31.3 is pushed** (CLAUDE.md "0.31.3"): the catalog holds the button for the Denjin SA2 Lv2 / Lv3 rows (they were performed as Lv1); the user is re-running C with Ryu.
 
 **Before that:** **0.31.2 is pushed** (CLAUDE.md "0.31.2"): no tech guesses at pressure moments (guesses averaged -555 hp after a block; reaction techs tech ~90% of normal throws); the reaction tech is held 2 frames when it would land exactly on the first free frame; Blanka / Chun-Li / Mai / Viper / Elena / Dhalsim throws recognised after the connect.
 
@@ -378,6 +380,8 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.31.4:** unverified in game: F10 in K stops the try at once; a skipped combo never appears in a match (the match narration names how many were kept out, `operator_skips` in the summary). Skips that a re-test overwrote before 0.31.4 are lost: ask the user to skip those combos once more. K -> 4 (pick by text) re-tests a skipped one and lifts its ban if it works without F10.
 
 **0.31.2:** unverified in game: fewer throws landing at Master with the tech guesses off (watch "thrown" in the scorecard and the defence lines in the thoughts).
 
@@ -855,7 +859,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
 | Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers`; 0.27.0: `_aa_cross_guard`, `drive_reversal_late`, `combo_lab.ComboRun._no_window`, `neutral_policy.STANCE` / `NEUTRAL_MAX_DIST` / `CORNER_OUT`, `defense.prior_by_situation`; 0.28.0: `charge.py` (charge timing, opponent charge), `combo_lab.apply_charge`; 0.29.0: `framedata.annotate_holds` / `held`,
-`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for`; 0.30.1: `fighter._crumple_options`, `combo_gen.estimate_after`; 0.31.0: `fighter_profile.py` (rules for other characters), `bot_character.py` (who the bot plays, model dirs), `neutral_policy._own_moves_from_map`; 0.31.1: `throws.py` (throw ids per character), `progress.same_mode`; 0.31.2: `fighter.being_thrown` / `_tech_wait`, `throws.ambiguous_for` |
+`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for`; 0.30.1: `fighter._crumple_options`, `combo_gen.estimate_after`; 0.31.0: `fighter_profile.py` (rules for other characters), `bot_character.py` (who the bot plays, model dirs), `neutral_policy._own_moves_from_map`; 0.31.1: `throws.py` (throw ids per character), `progress.same_mode`; 0.31.2: `fighter.being_thrown` / `_tech_wait`, `throws.ambiguous_for`; 0.31.4: `route_bans.py` (combos the operator skipped in K: banned in matches), `combo_lab.operator_banned` / `note_operator_skip` / `lift_operator_skips`, `Composer.set_banned` |
 | Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning; 0.26.0: `bar_value` set by `fighter._bar_value`, follow-up reach `reach_miss` from config `combo_reach`, `involves_super` / `load_learned` drop pre-0.26.0 super results); `combo_lab.ComboRun.switch` keeps a pre-input motion (0.26.0) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |

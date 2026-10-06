@@ -549,7 +549,7 @@ def test_moves_that_worked_are_replayed_exactly_while_the_failing_move_is_search
     monkeypatch.setattr(catalog, "_wait_settled", lambda *a, **k: None)
     sends = []
 
-    def attempt(sess, reader, runner, steps, offsets, na, nd, mv, lead=cl.LEAD, gravity=None, fixed=None):
+    def attempt(sess, reader, runner, steps, offsets, na, nd, mv, lead=cl.LEAD, gravity=None, fixed=None, **kw):
         sim = Sim(moves, lead=4)
         run = cl.ComboRun(steps, offsets, na, nd, mv, lead=lead, fixed=fixed)
         out = {}
@@ -769,7 +769,7 @@ def test_bar_proof_of_no_link_window_stops_the_route(monkeypatch):
     monkeypatch.setattr(catalog, "walk_to_contact", lambda *a, **k: None)
     monkeypatch.setattr(catalog, "_wait_settled", lambda *a, **k: None)
 
-    def attempt(sess, reader, runner, steps, offsets, na, nd, mv, lead=cl.LEAD, gravity=None, fixed=None):
+    def attempt(sess, reader, runner, steps, offsets, na, nd, mv, lead=cl.LEAD, gravity=None, fixed=None, **kw):
         sim = Sim(moves, lead=4)
         sim.bar_on = True
         return _run(sim, steps, offsets)

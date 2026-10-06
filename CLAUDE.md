@@ -4093,6 +4093,46 @@ ranked recordings 0.23.0-0.31.0 (both players' input masks; the bot's LP+LK pres
   `... 4+HP@3 5+HP@45` after Denjin Charge and the wait. The combo lab already held them (`combo_lab`, 0.29.0).
 - Only Ryu's catalog plan changed (regression fingerprint `catalog_plan:ryu` updated). Test `tests/test_0313.py`. Not run in game.
 
+## 0.31.4: a combo skipped with F10 in the combo lab is never used in a match (user, 2026-10-06)
+- User: "if a [combo] is skipped during the combo routes, the bot should immediately reset, move on to the next [combo], and
+  never consider that specific sequence in the combo planner and builder during matches"; "If I skip that [combo] in K, it
+  shouldn't show up in a live match"; "Combo, not move"; "Several times I've seen combos that I've skipped show up."
+- **Why skipped combos showed up (code, 0.12.5-0.31.3):**
+  - F10 only marked that one lab entry (its route text + position). A re-test overwrote the mark: after a lab rule change
+    (`LAB_RULES`, e.g. 0.28.0 / 0.29.0, which re-tests conclusive failures) or K -> 7.
+  - A skip during the confirm repeats, after a success, left the route verified: a TRUE combo the fighter used.
+  - The same moves came back from other places: another route with the same moves (a row's other choice, mined or generated
+    routes), the fighter config's own routes (punish engine, 2MK confirms, Drive Rush follow-ups, the fireball jump-in), and
+    the combo composer (0.24.0), which joins verified transitions and can rebuild the skipped sequence from other routes.
+- **Now a skip bans the sequence of moves** (`sf6bot/route_bans.py`): the plan's step names in order; a jump-in's jump, the
+  connectors and a Denjin setup are ignored.
+  - Kept in the lab file as `operator_skips` (route, moves, time, version), which a re-test never overwrites. Lab files from
+    before 0.31.4: routes still marked `skipped_by_operator` count too. A skip that a re-test already overwrote is lost:
+    skip that combo once more.
+  - A skipped route is never verified, even after successes (`skipped_after_successes`).
+  - Matching: a 2+ move ban matches any route that performs the whole sequence in a row (inside a longer combo too); a
+    one-move route bans only exactly that route. A part of a skipped combo is another combo and stays allowed.
+- **In matches**, no route that performs a banned sequence is used:
+  - the route book (`route_book.build`, `verified_routes` also drops skipped entries)
+  - every composition: the composer's search prunes a transition that would complete a banned sequence, which covers its
+    book entries, live compositions, re-plans, first-hit extensions and the Drive Impact crumple cash-out
+  - the config's own routes (`route_bans.apply_to_config`: punish options and engine, the 2MK confirms, the fireball
+    jump-in, Drive Rush follow-ups; also removed from the neutral zone tables) for that match only
+  - The match narrates it once ("Combos you skipped in the combo lab (F10): N, never used here (...)"), and the summary
+    has `operator_skips` {combos, book_left_out, config_left_out}.
+- **In the lab:**
+  - F10 now stops the try in progress at once: the executor polls it between lines, and the super cinematic follow, the
+    settle wait after a try, the walk and the setup stop too. The next route's position reset follows straight away. Before,
+    F10 was only read before the next try, after the try, its settle wait (5 s, 15 s with a super) and the reset.
+  - F10 pressed right after a route's last try (its F9 window) skips that route.
+  - A route that contains a banned combo is not tested again, also with K -> 7; the run says how many were left out.
+  - To test one again, pick it by its text with K -> 4 (`--only`); verified there without F10, the ban on exactly its moves
+    is lifted. A route still containing another skipped combo is reported "still kept out of matches".
+  - `combo_lab.md` lists skipped routes as "SKIPPED by you (F10) ... never used in matches".
+- Tests `tests/test_0314.py`: matching, lab-file bans, the route book, the composer (incl. a ban spanning the move already
+  out and the next), the config routes, F10 stopping a try on its next line with no settle wait, a skip after a success, the
+  lift by K -> 4, and a MOCK match over the real CPU fight. Not run in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

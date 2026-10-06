@@ -1861,6 +1861,45 @@ def _override(res: dict, n: int):
             [s2.get("lead_measured") for s2 in res.get("steps") or []])
 
 
+def operator_banned(key: str, plan: dict, lab: dict, ban_seqs) -> tuple | None:
+    """0.31.4: the route is a combo the operator skipped (F10), or performs one (route_bans): not tested again unless
+    picked by text, never used in matches. Returns the banned sequence (or the route's own moves for its own key)."""
+    from . import route_bans
+    names = route_bans.names_of(plan.get("steps"))
+    if key in (lab.get("operator_skips") or {}):
+        return names or (key,)
+    return route_bans.find(names, ban_seqs)
+
+
+def note_operator_skip(lab: dict, combo: dict, plan: dict) -> tuple:
+    """Record an F10 skip in the lab file's `operator_skips` (a re-test of the route never overwrites it). Returns the
+    banned move sequence."""
+    from . import route_bans
+    mv = route_bans.names_of(plan.get("steps"))
+    lab.setdefault("operator_skips", {})[route_key(combo)] = {
+        "route": combo.get("route"), "position": _position(combo), "moves": list(mv),
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"), "sf6bot_version": __import__("sf6bot").__version__}
+    return mv
+
+
+def lift_operator_skips(lab: dict, plan: dict) -> int:
+    """A route picked by text (K -> 4) verified without F10: the bans on exactly its moves are lifted (also an older
+    route's `skipped_by_operator` mark). Returns how many were lifted."""
+    from . import route_bans
+    mv = route_bans.names_of(plan.get("steps"))
+    n = 0
+    skips = lab.get("operator_skips") or {}
+    for k in [k for k, v in skips.items() if tuple(v.get("moves") or ()) == mv]:
+        del skips[k]
+        n += 1
+    for v in (lab.get("routes") or {}).values():
+        if v.get("skipped_by_operator") and tuple(v.get("moves") or ()) == mv:
+            v["skipped_by_operator"] = False
+            v["skip_lifted"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            n += 1
+    return n
+
+
 def operator_skipped(sess, since: float | None) -> bool:
     """F10 (operator, 0.12.5): "skip this combo" pressed since the route started."""
     skips = getattr(getattr(sess, "watchdog", None), "skips", None) or []
@@ -1941,10 +1980,23 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
     exhausted = False         # the timing search ran out (a verdict), as opposed to being stopped
     route_t0 = clock.now()
     skipped_by_operator = False
+
+    # 0.31.4 (user: "the bot should immediately reset, move on to the next [combo]"): F10 stops the try in progress (the
+    # executor polls it between lines), the waits after it, the walk and the setup; the next route's position reset
+    # follows at once. Before, F10 was only read before the next try: after the try, its settle wait (5 s, 15 s with a
+    # super) and the reset and walk.
+    def skip_now():
+        return "operator skip (F10)" if operator_skipped(sess, route_t0) else None
+
+    def skipping() -> bool:
+        if skip_now():
+            sess.controller.release_all("combo lab: operator skip (F10)")
+            print("  operator (F10): skipping this route; it is kept out of matches")
+            return True
+        return False
     while not sess.stop_event.is_set():
-        if operator_skipped(sess, route_t0):
+        if skipping():
             skipped_by_operator = True
-            print("  operator (F10): skipping this route")
             break
         how = set_position(sess, reader, reset, _position(combo), state)
         if plan.get("jump_in"):
@@ -1956,7 +2008,8 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                       f"{state[key]['air_frames']} frames in the air")
                 set_position(sess, reader, reset, _position(combo), state)
             walk_to_distance(sess, reader, state[key]["travel"] + JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)])
-            _wait_settled(reader, sess, neutral_a, neutral_d, 2.0, need=10)    # the walk is over before the jump
+            _wait_settled(reader, sess, neutral_a, neutral_d, 2.0, need=10,     # the walk is over before the jump
+                          abort=skip_now)
             steps[0]["start_ids"] = state[key].get("ids") or None
         else:
             walk_to_contact(sess, reader)
@@ -1969,6 +2022,9 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
                 d0 = player_distance(st0.p1, st0.p2) if st0 is not None else None
                 if d0 is not None and abs(d0 - want) > 0.04:
                     walk_to_distance(sess, reader, want)
+        if skipping():
+            skipped_by_operator = True
+            break
         if plan.get("setup"):
             if not _do_setup(sess, reader, runner, plan["setup"], neutral_a, neutral_d):
                 print(f"  setup {plan['setup']['name']} did not come out")
@@ -1998,8 +2054,14 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         lead_now = found_lead if found is not None else kept_lead if kept_n else _lead(state)
         fixed = recorded if recorded is not None else (kept[:kept_n] + [{}] * (len(steps) - kept_n)) if kept_n else None
         extra = {"learned": dict(learned)} if learned else {}
+        if skipping():
+            skipped_by_operator = True
+            break
         res = _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead=lead_now,
-                       gravity=(jump or {}).get("gravity"), fixed=fixed, **extra)
+                       gravity=(jump or {}).get("gravity"), fixed=fixed, abort=skip_now, **extra)
+        if skipping():
+            skipped_by_operator = True        # the try in progress was stopped: no settle wait, the next route resets
+            break
         for k_, v_ in (res.get("free_at") or {}).items():
             # DI / super length on hit: the shortest seen (0.20.5: a late first reading was kept for good)
             learned[int(k_)] = min(v_, learned.get(int(k_), v_))
@@ -2019,7 +2081,7 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         if plan.get("jump_in"):
             res["jump_distance_extra"] = JUMP_DISTANCES[jump_variant % len(JUMP_DISTANCES)]
         long = any(s.get("super_art") for s in steps)
-        _wait_settled(reader, sess, neutral_a, neutral_d, 15.0 if long else 5.0)
+        _wait_settled(reader, sess, neutral_a, neutral_d, 15.0 if long else 5.0, abort=skip_now)
         fm = reader.last_fm if reader.last_fm != fm_before else None
         res["end_advantage"] = parse_frame_meter(fm).get("advantage") if fm else None
         res["offsets"] = dict(offsets)
@@ -2127,16 +2189,27 @@ def _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, g
         ov = _override(attempts[-1], len(attempts))      # the route's last try: F9 window before moving on
         if found is None:
             found, found_lead, recorded, found_dist, success_leads = ov
+    if not skipped_by_operator and skip_now():
+        # F10 right after the route's last try (its F9 window, or the confirm repeats just ended): that route is skipped
+        skipped_by_operator = True
+        print("  operator (F10): skipping this route; it is kept out of matches")
     summ = _summary(attempts, plan, combo)
     summ["operator_overrides"] = sum(1 for a in attempts if a.get("operator_override"))
     summ["plan_fp"] = plan_fingerprint(plan)
+    if skipped_by_operator:
+        # 0.31.4: the operator's verdict wins over the lab's, also after a success (a skip during the confirm repeats
+        # used to leave a verified TRUE combo the fighter then used): not verified, banned in matches (route_bans)
+        summ["skipped_by_operator"] = True
+        if summ["verified"]:
+            summ["skipped_after_successes"] = summ["successes"]
+            summ["notes"] = list(summ.get("notes") or []) + [
+                f"skipped by the operator (F10) after {summ['successes']} success(es): not used"]
+        summ["verified"] = False
     # a verdict worth remembering: the search ran out, or the bar proved there is no link window (not an
     # interrupted run, a setup failure or a wrong Training Mode setting)
     summ["conclusive"] = bool(not summ["verified"] and (exhausted or no_window_proof or skipped_by_operator)
                               and not sess.stop_event.is_set())
-    if skipped_by_operator:
-        summ["skipped_by_operator"] = True       # not tried again unless K -> 7 (--again)
-    if recorded is not None:
+    if recorded is not None and not skipped_by_operator:
         replays = [a for a in attempts if a.get("replayed_recorded_timing")]
         summ["recorded_timing"] = {"steps": recorded, "lead": found_lead, "start_distance": found_dist,
                                    "offsets": {str(k): v for k, v in (found or {}).items()},
@@ -2167,6 +2240,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
     runner = SequenceRunner(c, sink=sess.recorder.event)
     reset, reset_backend, reset_key = make_reset(sess, cfg, reader)
     run_results: dict = {}
+    new_skips = 0             # 0.31.4: combos the operator skipped this run (saved even when no result is kept)
     skipped: dict = {}
     name = "Unknown"
     lab: dict = {}
@@ -2200,6 +2274,10 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
         elif source in ("community", "both"):
             print(f"No community combos for {name}: save its SuperCombo Combos page and import (menu T, A).")
         lab = load_lab(ds, name)
+        # 0.31.4: combos the operator skipped (F10) are banned: a route containing one is not tested again unless picked
+        # by text (K -> 4), and the fighter never uses one (route_bans)
+        from . import route_bans
+        ban_seqs = route_bans.sequences(route_bans.from_lab(lab))
         rules = load_rules()
         # 0.18.2: a counter-hit / punish-counter bonus the catalog MEASURED (C with the dummy on that setting) fills
         # a bonus the user's rules leave unset
@@ -2245,6 +2323,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                 seen_keys: set = set()
                 plans = []
                 known_failures = 0
+                banned_n = 0
                 for combo in todo:
                     k = route_key(combo)
                     if k in seen_keys:
@@ -2253,6 +2332,9 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     plan = plan_route(combo, capcom, catalog)
                     if plan["unsupported"]:
                         skipped[k] = plan["unsupported"]
+                        continue
+                    if not only and operator_banned(k, plan, lab, ban_seqs):
+                        banned_n += 1          # also with K -> 7: the operator said no
                         continue
                     if not again and not only and skip_known_failure(lab["routes"].get(k), plan, hit_pass):
                         known_failures += 1
@@ -2264,6 +2346,9 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     print(f"  {known_failures} route(s) already failed for a clear reason with the same plan: "
                           f"not tried again (menu K -> 7 retests everything; K -> 4 picks routes by text)")
                     known_failures = 0
+                if banned_n:
+                    print(f"  {banned_n} route(s) contain a combo you skipped with F10: not tested, and kept out of "
+                          f"matches (to test one again, pick it by its text with K -> 4)")
                 if limit:
                     plans = plans[:limit]
                 if not plans:
@@ -2301,6 +2386,10 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                 for n_route, (combo, plan) in enumerate(plans, 1):
                     if sess.stop_event.is_set():
                         break
+                    if not only and operator_banned(route_key(combo), plan, lab, ban_seqs):
+                        print(f"[{n_route}/{len(plans)}] {combo['route']}: contains a combo you skipped with F10 in "
+                              f"this run: not tested")
+                        continue
                     print(f"[{n_route}/{len(plans)}] {combo['route']}  ({_position(combo)}, {combo.get('source')}, "
                           f"damage listed {combo.get('damage') or combo.get('est_damage')})")
                     if plan.get("setup"):
@@ -2310,6 +2399,19 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                               f"{', only as a punish' if combo.get('situation') == 'punish' else ''} "
                               f"({combo.get('requirement_source')})")
                     summ = _test_route(sess, reader, runner, reset, combo, plan, tries, confirm, ids, guard, lab_state)
+                    mv_ = route_bans.names_of(plan["steps"])
+                    if summ.get("skipped_by_operator"):
+                        ban_seqs.append(note_operator_skip(lab, combo, plan))   # never overwritten by a re-test
+                        new_skips += 1
+                    elif summ["verified"] and lift_operator_skips(lab, plan):
+                        # picked by text (K -> 4) and it worked without F10: the ban on exactly these moves is lifted
+                        ban_seqs = route_bans.sequences(route_bans.from_lab(lab))
+                        summ["skip_lifted"] = True
+                        print("  verified without F10: the ban on this combo is lifted")
+                    still_ = None if summ.get("skipped_by_operator") else route_bans.find(mv_, ban_seqs)
+                    if still_ and summ["verified"]:
+                        summ["kept_out_by"] = list(still_)
+                        print(f"  still kept out of matches: it contains a combo you skipped ({' , '.join(still_)})")
                     if (summ.get("failed_at") or {}).get("kind") == "first_blocked":
                         setup_error = ("The dummy BLOCKED the first hit. Set Training Mode's dummy guard to "
                                        "'After first hit' (or run with --guard none) and start again.")
@@ -2335,6 +2437,8 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
                     if summ["verified"]:
                         msg = (f"{'TRUE COMBO' if summ['true_combo'] else 'connects (dummy not guarding)'} "
                                f"{summ['successes']}/{summ['attempts']}, {summ.get('damage')} dmg")
+                    elif summ.get("skipped_by_operator"):
+                        msg = "SKIPPED (F10): never used in matches"
                     else:
                         msg = f"not done: {summ.get('failed_at')}"
                     print("  -> " + msg)
@@ -2350,7 +2454,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
             pass
         c.release_all("combo lab end")
         reader.stop()
-    if not run_results and not skipped:
+    if not run_results and not skipped and not new_skips:
         return None
     out = ds / "combo_lab" / f"{file_stem(name)}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -2513,6 +2617,9 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
             # supers"); the fighter goes back to deciding as soon as the super has connected
             calm, end = 0, clock.now() + 10.0
             while clock.now() < end and calm < 30 and not sess.stop_event.is_set():
+                if abort is not None and abort():
+                    aborted = aborted or abort()     # the lab's F10 (0.31.4): no waiting through the cinematic
+                    break
                 try:
                     st = q.get(timeout=0.05)
                 except Exception:
@@ -2591,9 +2698,11 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
     ok = {k: v for k, v in results.items() if v.get("verified")}
     true = sum(1 for v in ok.values() if v.get("true_combo"))
     gaps = sum(1 for v in results.values() if (v.get("failed_at") or {}).get("kind") == "blocked")
+    by_op = sum(1 for v in results.values() if v.get("skipped_by_operator"))
     lines = [f"## Combo lab: {character}", f"- routes tried: {len(results)}, landed: {len(ok)} (TRUE combos vs a "
              f"dummy blocking after the first hit: {true}), blocked = not true: {gaps}, "
-             f"not supported yet: {len(skipped)}"]
+             f"not supported yet: {len(skipped)}" + (f", skipped by you (F10, never used in matches): {by_op}"
+                                                    if by_op else "")]
     if setup_error:
         lines.append(f"- SETUP: {setup_error}")
     leads = [x for v in results.values() for x in v.get("lead_measured") or []]
@@ -2607,15 +2716,20 @@ def report_md(character: str, results: dict, skipped: dict, setup_error: str | N
                          f"{v.get('community_damage') if v.get('community_damage') is not None or not v.get('alt_of') else 'n/a: one of the row choices'}) | hits {v.get('hits')} | drive {v.get('drive_spent')} "
                          f"super {v.get('super_spent')} | carry {v.get('carry')} | side switch {v.get('side_switch')} "
                          f"| end {v.get('end_advantage')} | offsets {v.get('offsets')}"
-                         + (f" | operator F9 x{v['operator_overrides']}" if v.get("operator_overrides") else ""))
+                         + (f" | operator F9 x{v['operator_overrides']}" if v.get("operator_overrides") else "")
+                         + (f" | still kept out of matches: contains the skipped {' , '.join(v['kept_out_by'])}"
+                            if v.get("kept_out_by") else ""))
+        elif v.get("skipped_by_operator"):
+            done = f", {v['skipped_after_successes']} had worked" if v.get("skipped_after_successes") else ""
+            lines.append(f"- SKIPPED by you (F10) after {v['attempts']} tries{done} | {k} | never used in matches; "
+                         f"pick it by text with K -> 4 to test it again")
         else:
             kept = f" | moves 1-{v['moves_kept']} worked (kept exactly)" if v.get("moves_kept") else ""
             nw = v.get("no_link_window")
             if nw:
                 kept += (f" | NO LINK WINDOW at move {nw['move_no']} ({nw['move']}): it started on the first free "
                          f"frame and the dummy still recovered first (frame bar)")
-            lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}"
-                         + (" | SKIPPED by the operator (F10)" if v.get("skipped_by_operator") else ""))
+            lines.append(f"- FAIL {v['attempts']} tries | {k} | {v.get('failed_at')}{kept}")
             if v.get("attempt_details"):
                 lines.append("  - " + trace_line(v["attempt_details"][-1]))
     if skipped:
@@ -2633,11 +2747,14 @@ def verified_routes(datasets_root: Path, character: str, min_rate: float = 0.5,
     first hit), at the timing that worked at least `min_rate` of the time."""
     from . import combos as _cb
     lab = load_lab(datasets_root, character)
+    banned_keys = set(lab.get("operator_skips") or {})
     # before 0.11.14 a row with choices ('A / B', an optional '( > SA3 )') was ONE route: its result says
     # nothing about any single choice (the 8-hour run mashed them together), so it is not used
-    return [v for v in lab.get("routes", {}).values()
+    # 0.31.4: never a route the operator skipped (F10), even one verified before the skip
+    return [v for k, v in lab.get("routes", {}).items()
             if (v.get("alt_of") or len(_cb.expand_alternatives(v.get("route") or "")) == 1)
             and (is_true(v) if true_only else v.get("verified"))
+            and not v.get("skipped_by_operator") and k not in banned_keys
             and (v.get("success_rate_final_timing") or 0) >= min_rate]
 
 

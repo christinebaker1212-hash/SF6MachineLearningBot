@@ -29,11 +29,15 @@ def _starter_kind(plan: dict) -> str:
     return "air" if s0.get("air") or s0.get("system") == "jump" else "ground"
 
 
-def build(character: str, ds_root: Path, min_rate: float = 0.3) -> list[dict]:
+def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | None = None) -> list[dict]:
+    """The book. 0.31.4: no route that performs a combo the operator skipped in the lab (F10, route_bans); `stats`
+    gets the number left out (`banned`)."""
     from . import framedata as fd
+    from . import route_bans
     from .combo_lab import plan_route, verified_routes
     from .combos import resolve
     ds_root = Path(ds_root)
+    ban_seqs = route_bans.sequences(route_bans.load(ds_root, character))
     capcom = fd.load(character, ds_root / "framedata")
     if not capcom:
         return []
@@ -52,6 +56,10 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3) -> list[dict]:
             continue
         plan = plan_route({"route": route, **r}, capcom, catalog)
         if plan.get("unsupported") or not plan["steps"]:
+            continue
+        if route_bans.find(route_bans.names_of(plan["steps"]), ban_seqs):
+            if stats is not None:
+                stats["banned"] = stats.get("banned", 0) + 1
             continue
         # 0.20.3: Denjin routes are used while the bot holds a Denjin stock (it charges at safe moments: fighter
         # `_denjin_*`); jump-in routes after a successful Drive Impact stun (user: "Jump ins are supposed to be used

@@ -138,6 +138,24 @@ class Composer:
         self.travel: dict = {}
         self.starters: dict = {}             # move name -> ([resolved step], [planned step]): moves a combo can start from
         self.starter_ids: dict = {}          # the bot's action id -> that move's name
+        # 0.31.4: move sequences the operator skipped in the combo lab (F10, route_bans): no composition performs one,
+        # whatever transitions it is joined from (by their last move, for a quick check while searching)
+        self.banned: list[tuple] = []
+        self._ban_by_last: dict = {}
+
+    def set_banned(self, seqs) -> None:
+        self.banned = [tuple(s) for s in seqs or () if s]
+        self._ban_by_last = {}
+        for b in self.banned:
+            if len(b) >= 2:
+                self._ban_by_last.setdefault(b[-1], []).append(b)
+
+    def _bans_hit(self, names: tuple) -> bool:
+        """The move sequence so far (ending in the move just added) performs a banned combo."""
+        for b in self._ban_by_last.get(names[-1] if names else None, ()):
+            if names[-len(b):] == b:
+                return True
+        return False
 
     # ---- the transition library --------------------------------------------------------------------------------
     def row(self, name: str, prev: str | None = None) -> dict | None:
@@ -321,10 +339,12 @@ class Composer:
                                 and _knockdown(self.row(last.get("name") or ""))))
         rows0 = self._hit_rows(prefix_steps)
         d0 = estimate_damage(rows0) * self.calib if rows0 else 0.0
+        from .route_bans import names_of
         # node = (move, its context: rushed, juggled before it); after = the context for the move after it
         start = {"path": [], "node": (last.get("name"), ctx[-1]), "after": after, "rows": rows0, "D": d0, "P": 1.0,
                  "E": 0.0, "drive": 0, "super": 0, "uses": Counter(), "last": last_key,
-                 "ended": bool(last.get("super_art")), "corner": False, "hit_req": "normal"}
+                 "ended": bool(last.get("super_art")), "corner": False, "hit_req": "normal",
+                 "names": names_of(prefix_steps)}
         frontier, out = [start], []
         n0 = len(prefix_steps)
         for depth in range(max(0, max_steps - n0)):
@@ -348,6 +368,10 @@ class Composer:
                     if depth == 0 and self.out_of_reach(t, dist, travel_done):
                         continue                  # the next step whiffs from this spacing (learned per body class /
                                                   # measured follow-up reach, 0.26.0)
+                    names = s["names"] + (t["name"],)
+                    if self._ban_by_last and self._bans_hit(names):
+                        self.stats["banned_pruned"] += 1      # a combo the operator skipped (F10): never performed
+                        continue
                     pt = self.p(t)
                     if s["last"] is not None:
                         prev_t = self.trans.get(s["last"])
@@ -370,7 +394,7 @@ class Composer:
                           "rows": rows, "D": D, "P": P, "E": E, "drive": s["drive"] + t["drive"],
                           "super": s["super"] + t["super"], "uses": uses, "last": t["key"], "ended": t["super_art"],
                           "corner": s["corner"] or t["corner"],
-                          "hit_req": req if req != "normal" else s["hit_req"]}
+                          "hit_req": req if req != "normal" else s["hit_req"], "names": names}
                     ns["score"] = self._score(ns, opp_hp)
                     nxt.append(ns)
                     if t["hitting"]:
@@ -571,15 +595,21 @@ class Composer:
                 break
 
 
-def build(book: list[dict], capcom: dict | None, catalog: dict | None = None, learned: dict | None = None) -> Composer | None:
+def build(book: list[dict], capcom: dict | None, catalog: dict | None = None, learned: dict | None = None,
+          bans=None) -> Composer | None:
     """The transition library from the book's TRUE combos and the composed entries (best per starter, resource cost,
-    position and hit type). `book` entries get their `resolved` steps and `edges` too (live re-planning)."""
+    position and hit type). `book` entries get their `resolved` steps and `edges` too (live re-planning). `bans`: move
+    sequences the operator skipped in the lab (route_bans, 0.31.4), never composed."""
     if not capcom or not book:
         return None
     from .combos import resolve
+    from .route_bans import find, names_of
     comp = Composer(capcom, catalog, learned)
+    comp.set_banned(bans)
     for e in book:
         if e.get("kind") not in ("ground", "drive_rush") or e.get("jump_in") or e.get("needs_denjin"):
+            continue
+        if comp.banned and find(names_of((e.get("plan") or {}).get("steps")), comp.banned):
             continue
         r = resolve(e["route"], capcom.get("moves") or [])
         if r.get("unresolved"):
@@ -700,7 +730,9 @@ def for_character(character: str, ds_root: Path, book: list[dict], opponent: str
             catalog = json.loads(p.read_text(encoding="utf-8"))
         except ValueError:
             catalog = None
-    comp = build(book, capcom, catalog, load_learned(ds_root, character))
+    from . import route_bans
+    comp = build(book, capcom, catalog, load_learned(ds_root, character),
+                 bans=route_bans.sequences(route_bans.load(ds_root, character)))
     if comp is not None:
         comp.body = body_class(opponent)
     return comp

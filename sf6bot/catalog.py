@@ -193,12 +193,15 @@ def _bar_of_move(states: list[dict], r: dict) -> dict | None:
     return out
 
 
-def _wait_settled(reader, sess, neutral_a: set, neutral_d: set, max_s: float, need: int = 30) -> bool:
-    """Wait until bot and dummy have both been in a neutral action for `need` consecutive lines."""
+def _wait_settled(reader, sess, neutral_a: set, neutral_d: set, max_s: float, need: int = 30, abort=None) -> bool:
+    """Wait until bot and dummy have both been in a neutral action for `need` consecutive lines. `abort()` (combo lab,
+    0.31.4: the operator's F10) ends the wait at once."""
     q = reader.subscribe()
     calm, end = 0, clock.now() + max_s
     try:
         while clock.now() < end and not sess.stop_event.is_set():
+            if abort is not None and abort():
+                return False
             try:
                 st = q.get(timeout=0.1)
             except Exception:
