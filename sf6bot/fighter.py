@@ -427,7 +427,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._approach_fired = False
         self._their_wake_fired = None
         self._crumple_t0, self._crumple_done = None, False
-        self._crumple_opts, self._own_di_t = None, None
+        self._crumple_opts = None
         # 0.22.0: the operator's answers against this opponent (takeover.AnswerBook), learned from rounds the user won
         self.op_answers = None
         # 0.22.4 (user: "when it is in burnout, it cannot just sit there and block Hadoukens ... it will just die from chip
@@ -1836,25 +1836,16 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         its last button lands on the bot's first free frame: SA3 with 3 bars, SA1 when it kills, else H Shoryuken."""
         sc = self.c.get("supers") or {}
         oa, tmr = op.get("action_id"), raw.get("stage_timer")
-        if isinstance(me.get("action_id"), int) and 850 <= me["action_id"] < 870 and isinstance(tmr, int):
-            self._own_di_t = tmr                          # the bot's own Drive Impact (DI-back included)
         # 0.19.0: after a wall Drive Impact also a stun-range reaction (250-299, where the crumple 276 is): the wall splat's
-        # id is not known yet (ESTIMATE); `di_wall.after_ids` in the summary will show it. 0.30.1: after ANY Drive Impact of
-        # the bot's in the last `di_stun_window` frames (a DI-back near the wall splats instead of crumpling)
-        recent_di = (self._own_di_t is not None and isinstance(tmr, int)
-                     and 0 <= tmr - self._own_di_t <= int(sc.get("di_stun_window", 120)))
-        wall_stun = ((self._di_wall_watch is not None or recent_di) and isinstance(oa, int) and 250 <= oa < 300
-                     and oa not in set(sc.get("crumple_ids") or [276]))
+        # id is not known yet (ESTIMATE); `di_wall.after_ids` in the summary will show it (the wall-DI rule is off, 0.20.7)
+        wall_stun = (self._di_wall_watch is not None and isinstance(oa, int) and 250 <= oa < 300)
         if (oa not in set(sc.get("crumple_ids") or [276]) and not wall_stun) or not isinstance(tmr, int):
             self._crumple_t0 = None
             return None
         if self._crumple_t0 is None:
             self._crumple_t0, self._crumple_done = tmr, False
             self.super_stats["stuns_seen"] = self.super_stats.get("stuns_seen", 0) + 1
-            if wall_stun:
-                self.super_stats["wall_stuns"] = self.super_stats.get("wall_stuns", 0) + 1
-        max_d = float(sc.get("wall_stun_max_dist", 1.6) if wall_stun else sc.get("crumple_max_dist", 1.1))
-        if self._crumple_done or dist > max_d:
+        if self._crumple_done or dist > float(sc.get("crumple_max_dist", 1.1)):
             return None
         aid = me.get("action_id")
         if isinstance(aid, int) and 850 <= aid < 870:    # still in the bot's own Drive Impact
@@ -1873,10 +1864,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             # 0.30.1 (user: "recognize that it was landed a drive impact counter, and choose its most damaging route it
             # can do afterwards, depending on the super it has"): every follow-up it can afford, valued as a combo whose
             # hit 1 was the Drive Impact (combo_gen.estimate_after), the one with the biggest expected damage that lands
-            free = int(sc.get("wall_stun_frames", sc.get("crumple_min_frames", 112)) if wall_stun
-                       else sc.get("crumple_min_frames", 112))
             w = {"kind": "crumple", "bot": max(0, rem0), "hit_in": 0, "know": {}, "chain": {}, "elapsed": 0,
-                 "free": free - (tmr - self._crumple_t0)}
+                 "free": int(sc.get("crumple_min_frames", 112)) - (tmr - self._crumple_t0)}
             if self._crumple_opts is None or self._crumple_opts[0] != self._crumple_t0:
                 self._crumple_opts = (self._crumple_t0, self._crumple_options(me, op, w))
             opts = self._crumple_opts[1]
@@ -1891,7 +1880,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 est = self.super_stats.setdefault("crumple_estimates", {})
                 est[o["name"]] = o.get("est")
                 bars = int(meter) // 10000
-                why = (f"{'wall splat' if wall_stun else 'crumple'} after my Drive Impact at {dist:.2f}, Super {bars}: "
+                why = (f"crumple after my Drive Impact at {dist:.2f}, Super {bars}: "
                        f"{o['name']} (about {o.get('est')} damage if it all hits; best of {len(opts)} I can afford)")
                 if o.get("entry") is not None:
                     return Decision("route", o["entry"]["route"], route=o["entry"], rule="crumple_followup", reason=why,
@@ -3862,9 +3851,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["supers"] = {"crumple_followups": dict(fighter.super_stats["crumple"]),
                                      "confirms": fighter.super_stats["confirm"],
                                      "punishes": fighter.super_stats["punish"],
-                                     # 0.30.1: stuns after the bot's Drive Impact and each follow-up's estimate
+                                     # 0.30.1: crumples seen and each follow-up's estimate
                                      "stuns_seen": fighter.super_stats.get("stuns_seen", 0),
-                                     "wall_stuns": fighter.super_stats.get("wall_stuns", 0),
                                      "crumple_estimates": dict(fighter.super_stats.get("crumple_estimates") or {})}
                 summary["drive_rush"] = dict(fighter.rush_stats)
                 summary["anti_air"] = dict(fighter.aa_stats)

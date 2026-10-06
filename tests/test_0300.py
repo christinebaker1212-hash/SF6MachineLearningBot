@@ -130,14 +130,8 @@ def test_crumple_follow_up_depends_on_the_super_the_bot_has():
     assert "DRC" not in d3.name and d3.name.endswith("236236K")
 
 
-def test_a_wall_splat_after_the_bots_drive_impact_is_cashed_out_too():
+def test_only_the_crumple_counts_not_other_stun_reactions():
+    """User: "I'm not talking about wall splats where it stuns": only the crumple (276) after the bot's Drive Impact."""
     f = _di_fighter()
-    k, d = _after_di(f, 30000, op_a=262, x=1.2)
-    assert d is not None and f.super_stats["wall_stuns"] == 1
-    # the same reaction with no Drive Impact of the bot's before it: nothing
-    from tests.test_defense import state
-    g = _di_fighter()
-    for t in range(60):
-        dd = g.decide(state(me={"action_id": 1, "super": 30000, "drive": 60000}, op={"x": 1.2, "action_id": 262},
-                            timer=5000 + t), t / 60, 0)
-        assert dd.rule != "crumple_followup"
+    assert _after_di(f, 30000, op_a=262, x=0.72) == (None, None)
+    assert "stuns_seen" not in f.super_stats

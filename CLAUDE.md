@@ -3896,7 +3896,7 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
 - Tests: `tests/test_0300.py` (recognition, the prompt, local.yaml round trip, no remapping, CLI); regression
   fingerprints unchanged.
 
-## 0.30.1: the most damaging follow-up after the bot's Drive Impact, by the Super it has (user, 2026-10-06)
+## 0.30.1: the most damaging follow-up after the bot's Drive Impact crumple, by the Super it has (user, 2026-10-06)
 - User: "We do still need to have the bot recognize that it was landed a drive impact counter, and choose its most damaging
   route it can do afterwards, depending on the super it has."
 - Before: after a crumple (276) the bot threw SA3 ALONE whenever it had 3 bars (0.18.1), SA1 only when it killed, never SA2,
@@ -3916,12 +3916,11 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
     frame and before the stun can end. Without the composer (no Capcom data) the old rule stays.
   - On the synthetic test book: 0 or 1 bars -> 5HP > DRC 5HK , 5HP > 623HP (~2,900); 2 bars -> SA2 (2,800); 3 bars ->
     5HP > DRC 5HK , 5HP > 623HP , SA3 (~4,900); 3 bars and 1 Drive bar -> 2MK > 236MK > 623HP , SA3 (~4,500).
-- **Recognising it:** the crumple id 276 as before, and now any stun-range reaction (250-299) within `supers.di_stun_window`
-  120 frames of the bot's own Drive Impact (a DI-back near the wall splats instead of crumpling; before 0.30.1 only after the
-  disabled wall-DI rule). The wall splat's id and length are not measured (`wall_stun_frames` 112, `wall_stun_max_dist` 1.6:
-  ESTIMATES).
-- Summary `supers`: `stuns_seen`, `wall_stuns`, `crumple_estimates` (per follow-up); the thoughts line gives each estimate.
-- Tests: `tests/test_0300.py` (the scaling against the measured SA3, the choice by bars and Drive, the wall splat); regression
+- **Recognising it:** the crumple (id 276, MEASURED: 18 of 18 after the bot's DI connects; 39 of 45 DI-backs in the 0.24.x
+  run) within 1.1, as before. User: "I'm not talking about wall splats where it stuns": a first version also took any
+  250-299 reaction after the bot's DI as a wall splat (unmeasured); taken out again in 0.30.2.
+- Summary `supers`: `stuns_seen` (crumples), `crumple_estimates` (per follow-up); the thoughts line gives each estimate.
+- Tests: `tests/test_0300.py` (the scaling against the measured SA3, the choice by bars and Drive, only the crumple counts); regression
   fingerprints unchanged. Not verified in game.
 
 ## Training Mode reset

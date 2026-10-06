@@ -4,14 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.30.1**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.30.2**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.30.1 is pushed** (CLAUDE.md "0.30.1"): after the bot's Drive Impact crumples or wall-splats the opponent,
+**State:** **0.30.2 is pushed** (CLAUDE.md "0.30.1"; 0.30.2 took out an unmeasured wall-splat guess): after the bot's Drive Impact crumples the opponent,
 it picks the follow-up with the biggest expected damage for the Super / Drive it has (combos ending in SA3 / SA2 / SA1,
 composed combos, supers alone), damage estimated hit by hit with the DI as hit 1. Check `supers.crumple_followups` /
 `crumple_estimates` in the next run's summaries.
@@ -364,8 +364,7 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
 
 ## 6. Open items waiting on the user (ask about these first)
 
-**0.30.1:** unverified in game: the DI follow-ups' real damage vs `crumple_estimates`, and the wall splat's id (any
-250-299 reaction after the bot's DI counts for now).
+**0.30.1:** unverified in game: the DI crumple follow-ups' real damage vs `crumple_estimates`.
 
 **0.30.0:** when Arjun / Bosch / Tifa come out: check that their saved Capcom pages import under their names (F), that C
 asks for the new id once, and that later fights name them. The slugs are guesses.

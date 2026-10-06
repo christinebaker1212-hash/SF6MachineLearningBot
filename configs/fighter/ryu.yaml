@@ -82,12 +82,6 @@ supers:
   crumple_min_frames: 112   # MEASURED (0.20.3, ranked recordings): the shortest crumple; a combo's first hit lands before it
   di_recovery_frames: 85    # MEASURED: the bot's own DI animation after the crumple starts (16 of 18)
   crumple_max_dist: 1.1     # MEASURED: the crumpled opponent is ~0.72 away
-  # 0.30.1: the bot's Drive Impact (a DI-back too) followed within this many frames by a stun-range reaction (250-299) of
-  # the opponent's other than the crumple = a wall splat: cashed out the same way (ESTIMATES: its id and length are not
-  # measured yet)
-  di_stun_window: 120
-  wall_stun_max_dist: 1.6
-  wall_stun_frames: 112
   sa3_max_dist: 1.3         # SA3 as a punish only this close (estimate)
   confirm: true             # a 2MK chosen in neutral is confirmed into SA3 with full meter, or into a super that kills
 # 0.26.0 (user: "the bot is missing damaging combo conversions. He requires more interactions to kill than his opponents
