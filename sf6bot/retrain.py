@@ -16,8 +16,10 @@ from pathlib import Path
 
 
 class Retrainer:
-    def __init__(self, every: int, run_dir: Path, enabled: bool = True, command: list | None = None):
+    def __init__(self, every: int, run_dir: Path, enabled: bool = True, command: list | None = None,
+                 character: str | None = None):
         self.every = int(every or 0)
+        self.character = character     # 0.31.0: a character other than Ryu retrains its own models only
         self.run_dir = Path(run_dir)
         self.enabled = enabled and self.every > 0
         self.command = command or [sys.executable, "-m", "sf6bot", "train", "--background"]
@@ -47,9 +49,12 @@ class Retrainer:
             kw["creationflags"] = 0x00004000 | 0x08000000  # BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW
         else:
             kw["preexec_fn"] = lambda: os.nice(10)
+        cmd = list(self.command)
+        if self.character and self.character != "Ryu" and "--character" not in cmd:
+            cmd += ["--character", self.character]
         try:
             self.fh = open(log, "w", encoding="utf-8")
-            self.proc = subprocess.Popen(self.command, stdout=self.fh, stderr=subprocess.STDOUT, env=env, **kw)
+            self.proc = subprocess.Popen(cmd, stdout=self.fh, stderr=subprocess.STDOUT, env=env, **kw)
         except OSError as e:
             self.proc = None
             return f"Background training could not start: {e}"

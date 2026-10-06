@@ -113,7 +113,7 @@ def own_moves(character: str, ds_root: Path) -> list[dict]:
     try:
         cat = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return [] if character in (None, "Ryu") else _own_moves_from_map(character, ds_root)
     rows = {m["name"]: m for m in ((fd.load(character, ds_root / "framedata") or {}).get("moves") or [])}
     out = []
     for name, m in (cat.get("moves") or {}).items():
@@ -137,6 +137,38 @@ def own_moves(character: str, ds_root: Path) -> list[dict]:
                     "total": g.get("total") if isinstance(g.get("total"), int) else row.get("total_n"),
                     "projectile": "projectile" in (row.get("properties") or "").lower(),
                     "super_cost": next((v for k, v in SUPER_COST.items() if name.startswith(k)), 0)})
+    return out
+
+
+def _own_moves_from_map(character: str, ds_root: Path) -> list[dict]:
+    """0.31.0: a character the bot plays without a move catalog (menu C) yet: its moves from the inferred move map
+    (recordings of human players of that character, menu X; medium confidence or better) and Capcom's inputs. Run C
+    as that character for measured ids (the catalog then replaces this)."""
+    from . import framedata as fd
+    from .move_map import LEVELS, load_map
+    rows = {m["name"]: m for m in ((fd.load(character, Path(ds_root) / "framedata") or {}).get("moves") or [])}
+    mp = load_map(character, ds_root) or {}
+    seen, out = set(), []
+    for a, e in sorted(((int(k), v) for k, v in (mp.get("ids") or {}).items()), key=lambda kv: kv[0]):
+        name, row = e.get("name"), rows.get(e.get("name"))
+        if row is None or name in seen or LEVELS.index(e.get("confidence", "low")) < LEVELS.index("medium"):
+            continue
+        if name.startswith("[") or "Drive" in name or "Dash" in name or "Perfect" in name:
+            continue
+        seq, _ = fd.to_sequence(row)
+        if not seq:
+            continue
+        inp = row.get("input") or ""
+        air = "jump" in inp.lower()
+        intent = it.attack_kind(a, air)
+        if intent not in ("poke", "special", "super", "air_attack"):
+            continue
+        seen.add(name)
+        out.append({"name": name, "id": a, "intent": intent, "seq": seq.split()[-1] if air else seq,
+                    "block_adv": row.get("on_block_n"), "startup": row.get("startup_n"), "damage": row.get("damage_n"),
+                    "total": row.get("total_n"), "projectile": "projectile" in (row.get("properties") or "").lower(),
+                    "super_cost": next((v for k, v in SUPER_COST.items() if name.startswith(k)), 0),
+                    "source": "move map"})
     return out
 
 
@@ -182,6 +214,8 @@ class NeutralPolicy:
         self.explore = float(c.get("explore", 0.08))
         self.intent_factor = {**INTENT_FACTOR, **(c.get("intent_factor") or {})}
         self.fireball_min = float(c.get("fireball_min_dist", FIREBALL_MIN_DIST))
+        # 0.31.0: a generated profile adds its own character's invincible reversal names (fighter_profile)
+        self.no_special = NO_NEUTRAL_SPECIAL + tuple(c.get("no_neutral_special") or ())
         self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
         self.zoner = False                    # 0.25.0: the opponent throws many projectiles this match
@@ -303,7 +337,7 @@ class NeutralPolicy:
         """The masks a style-table move still goes through: no OD / Shoryuken / punishable special from neutral
         (0.18.0 / 0.20.6), no fireball from close (0.19.1), supers only when they kill, the measured reach."""
         if m["intent"] == "special":
-            if any(k in m["name"] for k in NO_NEUTRAL_SPECIAL):
+            if any(k in m["name"] for k in self.no_special):
                 return False
             if m.get("projectile") and dist < self.fireball_min:
                 return False
@@ -519,7 +553,7 @@ class NeutralPolicy:
     def _cands(self, intent: str, me: dict, dist: float | None = None, op: dict | None = None) -> list[dict]:
         return [m for m in self.moves if m["intent"] == intent and self.in_reach(m, dist) and self._fast_enough(m, dist)
                 and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))
-                and not (intent == "special" and any(k in m["name"] for k in NO_NEUTRAL_SPECIAL))
+                and not (intent == "special" and any(k in m["name"] for k in self.no_special))
                 and not (intent == "special" and m.get("projectile") and dist is not None and dist < self.fireball_min)
                 and not (intent == "special" and not m.get("projectile")
                          and not (isinstance(m.get("block_adv"), int) and m["block_adv"] >= NEUTRAL_SPECIAL_MIN_BLOCK))

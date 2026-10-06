@@ -204,8 +204,10 @@ def _load_cache(path: Path) -> dict:
         return {"v": CACHE_VERSION, "files": {}}
 
 
-def collect(ds_root: Path, log=None) -> dict:
-    """{version: {"matches", "won", "lost", "counts": Counter}} over datasets/fights."""
+def collect(ds_root: Path, log=None, character: str = "Ryu") -> dict:
+    """{version: {"matches", "won", "lost", "counts": Counter}} over datasets/fights where the bot played `character`
+    (0.31.0; files from before the field: Ryu)."""
+    from .bot_character import of_meta
     from .brain import bot_side_ok
     ds_root = Path(ds_root)
     cache_p = ds_root / "models" / "cache" / "scorecard.json"
@@ -222,7 +224,7 @@ def collect(ds_root: Path, log=None) -> dict:
             continue
         notes = (meta.get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
-        if bot is None or not bot_side_ok(meta, bot) or meta.get("partial"):
+        if bot is None or not bot_side_ok(meta, bot) or meta.get("partial") or of_meta(meta) != character:
             continue
         if meta.get("operator_rounds"):
             # 0.22.0: the operator played part of this match: it measures the user, not the bot (counted apart)
@@ -296,13 +298,14 @@ def row(v: dict) -> dict:
     }
 
 
-def markdown(data: dict, last: int = 4) -> str:
+def markdown(data: dict, last: int = 4, character: str = "Ryu") -> str:
     vs = sorted(data, key=_vkey)[-last:]
+    title = "# Scorecard" if character == "Ryu" else f"# Scorecard: the bot as {character}"
     if not vs:
-        return "# Scorecard\n\nNo fight recordings yet."
+        return f"{title}\n\nNo fight recordings yet."
     rows_ = {v: row(data[v]) for v in vs}
     keys = list(next(iter(rows_.values())).keys())
-    out = ["# Scorecard (per bot version, from datasets/fights)", "",
+    out = [f"{title} (per bot version, from datasets/fights)", "",
            "| | " + " | ".join(vs) + " |", "|---|" + "---|" * len(vs)]
     for k in keys:
         out.append(f"| {k} | " + " | ".join(str(rows_[v][k]) for v in vs) + " |")
@@ -312,7 +315,10 @@ def markdown(data: dict, last: int = 4) -> str:
 
 
 def write(ds_root: Path, out_path: Path | None = None) -> str:
+    from .bot_character import fight_characters
     text = markdown(collect(ds_root))
+    for ch in sorted(c for c in fight_characters(ds_root) if c != "Ryu"):     # 0.31.0: one table per bot character
+        text += "\n\n" + markdown(collect(ds_root, character=ch), character=ch)
     if out_path is not None:
         Path(out_path).write_text(text, encoding="utf-8")
     return text

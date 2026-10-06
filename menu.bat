@@ -23,6 +23,8 @@ echo    H  Versus Human: offline at this PC, an online set (first to 2), or RANK
 echo       The bot finds its side, waits for "Fight!", records every match, and after
 echo       EVERY match writes what it thinks (thoughts.md, in S) and what it learned.
 echo    B  Train the bot's brain from all recordings (replays + matches; no game needed)
+echo    PA Play as another character (Ryu = his own rules; pick the same one in SF6)
+%BOT% play-as
 echo.
 echo  RECORD
 echo    D  Record replays (training data): one, many in a row, or AUTO (the bot plays them)
@@ -164,6 +166,7 @@ if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
 if /i "%CH%"=="vid" (%BOT% video toggle & goto menu)
 if /i "%CH%"=="h" goto versus
+if /i "%CH%"=="pa" goto playas
 if /i "%CH%"=="b" (%BOT% train & goto done)
 if /i "%CH%"=="d" goto record
 if /i "%CH%"=="c" goto catalog
@@ -239,6 +242,14 @@ set "FT="
 set /p FT=First to how many wins? (Enter = 2): 
 if "%FT%"=="" set "FT=2"
 %BOT% fight --versus-human %VMODE% --first-to %FT%
+goto done
+
+:playas
+%BOT% play-as
+set "PAN="
+set /p PAN=Character for the bot (e.g. Ryu, Ken, Chun-Li; Enter = keep): 
+if "%PAN%"=="" goto menu
+%BOT% play-as "%PAN%"
 goto done
 
 :newchar

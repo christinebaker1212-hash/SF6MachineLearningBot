@@ -33,7 +33,7 @@ from .actions import Facing, InputState
 from .dataset import DatasetBuilder
 from .episodes import FIGHT_START_FRAME, EpisodeTracker
 from .intents import category as intents_category
-from .game_state import (ArrivalMeter, character_name, is_unknown_character, unmapped_new_characters, facing_of, file_stem, num, open_state_reader,
+from .game_state import (CHARACTERS, ArrivalMeter, character_name, is_unknown_character, unmapped_new_characters, facing_of, file_stem, num, open_state_reader,
                          player_distance)
 from .sequences import SequenceRunner, parse_sequence
 from .takeover import attack_id as attack_id_
@@ -921,7 +921,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         name = d.name or ""
         seq = d.seq if isinstance(d.seq, str) else ""
-        if "Shoryuken" not in name and not re.search(r"(^|\s)6@\d+ 2@\d+ 3\+[LMH]?P", seq):
+        dps = (self.c.get("anti_air") or {}).get("dp_names") or []
+        if "Shoryuken" not in name and not any(n_ in name for n_ in dps) \
+                and not re.search(r"(^|\s)6@\d+ 2@\d+ 3\+[LMH]?[PK]", seq):
             return None
         me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
         if (_num(op.get("y")) or 0.0) <= 0.3 or self.op_vy <= 0 or not self._jumping(op):
@@ -1141,7 +1143,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
             px = ox + self.op_vx * t_land
             pdx, dx = px - mx, ox - mx
-            srk = self.c["moves"][aa.get("move", "shoryuken")]
+            srk = self._aa_move()
             need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
             early = int(aa.get("early_frames", 6)) + self.aa_extra   # active this many frames before they land
             if abs(pdx) <= aa["max_dist"] + 0.6 and t_land <= need + early:
@@ -1184,6 +1186,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                     # cannot beat it once it has started; it only has to start before the jump-in connects (at the
                     # latest the landing), and then hits during the landing recovery. `late_frames` 4: started by the
                     # frame before the landing (motion + input delay + 1 = need - start-up + 1). Later than that: block.
+                    if t_land >= need - int(aa.get("late_frames", 4)) and not self._aa_on():
+                        return Decision("hold", direction=4, facing=Facing.RIGHT if pdx > 0 else Facing.LEFT,
+                                        rule="block_air", reason=why + ": no anti-air special, blocking")
                     if t_land >= need - int(aa.get("late_frames", 4)):
                         self.aa_done_for_jump = True
                         self._aa_kind = "air_moves" if air_move else "anti_air"    # counted once actually sent
@@ -1209,7 +1214,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 if self._aa_ready_for != self.op_onset:
                     self._aa_ready_for = self.op_onset
                     self.aa_stats["ready"] = self.aa_stats.get("ready", 0) + 1
-                srk = self.c["moves"][aa.get("move", "shoryuken")]
+                srk = self._aa_move()
                 need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
                 why = f"opponent in the air, lands in {t_land:.0f}f {abs(pdx):.2f} away"
                 if t_land <= need + int(aa.get("early_frames", 6)):
@@ -1542,7 +1547,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         busy gate dropped every anti-air input during blockstun)."""
         aa = self.c["anti_air"]
         jt = self._jump_threat(me, op)
-        if jt is None or not aa.get("wakeup_reversal", True):
+        if jt is None or not aa.get("wakeup_reversal", True) or not self._aa_on():
             return None
         t_land, pdx = jt
         dx = (_num(op.get("x")) or 0.0) - (_num(me.get("x")) or 0.0)
@@ -1550,7 +1555,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if abs(dx) < float(aa.get("side_dead", 0.05)) or dx * pdx <= 0 or abs(pdx) > float(aa["max_dist"]) \
                 or not rem + int(lo) <= t_land <= rem + int(hi):
             return None
-        srk = self.c["moves"][aa.get("move", "shoryuken")]
+        srk = self._aa_move()
         pad = max(0, int(rem) - self.lead - self.stale) - seq_prefix(srk["seq"])
         self.aa_done_for_jump = True
         key = "wakeup_reversal" if sit == "wakeup" else "blockstun_reversal"
@@ -1781,6 +1786,17 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         m = (self.c.get("moves") or {}).get(key)
         return m if m and m.get("seq") else None
 
+    # 0.31.0: a character without an anti-air special (fighter_profile: no invincible 623 move) blocks jump-ins toward
+    # the landing side; its timing still uses a 623 motion with a 5-frame start-up (Ryu's L Shoryuken)
+    _NO_AA = {"name": "no anti-air special", "seq": "6@3 2@3 3+LP@3", "startup": 5}
+
+    def _aa_move(self) -> dict:
+        aa = self.c.get("anti_air") or {}
+        return (self.c.get("moves") or {}).get(aa.get("move", "shoryuken")) or self._NO_AA
+
+    def _aa_on(self) -> bool:
+        return bool((self.c.get("anti_air") or {}).get("enabled", True)) and self._aa_move() is not self._NO_AA
+
     def _bar_value(self, me: dict) -> float:
         """0.26.0: what a Super bar kept is worth (hp) to the combo composer now. MEASURED 0.25.0 ranked: the bot died
         holding 1-3 bars in 7 of 8 lost matches. Bars carry over between rounds, not past the match, so in a round that
@@ -1993,15 +2009,15 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.super_stats["crumple_options"] = len(out)
         return out
 
-    @staticmethod
-    def _route_names(o: dict) -> list[str]:
+    def _route_names(self, o: dict) -> list[str]:
         """The Capcom names of a config route's moves ('5HP > 623HP' -> Standing Heavy Punch, H Shoryuken): the
         starter is given; the rest by the config's notation (Ryu's punish routes end in 623HP)."""
         names = [o.get("starter") or ""]
         rest = (o.get("route") or "").split(">")[1:]
+        own = self.c.get("route_names") or {}               # 0.31.0: a generated profile's anti-air special names
         for part in rest:
             t = part.strip()
-            names.append({"623HP": "H Shoryuken", "623MP": "M Shoryuken", "623LP": "L Shoryuken"}.get(t, t))
+            names.append(own.get(t) or {"623HP": "H Shoryuken", "623MP": "M Shoryuken", "623LP": "L Shoryuken"}.get(t, t))
         return names
 
     def _answer_seq(self, resp: str, me: dict) -> tuple[str, str] | None:
@@ -2118,7 +2134,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         dc = self.c.get("denjin") or {}
         aid = me.get("action_id")
         cid = self.denjin_ids.get("charge") or dc.get("charge_id")
-        if aid == cid and isinstance(tmr, int) and isinstance(self._my_act_t0, int) and not self.denjin_stock \
+        if not dc.get("enabled", True):        # 0.31.0: Ryu only (a generated profile turns it off: no stock)
+            pass
+        elif aid == cid and isinstance(tmr, int) and isinstance(self._my_act_t0, int) and not self.denjin_stock \
                 and tmr - self._my_act_t0 >= int(dc.get("stock_frame", 51)) - 1 and self._denjin_seen != self._my_act_t0:
             self._denjin_seen = self._my_act_t0
             self.denjin_stock = True
@@ -2520,7 +2538,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             ex |= {"block", "parry", "reversal"}
             bonus["jab"] = float(tc.get("jab_bonus", 0.35))
         elif sit == "their_wakeup":
-            meaty = self.own_reach.get(int(tc.get("meaty_id", 640)))
+            mid_ = tc.get("meaty_id", 640)          # 0.31.0: null for a character without a measured 2MK id
+            meaty = self.own_reach.get(int(mid_)) if mid_ is not None else None
             if dist > float(meaty if isinstance(meaty, (int, float)) else tc.get("meaty_max_dist", 1.25)) + 0.05:
                 ex.add("meaty")
             if dist > float(tc.get("oki_throw_max", 0.9)):
@@ -3574,21 +3593,35 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     reader = open_state_reader(cfg, on_state=lines.put)
     if reader is None:
         return {}
-    fcfg = load_fighter_config(cfg.get("fighter", {}).get("config_dir", "configs/fighter"))
     ds_root = Path(cfg.get("datasets", {}).get("root", "datasets"))
-    brain = Brain(ds_root) if (fcfg.get("policy") or {}).get("enabled", True) else None
-    if brain is not None and brain.problem:
-        print(f"Brain: {brain.problem}")
-    from .win_model import WinModel
-    win = WinModel(ds_root) if brain is not None else None
-    if win is not None:
-        print("Win model: " + (f"trust {win.trust:.2f} (trained {win.meta.get('trained')} on {win.meta.get('samples')} "
-                               "decisions)" if win.net is not None else (win.problem or "not trained yet")))
+    # 0.31.0: the character the bot plays (fight --character, configs/local.yaml, else Ryu). Ryu = configs/fighter/ryu.yaml
+    # as always; anyone else = a profile generated from that character's Capcom data (fighter_profile.py)
+    from . import fighter_profile as fprof
+    from .bot_character import playing
+    cfg_dir = cfg.get("fighter", {}).get("config_dir", "configs/fighter")
+    fcfg = fprof.profile(playing(cfg), cfg_dir, ds_root)
+    if (fcfg.get("profile") or {}).get("generated"):
+        print("Playing as " + fprof.summary_line(fcfg))
+
+    def _models(ch_):
+        b_ = Brain(ds_root, ch_) if (fcfg.get("policy") or {}).get("enabled", True) else None
+        if b_ is not None and b_.problem:
+            print(f"Brain: {b_.problem}")
+        if b_ is not None and b_.borrowed:
+            print(f"{ch_} has no networks of its own yet: using Ryu's, read-only (B trains {ch_}'s after its first matches).")
+        from .win_model import WinModel
+        w_ = WinModel(ds_root, ch_) if b_ is not None else None
+        if w_ is not None:
+            print("Win model: " + (f"trust {w_.trust:.2f} (trained {w_.meta.get('trained')} on {w_.meta.get('samples')} "
+                                   "decisions)" if w_.net is not None else (w_.problem or "not trained yet")))
+        return b_, w_
+    brain, win = _models(fcfg.get("character"))
     # 0.16.0: long sessions retrain in the background every N matches; new models are loaded at a match start
     from .retrain import Retrainer
     pc = fcfg.get("policy") or {}
     retrainer = Retrainer(pc.get("retrain_every", 20) if (versus == "ranked" or pc.get("retrain_in_all_modes"))
-                          else 0, sess.recorder.dir, enabled=not sess.mock and brain is not None)
+                          else 0, sess.recorder.dir, enabled=not sess.mock and brain is not None,
+                          character=fcfg.get("character"))
     # 0.18.8: ranked runs on their own between matches: the result screen's first option (rematch, or back to Fighting
     # Ground) is confirmed from the game state; nothing is ever pressed outside a battle (result_menu.py)
     from .result_menu import MenuWatch, ResultMenu
@@ -3970,7 +4003,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     raise _SkipProgress()
                 if ladder is not None:
                     summary["ladder_pre"] = ladder.pre_record(side["i"])
-                prog = record_match(ds_root, sess.recorder.dir, summary, session_rows, models_info(ds_root))
+                prog = record_match(ds_root, sess.recorder.dir, summary, session_rows,
+                                    models_info(ds_root, fcfg.get("character")))
                 if ladder is not None:
                     ladder.match_finished(session_rows[-1].get("match_id"), side["i"],
                                           (summary.get("match") or {}).get("bot_won"))
@@ -4320,6 +4354,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter = None
             if fighter is None and isinstance(op.get("chara"), int):
                 summary["character"] = character_name(me.get("chara"))
+                if (summary["character"] != fcfg.get("character") and summary["character"] in CHARACTERS.values()
+                        and side["i"] is not None):
+                    # 0.31.0: the game shows the bot on another character than it was set to play: that character's
+                    # profile and models (Ryu's own stay untouched)
+                    sess.narrate(f"I am playing {summary['character']}, not {fcfg.get('character')}: using "
+                                 f"{summary['character']}'s rules and data.", source="measured")
+                    fcfg = fprof.profile(summary["character"], cfg_dir, ds_root)
+                    print("Playing as " + fprof.summary_line(fcfg))
+                    if brain is not None:
+                        brain, win = _models(fcfg.get("character"))
+                        brain_mtime[0] = None
+                    retrainer.character = fcfg.get("character")
                 summary["opponent"] = character_name(op["chara"])
                 summary["opponent_kind"] = "human" if versus else "cpu"
                 if is_unknown_character(op["chara"]):    # 0.30.0: a character released after this build
@@ -4352,9 +4398,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 policy = None
                 if brain is not None:
                     # a model retrained in the background is picked up here, between matches
-                    mt_ = _mtime(ds_root / "models" / "intent_net.npz"), _mtime(ds_root / "models" / "counts.json")
+                    mt_ = _mtime(brain.dir / "intent_net.npz"), _mtime(brain.dir / "counts.json")
                     if brain_mtime[0] is not None and mt_ != brain_mtime[0]:
-                        brain = Brain(ds_root)
+                        brain = Brain(ds_root, fcfg.get("character"))
                         sess.narrate("Using the copy-a-player network retrained during this session.", source="learned")
                     brain_mtime[0] = mt_
                     if win is not None and win.reload() and win.net is not None:
@@ -4363,7 +4409,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         summary["win_model"] = {k: win.meta.get(k) for k in ("trained", "samples", "trust")}
                     for rep_ in ("win_report.md", "brain_report.md"):
                         try:
-                            src_ = ds_root / "models" / rep_
+                            src_ = brain.dir / rep_
                             if src_.exists():
                                 (sess.recorder.dir / rep_).write_text(src_.read_text(encoding="utf-8"), encoding="utf-8")
                         except OSError:
@@ -4475,8 +4521,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["stale_catalogs"] = stale
                     sess.narrate(f"The game was updated since the move catalog of {', '.join(stale)} was "
                                  "measured: re-run C as that character.", source="measured")
-                if summary["character"] not in ("Ryu", "?"):
-                    print(f"WARNING: the bot side is {summary['character']}, but these rules are written for Ryu.")
+                if summary["character"] not in (fcfg.get("character"), "?"):
+                    print(f"WARNING: the bot side is {summary['character']}, but these rules are for "
+                          f"{fcfg.get('character')}.")
+                if (fcfg.get("profile") or {}).get("generated"):
+                    summary["profile"] = {k: v for k, v in fcfg["profile"].items() if k != "base"}
                 sess.narrate(f"Opponent {summary['opponent']}: "
                              + (f"move data: {label} (punishes and DI reactions on)." if label
                                 else "no move catalog or inferred map: no punishes; DI reactions from the shared "
@@ -4795,12 +4844,17 @@ def _mtime(p: Path):
         return None
 
 
-def models_info(ds_root: Path) -> dict:
-    """Which trained models are playing (for the progress file): when each was trained, on how much."""
+def models_info(ds_root: Path, character: str | None = None) -> dict:
+    """Which trained models are playing (for the progress file): when each was trained, on how much. 0.31.0: the
+    playing character's (Ryu's when it has none of its own yet)."""
+    from .bot_character import model_dir
     out = {}
     for key, name in (("brain", "intent_net.npz.json"), ("win_model", "win_net.npz.json")):
         try:
-            m = json.loads((Path(ds_root) / "models" / name).read_text(encoding="utf-8"))
+            p_ = model_dir(ds_root, character) / name
+            if not p_.exists():
+                p_ = model_dir(ds_root) / name
+            m = json.loads(p_.read_text(encoding="utf-8"))
             out[key] = {"trained": m.get("trained"), "samples": m.get("samples")}
         except (OSError, ValueError):
             pass

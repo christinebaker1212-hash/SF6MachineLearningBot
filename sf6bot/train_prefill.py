@@ -19,8 +19,8 @@ def prefill(ds_root: Path, log=print, fcfg: dict | None = None) -> dict:
     fights = sorted((ds_root / "fights").glob("*.jsonl.gz"))
     replays = sorted((ds_root / "replays").glob("*.jsonl.gz"))
     merged = sorted((ds_root / "merged").glob("*.jsonl.gz"))
-    brain_paths = [r["path"] for r in brain_recordings(ds_root)]
-    samples_set = set(brain_paths) | {r["path"] for r in win_recordings(ds_root)}
+    brain_paths = [r["path"] for r in brain_recordings(ds_root, None)]       # every bot character
+    samples_set = set(brain_paths) | {r["path"] for r in win_recordings(ds_root, None)}
     reach_set = set(brain_paths) | set(fights)          # reach and combo mining read the same files
     timing_set = set(replays) | set(merged) | set(fights)
     map_set = set(replays) | set(fights)

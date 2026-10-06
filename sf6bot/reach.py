@@ -111,7 +111,7 @@ def build(ds_root: Path, log=print) -> dict:
     from . import __version__
     from .brain import recordings
     ds_root = Path(ds_root)
-    files = [r["path"] for r in recordings(ds_root)]
+    files = [r["path"] for r in recordings(ds_root, None)]    # every bot character's fights (move knowledge)
     # fights: both players (the bot's own reach too); recordings() keeps only the opponent there
     files += [p for p in sorted((ds_root / "fights").glob("*.jsonl.gz")) if p not in files]
     from . import file_cache as fc

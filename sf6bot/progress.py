@@ -186,7 +186,7 @@ def summarize(session: list[dict], history: list[dict], lp: dict | None = None) 
 
 def markdown(p: dict) -> str:
     s = p["session"]
-    lines = ["# Progress", "", f"updated {p['updated']}", "",
+    lines = ["# Progress" + (f": {p['character']}" if p.get("character") else ""), "", f"updated {p['updated']}", "",
              f"- this session: {s['matches']} matches, won {s['won']}, lost {s['lost']}"
              + (f" ({s['win_rate']:.0%})" if s.get("win_rate") is not None else "")
              + (f"; taken over by you (unfinished): {s['takeovers']}, win rate counting those as losses "
@@ -255,8 +255,17 @@ def lp_markdown(lp: dict) -> list[str]:
     return out
 
 
+def for_character(rows: list[dict], character: str | None) -> list[dict]:
+    """0.31.0: the history of one bot character (SF6 keeps LP per character; rows from before the field: Ryu)."""
+    if not character or character == "?":
+        return rows
+    return [x for x in rows if (x.get("character") or "Ryu") in (character, "?")]
+
+
 def _write(ds_root: Path, run_dir: Path, session_rows: list[dict]) -> dict:
-    prog = summarize(session_rows, load_ladder(ds_root), load_lp(ds_root))
+    ch = next((x.get("character") for x in reversed(session_rows) if x.get("character") not in (None, "?")), None)
+    prog = summarize(session_rows, for_character(load_ladder(ds_root), ch), load_lp(ds_root))
+    prog["character"] = ch
     run_dir = Path(run_dir)
     (run_dir / "progress.json").write_text(json.dumps(prog, indent=1, default=str), encoding="utf-8")
     (run_dir / "progress.md").write_text(markdown(prog), encoding="utf-8")

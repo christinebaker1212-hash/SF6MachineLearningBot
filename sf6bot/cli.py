@@ -343,6 +343,13 @@ def cmd_fight(args, cfg):
     this PC, the volunteer here or over Parsec): the bot gets its own virtual controller. Online: the bot
     plays as this PC's player with the keyboard (Capcom's written approval, 2026-10-02, disclosed CFN)."""
     from .fighter import run_fight
+    if getattr(args, "character", None):
+        from .bot_character import resolve
+        ch = resolve(args.character)
+        if ch is None:
+            print(f"Unknown character {args.character!r}.")
+            return
+        cfg.setdefault("fighter", {})["character"] = ch
     vh = args.versus_human
     pad = args.pad or vh == "offline"
     if pad:
@@ -641,7 +648,17 @@ def cmd_train(args, cfg):
     from .train_prefill import prefill
     prefill(root, log=print)
     steps.start("copy-a-player network")
-    rep = train(root, log=print)
+    # 0.31.0: each bot character's networks from its own fights (+ the replays); Ryu's only ever from Ryu's fights
+    from .bot_character import fight_characters, model_dir, resolve
+    from .game_state import file_stem
+    only = resolve(getattr(args, "character", None)) if getattr(args, "character", None) else None
+    chars = [only] if only else ["Ryu"] + sorted(c for c in fight_characters(root) if c != "Ryu")
+    reps: dict = {}
+    for ch in chars:
+        if len(chars) > 1 or ch != "Ryu":
+            print(f"--- {ch} ---")
+        reps[ch] = train(root, log=print, character=ch)
+    rep = reps[chars[0]]
     from .reach import build as build_reach
     steps.start("move reach")
     reach = build_reach(root, log=print)
@@ -654,7 +671,12 @@ def cmd_train(args, cfg):
     except Exception as e:                       # noqa: BLE001 - the shipped table stays in use
         print(f"Move timing failed: {e}")
     steps.start("win model")
-    wrep = train_win(root, log=print)
+    wreps: dict = {}
+    for ch in chars:
+        if len(chars) > 1 or ch != "Ryu":
+            print(f"--- {ch} ---")
+        wreps[ch] = train_win(root, log=print, character=ch)
+    wrep = wreps[chars[0]]
     from .combo_mining import build as mine_combos
     steps.start("combos found in recordings")
     try:
@@ -663,17 +685,16 @@ def cmd_train(args, cfg):
         print(f"Combo mining failed: {e}")
     # 0.21.0: the style table of the bot's character from every replay with it (play neutral like those players)
     steps.start("style table")
-    try:
-        from . import style as _style
-        from .fighter import load_fighter_config
-        ch = load_fighter_config(cfg.get("fighter", {}).get("config_dir", "configs/fighter")).get("character")
-        st = _style.build(root, ch, log=print) if ch else None
-        if st is not None:
-            print(f"Style table saved: {_style.save(st, root)}")
-    except Exception as e:                       # noqa: BLE001
-        print(f"Style table failed: {e}")
+    for ch in chars:
+        try:
+            from . import style as _style
+            st = _style.build(root, ch, log=print)
+            if st is not None:
+                print(f"Style table saved: {_style.save(st, root)}")
+        except Exception as e:                   # noqa: BLE001
+            print(f"Style table failed ({ch}): {e}")
     if bg:
-        out = root / "models"
+        out = model_dir(root, chars[0])
         out.mkdir(parents=True, exist_ok=True)
     else:
         out = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_train")
@@ -681,10 +702,46 @@ def cmd_train(args, cfg):
         (out / "meta.json").write_text(json.dumps({"kind": "train"}, indent=1))
     (out / "brain_report.md").write_text(report_md(rep), encoding="utf-8")
     (out / "win_report.md").write_text(win_md(wrep), encoding="utf-8")
+    for ch in chars[1:]:
+        sfx = file_stem(ch)
+        (out / f"brain_report_{sfx}.md").write_text(report_md(reps[ch]), encoding="utf-8")
+        (out / f"win_report_{sfx}.md").write_text(win_md(wreps[ch]), encoding="utf-8")
+        if not bg:
+            d_ = model_dir(root, ch)
+            if d_.exists():
+                (d_ / "brain_report.md").write_text(report_md(reps[ch]), encoding="utf-8")
+                (d_ / "win_report.md").write_text(win_md(wreps[ch]), encoding="utf-8")
     steps.finish()
     print(report_md(rep))
     print(win_md(wrep))
+    if len(chars) > 1:
+        print("Also trained: " + ", ".join(f"{ch} (its own fights)" for ch in chars[1:]))
     print("The fighter uses the new models from the next match on (menus V, N, H).")
+
+
+def cmd_play_as(args, cfg):
+    """0.31.0: the character the bot plays (saved in configs/local.yaml). Ryu = his own rules, unchanged; anyone else =
+    rules generated from that character's Capcom data (fighter_profile.py), with its own learning and models."""
+    from .bot_character import playing, resolve
+    if not args.name:
+        print(f"The bot plays: {playing(cfg)}")
+        return
+    ch = resolve(args.name)
+    if ch is None:
+        print(f"Unknown character {args.name!r}.")
+        return
+    from .config import set_local
+    p = set_local(["fighter", "character"], ch)
+    print(f"The bot now plays {ch} (saved in {p}). Pick {ch} in SF6 too.")
+    if ch != "Ryu":
+        from pathlib import Path as _P
+        from . import fighter_profile as fprof
+        root = _P((cfg.get("datasets") or {}).get("root", "datasets"))
+        c = fprof.profile(ch, (cfg.get("fighter") or {}).get("config_dir", "configs/fighter"), root)
+        print(fprof.summary_line(c))
+        if not (root / "catalog" / f"{ch.replace(' ', '').replace('.', '')}_movelist.json").exists():
+            print(f"Tip: run C (move catalog) with {ch} as P1 in Training Mode so the bot knows its own move ids; "
+                  "until then it uses the ids learned from recordings (menu X).")
 
 
 def cmd_video(args, cfg):
@@ -879,7 +936,13 @@ def main(argv=None):
                    "agreed beforehand): human limits on, the participant's guess asked after each match")
     p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "
                    "controller and the overlay buttons press that controller (default: P1's keys)")
+    p.add_argument("--character", default=None, help="the character the bot plays (default: play-as, else Ryu); "
+                   "pick the same character in SF6")
     p.set_defaults(fn=cmd_fight)
+
+    p = sub.add_parser("play-as", help="the character the bot plays from now on (saved); no argument: show it")
+    p.add_argument("name", nargs="?", default=None)
+    p.set_defaults(fn=cmd_play_as)
 
     p = sub.add_parser("video", help="video recording on / off / toggle (saved); no argument: show it")
     p.add_argument("mode", nargs="?", choices=("on", "off", "toggle"), default=None)
@@ -892,6 +955,8 @@ def main(argv=None):
                        "every recording; no game needed")
     p.add_argument("--background", action="store_true", help="(started by long fight sessions) reports to "
                    "datasets/models/ instead of a new run folder")
+    p.add_argument("--character", default=None, help="train only this bot character's networks (default: Ryu's, "
+                   "then every other character the bot has played)")
     p.set_defaults(fn=cmd_train)
 
     p = sub.add_parser("controller", help="(obsolete since 0.9.0: the side decides) reset to keyboard")

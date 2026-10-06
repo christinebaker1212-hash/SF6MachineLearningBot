@@ -95,7 +95,7 @@ experimental outcome we're working toward, not a promised capability.
 | Display | 1920x1080 @ 60 Hz, single monitor | `sysinfo` |
 | Python | 3.14.5 | `sysinfo` |
 | SF6 window | `StreetFighter6.exe`, title "Street Fighter 6", **windowed 1280x720** client at (479,192) | `list-windows` |
-| Character / controls | Ryu, Classic | user |
+| Character / controls | Ryu, Classic (0.31.0: any character via play-as; Ryu's rules unchanged) | user |
 | User's own rank | **Master, 1450 MR** (2026-10-02). The bot lost 0–2 to the user (Ken), one round a Perfect (0.9.0): the first Master-level data point | user |
 | Input method | keyboard via SendInput (scancodes) | user |
 | REFramework | available | user |
@@ -3958,6 +3958,66 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
   show it.
 - Tests: `tests/test_0303.py` (progress text, cache round trip and invalidation, move timing cached = uncached, merged
   replays not rewritten, the pre-pass reads each recording once then nothing, erased recordings' caches removed).
+
+## 0.31.0: the bot plays characters other than Ryu, without changing Ryu (user, 2026-10-06)
+- User: "Would playing another character hurt Ryu, or would it strengthen it with more data?"; "Let's add the ability to
+  play different characters other than Ryu without hurting Ryu or affecting him at all."
+- **Choosing the character:**
+  - `sf6bot play-as NAME` (menu **PA**, panel FIGHT -> "Play as") saves it in configs/local.yaml; `fight --character
+    NAME` for one run; else Ryu.
+  - ranked.bat and every fight mode use the saved choice. Pick the same character in SF6.
+  - If the game shows the bot on another character (side found by the crouch probe), the fight switches to that
+    character's profile and data, and says so.
+- **Ryu is unchanged:** `fighter_profile.profile("Ryu")` is configs/fighter/ryu.yaml exactly (test). His networks
+  train only on Ryu's fights (`brain.recordings` / `win_model.recordings` filter on the fight's `bot_character`; files
+  from before the field are Ryu's) plus the replays, as before. His per-opponent learning, combo results, composer
+  transitions, operator answers, style table and models are where they were.
+- **Another character's rules** (`sf6bot/fighter_profile.py`) are generated when a fight starts: Ryu's rule set (same
+  distances, timings, defence game, punish engine, fireball play, Drive rules), with every part that names Ryu's moves
+  rebuilt from that character's Capcom data (menu F) and move ids (catalog C, else the move map from recordings):
+  - Super Arts 1-3 with motion inputs (charge supers and command-grab supers left out)
+  - the anti-air: a 623 special with start-up <= 8 that Capcom notes invincible to air attacks (light version first).
+    None (Guile, Chun-Li, Dee Jay, Blanka, E. Honda, Kimberly, A.K.I., Manon, Marisa, Rashid, Viper, JP, Zangief,
+    Ingrid, Dhalsim, M. Bison, Ed: start-up 10+) -> `anti_air.enabled: false`: jump-ins are blocked toward the landing
+    side. No anti-air normal is guessed. Charge characters' charge anti-airs are not used yet.
+  - reversals: the OD version of that special and the Super Arts Capcom notes invincible
+  - punish engine: the character's normals (Capcom start-up / damage / on block), MP / HP / MK / LP normals cancelled into
+    its heavy anti-air special where Capcom's cancel column allows it, sweep / heavies alone, its supers
+  - frame traps and the meaty from its own start-ups; 2MK confirms into its SA3 / SA1; fireball clash with its own 236
+    projectile (none = no clash); the fireball jump-in route ends in its anti-air special when 5HP cancels
+  - no invincible special from neutral (`policy.no_neutral_special`)
+  - off: Denjin Charge, Ryu's measured combo reach / travel (its anti-air specials get Ryu's 1.5 as an ESTIMATE)
+  - the user's move answers / punish rules about OPPONENTS stay when the bot's character has the move they use
+  - reach fallbacks are Ryu's MEASURED values by move name: an ESTIMATE for another character until B measures its own;
+    walk speed, jump frames and throw range are Ryu's too (ESTIMATES)
+  - `configs/fighter/<character>.yaml` (e.g. ken.yaml), if written, is merged on top of the generated profile
+  - the startup line says what the profile has ("supers ...; anti-air ...; reversals ...; fireball ...")
+- **Over all 31 imported characters (the user's Capcom pages, 2026-10-05):** every profile generates. 14 have an
+  anti-air special (Ken, Akuma, Luke, Jamie, Juri, Cammy, Lily, Terry, Mai, Elena, Sagat, Alex, Yasmine, Ryu); Guile
+  and Zangief have one Super Art the bot can input (SA2), E. Honda / Manon / Lily two.
+- **Its own move ids** without a catalog: `neutral_policy.own_moves` falls back to the move map (menu X; ids seen in
+  recordings of human players of that character, medium confidence or better). Run C with the character as P1 for
+  measured ids (better).
+- **Its own learning and models:**
+  - per-opponent learning, combo results, composer transitions: already per bot character (`<Bot>_vs_<Opponent>.json`)
+  - networks in datasets/models/chars/<Character>/; until it has some (B after its first matches), it plays with Ryu's
+    networks READ-ONLY (`Brain.borrowed`): they predict what players do in a situation (intents are character-
+    independent); nothing is written back to Ryu's
+  - B trains Ryu's networks as before, then each other character the bot has played (its own fights); `train
+    --character NAME` only that one; the background retrain in ranked trains the playing character
+  - progress.md / the ladder history per character (SF6 keeps LP per character); the scorecard has one table per
+    character (Ryu's first, unchanged)
+- **Shared on purpose:** what is known about each OPPONENT character (move maps, move timing, reach, command grabs, combos
+  found in recordings) is the same whoever plays against it, so matches as any character add to it. This is knowledge
+  about opponents; it does not change how Ryu decides.
+- **B stalled after the network's last epoch (user, 2026-10-06, 0.30.3: "stopped here for 10 minutes without any further
+  update")**: the held-out scoring's top-3 check re-copied the held-out answers for every decision (quadratic: 79,251
+  decisions; ~10 s per score here, x3 scores, much slower on the Ally). Vectorised (same numbers, 0.13 s) and a
+  "Scoring the network ..." line added.
+- Tests: `tests/test_0310.py` (Ryu's profile identical; Ken / Guile / Zangief profiles from the real Capcom pages;
+  no-anti-air blocking; overrides; training lists per character; borrowed models; progress per character; names; the
+  retrain command; own moves from a move map; a MOCK fight session as Ken over the real CPU fight, Ryu's models
+  untouched). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

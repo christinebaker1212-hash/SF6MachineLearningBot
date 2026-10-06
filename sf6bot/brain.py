@@ -55,9 +55,11 @@ def bot_side_ok(meta: dict, bot: int) -> bool:
     return True
 
 
-def recordings(ds_root: Path) -> list[dict]:
+def recordings(ds_root: Path, character: str | None = "Ryu") -> list[dict]:
     """[{path, players, source}] without counting the same replay twice (merged replays replace the
-    recordings they were made from)."""
+    recordings they were made from). 0.31.0: fights only where the bot played `character` (Ryu's models never see a
+    match played as anyone else)."""
+    from .bot_character import of_meta
     ds_root = Path(ds_root)
     out, used = [], set()
     for p in sorted((ds_root / "merged").glob("*.jsonl.gz")):
@@ -69,17 +71,17 @@ def recordings(ds_root: Path) -> list[dict]:
     for p in sorted((ds_root / "fights").glob("*.jsonl.gz")):
         notes = (_meta(p).get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
-        if bot is None or not bot_side_ok(_meta(p), bot):
+        if bot is None or not bot_side_ok(_meta(p), bot) or (character is not None and of_meta(_meta(p)) != character):
             continue
         src = "ranked" if "vs human ranked" in notes else "human" if "vs human" in notes else "cpu"
         out.append({"path": p, "players": (1 - bot,), "source": src, "bot": bot})
     return out
 
 
-def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
+def build(ds_root: Path, log=print, character: str = "Ryu") -> tuple[list[dict], list[dict]]:
     """All samples, each with its recording index and weight; and per-recording info."""
     from .eta import Progress
-    recs = recordings(ds_root)
+    recs = recordings(ds_root, character)
     samples, info = [], []
     prog = Progress("copy-a-player samples", len(recs), log=log)
     for ri, r in enumerate(recs):
@@ -123,11 +125,12 @@ def _split(samples: list[dict], n_recs: int) -> tuple[list[int], list[int]]:
     return tr, va
 
 
-def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) -> dict:
+def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0, character: str = "Ryu") -> dict:
+    from .bot_character import model_dir
     ds_root = Path(ds_root)
-    out_dir = Path(out_dir or ds_root / "models")
+    out_dir = Path(out_dir or model_dir(ds_root, character))
     out_dir.mkdir(parents=True, exist_ok=True)
-    samples, info = build(ds_root, log)
+    samples, info = build(ds_root, log, character)
     report = {"trained": time.strftime("%Y-%m-%d %H:%M:%S"), "sf6bot_version": __import__("sf6bot").__version__,
               "recordings": info, "samples": len(samples), "intents": list(it.INTENTS),
               "n_features": it.N_FEATURES, "features": it.FEATURES_VERSION}
@@ -154,6 +157,7 @@ def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) 
     log(f"Training the network on {len(tr)} decisions, checking on {len(va)} held out ...")
     fit = net.fit(X[tr], y[tr], w[tr], X[va], y[va], epochs=300, patience=25, seed=seed, log=log)
     # scores on the held-out decisions: network, counts (built from the training part only), majority class
+    log(f"Scoring the network on the {len(va)} held-out decisions ...")
     c_tr = it.Counts()
     for i in tr:
         c_tr.add(samples[i], samples[i]["w"])
@@ -162,10 +166,14 @@ def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) 
     p_mix = 0.75 * p_net + 0.25 * p_cnt
     maj = np.bincount(y[tr], minlength=len(it.INTENTS)).argmax()
 
+    y_va = y[va]
+
     def score(p):
-        top1 = (p.argmax(axis=1) == y[va]).mean()
-        top3 = np.mean([y[va][k] in np.argsort(-p[k])[:3] for k in range(len(va))])
-        nll = -np.mean(np.log(p[np.arange(len(va)), y[va]] + 1e-12))
+        # 0.31.0: vectorised. The old per-decision loop re-copied y[va] for every decision (quadratic): on the user's
+        # 79,251 held-out decisions it ran for 10+ minutes after the last epoch with no output
+        top1 = (p.argmax(axis=1) == y_va).mean()
+        top3 = (np.argsort(-p, axis=1)[:, :3] == y_va[:, None]).any(axis=1).mean()
+        nll = -np.mean(np.log(p[np.arange(len(va)), y_va] + 1e-12))
         return {"top1": round(float(top1), 3), "top3": round(float(top3), 3), "log_loss": round(float(nll), 3)}
     report["held_out"] = {"decisions": len(va), "network": score(p_net), "counts": score(p_cnt),
                           "network+counts": score(p_mix),
@@ -206,8 +214,13 @@ def report_md(rep: dict) -> str:
 class Brain:
     """What the fighter asks during a match: P(intent) for the situation, from the network and the counts."""
 
-    def __init__(self, ds_root: Path):
-        d = Path(ds_root) / "models"
+    def __init__(self, ds_root: Path, character: str = "Ryu"):
+        from .bot_character import is_default, model_dir
+        d = model_dir(ds_root, character)
+        self.borrowed = False          # 0.31.0: another character without its own models plays with Ryu's, read-only
+        if not is_default(character) and not ((d / MODEL).exists() or (d / COUNTS).exists()):
+            d, self.borrowed = model_dir(ds_root), True
+        self.dir = d
         self.net, self.meta, self.counts, self.problem = None, {}, None, None
         self.stale = False             # a network from an older feature version: retrain (B, or by itself in matches)
         try:

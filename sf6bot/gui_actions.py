@@ -34,10 +34,16 @@ class Action:
 TABS = [("FIGHT", "fight"), ("RECORD", "record"), ("TRAIN", "train"), ("COMBOS", "combos"),
         ("BUTTONS", "buttons"), ("RESULTS", "results"), ("TOOLS", "tools")]
 
+# 0.31.0: the characters the bot can play (game_state.CHARACTERS, Ryu first)
+PLAY_AS = [("Ryu", "Ryu")] + sorted(((n, n) for n in __import__("sf6bot.game_state", fromlist=["CHARACTERS"])
+                                     .CHARACTERS.values() if n != "Ryu"), key=lambda x: x[0].lower())
 ACTIONS: list[Action] = [
     # ---- FIGHT -------------------------------------------------------------------------------------------
     Action("vs_cpu", "fight", "Bot vs CPU", "Start from a menu; the bot takes over at FIGHT! and records every match.",
            [Option("side", "Bot side", choices=[("Left (P1)", "p1"), ("Right (P2)", "p2")], default="p1")], menu="V / N"),
+    Action("play_as", "fight", "Play as",
+           "The character the bot plays (saved; pick the same one in SF6). Ryu = his own rules; others are generated "
+           "from Capcom data.", [Option("name", "Character", choices=PLAY_AS, default="Ryu")], menu="PA"),
     Action("versus", "fight", "Versus Human", "A volunteer plays the bot. The bot finds its side; no countdown.",
            [Option("mode", "Mode", choices=[("Offline", "offline"), ("Online", "online"),
                                             ("Ranked", "ranked")], default="offline"),
@@ -233,6 +239,8 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         return [one("overlay-test")]
     if action_id == "release_all":
         return [one("release-all")]
+    if action_id == "play_as":
+        return [one("play-as", str(v.get("name") or "Ryu"))]
     if action_id == "character_id":
         cid = str(v.get("id") or "").strip()
         if not cid:

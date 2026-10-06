@@ -58,8 +58,10 @@ def _version(v) -> tuple:
 TRUST_FULL = 0.10           # a 10% better held-out loss than the per-choice average = full trust
 
 
-def recordings(ds_root: Path) -> list[dict]:
-    """[{path, weights: {player: weight}, source}] for the win model."""
+def recordings(ds_root: Path, character: str | None = "Ryu") -> list[dict]:
+    """[{path, weights: {player: weight}, source}] for the win model. 0.31.0: fights only where the bot played
+    `character`."""
+    from .bot_character import of_meta
     from .brain import _meta, bot_side_ok
     from .brain import recordings as bc_recordings
     ds_root = Path(ds_root)
@@ -72,7 +74,7 @@ def recordings(ds_root: Path) -> list[dict]:
         meta = _meta(p)
         notes = (meta.get("notes") or "").lower()
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
-        if bot is not None and bot_side_ok(meta, bot):
+        if bot is not None and bot_side_ok(meta, bot) and (character is None or of_meta(meta) == character):
             old = _version(meta.get("sf6bot_version")) < CURRENT_SINCE
             fights.append((p, bot, "ranked" if "ranked" in notes else "human" if "vs human" in notes else "cpu", old))
     fights = fights[-FIGHTS_MAX:]
@@ -84,11 +86,11 @@ def recordings(ds_root: Path) -> list[dict]:
     return out
 
 
-def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
+def build(ds_root: Path, log=print, character: str = "Ryu") -> tuple[list[dict], list[dict]]:
     from .sample_cache import file_samples
     from .eta import Progress
     samples, info = [], []
-    recs = recordings(ds_root)
+    recs = recordings(ds_root, character)
     prog = Progress("win model samples", len(recs), log=log)
     for ri, r in enumerate(recs):
         prog.step()
@@ -112,12 +114,13 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
     return samples, info
 
 
-def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0) -> dict:
+def train(ds_root: Path, out_dir: Path | None = None, log=print, seed: int = 0, character: str = "Ryu") -> dict:
+    from .bot_character import model_dir
     from .brain import _split
     ds_root = Path(ds_root)
-    out_dir = Path(out_dir or ds_root / "models")
+    out_dir = Path(out_dir or model_dir(ds_root, character))
     out_dir.mkdir(parents=True, exist_ok=True)
-    samples, info = build(ds_root, log)
+    samples, info = build(ds_root, log, character)
     rep = {"trained": time.strftime("%Y-%m-%d %H:%M:%S"), "sf6bot_version": __import__("sf6bot").__version__,
            "samples": len(samples), "recordings": len(info), "sources": {}, "intents": list(it.INTENTS),
            "n_features": it.N_FEATURES, "features": it.FEATURES_VERSION, "return": {"half_life_frames": it.RETURN_HALF_LIFE,
@@ -194,8 +197,12 @@ def report_md(rep: dict) -> str:
 class WinModel:
     """Loaded by the fighter at each match start (a retrained file is picked up then)."""
 
-    def __init__(self, ds_root: Path):
-        self.path = Path(ds_root) / "models" / MODEL
+    def __init__(self, ds_root: Path, character: str = "Ryu"):
+        from .bot_character import is_default, model_dir
+        self.path = model_dir(ds_root, character) / MODEL
+        self.borrowed = False          # 0.31.0: another character without its own model uses Ryu's, read-only
+        if not is_default(character) and not self.path.exists():
+            self.path, self.borrowed = model_dir(ds_root) / MODEL, True
         self.net, self.meta, self.problem, self.mtime = None, {}, None, None
         self.stale = False
         self.reload()

@@ -182,7 +182,7 @@ def build(ds_root: Path, log=print, fcfg: dict | None = None) -> dict:
     """Mine every recording (replays, merged, fights: both players) -> datasets/combos_mined/<Character>.json."""
     from .brain import recordings
     ds_root = Path(ds_root)
-    files = [r["path"] for r in recordings(ds_root)]
+    files = [r["path"] for r in recordings(ds_root, None)]    # every bot character's fights
     files += [p for p in sorted((ds_root / "fights").glob("*.jsonl.gz")) if p not in files]
     agg: dict = defaultdict(dict)
     names: dict = {}
