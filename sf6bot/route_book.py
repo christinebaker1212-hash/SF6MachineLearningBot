@@ -152,13 +152,15 @@ def after_first_hit(book: list[dict], e: dict, kind: str | None, me: dict, op: d
 
 
 def choose_jump_in(book: list[dict], me: dict, op: dict, *, learned: dict | None = None, reserve: float = 0,
-                   denjin: bool = False) -> dict | None:
+                   denjin: bool = False, over_fireball: bool = False) -> dict | None:
     """0.20.3: the best affordable jump-in route (any hit type: the opponent is stunned, so the route's links hold) for
     a Drive Impact stun; Denjin routes only with a stock. 0.24.2 (user, 2026-10-05: "all of the routes that start with a
     jumping attack are attacks that are supposed to be initiated after a DI stun in the corner ... there's no reason to
-    initiate any attack with a jumping attack. Unless it is a DI stun in the corner"): only with the opponent cornered."""
+    initiate any attack with a jumping attack. Unless it is a DI stun in the corner"): only with the opponent cornered.
+    0.28.0 (user, 2026-10-06: "Jump with a jump-in combo"): the other exception, `over_fireball` (a forward jump over a
+    projectile onto its recovering thrower, zoning.py), anywhere; corner routes still only in the corner."""
     corner = cornered(op, me)
-    if not corner:
+    if not corner and not over_fireball:
         return None
     opp_hp = num(op.get("hp"))
     best, best_v = None, -1.0

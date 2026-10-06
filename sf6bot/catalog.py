@@ -32,6 +32,7 @@ from pathlib import Path
 
 from . import clock
 from .actions import InputState
+from .charge import hold_frames
 from .game_state import character_name, facing_of, file_stem, num, open_state_reader, player_distance
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
@@ -53,8 +54,8 @@ MOVES: list[tuple[str, str, bool]] = [
     *[(f"623{b}", f"6@3 2@3 3+{b}@3", True) for b in ("LP", "HP", "LK", "HK")],
     *[(f"41236{b}", f"4@3 1@3 2@3 3@3 6+{b}@3", True) for b in ("LP", "HP", "LK", "HK")],
     *[(f"63214{b}", f"6@3 3@3 2@3 1@3 4+{b}@3", True) for b in ("LP", "HP", "LK", "HK")],
-    *[(f"[4]6{b}", f"4@50 6+{b}@3", True) for b in ("LP", "LK")],
-    *[(f"[2]8{b}", f"2@50 8+{b}@3", True) for b in ("LP", "LK")],
+    *[(f"[4]6{b}", f"4@{hold_frames()} 6+{b}@3", True) for b in ("LP", "LK")],
+    *[(f"[2]8{b}", f"2@{hold_frames()} 8+{b}@3", True) for b in ("LP", "LK")],
     # Super Arts (Classic). Training Mode must have Super gauge available (it showed full: 30000).
     ("SA_236236P", "2@2 3@2 6@2 2@2 3@2 6+HP@3", True),
     ("SA_236236K", "2@2 3@2 6@2 2@2 3@2 6+HK@3", True),

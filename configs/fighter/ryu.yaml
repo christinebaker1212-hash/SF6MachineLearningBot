@@ -137,8 +137,11 @@ punish:
        on_block: -12}
     - {name: "Standing Heavy Kick", seq: "5+HK@3", starter: "Standing Heavy Kick", id: 617, startup: 12, damage: 900,
        on_block: 1}
+    # 0.28.0: max_reach (the user's Akuma zoning, 2026-10-06): sent from 1.9-2.7 at a fireball's thrower, 56 of 58 H
+    # Tatsumakis were hit by the next fireball (~44,000 damage in 3 matches); its first hit (frame 16) reaches ~1.6, the
+    # later ones (31, 46: Capcom) come long after the thrower has recovered
     - {name: "H Tatsumaki Senpu-kyaku", seq: "2@3 1@3 4+HK@3", starter: "H Tatsumaki Senpu-kyaku", id: 1005, startup: 16,
-       damage: 1200, on_block: -13}
+       damage: 1200, on_block: -13, max_reach: 1.6}
     - {move: punish_l_srk, starter: "L Shoryuken", id: 930, damage: 1100, on_block: -23}
     - {move: sa3, reach: 1.3, on_block: -52}
     - {move: sa1, reach: 4.5, projectile: true, on_block: -24}
@@ -158,7 +161,7 @@ punish:
     Standing Heavy Kick: 1.5
     Crouching Heavy Kick: 2.05
     L Shoryuken: 1.35
-    H Tatsumaki Senpu-kyaku: 2.4
+    H Tatsumaki Senpu-kyaku: 1.6        # 0.28.0: was 2.4 (later hits); see max_reach above
   pdr_frames: 24       # ESTIMATE: Parry Drive Rush from the parry's first frame to the normal's (parry out on its frame ~10,
                        # the rush, the normal on rush frame ~11: combo_lab.RUSH_AT, a guess)
   pdr_travel: 0.6      # 0.26.0 MEASURED (0.25.0 ranked, 30 rushes): an 18-frame rush closed 0.62; a normal out of it
@@ -331,7 +334,16 @@ fireball:
   enabled: true
   # 0.24.2 (user, 2026-10-05: "there's no reason to initiate any attack with a jumping attack. Unless it is a DI stun in the
   # corner"): the forward jump-in onto the thrower is off. The neutral jump over a fireball (no attack) stays.
-  jump_punish: false
+  # 0.28.0 (user, 2026-10-06: "Jump with a jump-in combo"): on again for this case. MEASURED (the user's Akuma, 4 matches
+  # zoned from 2.4-2.8 with L Gou Hadoken every 46-52 frames): the bot dealt 0 in two matches, its only way in was walking.
+  # Decided on the throw's lead-in (lead_ins below / learned in the match) so the jump attack lands before the thrower
+  # recovers; the combo lab's TRUE jump-in routes (midscreen ones too), hit-confirmed.
+  jump_punish: true
+  # lead-in id -> {proj: the projectile id it turns into, len: its fixed length in frames}. MEASURED (the user's Akuma,
+  # 2026-10-06): L Gou Hadoken 900 for 8 frames, then 906 (every one of 93). Others are learned in the match.
+  lead_ins:
+    Akuma:
+      900: {proj: 906, len: 8}
   # the jump-in over a fireball, on the game clock (the combo lab's executor: the air button on the way down, the landing
   # combo only after it hit); the combo lab's TRUE jump-in routes come first. damage: Capcom's listed damage of the three
   # moves, an ESTIMATE of the scaled total
@@ -621,6 +633,13 @@ cmd_grab:
       923: {contact: [23], connect: [926], variant: true}       # the OD versions show 917 / 918 for a frame first
       924: {contact: [63], whiff: [108], connect: [926, 928], variant: true}
       930: {contact: [5, 5, 5, 5], connect: [931]}
+    # 0.28.0, MEASURED (the user's Akuma, 2026-10-06, 9 matches): Ashura Senku (forward) 1075 -> 1076 -> Oboro Throw 1087
+    # -> 1088 (bot 1089); 22 of 23 teleports went into the grab. Oboro alone (8 frames) can't be reacted to; from the
+    # teleport's first frame it is 29-36.
+    Akuma:
+      1075: {contact: [29, 32, 33, 34, 36], connect: [1088, 1091]}
+      1076: {contact: [18, 21, 22, 23, 25, 25, 28, 29], connect: [1088, 1091]}
+      1087: {contact: [8, 8, 8, 8, 8], connect: [1088, 1091]}
     # JP's Embrace (2 matches, 0.22.5; 10 connects): a ranged grab started from 3.0-4.9 apart, connecting 41-49 frames
     # later (the bot shows 1015 / 1025 while caught, then 231); a whiffed one lasts 52 frames. OD 1016 (shows 1010 for a frame).
     JP:

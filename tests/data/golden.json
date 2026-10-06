@@ -1,5 +1,5 @@
 {
- "catalog_plan:guile": "d05b7bb70b87c419",
+ "catalog_plan:guile": "1150ca54eec47111",
  "catalog_plan:ryu": "62a15ffcce27ac71",
  "catalog_plan:zangief": "32a4d934f74e928e",
  "compare:ryu_0.3.2": "52df9a208922c6d4",
@@ -9,7 +9,7 @@
  "dataset_rows:watch_2026-10-01_ryu_vs_cpu.jsonl.gz": "cd9f058790336eb0",
  "episodes:watch_2026-10-01_match2.jsonl.gz": "55db9ebb7d2d06fc",
  "episodes:watch_2026-10-01_ryu_vs_cpu.jsonl.gz": "793c3608acd52302",
- "fighter_decisions": "00cb570cb4d37a6b",
+ "fighter_decisions": "0c864f5d51e43fa6",
  "framedata:guile": "e880d450f2e401b8",
  "framedata:ryu": "db2b97d95227b81f",
  "framedata:zangief": "393ded9ffe685ecf"

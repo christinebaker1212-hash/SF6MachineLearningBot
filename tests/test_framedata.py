@@ -103,7 +103,7 @@ def test_capcom_inputs_to_sequences():
     plain = [t for t in todo if not t.get("kind")]           # 0.10.0 adds chained rows on top
     assert len(plain) == 53 and len({t["sequence"] for t in plain}) == 53 and len(todo) == 68
     g = _moves("guile")
-    assert to_sequence(g["L Sonic Boom"])[0] == "4@50 6+LP@3"
+    assert to_sequence(g["L Sonic Boom"])[0] == "4@47 6+LP@3"        # 0.28.0: 45F charge (user) + 2F margin
     z = _moves("zangief")
     assert to_sequence(z["L Screw Piledriver"])[0].endswith("8+LP@3")
 

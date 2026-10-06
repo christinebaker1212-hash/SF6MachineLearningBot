@@ -4,14 +4,22 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.27.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.28.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.27.0 is pushed.** It was built from the 0.26.0 ranked run: 33 fight files, 22-10, Diamond 4 at the peak. The
+**State:** **0.28.0 is pushed** (CLAUDE.md "0.28.0"): after Master, the user's own sets vs the bot (Akuma, 0-5 with human
+limits on, then 0-4 off) showed the holes: teleport -> Oboro Throw (never jumped), rushed Skull Splitter ("* Mid High" not read
+as an overhead), and full-screen L Gou Hadoken zoning (H Tatsumaki punishes from 2+ hit by the next fireball). 0.28.0: grab
+starts linked through their parent special, "*" overheads, H Tatsumaki punish reach 1.6, the fireball jump-in decided on the
+throw's lead-in (user: "Jump with a jump-in combo"), 45F charge + retention (user) and the opponent's charge tracked, and
+charge moves in combo-lab routes held from the route start (user's Guile report). Ask for the next ranked S and fight files,
+and for a Guile K run (C first if Guile has no catalog).
+
+**Before 0.28.0:** **0.27.0 was pushed.** It was built from the 0.26.0 ranked run: 33 fight files, 22-10, Diamond 4 at the peak. The
 user asked: "capitalize on what works, and reduce what doesn't ... These players are smarter, more skilled than the Platinums";
 "Master must be the next frontier." There was no S file for that run (the runs were purged; the S sent was the old 0.22.5 one).
 The unfinished Ryu mirror was a rage quit. Next, the user runs `update.bat`, starts unattended ranked and sends S plus the
@@ -339,6 +347,11 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.28.0:** unverified in game. Check: Oboro Throws landed vs Akuma (`cmd_grab.jumped` / `too_late`), Skull Splitters
+blocked standing, `fireball.jump_punish` / `jump_on_lead_in` and what followed (per-opponent `defense` "fireball" results), no
+H Tatsumaki punishes from 1.6+, and the user's Guile K run (combo lab notes "charge (4) held from ...", routes with a Boom
+after a cancel). Human limits' guard reaction (median 21F) stays longer than a 20F overhead: ask before changing it.
 
 **0.27.0 (user: "capitalize on what works, and reduce what doesn't"):** built from the 0.26.0 Diamond run (CLAUDE.md "0.27.0").
 Unverified in game. Ask the user for a fresh S after the next run (none came with the 0.26.0 run).
@@ -793,7 +806,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | Orchestration | `session.py` (wires everything, guaranteed teardown, `narrate()`), `cli.py` (all commands), `config.py` + `configs/*.yaml` |
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
-| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers`; 0.27.0: `_aa_cross_guard`, `drive_reversal_late`, `combo_lab.ComboRun._no_window`, `neutral_policy.STANCE` / `NEUTRAL_MAX_DIST` / `CORNER_OUT`, `defense.prior_by_situation` |
+| Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers`; 0.27.0: `_aa_cross_guard`, `drive_reversal_late`, `combo_lab.ComboRun._no_window`, `neutral_policy.STANCE` / `NEUTRAL_MAX_DIST` / `CORNER_OUT`, `defense.prior_by_situation`; 0.28.0: `charge.py` (charge timing, opponent charge), `combo_lab.apply_charge`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS` |
 | Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning; 0.26.0: `bar_value` set by `fighter._bar_value`, follow-up reach `reach_miss` from config `combo_reach`, `involves_super` / `load_learned` drop pre-0.26.0 super results); `combo_lab.ComboRun.switch` keeps a pre-input motion (0.26.0) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |

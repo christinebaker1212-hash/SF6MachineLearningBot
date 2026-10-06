@@ -467,6 +467,10 @@ class PunishEngine:
                                    else self._reach_fb(o.get("starter")))
             if reach is None:
                 continue
+            if o.get("max_reach") is not None:
+                # 0.28.0: a moving multi-hit move's measured reach counts its later hits (H Tatsumaki's hit 3 on frame 46
+                # from 2.4), too late for a punish: its first hit's reach caps it
+                reach = min(reach, float(o["max_reach"]))
             dmg = float(o.get("damage") or (mv or {}).get("damage") or 0)
             lethal = opp_hp is not None and dmg >= opp_hp
             name = (mv or {}).get("name") or o.get("name")

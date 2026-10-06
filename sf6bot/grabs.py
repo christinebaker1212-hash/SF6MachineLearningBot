@@ -27,6 +27,10 @@ from pathlib import Path
 
 SPECIAL_LO, SPECIAL_HI = 900, 1200     # special moves' action ids (supers are 1200+: their cinematics are not grabs)
 KEEP = 24                              # samples kept per id
+BUTTON_BITS = 0x3F0                    # LP MP HP LK MK HK in the input mask (configs/input_bits.yaml, MEASURED)
+OWN_PRESS = 12                         # a change of the bot's id this soon after its own press is its own move
+PARENT_MAX = 75                        # a special the grab came straight out of counts as its start up to this many frames
+                                       # before the connect (far Siberian Express: 52-66, MEASURED)
 
 
 def _ints(v) -> list[int]:
@@ -128,6 +132,8 @@ class GrabWatch:
         self.connect_t = None             # clock of the latest connect in the current run of specials
         self.last_reaction = None         # clock the bot was last in a hit / block / grab reaction
         self.prev_me = None
+        self.prev_btn = None
+        self.btn_t = None                 # clock of the bot's latest fresh button press (its input mask)
         self.pending: dict | None = None  # a connect waiting for its damage
         self.events: list[dict] = []      # this match: connects and whiffs (counted in the fight summary)
 
@@ -144,8 +150,16 @@ class GrabWatch:
         victim = special and isinstance(ma, int) and ma in (oa + 1, oa - 1)
         # a ranged grab shows other victim ids (MEASURED: JP's Embrace 1011 from 3-5 apart: the bot 1015, 1025, then 231):
         # a change into a special / super range id that is not one of the bot's own moves counts too
+        # 0.28.0: the bot's own special that is not in its catalog looked the same (MEASURED: Ryu's H Tatsumaki 1005 into
+        # Akuma's fireball 906 was learned as a "grab" 13 times): a change the bot pressed a button for in the last
+        # OWN_PRESS frames is its own move
+        btn = me.get("input")
+        if isinstance(btn, int) and btn & BUTTON_BITS and not (isinstance(self.prev_btn, int) and self.prev_btn & BUTTON_BITS):
+            self.btn_t = tmr
+        self.prev_btn = btn
+        pressed = self.btn_t is not None and 0 <= tmr - self.btn_t <= OWN_PRESS
         odd = (special and not victim and isinstance(ma, int) and 900 <= ma < 1300 and ma not in self.own_ids
-               and not any(0 <= ma - o <= 5 for o in self._own_specials))
+               and not any(0 <= ma - o <= 5 for o in self._own_specials) and not pressed)
         dist = player_distance(me, op)
         # 0. a connect seen earlier is confirmed by its damage (78-125 frames later, MEASURED: Zangief's grabs; ~95 for
         #    JP's Embrace): still in the victim's animation (+1 kind), or for the other kind, never back to a free state
@@ -160,9 +174,10 @@ class GrabWatch:
                 self.pending = None
                 if p["kind"] == "pm" or (oa == p["id"] and tmr - p["t"] >= 20):    # else: hit by something else
                     learned = []
-                    for k, (a, t0, d0) in enumerate(p["start"]):
-                        # p["start"] runs from the id before the connect back to the first: all but the first are switches
-                        self.book.add_connect(a, p["t"] - t0, d0, p["id"], variant=k < len(p["start"]) - 1)
+                    for a, t0, d0, var in p["start"]:
+                        # p["start"] runs from the id before the connect back to the first; `var`: it switched from the id
+                        # before it within 2 frames (an OD version)
+                        self.book.add_connect(a, p["t"] - t0, d0, p["id"], variant=var)
                         learned.append((a, p["t"] - t0))
                     out = {"connect": p["id"], "learned": learned, "start": p["start"][-1][0] if p["start"] else p["id"],
                            "damage": int(p["hp"] - hp)}
@@ -173,17 +188,22 @@ class GrabWatch:
             t_c = next((t0 for a, t0, _, _ in reversed(self.run) if a == oa), tmr)
             self.connect_t = t_c
             # the grab's start: the id right before the connecting one, and ids that turned into it within 2 frames (the
-            # OD version shows the plain one for a frame: 918 -> 924, 917 -> 923). Earlier specials are other moves.
+            # OD version shows the plain one for a frame: 918 -> 924, 917 -> 923: `variant`). 0.28.0: also the special the
+            # grab came straight out of (no other action between them) up to PARENT_MAX frames before the connect, as a
+            # start of its own: MEASURED (the user's Akuma, 2026-10-06), Ashura Senku 1075 -> 1076 -> Oboro Throw 1087 ->
+            # 1088, 22 of 23 teleports went into the grab, 32-41 frames from 1075 to the connect, while Oboro alone
+            # (8 frames) is too fast to react to: 13 landed, the bot jumped none.
             chain = [e for e in self.run if e[0] != oa]
             start = []
             for k in range(len(chain) - 1, -1, -1):
-                start.append(chain[k])
-                if k == 0 or chain[k][1] - chain[k - 1][1] > 2:
+                if t_c - chain[k][1] > PARENT_MAX and start:
                     break
+                var = k > 0 and chain[k][1] - chain[k - 1][1] <= 2
+                start.append(chain[k] + (var,))
             # not learned: a grab that started while the bot was reeling (part of a combo, not something to react to), one
             # that connected within 3 frames of its start id (no grab is that fast: the start was missed), and one the
             # opponent began in the air (MEASURED: Cammy's Hooligan 979 grabbing from 0.6 high: the anti-air answers it)
-            start = [(a, t0, d0) for a, t0, d0, y0 in start if t_c - t0 >= 3 and y0 <= 0.4
+            start = [(a, t0, d0, var) for a, t0, d0, y0, var in start if t_c - t0 >= 3 and y0 <= 0.4
                      and not (self.last_reaction is not None and self.last_reaction >= t0 - 1)]
             self.pending = {"id": oa, "victim": ma, "t": t_c, "start": start, "hp": num(me.get("hp")),
                             "kind": "pm" if victim else "odd"}
@@ -201,6 +221,9 @@ class GrabWatch:
                 if self.connect_t is not None and t0 <= self.connect_t:
                     continue                              # it (or the grab before it in this run) connected
                 nxt = next((self.run[j][1] for j in range(i + 1, n) if self.run[j][1] - self.run[j - 1][1] > 2), None)
+                if nxt is not None and any(self.run[j][0] in self.book.onsets() or self.is_grab(self.run[j][0])
+                                           for j in range(i + 1, n) if self.run[j][1] >= nxt):
+                    continue                              # a parent (a teleport) going into a grab: the grab's whiff counts
                 if nxt is None and interrupted:
                     continue                              # it ran until something hit it: not its whole length
                 end = nxt if nxt is not None else tmr

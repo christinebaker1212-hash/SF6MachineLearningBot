@@ -3778,6 +3778,55 @@ MEASURED on the 4 uploaded fight files and the S excerpt (0.27.0, Versus Human o
   against full-screen fireballs (jump-ins off by the user's rule, SA1 through off since 0.25.0): it walked in between them
   for 1.4 s / 3.9 s a match.
 
+## 0.28.0: anti-zoning, the teleport grab, "* Mid" overheads, charge (user, 2026-10-06)
+User: "Yup. Let's patch this hole. This, among many things, is needed to reach higher levels of Master. Charge times also
+require 45 frames exactly. Charge is retained for 10 frames for [4]6 charge moves (Booms) and 12 frames for [2]8 ones (Flash
+Kick) after leaving charge." Asked how to get in against full-screen fireballs: "Jump with a jump-in combo". Then, mid-build:
+"I tried Guile's combos - none of them worked, because it only started charging after the cancel timing was over ... the
+bot needs to start holding charge the second it inputs a move that precedes a charge, then input the charge move during
+that cancel timing." All MOCK / replay-tested (`tests/test_0280.py`); nothing here is verified in game.
+- **Thrower punish:** the punish engine's H Tatsumaki is capped at 1.6 (`max_reach` on engine options; `reach_fallback`
+  2.4 -> 1.6). Its measured reach counted the later hits (frames 31 / 46, Capcom); sent at a fireball's thrower from 1.9-2.7
+  it was hit by the next fireball 56 of 58 times (~44,000 damage in 3 of the user's matches). Regression stream: the four
+  H Tatsumaki punishes from 1.73-2.07 became a sweep, 5HP > Shoryuken or a block (golden updated).
+- **Teleport into a command grab** (`grabs.GrabWatch`): a special the grab came straight out of (no other action between,
+  within `PARENT_MAX` 75 frames of the connect) is learned as a start of its own (not an OD variant; the parent's own
+  length is not counted as a whiff). MEASURED (the user's Akuma): Ashura Senku 1075 -> 1076 -> Oboro Throw 1087 -> 1088,
+  22 of 23 teleports went into the grab, 29-36 frames from 1075; seeded in `cmd_grab.measured.Akuma`. Replay (rule 1d,
+  learned leave-one-out, open loop): the bot in the air at 14 of 15 Oboro connects (live: 0 of 13). Zangief unchanged or
+  better (25 / 24 of 27 with / without seeds; was 24 / 23).
+- **A bug found on the way:** the bot's own uncatalogued special counted as a grab victim ("odd" connect): Ryu's H Tatsumaki
+  (1005) into Akuma's fireball was learned as a 13-sample "command grab" 900 -> 906 (then a ground grab to every rule).
+  Now a change of the bot's id within `OWN_PRESS` 12 frames of its own button press (input mask) is its own move, and the
+  punish engine's move ids join `own_ids`.
+- **Overheads:** `fighter.guard_of` strips a leading "*" (Capcom's "* Mid High"): Akuma's Skull Splitter (10 of 14 rushed
+  ones hit the crouch-blocking bot), Ryu's Collarbone Breaker, Chun-Li's Lotus Fist, Blanka's Rock Crusher, Elena's j.HK /
+  [Boosted] Mallet Smash, Sagat's j.MP; 2 lows. Not changed: human limits' guard reaction (median 21F) is longer than a
+  20F overhead (only with human limits on).
+- **Fireball jump-in** (`fireball.jump_punish: true`, an exception to 0.24.2 by the user's choice): decided on the throw's
+  LEAD-IN (`zoning._zn_pre_jump`). MEASURED (the user's Akuma, 4 zoning matches): L Gou Hadoken = 900 for exactly 8 frames,
+  then 906, total 46 from 900, thrown every 46-52 frames from 2.4-2.8. Seen on 906 a forward jump lands after Akuma is free;
+  on 900 the jump attack lands ~3 frames before. Lead-ins of a fixed length are learned in the match (lead-in -> projectile
+  and its length; a held charge varies and is never used); Akuma's 900 is seeded (`fireball.lead_ins`). The route: the combo
+  lab's TRUE jump-in routes, midscreen ones too (`route_book.choose_jump_in(over_fireball=True)`; other jump-ins stay corner
+  only), else `j.HK , 5HP > 623HP`, hit-confirmed. Replay over the user's 9 Akuma matches (open loop): 41 jumps on 99 L Gou
+  Hadokens thrown from 2.1-2.8; Akuma still in the fireball when the jump attack would hit in 30.
+- **Charge** (`sf6bot/charge.py`): `CHARGE_FRAMES` 45, `RETAIN` 10 ([4]6) / 12 ([2]8) (the user's numbers). The bot's own
+  charge inputs hold 45 + 2 (wall-clock margin) = 47 (was 50; catalog `[4]6` / `[2]8` probes too; Guile's catalog plan
+  fingerprint changed). `ChargeTracker` follows the opponent's charge from its input mask (back relative to its facing,
+  down); the fireball jump is not sent when the thrower has a [2]8 move (Capcom inputs) whose charge will be ready when the
+  bot lands (Flash Kick), counted `fireball.charge_ready`.
+- **Charge moves inside combo routes** (`combo_lab.apply_charge`, at the end of `plan_route`): the charge is held from the
+  start of the route through the moves before it: a single-direction move's direction is combined with the charge (2+MK ->
+  1+MK, 5+LP -> 4+LP unless that is a command normal of the character, then the charge restarts after it); motions are
+  never bent (236 stays 236). Held moves end still holding down-back (`charge_hold`: the runner does not return to neutral),
+  the route starts after a down-back pre-charge of 49 frames in the lab (`perform_route(precharge=...)`, default: lab yes,
+  matches no; crouching does not walk), and the charge move sends only its release (`6+LP@3`, prefix 0, never pre-sent) on
+  the cancel. A charge move with no move before it that can hold the charge (Guile 5HP > Boom: 4+HP is another move) keeps
+  its full charge, with a note ("charged on its own"): such a route cannot work as written. `LAB_RULES` = 0.28.0, so
+  earlier conclusive failures are retried. The fighter (Ryu) has no charge moves; a charge character in matches would need
+  a pre-charge of its own (crouch-blocking down-back already charges).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

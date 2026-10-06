@@ -83,7 +83,7 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
 NORMAL_VARIANT_SPAN = 2    # 0.23.0: ... after a chained normal's own id (Ryu's chained 2LP 623 after 622)
-LAB_RULES = "0.25.0"
+LAB_RULES = "0.28.0"
 EARLIER_HIT_WINDOW = 5   # 0.25.0: frames after an earlier hit's first active frame before it counts as passed (ESTIMATE)
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
@@ -515,8 +515,92 @@ def plan_route(combo: dict, capcom: dict, catalog: dict | None) -> dict:
                 st["known_ids"] = list(st.get("known_ids") or []) + var
     if setup:
         notes.append(f"setup: Denjin Charge ({setup['sequence']}) before the route")
+    notes += apply_charge(plan, rows)
     return {"steps": plan, "notes": notes, "unsupported": None, "jump_in": jump_row is not None,
             "id_names": id_names, "setup": setup}
+
+
+# ---- charge moves inside a route (0.28.0) ----------------------------------------------------------------------------
+# The user (2026-10-06, Guile): "none of them worked, because it only started charging after the cancel timing was over
+# ... the bot needs to start holding charge the second it inputs a move that precedes a charge, then input the charge
+# move during that cancel timing." A charge move's sequence is '4@47 6+LP@3': sent on the cancel it began a 47-frame hold
+# there. Now the charge is held from the start of the route through the moves before it (their directions combined with
+# the charge: 2+MK -> 1+MK), the route starts after a down-back pre-charge (charge.py: 45 frames + margin; crouching
+# does not walk), and the charge move sends only its release (6+LP) on the cancel.
+_CHARGE_TOK = re.compile(r"^([124])@(\d+)$")
+_COMBINE = {"4": {"5": "4", "4": "4", "2": "1", "1": "1", "8": "7", "7": "7"},
+            "2": {"5": "2", "2": "2", "4": "1", "1": "1", "6": "3", "3": "3"},
+            "1": {"5": "1", "2": "1", "4": "1", "1": "1"}}
+CHARGE_HOLD_DIR = "1"          # held between moves and for the pre-charge: down-back keeps both charges and stands still
+
+
+def _charge_split(seq: str) -> tuple[str, str] | None:
+    """'4@47 6+LP@3' -> ('4', '6+LP@3'): a charge move's direction and its release, else None."""
+    from .charge import CHARGE_FRAMES
+    toks = (seq or "").split()
+    m = _CHARGE_TOK.match(toks[0]) if len(toks) >= 2 else None
+    if m is None or int(m.group(2)) < CHARGE_FRAMES:
+        return None
+    return m.group(1), " ".join(toks[1:])
+
+
+def _charge_combine(seq: str, c: str, command_normals: set) -> str | None:
+    """A move's sequence with the charge direction `c` held through it, or None (a direction that breaks the charge,
+    or one that would turn it into another move: a command normal such as 4+HP)."""
+    out = []
+    toks = (seq or "").split()
+    if len({t.split("@")[0].partition("+")[0] for t in toks}) != 1:
+        return None                            # a motion (236 ...): bending it would make another move
+    for tok in toks:
+        head, _, frames = tok.partition("@")
+        d, plus, btns = head.partition("+")
+        nd = _COMBINE[c].get(d)
+        if nd is None:
+            return None
+        if btns and nd != d and nd not in "12" and f"{nd}+{btns}" in command_normals:
+            return None
+        out.append(f"{nd}{plus}{btns}@{frames}" if frames else f"{nd}{plus}{btns}")
+    return " ".join(out + [f"{CHARGE_HOLD_DIR}@1"])
+
+
+def apply_charge(plan: list[dict], rows: dict | None) -> list[str]:
+    """Rewrite a planned route so its charge moves have their charge when their cancel / link is due (see above).
+    Marks `charge_hold` on the moves held through, `charge` on the charge move ({dir, held_from, precharge}). A charge
+    move with nothing before it to hold through and no pre-charge keeps its own full charge (the old sequence)."""
+    cmd = set()
+    for lst in (rows or {}).values():
+        for r in (lst if isinstance(lst, list) else [lst]):
+            inp = re.sub(r"\s+", "", (r or {}).get("input") or "")
+            if re.fullmatch(r"[1-9]\+(LP|MP|HP|LK|MK|HK)", inp):
+                cmd.add(inp)
+    notes = []
+    start = 0                                  # the first move the next charge can be held from
+    for k, st in enumerate(plan):
+        sp = _charge_split(st.get("sequence") or "") if not st.get("system") else None
+        if sp is None:
+            continue
+        c, release = sp
+        held_from = start
+        for j in range(start, k):
+            pj = plan[j]
+            new = None if pj.get("system") or pj.get("charge_hold") else _charge_combine(pj.get("sequence") or "", c, cmd)
+            if pj.get("charge_hold"):
+                continue                       # already held through for an earlier charge of the same route
+            if new is None:
+                held_from = j + 1              # this move breaks the charge: it starts again after it
+                continue
+            pj["sequence"], pj["charge_hold"] = new, c     # its prefix (frames before the button) is unchanged
+        precharge = held_from == 0
+        if held_from >= k and not precharge:
+            notes.append(f"{st.get('name')}: no move before it to hold the charge through: charged on its own")
+            start = k + 1
+            continue
+        st["sequence"], st["prefix"] = release, fd._prefix_frames(release)
+        st["charge"] = {"dir": c, "held_from": held_from, "precharge": precharge}
+        notes.append(f"{st.get('name')}: charge ({c}) held from " + ("the start (pre-charge)" if precharge else
+                                                                     f"move {held_from + 1}") + f", then {release}")
+        start = k + 1
+    return notes
 
 
 # ---- execution against the state stream (pure: unit tested with synthetic lines) ------------------
@@ -1090,6 +1174,8 @@ class ComboRun:
         if not n or self.rt[n].get("motion_sent") is not None:
             return None
         st, pr, pst = self.steps[n], self.rt[n - 1], self.steps[n - 1]
+        if st.get("charge") or st.get("charge_hold"):
+            return None                       # 0.28.0: sent whole (forward early drops the charge; a held move ends on it)
         h = st.get("cancel_on_hit") or 1
         if not st.get("prefix") or pr["start"] is None or not pst.get("hitting"):
             return None
@@ -2294,7 +2380,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
                   confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None,
-                  adopt: dict | None = None) -> dict:
+                  adopt: dict | None = None, precharge: bool | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2306,6 +2392,15 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     0.24.0): step 0 is the move the bot is already doing (ComboRun)."""
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
                    fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt)
+    if precharge is None:
+        precharge = not confirm and adopt is None
+    if precharge and any((s_.get("charge") or {}).get("precharge") for s_ in steps):
+        # 0.28.0: a route whose charge is held from its start: down-back for the full charge first (crouching does
+        # not walk), still held when the first move goes out (apply_charge)
+        from .charge import hold_frames
+        runner.run(parse_sequence(f"{CHARGE_HOLD_DIR}@{hold_frames() + 2}", "pre-charge"), stop_event=sess.stop_event,
+                   end_neutral=False)
+        run.extra["precharge"] = hold_frames() + 2
     q = reader.subscribe()
     side = None
     deadline = clock.now() + timeout
@@ -2390,8 +2485,9 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                 seq = seq.split()[-1]            # the motion is already in: only the button (and its direction)
             run.sent(k, facing="right" if side == Facing.RIGHT else "left" if side == Facing.LEFT else None)
             # a Parry Drive Rush's parry stays held until its dash (0.20.5)
+            # 0.28.0: a move held through for a later charge move ends still holding the charge (apply_charge)
             _, ok = runner.run(parse_sequence(seq, run.steps[k]["name"]), stop_event=sess.stop_event,
-                               end_neutral=not run.steps[k].get("pdr"))
+                               end_neutral=not (run.steps[k].get("pdr") or run.steps[k].get("charge_hold")))
             if not ok:
                 break
         if run.super_connected is not None and not confirm:

@@ -402,15 +402,19 @@ def _buttons(btns: list[str]) -> str:
     return "+".join({"P": "HP", "K": "HK"}.get(b, b) for b in btns)
 
 
+from .charge import hold_frames  # noqa: E402
+
+
 def _motion(dirs: str, btn: str, step: int) -> str:
-    """'236' + 'LP' -> '2@3 3@3 6+LP@3'. '[4]6' -> charge 50 frames then 6. '360' -> a full circle
+    """'236' + 'LP' -> '2@3 3@3 6+LP@3'. '[4]6' -> charge 47 frames (45 + margin) then 6. '360' -> a full circle
     ending upward (the button lands in the jump's pre-jump frames)."""
     out: list[str] = []
     i = 0
     while i < len(dirs):
         if dirs[i] == "[":
             j = dirs.index("]", i)
-            out.append(f"{dirs[i + 1:j]}@50")  # charge time: ~45F in SF6 (community), 50 for margin
+            # charge: 45 frames (the user, 2026-10-06) + a margin for the wall clock (charge.py)
+            out.append(f"{dirs[i + 1:j]}@{hold_frames()}")
             i = j + 1
         elif dirs.startswith("720", i):
             out += [f"{d}@2" for d in "632147896321478"]  # two circles, ending up
@@ -464,7 +468,7 @@ def to_sequence(move: dict) -> tuple[str | None, str]:
         # Air charge move (Blanka): charge on the ground, back-jump keeps the charge, release in air.
         c = dirs[1]
         back_jump = {"4": "7", "2": "1"}.get(c, "8")
-        return f"{c}@50 {back_jump}@3 {c}@11 " + _motion(dirs[3:], btns, 3), ""
+        return f"{c}@{hold_frames()} {back_jump}@3 {c}@11 " + _motion(dirs[3:], btns, 3), ""
     # Supers use 3F per direction too: with 2F, a dropped direction turned 236236+P into 623+P
     # (0.4.0, SA1 came out as H Shoryuken).
     seq = _motion(dirs, btns, 3)

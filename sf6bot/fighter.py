@@ -183,7 +183,9 @@ def guard_of(properties: str | None) -> str | None:
     """Capcom's attack property -> how to block it. Capcom's English pages use the Japanese levels:
     "High" (jodan) blocks standing or crouching, "Mid" (chudan) is an OVERHEAD (stand only, jump
     attacks are listed as Mid), "Low" (gedan) crouch only."""
-    p = (properties or "").lower()
+    # 0.28.0: Capcom marks some moves' property with a leading "*" ("* Mid High": Akuma's Skull Splitter, Ryu's
+    # Collarbone Breaker, Chun-Li's Lotus Fist ...); it hid 7 overheads and 2 lows
+    p = (properties or "").lower().lstrip("*").strip()
     if "throw" in p:
         return "throw"
     if p.startswith("mid"):
@@ -417,6 +419,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                                "jumped_grabbed": 0, "waited": 0, "too_late": 0, "learned": 0}
         # 0.22.6: command grabs learned from being grabbed (grabs.py); the fight setup gives the opponent's book (seeded
         # with the config's measured grabs). Rule 1d jumps the ones that take long enough to see coming.
+        from .charge import ChargeTracker
+        self.op_charge = ChargeTracker()   # 0.28.0: the opponent's charge from its input mask
+        self._op_charges: set = set()      # which charges its Capcom moves use ("4" back, "2" down)
         from .grabs import GrabBook
         self.grabs = GrabBook(None, None)
         self.grab_watch = None
@@ -466,7 +471,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         from .grabs import GrabWatch
         self.grab_watch = GrabWatch(self.grabs, is_grab=lambda a: (self.opp.get(a) or {}).get("cmd_grab") == "ground",
                                     reaction_ids=self.hit_ids | self.thrown_ids,
-                                    own_ids={m["id"] for m in self.own if isinstance(m.get("id"), int)})
+                                    own_ids={m["id"] for m in self.own if isinstance(m.get("id"), int)}
+                                    | {o["id"] for o in (fcfg.get("punish") or {}).get("engine") or []
+                                       if isinstance(o.get("id"), int)})
         # 0.19.0 (22 ranked matches on 0.18.10, user's to-do list): parries thrown, Drive Impact at the wall, airborne
         # moves anti-aired, a later anti-air decision when the opponent is overhead
         self.parry_ids = _ids(ids.get("parry")) or set(range(480, 490))
@@ -1600,6 +1607,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         """0.22.6: the opponent's command grab book (grabs.GrabBook) and its Capcom rows (to name learned grabs)."""
         self.grabs = book
         self._grab_rows = list(rows or [])
+        from .charge import charge_kinds
+        self._op_charges = charge_kinds(self._grab_rows)
         self._grab_v = -1
         if self.grab_watch is not None:
             self.grab_watch.book = book
@@ -2654,6 +2663,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._pe_track(raw, me, op)
         self._track_grab_chain(oa, tmr)
         self._track_self(me, op, tmr)
+        if self._op_charges:
+            mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
+            self.op_charge.update(op.get("input"), None if mx_ is None or ox_ is None else ox_ < mx_, tmr)
         self._line_t = tmr
         d_ = player_distance(me, op)
         if d_ is not None and isinstance(tmr, int) and (not self._dist_hist or self._dist_hist[-1][0] != tmr):
@@ -2694,6 +2706,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 self.rush_stats["opp_rushed_normals"] += 1
             if oa in self.cmd_grab_ids() and prev_oa_ not in self.cmd_grab_ids():   # an OD switch is the same grab
                 self.cmd_grab_stats["seen"] += 1
+            self._zn_lead_seen(prev_oa_, oa, tmr, player_distance(me, op))     # 0.28.0: lead-in -> projectile
             # 0.23.0: also a projectile learned from recordings (move_timing "proj"); where the thrower stood
             # 0.25.0: not a charge being held (a lead-in id, Akuma's 903 / 904): nothing flies until it is released
             if ((self.opp.get(oa) or {}).get("projectile") or self._pe_know(oa).get("projectile")) \

@@ -96,7 +96,40 @@ class ZoningMixin:
         self._zn_blocked = None
         self._zn_walk_t = None
         self.zn_stats: dict = {"thrown": 0, "seen_for": None, "jump_punish": 0, "jump_over": 0, "sa1": 0, "clash": 0,
-                               "parry": 0, "block": 0, "walk_lines": 0, "too_close": 0, "busy": 0}
+                               "parry": 0, "block": 0, "walk_lines": 0, "too_close": 0, "busy": 0, "jump_on_lead_in": 0}
+        self._zn_leads: dict = {}      # 0.28.0: lead-in id -> {"proj": projectile id, "len": [frames]} seen this match
+        self._zn_lead_on = None        # the opponent's current lead-in: (id, clock, distance)
+
+    # ---- lead-ins (0.28.0) --------------------------------------------------------------------------------------------
+    def _zn_lead_seen(self, prev_oa, oa, tmr, dist) -> None:
+        """Every change of the opponent's action id (fighter.observe_line): a lead-in (move_timing `lead_in`) that turns
+        into a projectile is learned with its length. MEASURED (the user's Akuma, 2026-10-06): L Gou Hadoken is 900 for
+        exactly 8 frames, then the projectile 906; a held charge (903) varies, so it is never used to jump on."""
+        if not isinstance(tmr, int):
+            return
+        lo = self._zn_lead_on
+        if lo is not None and prev_oa == lo[0] and isinstance(oa, int) and (
+                (self.opp.get(oa) or {}).get("projectile") or self._pe_know(oa).get("projectile")):
+            e = self._zn_leads.setdefault(lo[0], {"proj": oa, "len": []})
+            if e["proj"] == oa:
+                e["len"] = (e["len"] + [tmr - lo[1]])[-12:]
+        mt = (getattr(self, "mt_moves", None) or {}).get(oa) or {}
+        self._zn_lead_on = (oa, tmr, dist) if mt.get("lead_in") else None
+
+    def _zn_lead_info(self, lid) -> tuple | None:
+        """(projectile id, frames) of a lead-in of a FIXED length: this match's sightings, else the config's measured
+        seed (`fireball.lead_ins.<Character>`)."""
+        e = self._zn_leads.get(lid)
+        if e and e["len"]:
+            if max(e["len"]) - min(e["len"]) <= 2:
+                return e["proj"], sorted(e["len"])[len(e["len"]) // 2]
+            return None
+        char = getattr(getattr(self, "grabs", None), "character", None)
+        seed = (((self.c.get("fireball") or {}).get("lead_ins") or {}).get(char) or {}).get(lid) \
+            or (((self.c.get("fireball") or {}).get("lead_ins") or {}).get(char) or {}).get(str(lid))
+        if seed and isinstance(seed.get("proj"), int) and isinstance(seed.get("len"), int):
+            return seed["proj"], seed["len"]
+        return None
 
     # ---- the projectile -----------------------------------------------------------------------------------------------
     def _zn_model(self, aid) -> Flight:
@@ -180,7 +213,7 @@ class ZoningMixin:
         if self.book:
             from .route_book import choose_jump_in
             e = choose_jump_in(self.book, me, op, learned=self.exp.routes() if self.exp else None,
-                               reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+                               reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock, over_fireball=True)
             if e is not None:
                 return e["route"], e, float(e.get("damage") or 0)
         jr = (zc.get("jump_routes") or [{}])[0]
@@ -194,7 +227,7 @@ class ZoningMixin:
             return None
         s = self._zn_state(raw, me, op)
         if s is None:
-            return self._zn_charge(me, op, dist, block_face)
+            return self._zn_pre_jump(raw, me, op, t) or self._zn_charge(me, op, dist, block_face)
         k = self._pe_know(s["id"]) if hasattr(self, "_pe_know") else {}
         if k.get("cmd_grab") or s["id"] in self.cmd_grab_ids():
             return None                                    # a ranged grab (JP's Embrace): rule 1d's
@@ -223,10 +256,10 @@ class ZoningMixin:
         if self._zn_for != s["t0"] and self._ok("fireball"):
             cands = []
             # 1. jump forward over it onto the thrower (a punish: it is still recovering when the jump attack lands)
-            jp = self._zn_jump(s, True)
-            lo, hi = float(zc.get("jump_land_min", 0.2)), float(zc.get("jump_land_max", 0.9))
-            # 0.24.2: off by default (user: no attack starts with a jumping attack except after a DI stun in the corner)
-            if zc.get("jump_punish", False) and jp["clear"] and lo <= jp["land_d"] <= hi and jp["land_k"] - JUMP_HIT_BEFORE_LAND <= s["free_k"] - 1:
+            # 0.24.2: off by default (user: no attack starts with a jumping attack except after a DI stun in the corner);
+            # 0.28.0: on again (user: "Jump with a jump-in combo"), also decided on the throw's lead-in (_zn_pre_jump)
+            jp = self._zn_jump_fits(s) if zc.get("jump_punish", False) else None
+            if jp is not None:
                 rname, entry, dmg = self._zn_jump_route(me, op)
                 v = self._zn_learned("jump_punish", float(zc.get("jump_punish_value", 0.8)) * dmg / 1000.0
                                      - float(zc.get("jump_fail_cost", 0.3)))
@@ -337,6 +370,69 @@ class ZoningMixin:
                             reason=why0 + ": walking in while it is far")
         return Decision("hold", direction=1, facing=block_face, rule="fireball_block",
                         reason=why0 + ": waiting for it")
+
+    def _zn_jump_fits(self, s: dict) -> dict | None:
+        """The forward jump over projectile `s` onto its thrower, when it clears the projectile, lands `jump_land_min` -
+        `jump_land_max` from the thrower and its attack (JUMP_HIT_BEFORE_LAND before the landing) comes before the
+        thrower is free; else None."""
+        zc = self.c.get("fireball") or {}
+        jp = self._zn_jump(s, True)
+        lo, hi = float(zc.get("jump_land_min", 0.2)), float(zc.get("jump_land_max", 0.9))
+        if not (jp["clear"] and lo <= jp["land_d"] <= hi and jp["land_k"] - JUMP_HIT_BEFORE_LAND <= s["free_k"] - 1):
+            return None
+        # 0.28.0: not into an up-charge anti-air (a [2]8 move, Guile's Flash Kick) the thrower will have ready when the
+        # bot comes down (charge.py: 45 frames held, kept 12 after leaving it)
+        if "2" in getattr(self, "_op_charges", ()) and self.op_charge.ready("2", self._now, ahead=max(0, jp["land_k"] - s["k"])):
+            self.zn_stats["charge_ready"] = self.zn_stats.get("charge_ready", 0) + 1
+            return None
+        return jp
+
+    def _zn_pre_jump(self, raw: dict, me: dict, op: dict, t: float):
+        """0.28.0 (the user, 2026-10-06: "Jump with a jump-in combo"): the jump over a projectile onto its thrower decided
+        on the throw's LEAD-IN, before the projectile id appears. MEASURED (the user's Akuma zoning, 9 matches): L Gou
+        Hadoken thrown back to back every 46-52 frames from 2.4-2.8 apart; seen on the projectile id (8 frames after the
+        lead-in) a forward jump lands after Akuma has recovered, seen on the lead-in it hits ~3 frames before he is free.
+        Only lead-ins of a fixed length (a held charge varies)."""
+        from .fighter import Decision, Facing
+        zc = self.c.get("fireball") or {}
+        lo_ = self._zn_lead_on
+        tmr = raw.get("stage_timer")
+        if not zc.get("jump_punish", False) or lo_ is None or op.get("action_id") != lo_[0] or not isinstance(tmr, int):
+            return None
+        info = self._zn_lead_info(lo_[0])
+        if info is None or lo_[2] is None:
+            return None
+        pid, ln = info
+        t0 = lo_[1] + ln
+        if self._zn_for == t0 or (num(me.get("y")) or 0.0) > 0.05 or (num(me.get("hitstun")) or 0) \
+                or (num(me.get("blockstun")) or 0) or self.busy(me) is not None or not self._ok("fireball"):
+            return None
+        kn = self._pe_know(pid)
+        m = self._zn_model(pid)
+        s = {"model": m, "k": tmr - t0, "d": float(lo_[2]), "left": m.arrival(float(lo_[2])) - (tmr - t0),
+             "free_k": kn.get("total") if isinstance(kn.get("total"), int) else 47, "id": pid, "t0": t0}
+        jp = self._zn_jump_fits(s)
+        if jp is None:
+            return None
+        rname, entry, dmg = self._zn_jump_route(me, op)
+        v = self._zn_learned("jump_punish", float(zc.get("jump_punish_value", 0.8)) * dmg / 1000.0
+                             - float(zc.get("jump_fail_cost", 0.3)))
+        if v <= float(zc.get("act_floor", 0.0)):
+            return None
+        self._zn_for = t0
+        self.zn_stats["jump_punish"] += 1
+        self.zn_stats["jump_on_lead_in"] += 1
+        if self.exp is not None:
+            self.exp.defended(t, "fireball", "jump_punish", me.get("hp"), op.get("hp"))
+        side = Facing.RIGHT if (num(op.get("x")) or 0) > (num(me.get("x")) or 0) else Facing.LEFT
+        nm = kn.get("name") or (self.opp.get(pid) or {}).get("name") or f"projectile {pid}"
+        why = (f"{nm} coming (its lead-in {lo_[0]}, {ln}F) from {s['d']:.2f}: jumping over it, landing "
+               f"{jp['land_d']:.2f} from the thrower on frame {jp['land_k']} (it recovers on {s['free_k']}): {rname}")
+        if entry is not None:
+            return Decision("route", entry["route"], route=entry, rule="fireball_jump", reason=why, facing=side)
+        jr = (zc.get("jump_routes") or [{}])[0]
+        self._zn_air = {"t0": t0, "seq": zc.get("jump_attack", "5+HK@3")}
+        return Decision("seq", rname, jr.get("seq", "9@3"), rule="fireball_jump", reason=why, facing=side)
 
     def _zn_charge(self, me: dict, op: dict, dist: float, block_face):
         """0.25.0: the opponent holding a projectile's charge (a lead-in id: move_timing `lead_in`, whose move is a
