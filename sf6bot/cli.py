@@ -111,6 +111,28 @@ def cmd_release_all(args, cfg):
     print(f"Released: {keys}")
 
 
+def cmd_character_id(args, cfg):
+    """Name a character id the bot doesn't know (a newly released character), or list the mapped ones."""
+    from .game_state import (CHARACTERS, NEW_CHARACTERS, learned_characters, remember_character,
+                             resolve_character_name, unmapped_new_characters)
+    if args.id is None:
+        learned = learned_characters(reload=True)
+        print("New characters mapped:", ", ".join(f"{k} = {v}" for k, v in sorted(learned.items())) or "none")
+        print("Not seen yet:", ", ".join(unmapped_new_characters()) or "none")
+        print("Usage: sf6bot character-id ID NAME   (the id is in the catalog / fight output; NAME e.g. "
+              + " / ".join(NEW_CHARACTERS) + ")")
+        return
+    if args.id in CHARACTERS:
+        print(f"Id {args.id} is already {CHARACTERS[args.id]}: not changed.")
+        return
+    name = resolve_character_name(" ".join(args.name)) or " ".join(args.name).strip()
+    if not name:
+        print("Give the character's name too.")
+        return
+    remember_character(args.id, name)
+    print(f"Saved: id {args.id} = {name} (configs/local.yaml; updates keep it).")
+
+
 def cmd_refw_install(args, cfg):
     from .game_state import find_sf6_dir, install_exporter, reframework_status
     d = find_sf6_dir(cfg)
@@ -280,9 +302,11 @@ def cmd_framedata_import(args, cfg):
     out = ds / "framedata"
     summary = fd.import_saved(pages, out)
     missing = summary.pop("_missing", [])
+    new_missing = summary.pop("_new_missing", [])
     ok = [k for k, v in summary.items() if "moves" in v]
     lines = ["# Capcom frame data import", f"- pages imported this time: {len(ok)}",
              f"- characters still missing ({len(missing)}): {', '.join(missing) or 'none'}",
+             f"- new characters not saved yet (fine until they are released): {', '.join(new_missing) or 'none'}",
              f"- upload {out / 'all_characters.json'} to Claude"]
     lines += [f"- {k}: {v.get('moves', v.get('error'))}" for k, v in summary.items()]
     for cat in sorted((ds / "catalog").glob("*.json")) if (ds / "catalog").exists() else []:
@@ -293,7 +317,7 @@ def cmd_framedata_import(args, cfg):
     run = Path(cfg["recording"]["root"]) / (_time.strftime("%Y%m%d_%H%M%S") + "_framedata")
     run.mkdir(parents=True, exist_ok=True)
     (run / "meta.json").write_text(_json.dumps({"kind": "framedata_import", "summary": summary,
-                                                "missing": missing}, indent=1))
+                                                "missing": missing, "new_missing": new_missing}, indent=1))
     (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
     print("\n".join(lines))
 
@@ -886,6 +910,11 @@ def main(argv=None):
     p.set_defaults(fn=cmd_share)
 
     sub.add_parser("release-all", help="send key-up for all bound keys").set_defaults(fn=cmd_release_all)
+    p = sub.add_parser("character-id", help="name a newly released character's in-game id (Arjun / Bosch / Tifa), "
+                       "or list the mapped ones")
+    p.add_argument("id", type=int, nargs="?")
+    p.add_argument("name", nargs="*")
+    p.set_defaults(fn=cmd_character_id)
 
     args = ap.parse_args(argv)
     cfg = load_config(args.config)

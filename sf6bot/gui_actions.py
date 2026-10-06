@@ -115,6 +115,11 @@ ACTIONS: list[Action] = [
     Action("input_map", "tools", "Input map", "Which input bit each key sets (Training Mode).", menu="T I"),
     Action("overlay_test", "tools", "Overlay test", "Shows the overlay for 15 s (no game needed).", menu="T O"),
     Action("release_all", "tools", "Release all keys", "If a key seems stuck.", menu="T 9"),
+    Action("character_id", "tools", "New character id",
+           "Name the in-game id of a newly released character (shown by C or a fight). Empty = list.",
+           [Option("id", "Id", kind="text", default="", hint="the number the bot printed"),
+            Option("name", "Character", choices=[("Arjun", "Arjun"), ("Bosch", "Bosch"), ("Tifa", "Tifa")],
+                   default="Arjun")], menu="T NC"),
     Action("sysinfo", "tools", "System info", "OS, CPU, GPU, RAM, display.", menu="T 1"),
     Action("list_windows", "tools", "Find SF6 window", "Which window matches SF6.", menu="T 2"),
     Action("capture_bench", "tools", "Capture test", "20 s of screen capture, no inputs.", menu="T 3"),
@@ -228,6 +233,13 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         return [one("overlay-test")]
     if action_id == "release_all":
         return [one("release-all")]
+    if action_id == "character_id":
+        cid = str(v.get("id") or "").strip()
+        if not cid:
+            return [one("character-id")]
+        if not cid.isdigit():
+            raise BadInput("The id is a number (the one the bot printed for the new character).")
+        return [one("character-id", cid, str(v.get("name") or "Arjun"))]
     if action_id == "sysinfo":
         return [one("sysinfo")]
     if action_id == "list_windows":

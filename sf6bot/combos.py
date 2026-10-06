@@ -648,7 +648,10 @@ def saved_pages(pages_dir: Path, bot_checks: dict | None = None) -> dict:
         text = f.read_text(encoding="utf-8", errors="replace")
         m = re.search(r"Street Fighter 6/([^/<\"]+)/Combos", text[:20000])
         if m:
-            name = back.get(m.group(1).replace(" ", "_"), back.get(m.group(1), m.group(1)))
+            name = back.get(m.group(1).replace(" ", "_"), back.get(m.group(1)))
+            if name is None:                  # e.g. a new character's wiki page named in full ("Tifa_Lockhart")
+                sl = fd.slug_for(m.group(1))
+                name = fd.SLUGS[sl] if sl else m.group(1)
             if is_bot_check(text):
                 if bot_checks is not None:
                     bot_checks[name] = f.name
@@ -690,7 +693,7 @@ def import_all(datasets_root: Path, pages_dir: Path | None = None, fetch: bool =
             summary[name] = {"error": f"saved file {bot_checks[name]} {BOT_CHECK_HELP}"}
             log(f"  {name}: the saved file {bot_checks[name]} {BOT_CHECK_HELP}.")
             continue
-        if page is None and fetch and not blocked:
+        if page is None and fetch and not blocked and slug not in fd.NEW_SLUGS:   # new: save the page
             try:
                 page = fetch_page(name)
                 time.sleep(delay_s)

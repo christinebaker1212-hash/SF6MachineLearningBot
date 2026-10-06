@@ -4,14 +4,19 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.29.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.30.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.29.0 is pushed** (CLAUDE.md "0.29.0"): held buttons (level rows from Capcom's notes: Ryu SA2 Lv2 / Lv3,
+**State:** **0.30.0 is pushed** (CLAUDE.md "0.30.0"): placeholders for the announced Arjun, Bosch and Tifa. Their Capcom
+page slugs are in `framedata.SLUGS` (guessed; pages are still recognised if the real slug / title is longer), and their
+in-game ids, unknown until release, are asked once by C / K (or named with T -> NC / the panel's "New character id") and
+saved in configs/local.yaml. On release: F (save their pages), then C with each as P1.
+
+**Before 0.30.0:** **0.29.0 was pushed** (CLAUDE.md "0.29.0"): held buttons (level rows from Capcom's notes: Ryu SA2 Lv2 / Lv3,
 Akuma's Gou Hadoken levels, "(Charged)" moves; the community's "Full Charge" / "hold 1" pick them), charge routes in
 matches
 only with the charge already held, and defence against charge characters (no meaty / throw into a charged invincible
@@ -353,6 +358,9 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.30.0:** when Arjun / Bosch / Tifa come out: check that their saved Capcom pages import under their names (F), that C
+asks for the new id once, and that later fights name them. The slugs are guesses.
 
 **0.29.0:** unverified in game. Check in a Ryu K run that SA2 Lv2 / Lv3 come out at their level (the catalog's ids / damage
 for the level rows; the held lengths are the middle of Capcom's windows), and against charge characters the match summary's
@@ -817,7 +825,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
 | Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers`; 0.27.0: `_aa_cross_guard`, `drive_reversal_late`, `combo_lab.ComboRun._no_window`, `neutral_policy.STANCE` / `NEUTRAL_MAX_DIST` / `CORNER_OUT`, `defense.prior_by_situation`; 0.28.0: `charge.py` (charge timing, opponent charge), `combo_lab.apply_charge`; 0.29.0: `framedata.annotate_holds` / `held`,
-`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS` |
+`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for` |
 | Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning; 0.26.0: `bar_value` set by `fighter._bar_value`, follow-up reach `reach_miss` from config `combo_reach`, `involves_super` / `load_learned` drop pre-0.26.0 super results); `combo_lab.ComboRun.switch` keeps a pre-input motion (0.26.0) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |

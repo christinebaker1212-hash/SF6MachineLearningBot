@@ -33,7 +33,7 @@ from .actions import Facing, InputState
 from .dataset import DatasetBuilder
 from .episodes import FIGHT_START_FRAME, EpisodeTracker
 from .intents import category as intents_category
-from .game_state import (ArrivalMeter, character_name, facing_of, file_stem, num, open_state_reader,
+from .game_state import (ArrivalMeter, character_name, is_unknown_character, unmapped_new_characters, facing_of, file_stem, num, open_state_reader,
                          player_distance)
 from .sequences import SequenceRunner, parse_sequence
 from .takeover import attack_id as attack_id_
@@ -4209,6 +4209,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["character"] = character_name(me.get("chara"))
                 summary["opponent"] = character_name(op["chara"])
                 summary["opponent_kind"] = "human" if versus else "cpu"
+                if is_unknown_character(op["chara"]):    # 0.30.0: a character released after this build
+                    summary["unknown_opponent_id"] = op["chara"]
+                    sess.narrate(f"Opponent's character id {op['chara']} is new to me (one of "
+                                 f"{', '.join(unmapped_new_characters()) or 'the new characters'}?). Name it once with "
+                                 f"'sf6bot character-id {op['chara']} NAME' (or catalog it with C).", source="measured")
                 if versus:
                     summary["opponent_human"] = {"mode": versus, "nickname": opponent_name}
                 if versus == "ranked":

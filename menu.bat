@@ -54,6 +54,7 @@ echo    A  Import community combo routes for every character (SuperCombo wiki)
 echo  CHECKS (Training Mode)
 echo    G  Game-state check         I  Input map         W  Watch while YOU play
 echo    O  Overlay test (no game)   9  Release all keys (a key seems stuck)
+echo    NC Name a new character's id (Arjun / Bosch / Tifa, once they are out)
 echo  OLDER TESTS
 echo    1 System info  2 Find SF6 window  3 Capture test  4 Walk forward  5/6 Acceptance L/R
 echo    7 Latency probe  8 Random inputs  Z Install PyTorch + timing loop
@@ -195,6 +196,7 @@ if /i "%CH%"=="6" (%BOT% acceptance --side right & goto done)
 if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
+if /i "%CH%"=="nc" goto newchar
 if /i "%CH%"=="z" goto torch
 goto menu
 
@@ -237,6 +239,16 @@ set "FT="
 set /p FT=First to how many wins? (Enter = 2): 
 if "%FT%"=="" set "FT=2"
 %BOT% fight --versus-human %VMODE% --first-to %FT%
+goto done
+
+:newchar
+%BOT% character-id
+set "NCI="
+set /p NCI=Character id to name (Enter = back): 
+if "%NCI%"=="" goto menu
+set "NCN="
+set /p NCN=Which character (Arjun, Bosch or Tifa): 
+%BOT% character-id %NCI% %NCN%
 goto done
 
 :teach

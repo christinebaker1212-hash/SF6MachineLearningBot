@@ -12,6 +12,7 @@ MENU = {
     "H 2": ("versus", {"mode": "online"}, [["fight", "--versus-human", "online", "--first-to", "2"]]),
     "H 3": ("versus", {"mode": "ranked"}, [["fight", "--versus-human", "ranked"]]),
     "B": ("train", {}, [["train"]]),
+    "T NC": ("character_id", {}, [["character-id"]]),
     "D 1": ("replay_one", {}, [["replay-record"]]),
     "D 2": ("replay_batch", {}, [["replay-record", "--batch"]]),
     "D 3": ("replay_auto", {}, [["replay-record", "--auto"]]),

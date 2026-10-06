@@ -3874,6 +3874,28 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
 - Unverified: that the opponent's input mask carries its directions online (offline and in replays it does; 0.17.0 records
   `opponent_inputs_seen`).
 
+## 0.30.0: placeholders for Arjun, Bosch and Tifa (user, 2026-10-06)
+- User: "There are going to be 3 new characters- Arjun, Bosch, and Tifa. Let's pre-emptively add placeholders for them so
+  when they are released, they can be easily catalogued."
+- **Capcom pages:** `framedata.SLUGS` has `arjun` / `bosch` / `tifa` (`NEW_SLUGS`). The slugs are GUESSED from Capcom's
+  pattern. A saved page is still recognised when the real slug or title is longer or shorter (`slug_for`: "tifa_lockhart",
+  "TIFA LOCKHART FRAME DATA" -> tifa), and the stored `source` uses the page's own slug. The links page marks them "new:
+  once released". The import report lists them apart ("new characters not saved yet"), not as missing. SuperCombo pages
+  named in full ("Tifa_Lockhart") are matched the same way; the combo importer never tries to download a new
+  character's page.
+- **In-game ids:** not known until release, so none is guessed. `game_state.character_name` also reads
+  `characters: {id: name}` from configs/local.yaml (`learned_characters`; update.bat keeps that file). A built-in id is
+  never remapped.
+  - C (catalog) and K (combo lab) on an unknown P1 id ask once: "Which character is it? 1 = Arjun 2 = Bosch 3 = Tifa"
+    (number or name; Enter skips) and save the answer (`ask_new_character`).
+  - Or name it directly: `sf6bot character-id ID NAME` (menu T -> NC; panel TOOLS -> "New character id"); no arguments
+    lists the mapped ones.
+  - Fights narrate an unknown opponent id once, with that command (`summary.unknown_opponent_id`).
+- **On release:** save the three frame pages (F), then C (guard None / All / counter / punish counter) with each as P1.
+  B and X then build their move timing and move maps from recordings as for anyone else.
+- Tests: `tests/test_0300.py` (recognition, the prompt, local.yaml round trip, no remapping, CLI); regression
+  fingerprints unchanged.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

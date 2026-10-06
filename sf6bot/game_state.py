@@ -41,10 +41,92 @@ CHARACTERS = {1: "Ryu", 2: "Luke", 3: "Kimberly", 4: "Chun-Li", 5: "Manon", 6: "
               32: "Ingrid", 33: "Yasmine"}
 
 
+# Announced characters not out yet (0.30.0). Their ESF ids are unknown until release, so none is guessed here: the
+# first time the catalog / combo lab sees an unknown id it asks which one it is (`ask_new_character`), or the user
+# runs `sf6bot character-id ID NAME`; the answer goes to configs/local.yaml (`characters: {id: name}`), which
+# update.bat keeps. Their Capcom page slugs are in framedata.SLUGS.
+NEW_CHARACTERS = ("Arjun", "Bosch", "Tifa")
+LOCAL_YAML = Path(__file__).resolve().parent.parent / "configs" / "local.yaml"
+_learned: dict | None = None
+
+
+def learned_characters(reload: bool = False) -> dict[int, str]:
+    """ESF id -> name the user mapped for characters released after this table ({} when none)."""
+    global _learned
+    if _learned is None or reload:
+        out: dict[int, str] = {}
+        try:
+            if LOCAL_YAML.exists():
+                import yaml
+                data = yaml.safe_load(LOCAL_YAML.read_text(encoding="utf-8")) or {}
+                for k, v in (data.get("characters") or {}).items():
+                    try:
+                        if v and int(k) not in CHARACTERS:
+                            out[int(k)] = str(v)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
+        _learned = out
+    return _learned
+
+
 def character_name(esf) -> str:
     if not isinstance(esf, int):
         return "?"
-    return CHARACTERS.get(esf, f"ESF_{esf:03d}")
+    return CHARACTERS.get(esf) or learned_characters().get(esf) or f"ESF_{esf:03d}"
+
+
+def is_unknown_character(esf) -> bool:
+    return isinstance(esf, int) and character_name(esf).startswith("ESF_")
+
+
+def unmapped_new_characters() -> list[str]:
+    taken = set(learned_characters().values())
+    return [n for n in NEW_CHARACTERS if n not in taken]
+
+
+def remember_character(esf: int, name: str) -> Path:
+    """Save `esf` = `name` in configs/local.yaml. A built-in id is never remapped."""
+    from .config import set_local
+    if esf in CHARACTERS:
+        raise ValueError(f"id {esf} is already {CHARACTERS[esf]}")
+    p = set_local(["characters", int(esf)], name, LOCAL_YAML)
+    learned_characters(reload=True)
+    return p
+
+
+def resolve_character_name(text: str) -> str | None:
+    """A typed name -> the canonical one: a new character's ('tifa' -> 'Tifa'), else any known name."""
+    t = re.sub(r"[^a-z0-9]", "", (text or "").lower())
+    if not t:
+        return None
+    for n in list(NEW_CHARACTERS) + list(CHARACTERS.values()):
+        k = re.sub(r"[^a-z0-9]", "", n.lower())
+        if t == k or (n in NEW_CHARACTERS and (t.startswith(k) or k.startswith(t))):
+            return n
+    return None
+
+
+def ask_new_character(esf, who: str = "P1", ask=input, log=print) -> str:
+    """The name for `esf`; for an id the bot doesn't know, ask once which new character it is and save it."""
+    if not is_unknown_character(esf):
+        return character_name(esf)
+    opts = unmapped_new_characters()
+    log(f"{who}'s character id {esf} is not one the bot knows: a newly released character?")
+    for i, n in enumerate(opts, 1):
+        log(f"  {i} = {n}")
+    try:
+        a = (ask("Which character is it? (number or name; Enter = skip) ") or "").strip()
+    except (EOFError, OSError):
+        a = ""
+    name = opts[int(a) - 1] if a.isdigit() and 1 <= int(a) <= len(opts) else resolve_character_name(a) or (a or None)
+    if not name:
+        log(f"Skipped: id {esf} stays unnamed (map it later: sf6bot character-id {esf} NAME).")
+        return character_name(esf)
+    remember_character(esf, name)
+    log(f"Saved: id {esf} = {name} (configs/local.yaml; updates keep it).")
+    return name
 
 
 @dataclass

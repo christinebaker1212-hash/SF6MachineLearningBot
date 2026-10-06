@@ -33,7 +33,7 @@ from pathlib import Path
 from . import clock
 from .actions import InputState
 from .charge import hold_frames
-from .game_state import character_name, facing_of, file_stem, num, open_state_reader, player_distance
+from .game_state import ask_new_character, character_name, facing_of, file_stem, num, open_state_reader, player_distance
 from .sequences import SequenceRunner, parse_sequence
 from .session import Session
 
@@ -522,7 +522,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             print("No battle state. Be in Training Mode and able to move.")
             return None
         chara = st.p1.get("chara")
-        name = character_name(chara) if isinstance(chara, int) else "Unknown"
+        name = ask_new_character(chara) if isinstance(chara, int) else "Unknown"   # a new character: asked once
         if chara is None:
             print("Character id unknown (it is read at match start): re-enter Training Mode once after "
                   "restarting SF6 so the exporter sees the character select.")

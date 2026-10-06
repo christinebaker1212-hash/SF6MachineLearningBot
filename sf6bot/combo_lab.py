@@ -31,7 +31,7 @@ from pathlib import Path
 from . import clock
 from . import framebar
 from . import framedata as fd
-from .game_state import character_name, file_stem, num, open_state_reader
+from .game_state import ask_new_character, character_name, file_stem, num, open_state_reader
 from .hits import classify_hit
 from .sequences import SequenceRunner, parse_sequence
 from .actions import Facing
@@ -2181,7 +2181,7 @@ def run_combo_lab(sess, cfg: dict, position: str = "any", hit_type: str = "norma
             print("No battle state. Be in Training Mode and able to move.")
             return None
         chara = st.p1.get("chara")
-        name = character_name(chara) if isinstance(chara, int) else "Unknown"
+        name = ask_new_character(chara) if isinstance(chara, int) else "Unknown"   # a new character: asked once
         capcom = fd.load(name, ds / "framedata")
         if not capcom:
             print(f"No Capcom frame data for {name}: import it first (menu T, then F).")

@@ -28,7 +28,12 @@ SLUGS = {
     "ed": "Ed", "gouki_akuma": "Akuma", "vega_mbison": "M. Bison", "terry": "Terry", "mai": "Mai",
     "elena": "Elena", "sagat": "Sagat", "cviper": "Viper", "alex": "Alex", "ingrid": "Ingrid",
     "yasmine": "Yasmine",
+    # Announced, not released yet (0.30.0): page slugs GUESSED from Capcom's pattern (lower-case name). A saved
+    # page is still recognised when the real slug or title differs ("tifa_lockhart", "TIFA LOCKHART"): see
+    # `slug_for`. Their in-game ids are mapped on first sight (game_state.ask_new_character).
+    "arjun": "Arjun", "bosch": "Bosch", "tifa": "Tifa",
 }
+NEW_SLUGS = ("arjun", "bosch", "tifa")
 
 # Controller icon file name -> token in our notation. Directions are numpad, facing right.
 ICONS = {
@@ -217,23 +222,43 @@ def _norm(t: str) -> str:
     return re.sub(r"[^a-z0-9]", "", t.lower())
 
 
+def slug_for(text: str) -> str | None:
+    """Our slug for a page slug, page title or name. Exact for the released cast; a new character's also when
+    the real one is longer or shorter ('tifa_lockhart', 'Tifa Lockhart' -> 'tifa')."""
+    t = _norm(text or "")
+    if not t:
+        return None
+    for slug, name in SLUGS.items():
+        if t in (_norm(name), _norm(slug)) or t in slug.split("_"):
+            return slug
+    for slug in NEW_SLUGS:
+        k = _norm(SLUGS[slug])
+        if t.startswith(k) or (len(t) >= 3 and k.startswith(t)):
+            return slug
+    return None
+
+
+def page_slug(html: str) -> str | None:
+    """The slug Capcom's page itself uses (the Next.js query name), when it says."""
+    m = re.search(r'"query":\{"name":"([a-z0-9_\-]+)"\}', html)
+    return m.group(1) if m else None
+
+
 def identify_slug(html: str) -> str | None:
     """Which character a saved page is: the Next.js query name, else the <title>."""
-    m = re.search(r'"query":\{"name":"([a-z_]+)"\}', html)
-    if m and m.group(1) in SLUGS:
-        return m.group(1)
+    q = page_slug(html)
+    if q and q in SLUGS:
+        return q
     m = re.search(r"<title[^>]*>\s*([^<|]+?)\s+FRAME DATA", html, re.I)
-    if m:
-        t = _norm(m.group(1))
-        for slug, name in SLUGS.items():
-            if t in (_norm(name), _norm(slug)) or t in slug.split("_"):
-                return slug
-    return None
+    slug = slug_for(m.group(1)) if m else None
+    return slug or (slug_for(q) if q else None)
 
 
 def links_page(locale: str = "en-us") -> str:
     """A small local HTML page with one link per character's frame data page."""
-    rows = "\n".join(f'<li><a href="{BASE_URL.format(locale=locale, slug=s)}" target="_blank">{n}</a></li>'
+    rows = "\n".join(f'<li><a href="{BASE_URL.format(locale=locale, slug=s)}" target="_blank">{n}</a>'
+                     + (" <i>(new: once released; if the link does not open, open the character from Capcom's "
+                        "frame data list instead)</i>" if s in NEW_SLUGS else "") + "</li>"
                      for s, n in SLUGS.items())
     return f"""<!doctype html><meta charset="utf-8"><title>SF6 frame data pages</title>
 <body style="font-family:sans-serif;max-width:40em;margin:2em auto">
@@ -266,7 +291,7 @@ def import_saved(pages_dir: Path, out_dir: Path, log=print) -> dict:
         (out_dir / "raw" / f"{slug}.html").write_text(html, encoding="utf-8")
         doc = {
             "character": SLUGS[slug], "slug": slug,
-            "source": BASE_URL.format(locale="en-us", slug=slug), "saved_file": f.name,
+            "source": BASE_URL.format(locale="en-us", slug=page_slug(html) or slug), "saved_file": f.name,
             "imported_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "file_modified_utc": datetime.fromtimestamp(f.stat().st_mtime, timezone.utc)
                                          .strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -289,7 +314,8 @@ def import_saved(pages_dir: Path, out_dir: Path, log=print) -> dict:
             combined[d["slug"]] = d
     (out_dir / "all_characters.json").write_text(json.dumps(combined, ensure_ascii=False),
                                                 encoding="utf-8")
-    summary["_missing"] = [SLUGS[s] for s in SLUGS if s not in combined]
+    summary["_missing"] = [SLUGS[s] for s in SLUGS if s not in combined and s not in NEW_SLUGS]
+    summary["_new_missing"] = [SLUGS[s] for s in NEW_SLUGS if s not in combined]
     return summary
 
 
