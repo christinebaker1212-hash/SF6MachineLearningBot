@@ -77,3 +77,67 @@ def test_combo_page_of_a_new_character_named_in_full(tmp_path):
     (tmp_path / "a.html").write_text("<title>Street Fighter 6/Tifa_Lockhart/Combos - SuperCombo Wiki</title>",
                                      encoding="utf-8")
     assert list(combos.saved_pages(tmp_path)) == ["Tifa"]
+
+
+# ---- 0.30.1: the most damaging follow-up after the bot's Drive Impact, by the Super it has --------------------------
+
+def _di_fighter():
+    from tests.test_0240 import CAP, FCFG, _book, cc
+    from sf6bot.fighter import ScriptedFighter
+    book = _book()
+    comp = cc.build(book, CAP)
+    f = ScriptedFighter(FCFG, seed=1, book=book + comp.entries)
+    f.composer, f.lead = comp, 5
+    return f
+
+
+def _after_di(f, meter, drive=60000, op_hp=10000, op_a=276, x=0.72):
+    from tests.test_defense import state
+    for k in range(120):
+        d = f.decide(state(me={"action_id": 855 if k < 85 else 1, "super": meter, "drive": drive},
+                           op={"x": x, "action_id": op_a, "hp": op_hp}, timer=1000 + k), k / 60, 0)
+        if d.rule == "crumple_followup":
+            return k, d
+    return None, None
+
+
+def test_damage_after_a_drive_impact_is_scaled_hit_by_hit():
+    import gzip
+    from pathlib import Path
+    from sf6bot import combo_gen as cg
+    html = gzip.open(Path(__file__).parent / "data" / "capcom_ryu_frame_table.html.gz", "rt").read()
+    rows = {m["name"]: m for m in fd.unique_names(fd.parse_frame_page(html))}
+    sa3 = rows["SA3 Shin Shoryuken"]
+    assert cg.hit_count(sa3) == 6 and cg.hit_count(rows["Standing Heavy Punch"]) == 1
+    # SA3 alone after the DI: within 5% of the MEASURED 2,819 (0.18.1, 4 crumples)
+    assert abs(cg.estimate_after([sa3]) - 2819) < 0.05 * 2819
+    combo = [rows["Standing Heavy Punch"], rows["H Shoryuken"], sa3]
+    assert cg.estimate_after(combo) > cg.estimate_after([sa3]) + 1000        # comboing into SA3 beats SA3 alone
+
+
+def test_crumple_follow_up_depends_on_the_super_the_bot_has():
+    k, d = _after_di(_di_fighter(), 30000)
+    assert d.kind == "route" and d.name.endswith("236236K") and "after my Drive Impact" in d.reason
+    k0, d0 = _after_di(_di_fighter(), 0)
+    assert d0.kind == "route" and "236236" not in d0.name                    # no bars: a combo without a super
+    k2, d2 = _after_di(_di_fighter(), 20000)
+    assert "SA3" not in d2.name and "236236K" not in d2.name                 # 2 bars: nothing that needs 3
+    f = _di_fighter()
+    _after_di(f, 30000)
+    assert f.super_stats["stuns_seen"] == 1 and list(f.super_stats["crumple_estimates"].values())[0] > 4000
+    # never into burnout: with one Drive bar no Drive Rush route
+    k3, d3 = _after_di(_di_fighter(), 30000, drive=10000)
+    assert "DRC" not in d3.name and d3.name.endswith("236236K")
+
+
+def test_a_wall_splat_after_the_bots_drive_impact_is_cashed_out_too():
+    f = _di_fighter()
+    k, d = _after_di(f, 30000, op_a=262, x=1.2)
+    assert d is not None and f.super_stats["wall_stuns"] == 1
+    # the same reaction with no Drive Impact of the bot's before it: nothing
+    from tests.test_defense import state
+    g = _di_fighter()
+    for t in range(60):
+        dd = g.decide(state(me={"action_id": 1, "super": 30000, "drive": 60000}, op={"x": 1.2, "action_id": 262},
+                            timer=5000 + t), t / 60, 0)
+        assert dd.rule != "crumple_followup"

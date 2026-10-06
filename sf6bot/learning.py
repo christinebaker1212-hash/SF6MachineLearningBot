@@ -400,10 +400,12 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
     out += defense_thoughts(summary.get("defense") or {}, opp, exp)
     su = summary.get("supers") or {}
     cr = su.get("crumple_followups") or {}
+    est = su.get("crumple_estimates") or {}
     if cr or su.get("confirms") or su.get("punishes"):
         out.append(("scripted", "Big-damage chances I went for: "
-                                + (("after a Drive Impact crumple " + ", ".join(f"{k} x{v}" for k, v in cr.items()) + "; ")
-                                   if cr else "")
+                                + (("after a Drive Impact crumple " + ", ".join(
+                                    f"{k} x{v}" + (f" (about {est[k]} each)" if est.get(k) else "")
+                                    for k, v in cr.items()) + "; ") if cr else "")
                                 + f"2MK confirmed into a super x{su.get('confirms', 0)}; Super Art punishes "
                                   f"x{su.get('punishes', 0)}."))
     dr = summary.get("drive_rush") or {}

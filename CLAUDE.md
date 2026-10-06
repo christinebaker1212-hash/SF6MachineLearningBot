@@ -3896,6 +3896,34 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
 - Tests: `tests/test_0300.py` (recognition, the prompt, local.yaml round trip, no remapping, CLI); regression
   fingerprints unchanged.
 
+## 0.30.1: the most damaging follow-up after the bot's Drive Impact, by the Super it has (user, 2026-10-06)
+- User: "We do still need to have the bot recognize that it was landed a drive impact counter, and choose its most damaging
+  route it can do afterwards, depending on the super it has."
+- Before: after a crumple (276) the bot threw SA3 ALONE whenever it had 3 bars (0.18.1), SA1 only when it killed, never SA2,
+  and with fewer bars the punish engine's best route without a super (0.23.0). The combo composer (0.24.0) was not asked.
+- **Damage after the DI** (`combo_gen.estimate_after`, `hit_count`): the DI is hit 1; each later hit is scaled by its place in
+  the whole combo, a multi-hit move split over its hits from Capcom's active column (Ryu SA3: 6 hits; a super with no active
+  frames: 5, ESTIMATE), a super never below its minimum. SA3 alone after the DI: 2,733 (MEASURED 0.18.1: 2,819 average of 4;
+  adding the DI's "Starter scaling 20%" gave 2,267, so it is left out). 5HP > H Shoryuken > SA3: ~4,120.
+- **The choice** (`fighter._crumple_options`, in `_crumple_followup`; once per stun, cached): every follow-up the bot can
+  afford, valued at that damage x its chance to finish:
+  - the combo lab's normal-hit TRUE combos and the config's punish routes (counter / punish-counter routes left out: their
+    links need the counter's extra frames)
+  - SA1 / SA2 Lv1 / SA3 alone (`moves.sa2` added: 214214LP tapped, Capcom start-up 12, 2,800)
+  - the combo composer's best combo from every starter for the Super and Drive the bot has, a kept bar worth nothing here
+    (never into burnout, as everywhere)
+  - a kill wins (the surest, then the fewest bars). Timed by the punish engine so the first hit lands on the bot's first free
+    frame and before the stun can end. Without the composer (no Capcom data) the old rule stays.
+  - On the synthetic test book: 0 or 1 bars -> 5HP > DRC 5HK , 5HP > 623HP (~2,900); 2 bars -> SA2 (2,800); 3 bars ->
+    5HP > DRC 5HK , 5HP > 623HP , SA3 (~4,900); 3 bars and 1 Drive bar -> 2MK > 236MK > 623HP , SA3 (~4,500).
+- **Recognising it:** the crumple id 276 as before, and now any stun-range reaction (250-299) within `supers.di_stun_window`
+  120 frames of the bot's own Drive Impact (a DI-back near the wall splats instead of crumpling; before 0.30.1 only after the
+  disabled wall-DI rule). The wall splat's id and length are not measured (`wall_stun_frames` 112, `wall_stun_max_dist` 1.6:
+  ESTIMATES).
+- Summary `supers`: `stuns_seen`, `wall_stuns`, `crumple_estimates` (per follow-up); the thoughts line gives each estimate.
+- Tests: `tests/test_0300.py` (the scaling against the measured SA3, the choice by bars and Drive, the wall splat); regression
+  fingerprints unchanged. Not verified in game.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

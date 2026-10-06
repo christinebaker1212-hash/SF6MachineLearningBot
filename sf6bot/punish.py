@@ -495,7 +495,8 @@ class PunishEngine:
                         "value": 0.9 * float(m.get("damage") or 0), "risk": risk(m.get("block_adv"))})
         return out
 
-    def _pe_plan(self, me: dict, op: dict, dist: float, w: dict, kinds: tuple | None = None) -> dict | None:
+    def _pe_plan(self, me: dict, op: dict, dist: float, w: dict, kinds: tuple | None = None,
+                 options: list | None = None) -> dict | None:
         """The best feasible option for window w with its send timing, or None. Adds step-ins (walk / dash) and Parry
         Drive Rush for whiffs out of every option's reach. `kinds`: only options of these kinds ("route", "seq")."""
         from .fighter import motion_guard
@@ -504,7 +505,8 @@ class PunishEngine:
         delay = self.lead + self.stale
         best = None
         tried = []
-        opts = [o for o in self._pe_options(me, op, w) if kinds is None or o["kind"] in kinds]
+        opts = [o for o in (self._pe_options(me, op, w) if options is None else options)
+                if kinds is None or o["kind"] in kinds]
         steps = [("", 0, 0.0, 0)]
         if w["kind"] == "whiff" and w["bot"] == 0 and w["hit_in"] == 0:
             walk_v, dash_d = float(wc.get("walk_speed", 0.047)), float(wc.get("dash_gap", 1.25))

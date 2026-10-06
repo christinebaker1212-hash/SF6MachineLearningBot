@@ -82,6 +82,42 @@ def estimate_damage(moves: list[dict]) -> int:
     return int(total)
 
 
+SUPER_HITS_DEFAULT = 5   # ESTIMATE: hits of a Super Art whose Capcom row lists no active frames (a projectile super)
+
+
+def hit_count(m: dict) -> int:
+    """Hits of a move from Capcom's 'active' column: '5-16 5-6, 7-8, 9-10, 11-12, 13-14, 15-16' = 6 (Ryu SA3), '10-14' = 1."""
+    parts = (m.get("active") or "").split(None, 1)
+    if len(parts) > 1:
+        n = len(re.findall(r"\d+(?:-\d+)?", parts[1]))
+        if n > 1:
+            return n
+    if not parts and _super_level(m):
+        return SUPER_HITS_DEFAULT
+    return 1
+
+
+def estimate_after(moves: list[dict], before: int = 1) -> int:
+    """0.30.1: a combo's damage when `before` hits already landed (a Drive Impact crumple: the DI is hit 1), hit by hit:
+    a multi-hit move's damage is split over its hits (hit_count), each scaled by the hit's place in the whole combo
+    (SCALING; a super never below its minimum). Checked against the MEASURED SA3 after the bot's Drive Impact crumple
+    (0.18.1: 2,819 average, 4 times): 2,733. No starter scaling from the DI (that model gave 2,267)."""
+    total, i = 0.0, before
+    for m in moves:
+        dmg = m.get("damage_n") or 0
+        if not dmg:
+            continue
+        n = hit_count(m)
+        lvl = _super_level(m)
+        for _ in range(n):
+            sc = SCALING[min(i, len(SCALING) - 1)]
+            if lvl:
+                sc = max(sc, SUPER_MIN[lvl])
+            total += dmg / n * max(sc, 0.1)
+            i += 1
+    return int(total)
+
+
 # ---- the move graph ------------------------------------------------------------------------------
 
 def _measured(catalog: dict | None, key: str) -> dict:
