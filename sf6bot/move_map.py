@@ -211,7 +211,42 @@ def confidence(votes: Counter) -> tuple[str, int, float, str]:
     return name, k, round(share, 2), level
 
 
-def build_maps(datasets_root: Path, recordings: list[Path] | None = None, write: bool = True) -> dict:
+MAP_CACHE_V = 1   # bump when observe() / requirement() / match() change
+
+
+def framedata_sig(root: Path):
+    """What the votes depend on besides the recording: the imported Capcom data (a new import (F) re-reads)."""
+    from . import file_cache as fc
+    fd_dir = Path(root) / "framedata"
+    return fc.digest(sorted((p.name, p.stat().st_size, p.stat().st_mtime_ns)
+                            for p in fd_dir.glob("*.json"))) if fd_dir.exists() else None
+
+
+def file_votes(root: Path, f: Path, rows, reqs_by_char: dict, fd_sig=None) -> list:
+    """[(character, presses seen, {action id: Counter(move name)})] of one recording, cached (0.30.3: only new
+    recordings are read). `rows()` gives the recording's rows; `reqs_by_char` is filled as characters come up."""
+    from . import file_cache as fc
+    root = Path(root)
+
+    def per_file(rows_):
+        out = []
+        for pk in ("p1", "p2"):
+            chara = next((r[pk].get("chara") for r in rows_ if isinstance((r.get(pk) or {}).get("chara"), int)), None)
+            name = character_name(chara)
+            if name not in reqs_by_char:
+                fdata = fd.load(name, root / "framedata")
+                reqs_by_char[name] = [q for q in (requirement(m) for m in fdata["moves"]) if q] if fdata else None
+            if not reqs_by_char[name]:
+                continue
+            v: dict = defaultdict(Counter)
+            n = observe(rows_, pk, reqs_by_char[name], v)
+            out.append((name, n, {a: Counter(c) for a, c in v.items()}))
+        return out
+
+    return fc.get(root, "move_map", f, lambda: per_file(rows()), extra=fd_sig, version=MAP_CACHE_V)
+
+
+def build_maps(datasets_root: Path, recordings: list[Path] | None = None, write: bool = True, log=print) -> dict:
     """Infer action-id maps for every character seen in the recordings (default: datasets/replays
     and datasets/fights). Writes datasets/move_maps/<Character>.json. Returns {name: map}."""
     from .training_data import load_rows
@@ -221,17 +256,21 @@ def build_maps(datasets_root: Path, recordings: list[Path] | None = None, write:
     reqs_by_char: dict = {}
     votes_by_char: dict = defaultdict(lambda: defaultdict(Counter))
     sources: dict = defaultdict(int)
+    from .eta import Progress
+    fd_sig = framedata_sig(root)
+    prog = Progress("move ids", len(files), log=log)
     for f in files:
-        rows = load_rows(f)
-        for pk in ("p1", "p2"):
-            chara = next((r[pk].get("chara") for r in rows if isinstance((r.get(pk) or {}).get("chara"), int)), None)
-            name = character_name(chara)
-            if name not in reqs_by_char:
-                fdata = fd.load(name, root / "framedata")
-                reqs_by_char[name] = [q for q in (requirement(m) for m in fdata["moves"]) if q] if fdata else None
-            if not reqs_by_char[name]:
-                continue
-            sources[name] += observe(rows, pk, reqs_by_char[name], votes_by_char[name])
+        try:
+            parts = file_votes(root, f, lambda f=f: load_rows(f), reqs_by_char, fd_sig)
+        except (OSError, ValueError, EOFError) as e:
+            log(f"  move ids: skipped {Path(f).name}: {e}")
+            parts = []
+        for name, n, v in parts:
+            sources[name] += n
+            for a, c in v.items():
+                votes_by_char[name][a].update(c)
+        prog.step()
+    prog.done()
     out = {}
     for name, votes in votes_by_char.items():
         fdata = fd.load(name, root / "framedata")

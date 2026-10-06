@@ -309,30 +309,89 @@ def summarize(e: dict) -> dict:
             "follow": sorted(x for x, k in e["ids"].items() if k >= 2), "proj": proj_fit(e.get("proj") or [])}
 
 
-def build_table(recordings: list) -> dict:
-    """{character: {id: summary}} from recordings (paths or row lists)."""
-    loaded = []
+CACHE_V = 1      # bump with VERSION-level changes to transitions() / samples()
+
+
+def _pass1(rows: list[dict]) -> dict:
+    """One recording's pass 1: {"chars": [p1, p2], "counts": {character: transitions counts}}."""
+    rows = _fight_rows(rows)
+    out = {"chars": [None, None], "counts": {}}
+    if len(rows) <= 30:
+        return out
+    for i, (pk, dk) in enumerate((("p1", "p2"), ("p2", "p1"))):
+        ch = _chara(rows, pk)
+        out["chars"][i] = ch
+        if ch:
+            transitions(rows, pk, dk, out["counts"].setdefault(ch, {}))
+    return out
+
+
+def _pass2(rows: list[dict], follows: dict) -> dict:
+    """One recording's pass 2: {character: samples} with the follow-through table of every character."""
+    rows = _fight_rows(rows)
+    out: dict = {}
+    if len(rows) <= 30:
+        return out
+    for pk, dk in (("p1", "p2"), ("p2", "p1")):
+        ch = _chara(rows, pk)
+        if ch:
+            samples(rows, pk, dk, follows.get(ch, {}), out.setdefault(ch, {}))
+    return out
+
+
+def build_table(recordings: list, ds_root: Path | None = None, log=None) -> dict:
+    """{character: {id: summary}} from recordings (paths or row lists). 0.30.3: one recording at a time (they were all
+    held in memory: several GB with hundreds of recordings), each pass cached per recording when `ds_root` is given."""
+    from . import file_cache as fc
+    from .eta import Progress
+    srcs = []
     for f in recordings:
-        try:
-            rows = f if isinstance(f, list) else read_recording(f)
-        except (OSError, ValueError, EOFError):
-            continue
-        rows = _fight_rows(rows)
-        if len(rows) > 30:
-            loaded.append(rows)
+        srcs.append(f if isinstance(f, list) else fc.Rows(f))
+
+    def rows_of(src):
+        return src if isinstance(src, list) else src.get()
+
+    def cached(src, stage, compute, extra=None):
+        if ds_root is None or isinstance(src, list):
+            return compute()
+        return fc.get(ds_root, stage, src.path, compute, extra=extra, version=VERSION * 100 + CACHE_V)
+
     counts: dict = defaultdict(dict)
-    for rows in loaded:
-        for pk, dk in (("p1", "p2"), ("p2", "p1")):
-            ch = _chara(rows, pk)
-            if ch:
-                transitions(rows, pk, dk, counts[ch])
+    firsts = []
+    prog = Progress("move timing 1/2", len(srcs), log=log) if log else None
+    for src in srcs:
+        try:
+            p1 = cached(src, "timing1", lambda: _pass1(rows_of(src)))
+        except (OSError, ValueError, EOFError):
+            p1 = {"chars": [None, None], "counts": {}}
+        firsts.append(p1)
+        for ch, c in p1["counts"].items():
+            fc.merge_into(counts[ch], c)
+        if not isinstance(src, list):
+            src.drop()
+        if prog:
+            prog.step()
+    if prog:
+        prog.done()
     follows = {ch: follow_table(c) for ch, c in counts.items()}
     raw: dict = defaultdict(dict)
-    for rows in loaded:
-        for pk, dk in (("p1", "p2"), ("p2", "p1")):
-            ch = _chara(rows, pk)
-            if ch:
-                samples(rows, pk, dk, follows[ch], raw[ch])
+    prog = Progress("move timing 2/2", len(srcs), log=log) if log else None
+    for src, p1 in zip(srcs, firsts):
+        chars = sorted({c for c in p1["chars"] if c})
+        if chars:
+            extra = fc.digest({ch: {a: sorted(b) for a, b in sorted(follows.get(ch, {}).items())} for ch in chars})
+            try:
+                part = cached(src, "timing2", lambda: _pass2(rows_of(src), follows), extra=extra)
+            except (OSError, ValueError, EOFError):
+                part = {}
+            for ch, ids in part.items():
+                fc.merge_into(raw[ch], ids)
+        if not isinstance(src, list):
+            src.drop()
+        if prog:
+            prog.step()
+    if prog:
+        prog.done()
     out = {}
     for ch, ids in raw.items():
         out[ch] = {"follow": {str(a): sorted(b) for a, b in follows[ch].items()},
@@ -348,7 +407,7 @@ def build(ds_root: Path, log=print) -> dict:
     files = []
     for sub in ("replays", "merged", "fights"):
         files += sorted((ds_root / sub).glob("*.jsonl.gz"))
-    tab = build_table(files)
+    tab = build_table(files, ds_root=ds_root, log=log)
     out_dir = ds_root / "move_timing"
     out_dir.mkdir(parents=True, exist_ok=True)
     res = {}

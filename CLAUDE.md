@@ -3928,6 +3928,37 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
 - Tests: `tests/test_0300.py` (the scaling against the measured SA3, the choice by bars and Drive, only the crumple counts); regression
   fingerprints unchanged. Not verified in game.
 
+## 0.30.3: B (train) and X (move ids) faster, with progress while they run (user, 2026-10-06)
+- User: "learning the Move IDs and training the brain is taking an extremely long time now"; "Could I at least have more
+  feedback on what and how much is done ... as it's running?"; "Push the speedup to the update first".
+- **Why it was slow** (profiled on copies of the test recordings):
+  - every step of B (merge, reach, move timing, win model / brain samples, combo mining) and X read EVERY recording
+    again on every run: gzip'd JSON + the frame clock, ~0.25-0.35 s a recording here (more on the Ally), about five
+    reads of each recording per B
+  - the move-timing step kept ALL recordings' rows in memory at once (several GB with hundreds of recordings: likely
+    swapping on the Ally's 11.6 GB)
+  - the replay merge rewrote every merged file on every B, so the brain's sample cache saw them as new each time
+- **Now:**
+  - `sf6bot/file_cache.py`: each step's result per recording is cached in `datasets/models/cache/stages/<step>/`, keyed by
+    the file's name, size and time, the step's version and what else it depends on (the imported Capcom data for move
+    ids; the move names known for combo mining; the follow-through table for move timing's second pass). Only new or
+    changed recordings are read. Results of erased recordings are deleted.
+  - `sf6bot/train_prefill.py` (B step 2, "read new recordings once"): every recording some step has not cached is read
+    once and every step's result computed from it (decision samples, reach, move timing pass 1, combos found, move ids:
+    X is then instant after a B). Move timing's second pass still re-reads a recording when its result changed.
+  - move timing reads one recording at a time; the merge rewrites a merged replay only when its source replays changed
+    (`source_sigs` in its meta; files merged before 0.30.3 are rewritten once).
+  - Results are identical to before (the four outputs compared on the test set: move ids, reach, move timing, combos found).
+    On 22 test recordings: first run ~14 s (was ~17 s without the samples), a second run of these steps 0.4 s.
+- **Progress** (`sf6bot/eta.py`): B prints "=== Step 3 of 8: copy-a-player network ===" headers with the time each step
+  took; every reading loop prints "[move ids] 37 of 412 recordings (9%), 0:21 so far, about 3:28 left" at most every 2 s;
+  network training prints its epoch "of up to 300 (stops early when the held-out loss stops improving)" at least every
+  3 s. X prints its own lines. The panel already runs commands unbuffered, so the lines show as they happen.
+- Still proportional to the data: the two networks' training (every epoch goes over all decisions). The progress lines
+  show it.
+- Tests: `tests/test_0303.py` (progress text, cache round trip and invalidation, move timing cached = uncached, merged
+  replays not rewritten, the pre-pass reads each recording once then nothing, erased recordings' caches removed).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import time as _time
+
 import numpy as np
 
 
@@ -58,6 +60,7 @@ class MLP:
         t = 0
         best = (np.inf, None, 0)
         history = []
+        t_log = _time.monotonic()
         for ep in range(epochs):
             order = rng.permutation(len(y))
             for s in range(0, len(y), batch):
@@ -76,8 +79,10 @@ class MLP:
                 best = (va, ([W.copy() for W in self.W], [b.copy() for b in self.b]), ep)
             elif ep - best[2] >= patience:
                 break
-            if log and ep % 20 == 0:
-                log(f"  epoch {ep}: train loss {tr:.3f}, validation loss {va:.3f}")
+            if log and (ep % 20 == 0 or _time.monotonic() - t_log >= 3.0):
+                t_log = _time.monotonic()      # 0.30.3: at least every 3 s, with how far it may still go
+                log(f"  epoch {ep + 1} of up to {epochs} (stops early when the held-out loss stops improving): "
+                    f"train loss {tr:.3f}, validation loss {va:.3f}")
         if best[1] is not None:
             self.W, self.b = best[1]
         return {"epochs": len(history), "best_epoch": best[2], "best_val_loss": round(float(best[0]), 4),
@@ -122,6 +127,7 @@ class MLP:
         t = 0
         best = (np.inf, None, 0)
         history = []
+        t_log = _time.monotonic()
         for ep in range(epochs):
             order = rng.permutation(len(a))
             for s_ in range(0, len(a), batch):
@@ -140,8 +146,10 @@ class MLP:
                 best = (va, ([W.copy() for W in self.W], [b.copy() for b in self.b]), ep)
             elif ep - best[2] >= patience:
                 break
-            if log and ep % 10 == 0:
-                log(f"  epoch {ep}: train loss {tr:.4f}, validation loss {va:.4f}")
+            if log and (ep % 20 == 0 or _time.monotonic() - t_log >= 3.0):
+                t_log = _time.monotonic()
+                log(f"  epoch {ep + 1} of up to {epochs} (stops early when the held-out loss stops improving): "
+                    f"train loss {tr:.4f}, validation loss {va:.4f}")
         if best[1] is not None:
             self.W, self.b = best[1]
         return {"epochs": len(history), "best_epoch": best[2], "best_val_loss": round(float(best[0]), 5),

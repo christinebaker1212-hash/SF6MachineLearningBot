@@ -128,54 +128,98 @@ def perspectives(rows: list[dict]) -> list[dict]:
     return out
 
 
-def summarize(root: Path, write: bool = True) -> dict:
+def summarize(root: Path, write: bool = True, log=print) -> dict:
     """Group datasets/replays/*.jsonl.gz by fingerprint, merge each group, write datasets/merged/,
-    and report what is usable for training."""
+    and report what is usable for training. 0.30.3: fingerprints are cached per replay, a replay is read only when it
+    has to be compared or merged, and a merged file is rewritten only when its source replays changed (rewriting all of
+    them made every later step treat them as new)."""
+    import hashlib
+    from . import file_cache as fc
+    from .eta import Progress
     src = Path(root) / "replays"
     files = sorted(src.glob("*.jsonl.gz")) if src.exists() else []
     groups: dict = {}
     unmatched = []
+    rows_of = {f: fc.Rows(f) for f in files}
+    prog = Progress("replay merge", len(files), log=log)
     for f in files:
-        rows = load_rows(f)
-        fp = fingerprint(rows)
+        fp = fc.get(root, "fingerprint", f, lambda: fingerprint(rows_of[f].get()), version=1)
         if fp is None:
             unmatched.append(f.name)
-            groups[f"single:{f.name}"] = [(f, rows)]
-            continue
-        for n in range(100):  # same coarse key but different matches -> separate groups
-            key = f"{fp}#{n}"
-            if key not in groups or same_match(groups[key][0][1], rows):
-                groups.setdefault(key, []).append((f, rows))
-                break
+            groups[f"single:{f.name}"] = [f]
+        else:
+            for n in range(100):  # same coarse key but different matches -> separate groups
+                key = f"{fp}#{n}"
+                if key not in groups or same_match(rows_of[groups[key][0]].get(), rows_of[f].get()):
+                    groups.setdefault(key, []).append(f)
+                    break
+        prog.step()
+    prog.done()
     out_dir = Path(root) / "merged"
     report = {"recordings": len(files), "unique_matches": len(groups), "matches": [],
               "recordings_without_ko": unmatched, "samples_total": 0, "samples_by_character": {}}
     for key, recs in groups.items():
-        merged = merge([rows for _, rows in recs])
-        cov = coverage(merged)
-        singles = [coverage(rows)["coverage_pct"] for _, rows in recs]
-        chars = [None, None]
-        for r in merged:
-            for i, pk in enumerate(("p1", "p2")):
-                c = (r.get(pk) or {}).get("chara")
-                if isinstance(c, int):
-                    chars[i] = c
-        names = [character_name(c) for c in chars]
-        n_samples = 2 * cov["in_fight_frames"]
+        sigs = [fc.sig(f) for f in recs]
+        names = [character_name(c) for c in _group_chars(root, recs, rows_of)]
+        stem = f"{file_stem(names[0])}_vs_{file_stem(names[1])}_{hashlib.sha1(key.encode()).hexdigest()[:8]}"
+        p = out_dir / f"{stem}.jsonl.gz"
+        mp = out_dir / f"{stem}.meta.json"
+        entry = None
+        if write and p.exists():
+            try:
+                old = json.loads(mp.read_text(encoding="utf-8"))
+                if old.get("source_sigs") == sigs:
+                    entry = {k: v for k, v in old.items() if k != "source_sigs"}
+            except (OSError, ValueError):
+                entry = None
+        if entry is None:
+            merged = merge([rows_of[f].get() for f in recs])
+            cov = coverage(merged)
+            singles = [coverage(rows_of[f].get())["coverage_pct"] for f in recs]
+            chars = [None, None]
+            for r in merged:
+                for i, pk in enumerate(("p1", "p2")):
+                    c = (r.get(pk) or {}).get("chara")
+                    if isinstance(c, int):
+                        chars[i] = c
+            names = [character_name(c) for c in chars]
+            entry = {"characters": names, "recordings": [f.name for f in recs],
+                     "coverage_each_pct": singles, **cov, "training_samples": 2 * cov["in_fight_frames"]}
+            if write:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                with gzip.open(p, "wt", encoding="utf-8") as fh:
+                    for r in merged:
+                        fh.write(json.dumps(r, separators=(",", ":")) + "\n")
+                mp.write_text(json.dumps(dict(entry, source_sigs=sigs), indent=2))
+        for f in recs:
+            rows_of[f].drop()
+        n_samples = entry["training_samples"]
         report["samples_total"] += n_samples
-        for nm in names:
-            report["samples_by_character"][nm] = report["samples_by_character"].get(nm, 0) + cov["in_fight_frames"]
-        entry = {"characters": names, "recordings": [f.name for f, _ in recs],
-                 "coverage_each_pct": singles, **cov, "training_samples": n_samples}
+        for nm in entry["characters"]:
+            report["samples_by_character"][nm] = report["samples_by_character"].get(nm, 0) + entry["in_fight_frames"]
         if write:
-            out_dir.mkdir(parents=True, exist_ok=True)
-            import hashlib
-            stem = f"{file_stem(names[0])}_vs_{file_stem(names[1])}_{hashlib.sha1(key.encode()).hexdigest()[:8]}"
-            p = out_dir / f"{stem}.jsonl.gz"
-            with gzip.open(p, "wt", encoding="utf-8") as fh:
-                for r in merged:
-                    fh.write(json.dumps(r, separators=(",", ":")) + "\n")
-            (out_dir / f"{stem}.meta.json").write_text(json.dumps(entry, indent=2))
             entry["file"] = str(p)
         report["matches"].append(entry)
     return report
+
+
+def _group_chars(root: Path, recs: list, rows_of: dict) -> list:
+    """The two characters' ids of a group of recordings of one match (the last id seen per side), cached per file."""
+    from . import file_cache as fc
+    chars = [None, None]
+    for f in recs:
+        ids = fc.get(root, "chara_ids", f, lambda: _last_ids(rows_of[f].get()), version=1)
+        for i in (0, 1):
+            if ids[i] is not None:
+                chars[i] = ids[i]
+    return chars
+
+
+def _last_ids(rows: list[dict]) -> list:
+    out = [None, None]
+    for r in rows:
+        for i, pk in enumerate(("p1", "p2")):
+            c = (r.get(pk) or {}).get("chara")
+            if isinstance(c, int):
+                out[i] = c
+    return out

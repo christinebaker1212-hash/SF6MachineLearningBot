@@ -4,14 +4,19 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.30.2**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.30.3**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.30.2 is pushed** (CLAUDE.md "0.30.1"; 0.30.2 took out an unmeasured wall-splat guess): after the bot's Drive Impact crumples the opponent,
+**State:** **0.30.3 is pushed** (CLAUDE.md "0.30.3"): B and X cache their work per recording (only new recordings are
+read; the first B after updating fills the cache), move timing no longer holds every recording in memory, and both print
+progress as they run (step N of 8, recordings done of how many, time left, epochs). Next (user's order): playing
+characters other than Ryu without affecting Ryu (task in progress; see the plan in the session).
+
+**Before that:** **0.30.2 was pushed** (CLAUDE.md "0.30.1"; 0.30.2 took out an unmeasured wall-splat guess): after the bot's Drive Impact crumples the opponent,
 it picks the follow-up with the biggest expected damage for the Super / Drive it has (combos ending in SA3 / SA2 / SA1,
 composed combos, supers alone), damage estimated hit by hit with the DI as hit 1. Check `supers.crumple_followups` /
 `crumple_estimates` in the next run's summaries.

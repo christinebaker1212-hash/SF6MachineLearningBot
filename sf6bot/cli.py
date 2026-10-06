@@ -594,7 +594,12 @@ def cmd_move_map(args, cfg):
     if not (root / "framedata").exists():
         print("No Capcom frame data yet: run F first (the map matches inputs against Capcom's move list).")
         return
+    t0 = _time.monotonic()
+    print("Learning move ids from every recording (only new or changed recordings are read; the rest come from the "
+          "cache)...", flush=True)
     maps = build_maps(root)
+    from .eta import fmt
+    print(f"Move ids done in {fmt(_time.monotonic() - t0)}.", flush=True)
     checks = {}
     for name, m in maps.items():
         truth = catalog_truth(root, name)
@@ -623,25 +628,41 @@ def cmd_train(args, cfg):
     from .win_model import train as train_win
     root = Path(cfg.get("datasets", {}).get("root", "datasets"))
     bg = getattr(args, "background", False)
+    # 0.30.3 (user: "Could I at least have more feedback on what and how much is done ... as it's running?"): a header per
+    # step, progress lines inside each (recordings done of how many, time left), the time each step took. Each step's
+    # result per recording is cached (file_cache.py): after the first run only new recordings are read.
+    from .eta import Steps
+    steps = Steps(["merge repeat replays", "read new recordings once", "copy-a-player network", "move reach",
+                   "move timing", "win model", "combos found in recordings", "style table"])
+    steps.start("merge repeat replays")
     if (root / "replays").exists():
         summarize(root)          # merge repeat recordings of the same replay first
+    steps.start("read new recordings once")
+    from .train_prefill import prefill
+    prefill(root, log=print)
+    steps.start("copy-a-player network")
     rep = train(root, log=print)
     from .reach import build as build_reach
+    steps.start("move reach")
     reach = build_reach(root, log=print)
     rep["reach"] = reach
     # 0.23.0: every opponent id's timing (total, on-block, active frames, follow-through ids) for the punish engine
+    steps.start("move timing")
     try:
         from .move_timing import build as build_timing
         rep["move_timing"] = build_timing(root, log=print)
     except Exception as e:                       # noqa: BLE001 - the shipped table stays in use
         print(f"Move timing failed: {e}")
+    steps.start("win model")
     wrep = train_win(root, log=print)
     from .combo_mining import build as mine_combos
+    steps.start("combos found in recordings")
     try:
         wrep["mined_combos"] = mine_combos(root, log=print)
     except Exception as e:                       # noqa: BLE001 - the networks are trained either way
         print(f"Combo mining failed: {e}")
     # 0.21.0: the style table of the bot's character from every replay with it (play neutral like those players)
+    steps.start("style table")
     try:
         from . import style as _style
         from .fighter import load_fighter_config
@@ -660,6 +681,7 @@ def cmd_train(args, cfg):
         (out / "meta.json").write_text(json.dumps({"kind": "train"}, indent=1))
     (out / "brain_report.md").write_text(report_md(rep), encoding="utf-8")
     (out / "win_report.md").write_text(win_md(wrep), encoding="utf-8")
+    steps.finish()
     print(report_md(rep))
     print(win_md(wrep))
     print("The fighter uses the new models from the next match on (menus V, N, H).")

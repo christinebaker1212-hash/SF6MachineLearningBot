@@ -162,13 +162,17 @@ def count(files: list[tuple[list[dict], str, str]]) -> dict:
 
 def build(ds_root: Path, character: str, log=print) -> dict | None:
     """Count a style table from every recorded replay with this character (both sides). None without any."""
+    from .eta import Progress
     sides = _replay_sides(ds_root, character)
     files = []
+    prog = Progress(f"style table ({character})", len(sides), log=log, unit="replay sides")
     for gz, me, op in sides:
+        prog.step()
         try:
             files.append(([json.loads(line) for line in gzip.open(gz, "rt", encoding="utf-8")], me, op))
         except (OSError, ValueError, EOFError):
             continue
+    prog.done()
     if not files:
         return None
     t = count(files)

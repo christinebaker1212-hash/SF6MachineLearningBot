@@ -86,8 +86,12 @@ def recordings(ds_root: Path) -> list[dict]:
 
 def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
     from .sample_cache import file_samples
+    from .eta import Progress
     samples, info = [], []
-    for ri, r in enumerate(recordings(ds_root)):
+    recs = recordings(ds_root)
+    prog = Progress("win model samples", len(recs), log=log)
+    for ri, r in enumerate(recs):
+        prog.step()
         try:
             s = file_samples(r["path"], ds_root)
         except (OSError, ValueError, EOFError) as e:
@@ -104,6 +108,7 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
                 samples.append(x)
                 kept += 1
         info.append({"file": r["path"].name, "source": r["source"], "samples": kept})
+    prog.done()
     return samples, info
 
 

@@ -153,6 +153,31 @@ def _names(character: str, ds_root: Path, fcfg: dict | None) -> tuple[dict, dict
     return names, totals
 
 
+CACHE_V = 1     # bump when mine() changes
+
+
+def _chars(rows: list[dict]) -> list[str]:
+    """[P1's character name, P2's] of a recording."""
+    return [character_name(next((r[pk].get("chara") for r in rows if isinstance((r.get(pk) or {}).get("chara"), int)),
+                                None)) for pk in ("p1", "p2")]
+
+
+def file_combos(ds_root: Path, p: Path, src, names: dict, fcfg: dict | None = None):
+    """(characters, [(side, combos)]) of one recording, cached (0.30.3): the characters first (cheap once cached), then
+    the combos, keyed by the move names known for those characters (a new catalog / move map re-mines that character's
+    recordings). `names` is filled as characters come up; `src` is a file_cache.Rows."""
+    from . import file_cache as fc
+    chars = fc.get(ds_root, "chars", p, lambda: _chars(src.get()), version=1)
+    for name in chars:
+        if name not in names:
+            names[name] = _names(name, ds_root, fcfg)
+    extra = fc.digest([[nm, sorted(names[nm][0].items()), sorted(names[nm][1].items())] for nm in chars])
+    found = fc.get(ds_root, "mining", p, lambda: [
+        (i, mine(src.get(), atk, dfn, *names[chars[i]]))
+        for i, (atk, dfn) in enumerate((("p1", "p2"), ("p2", "p1")))], extra=extra, version=CACHE_V)
+    return chars, found
+
+
 def build(ds_root: Path, log=print, fcfg: dict | None = None) -> dict:
     """Mine every recording (replays, merged, fights: both players) -> datasets/combos_mined/<Character>.json."""
     from .brain import recordings
@@ -161,18 +186,21 @@ def build(ds_root: Path, log=print, fcfg: dict | None = None) -> dict:
     files += [p for p in sorted((ds_root / "fights").glob("*.jsonl.gz")) if p not in files]
     agg: dict = defaultdict(dict)
     names: dict = {}
+    from . import file_cache as fc
+    from .eta import Progress
+    prog = Progress("combo mining", len(files), log=log)
     for p in files:
+        prog.step()
+        src = fc.Rows(p)
         try:
-            rows = read_recording(p)
+            chars, found = file_combos(ds_root, p, src, names, fcfg)
         except (OSError, ValueError, EOFError) as e:
             log(f"  skipped {p.name}: {e}")
             continue
-        for atk, dfn in (("p1", "p2"), ("p2", "p1")):
-            ch = next((r[atk].get("chara") for r in rows if isinstance((r.get(atk) or {}).get("chara"), int)), None)
-            name = character_name(ch)
-            if name not in names:
-                names[name] = _names(name, ds_root, fcfg)
-            for c in mine(rows, atk, dfn, *names[name]):
+        src.drop()
+        for i, combos in found:
+            name = chars[i]
+            for c in combos:
                 key = c["route"] + (" [corner]" if c["corner"] else "")
                 e = agg[name].setdefault(key, {"route": c["route"], "ids": c["ids"], "conn": c["conn"],
                                                "moves": c["moves"], "corner": c["corner"], "seen": 0,
@@ -184,6 +212,7 @@ def build(ds_root: Path, log=print, fcfg: dict | None = None) -> dict:
                 e["drive"], e["super"] = min(e["drive"], c["drive"]), min(e["super"], c["super"])
                 if p.name not in e["files"] and len(e["files"]) < 5:
                     e["files"].append(p.name)
+    prog.done()
     out = {}
     d = ds_root / "combos_mined"
     d.mkdir(parents=True, exist_ok=True)

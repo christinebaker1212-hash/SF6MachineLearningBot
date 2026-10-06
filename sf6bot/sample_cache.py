@@ -55,7 +55,7 @@ def _to_dicts(a: dict) -> list[dict]:
             for i in range(len(a["y"]))]
 
 
-def file_samples(path: Path, ds_root: Path, stride: int = 2) -> list[dict]:
+def file_samples(path: Path, ds_root: Path, stride: int = 2, rows=None) -> list[dict]:
     """Both players' decision samples of one recording, with returns; from the cache when it is current."""
     path = Path(path)
     cf = _cache_file(path, ds_root)
@@ -68,7 +68,7 @@ def file_samples(path: Path, ds_root: Path, stride: int = 2) -> list[dict]:
     except (OSError, ValueError, KeyError):
         pass
     from .game_state import read_recording
-    rows = read_recording(path)
+    rows = rows() if rows is not None else read_recording(path)     # 0.30.3: rows already read by the pre-pass
     s = it.samples(rows, players=(0, 1), stride=stride, with_return=True)
     try:
         cf.parent.mkdir(parents=True, exist_ok=True)

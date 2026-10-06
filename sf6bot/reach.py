@@ -103,6 +103,9 @@ def table(all_starts: list[dict]) -> dict:
     return out
 
 
+CACHE_V = 1     # bump when starts() changes
+
+
 def build(ds_root: Path, log=print) -> dict:
     """Measure every recording and write datasets/reach/<Character>.json. Returns {character: n moves}."""
     from . import __version__
@@ -111,14 +114,18 @@ def build(ds_root: Path, log=print) -> dict:
     files = [r["path"] for r in recordings(ds_root)]
     # fights: both players (the bot's own reach too); recordings() keeps only the opponent there
     files += [p for p in sorted((ds_root / "fights").glob("*.jsonl.gz")) if p not in files]
+    from . import file_cache as fc
+    from .eta import Progress
     st = []
+    prog = Progress("move reach", len(files), log=log)
     for p in files:
         try:
-            rows = read_recording(p)
+            # 0.30.3: each recording's starts are cached (only new recordings are read)
+            st += fc.get(ds_root, "reach", p, lambda: starts(read_recording(p)), version=CACHE_V)
         except (OSError, ValueError, EOFError) as e:
             log(f"  reach: skipped {p.name}: {e}")
-            continue
-        st += starts(rows)
+        prog.step()
+    prog.done()
     tab = table(st)
     out_dir = ds_root / "reach"
     out_dir.mkdir(parents=True, exist_ok=True)

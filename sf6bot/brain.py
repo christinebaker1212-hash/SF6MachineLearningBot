@@ -78,9 +78,12 @@ def recordings(ds_root: Path) -> list[dict]:
 
 def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
     """All samples, each with its recording index and weight; and per-recording info."""
+    from .eta import Progress
     recs = recordings(ds_root)
     samples, info = [], []
+    prog = Progress("copy-a-player samples", len(recs), log=log)
     for ri, r in enumerate(recs):
+        prog.step()
         from .sample_cache import file_samples
         try:
             s = [x for x in file_samples(r["path"], ds_root) if x["player"] in r["players"]
@@ -96,6 +99,7 @@ def build(ds_root: Path, log=print) -> tuple[list[dict], list[dict]]:
         made_from = _meta(r["path"]).get("recordings") if r["path"].parent.name == "merged" else None
         info.append({"file": r["path"].name, "source": r["source"], "samples": len(s),
                      **({"made_from": made_from} if made_from else {})})
+    prog.done()
     return samples, info
 
 
