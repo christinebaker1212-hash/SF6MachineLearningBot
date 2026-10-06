@@ -287,7 +287,9 @@ class ZoningMixin:
                                   "clash", had["name"], None, {}))
             # 4. a neutral jump over it (in burnout, or with too little Drive to parry): no Drive lost, no ground gained
             jn = self._zn_jump(s, False)
-            if jn["clear"] and (jn["cross"] or 0) - jn["takeoff"] >= int(zc.get("neutral_jump_min_tau", 8)):
+            # 0.29.0: not over a projectile into a charged [2]8 anti-air (Sonic Boom, then Flash Kick)
+            if jn["clear"] and (jn["cross"] or 0) - jn["takeoff"] >= int(zc.get("neutral_jump_min_tau", 8)) \
+                    and not self.charged_anti_air(ahead=max(0, jn["land_k"] - s["k"])):
                 cands.append((self._zn_learned("jump_over", float(zc.get("jump_over_value_burnout" if burn else
                                                                          "jump_over_value", 0.25 if burn else -0.1))),
                               "jump_over", "neutral jump", None, jn))
@@ -382,7 +384,7 @@ class ZoningMixin:
             return None
         # 0.28.0: not into an up-charge anti-air (a [2]8 move, Guile's Flash Kick) the thrower will have ready when the
         # bot comes down (charge.py: 45 frames held, kept 12 after leaving it)
-        if "2" in getattr(self, "_op_charges", ()) and self.op_charge.ready("2", self._now, ahead=max(0, jp["land_k"] - s["k"])):
+        if self.charged_anti_air(ahead=max(0, jp["land_k"] - s["k"])):
             self.zn_stats["charge_ready"] = self.zn_stats.get("charge_ready", 0) + 1
             return None
         return jp

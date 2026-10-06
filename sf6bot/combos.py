@@ -463,12 +463,45 @@ def _norm_token(tok: str) -> tuple[str, list[str]]:
     return t, mods
 
 
+# 0.29.0 (user, 2026-10-06: held buttons, e.g. Ryu's SA2): the community writes the level of a held move in words
+# ('Full Charge 214214P', '214214P ( hold 1 )', '214214M partial hold', 'Lv.3 Super'). It picks Capcom's level row
+# ('SA2 Shin Hashogeki（Lv3）'), whose sequence keeps the button down (framedata.annotate_holds). Without a word the
+# plain (Lv1 / tapped) row stays.
+_HOLD_WORDS = ((3, re.compile(r"\b(?:full(?:y)?\s*charge[ds]?|max(?:imum)?\s*charge|(?:lv\.?|level)\s*3|hold\s*2)\b",
+                              re.I)),
+               (2, re.compile(r"\b(?:partial\s*(?:hold|charge)|half\s*charge|(?:lv\.?|level)\s*2|hold\s*1|hold)\b", re.I)))
+
+
+def _hold_word(tok: str) -> tuple[int | None, str]:
+    for lvl, rx in _HOLD_WORDS:
+        if rx.search(tok):
+            return lvl, re.sub(r"\s+", " ", rx.sub(" ", tok)).strip(" ,")
+    return None, tok
+
+
+def _level_row(row: dict, lvl: int, capcom_moves: list[dict]) -> dict | None:
+    """The row of the same move at hold level `lvl` (2 / 3), else its '(Charged)' row."""
+    from .framedata import hold_base, hold_level
+    base = hold_base(row["name"])
+    rows = [m for m in capcom_moves if hold_base(m["name"]) == base and m["name"] != row["name"]]
+    return (next((m for m in rows if hold_level(m["name"]) == lvl), None)
+            or next((m for m in rows if hold_level(m["name"]) == "c"), None))
+
+
 def resolve(route: str, capcom_moves: list[dict]) -> dict:
     """Match each move of a route to a Capcom row name. Generic buttons (623P) match the L version
     and are marked generic; '~ 6HK' after 236HK resolves to the '(During Jinrai Kick) 6+HK' row."""
     idx = _capcom_index(capcom_moves)
     steps, unresolved, prev = [], [], None
     for conn, tok in split_route(route):
+        lvl, tok = _hold_word(tok)
+        if lvl is not None and not tok.strip(" .") or re.fullmatch(r"(?:then\s+)?release", tok.strip(), re.I):
+            # 'hold' / 'then release' written as a step of its own: the level of the move before it
+            if prev is not None and lvl is not None and prev.get("name"):
+                lv = _level_row({"name": prev["name"]}, lvl, capcom_moves)
+                if lv is not None:
+                    prev.update(name=lv["name"], hold_level=lvl, startup=lv.get("startup_n"))
+            continue
         key, mods = _norm_token(tok)
         if re.fullmatch(r"SA[123]", key.upper()):
             hit = next((m for m in capcom_moves if m["name"].upper().startswith(key.upper() + " ")), None)
@@ -521,6 +554,11 @@ def resolve(route: str, capcom_moves: list[dict]) -> dict:
                 tc = next((m for m in capcom_moves if (m.get("input") or "").replace("+", "") ==
                            f"{prev.get('input_key', '')}>{key.lstrip('5')}"), None)
                 row = tc
+        if row is not None and lvl is not None:
+            lv = _level_row(row, lvl, capcom_moves)
+            if lv is not None:
+                row = lv
+                step["hold_level"] = lvl
         if row is not None:
             step["name"] = row["name"]
             step["startup"] = row.get("startup_n")

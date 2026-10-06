@@ -3827,6 +3827,53 @@ that cancel timing." All MOCK / replay-tested (`tests/test_0280.py`); nothing he
   earlier conclusive failures are retried. The fighter (Ryu) has no charge moves; a charge character in matches would need
   a pre-charge of its own (crouch-blocking down-back already charges).
 
+## 0.29.0: held buttons; charge for every charge character, in the lab and in matches (user, 2026-10-06)
+User: "This extends to all charge characters, so it's important the bot knows how to perform and defend against it. The
+final issue is that the bot doesn't know how to handle any move that requires a held button, eg, Ryu's SA2 hold frames."
+All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is verified in game.
+### Held buttons (`framedata.annotate_holds`, `held`, `button_start`)
+- Capcom lists each level as its own row ("SA2 Shin Hashogeki（Lv2）", "L Gou Hadoken(Lv3)", "H Spiral Arrow(Charged)") and
+  writes the hold in the notes, in five wordings, e.g. Ryu SA2 "Changes to Level 2 version if the button is held for more
+  than 7 frames and then released ... Level 3 ... more than 39"; Akuma "Hold and release the button for 25 frames or more to
+  activate Level 2"; Ingrid "Holding the button for 30 frames or more transitions to level 2"; Cammy "Hold the button for
+  more than 16 frames"; Dhalsim "Hold the button for 29 frames and the held button version will be performed
+  automatically" (and his SA2's own "over 140 / 188 frames" per row).
+- A level row's sequence presses the move and keeps the button down, then lets go: a middle level to the middle of its
+  window (Ryu SA2 Lv2: 24 frames, inside 8-39), the top level to its threshold + `HOLD_MARGIN` 8 (Ryu Lv3: 48). Whether a
+  super's freeze counts toward the hold is not known: the middle of the window leaves room either way.
+- Rows with no length written (Luke's Flash Knuckle, Marisa, Mai, Rashid, Sagat's Tiger Uppercut, Ed, Zangief's 5HP
+  "(Charged)"): held through the charged version's own Capcom start-up + 2 (ESTIMATE: held that long it comes out charged
+  whether or not it releases by itself). Alex's "(Hold) HP" rows with no start-up, stance follow-ups and Ingrid's Sun Crest
+  levels (resources, not holds) stay skipped. Across the 31 characters: 62 level rows performable, 14 not.
+- Catalog (`catalog_moves`): the level rows are performed too (Ryu 53 -> 55 moves: SA2 Lv2 / Lv3).
+- Combo lab: the community's words pick the level row (`combos._HOLD_WORDS`): "Full Charge 214214P" / "max charge" /
+  "Lv.3" -> Lv3, "214214P ( hold 1 )" / "partial hold" / "Lv.2" / "hold" -> Lv2 (also a "hold" written as its own step
+  after the move); without a word the tapped Lv1 row stays. Ryu: "DC , Full Charge 214214P , PDR , ..." -> SA2 Lv3;
+  "Denjin 214214P ( hold 1 )" -> [Denjin Charge] SA2 Lv2. The held tail counts as the button: the motion pre-send
+  (`motion_part`), the rest after it (`button_part`) and the prefix (`_prefix_frames`) treat "4+HP@3 5+HP@45" as one press.
+- `LAB_RULES` = 0.29.0: routes that failed under the old rules are retried on the next K.
+### Charge in matches, for any charge character
+- The bot's own charge is tracked from its input mask (`fighter.own_charge`). In a match there is no time to pre-charge, so a
+  route whose charge move needs the charge from the route's start (`apply_charge`, 0.28.0) goes out only when the bot
+  already holds that charge (a crouch-block charges both); otherwise it ends on the move before the charge move
+  (`perform_route(charged=...)`, `cut_for_charge`; nothing at all if that is the first move: "no charge held"). The lab
+  pre-charges as before. Ryu has no charge moves: this matters once the bot plays a charge character.
+### Defending against charge characters (`fighter.opponent_charge_reversals`, `op_charge_reversal`, `charged_anti_air`)
+- From Capcom's rows: the opponent's charge specials ([2]8 / [4]6) noted invincible. Strike-invincible ones are reversals
+  (`interrupt_class` "all": Guile's OD Somersault Kick, Blanka's OD Vertical Rolling Attack, Dee Jay's OD Jackknife Maximum;
+  OD = 2 Drive bars, the opponent's Drive checked); ones invincible only to air attacks (L / M / H Somersault Kick) are
+  anti-airs.
+- The opponent's charge is followed from its input mask (`op_charge`, 45 frames to charge, kept 10 / 12 frames after
+  leaving it). A charge character blocking or getting up holding down-back has it charged:
+  - an invincible charge reversal charged and affordable on its wake-up, in corner pressure or after the bot's blocked
+    rushed normal: the meaty / frame trap and the throw lose 1.5 / 1.0, as for an invincible super in the bar
+    (`reversal_respect`; `charge.respected`)
+  - a [2]8 move charged (now or by the time a jump would land): no jump option in the defence game (within 2.5), no
+    neutral jump over its projectile, no fireball jump-in (`charge.jumps_held`, `fireballs.charge_ready`)
+- Match summary `charge` {respected, jumps_held, opponent_charges, reversals}.
+- Unverified: that the opponent's input mask carries its directions online (offline and in replays it does; 0.17.0 records
+  `opponent_inputs_seen`).
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

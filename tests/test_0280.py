@@ -259,3 +259,130 @@ def test_perform_route_pre_charges_and_holds_the_charge_between_moves():
     assert calls[1][0] == "m0" and calls[1][2] is False                  # ends still holding down-back
     assert calls[2][0] == "m1" and "6+LP" in calls[2][1].replace(" ", "")   # only the release on the cancel
     assert res["success"], res
+
+
+# ---- 0.29.0: held buttons -----------------------------------------------------------------------------------------------
+
+def _ryu_rows():
+    import gzip
+    from sf6bot.framedata import parse_frame_page
+    return parse_frame_page(gzip.open(Path(__file__).parent / "data" / "capcom_ryu_frame_table.html.gz", "rt",
+                                      encoding="utf-8").read())
+
+
+def test_ryu_sa2_levels_hold_the_button_inside_their_windows():
+    """The user: "the bot doesn't know how to handle any move that requires a held button, eg, Ryu's SA2 hold frames".
+    Capcom: Level 2 if held more than 7 frames, Level 3 more than 39."""
+    from sf6bot.framedata import _prefix_frames, annotate_holds, to_sequence
+    rows = {r["name"]: r for r in annotate_holds(_ryu_rows())}
+    lv1, lv2, lv3 = (rows[f"SA2 Shin Hashogeki（Lv{n}）"] for n in (1, 2, 3))
+    assert "hold_frames" not in lv1 and to_sequence(lv1)[0].endswith("4+HP@3")
+    assert 8 <= lv2["hold_frames"] <= 39 and lv3["hold_frames"] > 40
+    s2 = to_sequence(lv2)[0]
+    assert s2.endswith(f"4+HP@3 5+HP@{lv2['hold_frames'] - 3}") and _prefix_frames(s2) == 15
+
+
+def test_hold_thresholds_from_every_wording():
+    from sf6bot.framedata import annotate_holds
+    rows = [{"name": "L Gou Hadoken(Lv1)", "input": "236+LP", "notes": "Hold and release the button for 25 frames or more "
+             "to activate Level 2 / Hold and release the button for 49 frames or more to activate Level 3"},
+            {"name": "L Gou Hadoken(Lv2)", "input": "236+(Hold) LP", "notes": ""},
+            {"name": "L Gou Hadoken(Lv3)", "input": "236+(Hold) LP", "notes": ""},
+            {"name": "H Spiral Arrow(Charged)", "input": "236+(Hold) HK",
+             "notes": "Hold the button for more than 16 frames to change its properties"},
+            {"name": "L Flash Knuckle(Charged)", "input": "214+(Hold) LP", "notes": "", "startup_n": 30},
+            {"name": "Standing Heavy Punch(Charged)", "input": "(Hold) HP", "notes": ""}]
+    h = {r["name"]: r.get("hold_frames") for r in annotate_holds(rows)}
+    assert 25 <= h["L Gou Hadoken(Lv2)"] < 49 and h["L Gou Hadoken(Lv3)"] >= 49
+    assert h["H Spiral Arrow(Charged)"] >= 17 and h["L Flash Knuckle(Charged)"] == 32
+    assert h["Standing Heavy Punch(Charged)"] is None          # no length known: not performed
+
+
+def test_community_hold_words_pick_the_level_row():
+    from sf6bot.combos import resolve
+    rows = _ryu_rows()
+    full = resolve("DC , Full Charge 214214P , PDR , 2HP > 623HP", rows)
+    assert any(s.get("name") == "SA2 Shin Hashogeki（Lv3）" for s in full["steps"]) and not full["unresolved"]
+    part = resolve("PC 236HK , Denjin 214214P ( hold 1 ), PDR ~ 2HP", rows)
+    assert any(s.get("name") == "[Denjin Charge]SA2 Shin Hashogeki（Lv2）" for s in part["steps"])
+    plain = resolve("5HP > Denjin 214PP > 214214P", rows)
+    assert any(s.get("name") == "SA2 Shin Hashogeki（Lv1）" for s in plain["steps"])
+
+
+def test_a_held_super_is_presented_whole_after_its_motion():
+    from sf6bot.combo_lab import button_part, motion_part
+    seq = "2@3 1@3 4@3 2@3 1@3 4+HP@3 5+HP@45"
+    assert motion_part(seq) == "2@3 1@3 4@3 2@3 1@3 4@1" and button_part(seq) == "4+HP@3 5+HP@45"
+    assert motion_part("2@3 3@3 6+HP@3") == "2@3 3@3 6@1" and button_part("2@3 3@3 6+HP@3") == "6+HP@3"
+
+
+# ---- 0.29.0: charge characters in matches -------------------------------------------------------------------------------
+
+def test_a_match_route_needing_a_charge_not_held_ends_before_the_charge_move():
+    import threading
+    from types import SimpleNamespace
+    from sf6bot import combo_lab as cl
+    from tests.test_combo_lab import DUMMY_IDLE, MOVES, NEUTRAL, Sim, _steps
+    moves = [MOVES[0], dict(MOVES[2], conn=">")]
+    steps = _steps(moves)
+    steps[0].update(sequence="1+LP@3 1@1", charge_hold="4")
+    steps[1].update(sequence="6+LP@3", prefix=0, charge={"dir": "4", "held_from": 0, "precharge": True})
+    sim, sent = Sim(moves, lead=4), []
+
+    class Q:
+        n = 0
+
+        def get(self, timeout=None):
+            Q.n += 1
+            if Q.n > 200:
+                raise TimeoutError
+            return SimpleNamespace(ready=True, raw=sim.tick())
+
+    def run(seq, stop_event=None, end_neutral=True):
+        sent.append(seq.name)
+        if seq.name in ("m0", "m1"):
+            sim.send(int(seq.name[1]), 0)
+        return [], True
+    reader = SimpleNamespace(subscribe=lambda: Q(), unsubscribe=lambda q: None)
+    sess = SimpleNamespace(stop_event=threading.Event(), controller=SimpleNamespace(set_facing=lambda f: None))
+    res = cl.perform_route(sess, reader, SimpleNamespace(run=run), steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), timeout=2.0,
+                           confirm=True, charged=set())
+    assert "m1" not in sent and "pre-charge" not in sent and res.get("cut_for_charge") == 1
+    Q.n, sent[:] = 0, []
+    sim = Sim(moves, lead=4)
+    res = cl.perform_route(sess, reader, SimpleNamespace(run=run), steps, {}, {NEUTRAL}, {DUMMY_IDLE}, set(), timeout=2.0,
+                           confirm=True, charged={"4"})
+    assert "m1" in sent
+
+
+def test_a_charged_flash_kick_is_respected_on_their_wake_up_and_against_jumps():
+    f = _akuma()
+    f.op_charge_revs = [{"name": "OD Somersault Kick", "charge": "2", "drive": 20000, "anti_air": True}]
+    f._op_charges = {"2"}
+    for k in range(50):                                        # crouching down-back on the ground for 50 frames
+        f.observe_line(state(op={"x": 1.0, "action_id": 330, "input": 0x2 | 0x8, "drive": 60000}, timer=900 + k), 0)
+    ex, bonus, turn = f._turn("their_wakeup", state()["p1"], {"drive": 60000, "x": 1.0}, 1.0)
+    assert bonus.get("meaty", 0) < 0 and bonus.get("throw", 0) < 0 and "charged" in turn and "jump" in ex
+    assert f.charged_anti_air()
+    f.observe_line(state(op={"x": 1.0, "action_id": 1, "input": 0, "drive": 60000}, timer=950), 0)
+    assert f.charged_anti_air()                               # kept 12 frames after leaving the charge
+    for k in range(13):
+        f.observe_line(state(op={"x": 1.0, "action_id": 1, "input": 0, "drive": 60000}, timer=951 + k), 0)
+    assert not f.charged_anti_air()
+
+
+def test_charge_reversals_come_from_capcoms_notes():
+    import gzip
+    import json
+    import tempfile
+    from sf6bot.fighter import opponent_charge_reversals
+    from sf6bot.framedata import parse_frame_page
+    rows = parse_frame_page(gzip.open(Path(__file__).parent / "data" / "capcom_guile_frame_table.html.gz", "rt",
+                                      encoding="utf-8").read())
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "framedata").mkdir()
+        (Path(td) / "framedata" / "guile.json").write_text(json.dumps({"moves": rows}))
+        revs = opponent_charge_reversals("Guile", Path(td))
+    names = [r["name"] for r in revs]
+    assert names and all(r["charge"] in ("2", "4") for r in revs), names
+    assert any("Somersault" in n or "Flash" in n for n in names), names

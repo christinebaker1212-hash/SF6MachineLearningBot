@@ -101,7 +101,8 @@ def test_capcom_inputs_to_sequences():
     assert to_sequence(by_name["CA Shin Shoryuken"])[0] is None
     todo, skipped = catalog_moves({"moves": moves})
     plain = [t for t in todo if not t.get("kind")]           # 0.10.0 adds chained rows on top
-    assert len(plain) == 53 and len({t["sequence"] for t in plain}) == 53 and len(todo) == 68
+    # 0.29.0: + SA2 Shin Hashogeki Lv2 / Lv3 (the button held: framedata.annotate_holds)
+    assert len(plain) == 55 and len({t["sequence"] for t in plain}) == 55 and len(todo) == 70
     g = _moves("guile")
     assert to_sequence(g["L Sonic Boom"])[0] == "4@47 6+LP@3"        # 0.28.0: 45F charge (user) + 2F margin
     z = _moves("zangief")

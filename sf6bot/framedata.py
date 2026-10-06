@@ -436,11 +436,117 @@ def _motion(dirs: str, btn: str, step: int) -> str:
     return " ".join(out)
 
 
+# ---- held buttons (0.29.0) ----------------------------------------------------------------------------------------------
+# The user (2026-10-06): "the bot doesn't know how to handle any move that requires a held button, eg, Ryu's SA2 hold
+# frames." Capcom lists the levels as their own rows ("SA2 Shin Hashogeki（Lv2）", "L Gou Hadoken(Lv3)", "H Spiral
+# Arrow(Charged)") and says in the notes how long the button must be held, e.g. Ryu SA2 "Changes to Level 2 version if
+# the button is held for more than 7 frames and then released ... Level 3 ... more than 39"; Akuma "Hold and release the
+# button for 25 frames or more to activate Level 2"; Ingrid "Holding the button for 30 frames or more transitions to level
+# 2"; Cammy "Hold the button for more than 16 frames to change its properties"; Dhalsim "Hold the button for 29 frames and
+# the held button version will be performed automatically". A level row's sequence presses the button and keeps it down:
+# for a middle level to the middle of its window (the press-to-count offset is not known: a super's freeze may or may not
+# count), for the top level its threshold + HOLD_MARGIN, then releases it.
+HOLD_MARGIN = 8
+_LEVEL_RE = re.compile(r"\s*[（(]\s*(?:Lv\s*(\d)|(Charged))\s*[)）]")
+_HOLD_PATTERNS = (
+    (re.compile(r"Level (\d) version if the button is held for (?:more than|over) (\d+) frames", re.I), "lvl_more"),
+    (re.compile(r"Hold(?:ing)?(?: and release)? the button for (\d+) frames or more (?:transitions to|to activate) "
+                r"level (\d)", re.I), "frames_lvl"),
+    (re.compile(r"Hold the button for more than (\d+) frames", re.I), "charged_more"),
+    (re.compile(r"Hold the button for (\d+) frames and the held button version", re.I), "charged_at"),
+)
+_HOLD_OVER = re.compile(r"Hold the button for over (\d+) frames", re.I)   # Dhalsim: the row's own level
+
+
+def hold_base(name: str) -> str:
+    """'SA2 Shin Hashogeki（Lv2）' -> 'SA2 Shin Hashogeki'."""
+    return _LEVEL_RE.sub("", name or "").strip()
+
+
+def hold_level(name: str):
+    """2 / 3 for '(Lv2)' / '(Lv3)', 'c' for '(Charged)', 1 for '(Lv1)', else None."""
+    m = _LEVEL_RE.search(name or "")
+    if not m:
+        return None
+    return "c" if m.group(2) else int(m.group(1))
+
+
+def _thresholds(notes: str) -> dict:
+    out: dict = {}
+    for rx, kind in _HOLD_PATTERNS:
+        for m in rx.finditer(notes or ""):
+            if kind == "lvl_more":
+                out.setdefault(int(m.group(1)), int(m.group(2)) + 1)
+            elif kind == "frames_lvl":
+                out.setdefault(int(m.group(2)), int(m.group(1)))
+            elif kind == "charged_more":
+                out.setdefault("c", int(m.group(1)) + 1)
+            else:
+                out.setdefault("c", int(m.group(1)))
+    return out
+
+
+def annotate_holds(moves: list[dict]) -> list[dict]:
+    """Copies of the rows, with `hold_frames` (frames the button stays down from its press) on every level row whose
+    threshold Capcom's notes give (its own notes or another row of the same move). Rows whose hold length is not
+    written anywhere (Alex's "(Hold) HP", Zangief's Cyclone Lariat) get none and stay skipped."""
+    groups: dict = {}
+    for m in moves:
+        lv = hold_level(m.get("name"))
+        if lv is not None:
+            g = groups.setdefault(hold_base(m["name"]), {})
+            for k, v in _thresholds(m.get("notes") or "").items():
+                g.setdefault(k, v)
+    out = []
+    for m in moves:
+        lv = hold_level(m.get("name"))
+        if lv in (2, 3, "c"):
+            g = groups.get(hold_base(m["name"])) or {}
+            own = _HOLD_OVER.search(m.get("notes") or "")
+            th = int(own.group(1)) + 1 if own else g.get(lv)
+            if th is not None:
+                nxt = g.get(lv + 1) if isinstance(lv, int) else None
+                hold = (th + nxt) // 2 if nxt and nxt > th + 2 else th + HOLD_MARGIN
+                m = dict(m, hold_frames=hold, hold_src="Capcom notes")
+            elif "hold" in (m.get("input") or "").lower() and isinstance(m.get("startup_n"), int):
+                # no length written (Luke's Flash Knuckle, Marisa, Mai, Rashid ...): held through the charged
+                # version's own start-up it comes out charged whether or not it releases by itself (ESTIMATE)
+                m = dict(m, hold_frames=m["startup_n"] + 2, hold_src="start-up (estimate)")
+        out.append(m)
+    return out
+
+
+def held(seq: str | None, hold: int) -> str | None:
+    """'2@3 1@3 4+HP@3' held 24 frames -> '2@3 1@3 4+HP@3 5+HP@21' (the direction is let go, the button kept)."""
+    if not seq:
+        return seq
+    head, _, fr = seq.split()[-1].partition("@")
+    btn = head.partition("+")[2]
+    if not btn:
+        return None
+    return seq + f" 5+{btn}@{max(1, int(hold) - int(fr or 3))}"
+
+
+def button_start(toks: list[str]) -> int:
+    """Index of the token that presses the move's button: the last token, or for a held button the first of the tail of
+    tokens that all hold the same buttons ('... 4+HP@3 5+HP@21' -> the '4+HP' token)."""
+    i = len(toks) - 1
+    btn = toks[i].split("@")[0].partition("+")[2] if toks else ""
+    while btn and i > 0 and toks[i - 1].split("@")[0].partition("+")[2] == btn:
+        i -= 1
+    return i
+
+
 def to_sequence(move: dict) -> tuple[str | None, str]:
     """Our sequence notation for a Capcom row, or (None, reason) if the catalog can't do it alone."""
     name, inp = move["name"], move["input"]
     if not inp or inp in ("-",) or "No input" in inp:
         return None, "no input (triggered/automatic)"
+    if move.get("hold_frames") and not name.startswith(("[", "(")):
+        # 0.29.0: a level row with a known hold: the plain input, then the button kept down (annotate_holds)
+        plain = re.sub(r"\(\s*Hold\s*\)\s*|\bHold\s+", "", inp).strip()
+        seq, why = to_sequence(dict(move, name="held", input=plain, hold_frames=None))
+        return (held(seq, move["hold_frames"]), "") if seq else (None, why)
     if name.startswith(("[", "(")) or name.startswith("CA ") or re.search(r"Lv[23]", name):
         return None, "variant (state/level/CA) of another row"
     quals = re.findall(r"\(([^()]*)\)", inp)
@@ -521,9 +627,10 @@ _CANCEL_QUAL = "While connecting with a special-cancelable move"
 
 
 def _prefix_frames(seq: str) -> int:
-    """Frames in a sequence before its last step (the step holding the final button)."""
+    """Frames in a sequence before its last step (the step holding the final button); for a held button, before the
+    step that presses it (button_start)."""
     steps = seq.split()
-    return sum(int(t.split("@")[1]) for t in steps[:-1])
+    return sum(int(t.split("@")[1]) for t in steps[:button_start(steps)])
 
 
 def _window_start(parent: dict, child_name: str) -> int | None:
@@ -715,7 +822,7 @@ def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
     Rows with the same sequence are performed once; the later rows record `same_input_as`.
     """
     todo, skipped, by_seq = [], [], {}
-    framedata = dict(framedata, moves=unique_names(framedata["moves"]))
+    framedata = dict(framedata, moves=annotate_holds(unique_names(framedata["moves"])))
     chains = chain_plans(framedata)
     for mv in framedata["moves"]:
         seq, reason = to_sequence(mv)

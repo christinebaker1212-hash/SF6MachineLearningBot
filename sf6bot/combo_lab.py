@@ -83,7 +83,7 @@ HIT_EARLY = 3          # a hit counts for a move only from its frame (start-up -
 CANDIDATE_WAIT = 4
 VARIANT_SPAN = 5           # uncatalogued ids after a special's / super's own id that count as that move
 NORMAL_VARIANT_SPAN = 2    # 0.23.0: ... after a chained normal's own id (Ryu's chained 2LP 623 after 622)
-LAB_RULES = "0.28.0"
+LAB_RULES = "0.29.0"
 EARLIER_HIT_WINDOW = 5   # 0.25.0: frames after an earlier hit's first active frame before it counts as passed (ESTIMATE)
 # 'DL' (delay) steps (user, 0.12.5: "requires a delay, sometimes a significant delay"): start DELAY_START frames
 # late and search LATER first, far, then a little earlier (offsets are added to DELAY_START)
@@ -99,7 +99,7 @@ DASH_TOTAL = 19        # Ken forward dash, catalog-measured; used when the catal
 
 def _rows_by_name(capcom: dict) -> dict:
     out: dict = {}
-    for m in capcom.get("moves", []):
+    for m in fd.annotate_holds(capcom.get("moves", [])):        # 0.29.0: level rows know their hold
         out.setdefault(m["name"], []).append(m)
     return out
 
@@ -142,9 +142,13 @@ def step_sequence(row: dict) -> tuple[str | None, str]:
         return seq, ""
     rest = re.sub(r"\([^()]*\)", " ", inp).strip()
     rest = rest.split(">")[-1]                    # target combo row 'MP>HP': this step is the last part
+    if row.get("hold_frames"):
+        rest = re.sub(r"\(\s*Hold\s*\)\s*|\bHold\s+", "", rest).strip()
     if not rest or "Hold" in rest or "/" in rest:
         return None, why or "no input"
     seq, why2 = fd.to_sequence({"name": "x", "input": rest, "section": ""})
+    if seq and row.get("hold_frames"):
+        seq = fd.held(seq, row["hold_frames"])     # 0.29.0: '[Denjin Charge]SA2 ...（Lv3）': the button kept down
     return seq, why2
 
 
@@ -2380,7 +2384,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
                   confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None,
-                  adopt: dict | None = None, precharge: bool | None = None) -> dict:
+                  adopt: dict | None = None, precharge: bool | None = None, charged: set | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2390,10 +2394,23 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     `on_step(k, raw)` (fighter, 0.24.0): called once when step k >= 1 has started; it returns (steps, fixed) to go on
     with steps k+1.. of another route with the same first k+1 moves (the combo composer), or None. `adopt` (fighter,
     0.24.0): step 0 is the move the bot is already doing (ComboRun)."""
-    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt)
     if precharge is None:
         precharge = not confirm and adopt is None
+    cut = None
+    if not precharge and charged is not None:
+        # 0.29.0: in a match there is no time to pre-charge: a charge move that needs the charge from the route's start
+        # goes out only when the bot already holds that charge (fighter: its own input mask, charge.ChargeTracker; a
+        # crouch-block charges both). Otherwise the route ends on the move before it.
+        cut = next((k for k, s_ in enumerate(steps) if (s_.get("charge") or {}).get("precharge")
+                    and not ({s_["charge"]["dir"]} & set(charged) or (s_["charge"]["dir"] == "1" and charged))), None)
+        if cut is not None and cut > 0:
+            steps = steps[:cut]
+    if cut == 0:
+        return {"success": False, "fail": {"kind": "no_charge", "step": 0}, "steps": [], "aborted": "no charge held"}
+    run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
+                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt)
+    if cut:
+        run.extra["cut_for_charge"] = cut
     if precharge and any((s_.get("charge") or {}).get("precharge") for s_ in steps):
         # 0.28.0: a route whose charge is held from its start: down-back for the full charge first (crouching does
         # not walk), still held when the first move goes out (apply_charge)
@@ -2482,7 +2499,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                 sess.controller.set_facing(side)
             seq = run.steps[k]["sequence"]
             if run.rt[k].get("motion_sent") is not None:
-                seq = seq.split()[-1]            # the motion is already in: only the button (and its direction)
+                seq = button_part(seq)           # the motion is already in: only the button (and its direction)
             run.sent(k, facing="right" if side == Facing.RIGHT else "left" if side == Facing.LEFT else None)
             # a Parry Drive Rush's parry stays held until its dash (0.20.5)
             # 0.28.0: a move held through for a later charge move ends still holding the charge (apply_charge)
@@ -2517,12 +2534,20 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
 
 def motion_part(seq: str) -> str:
     """The directions of a sequence without its button, ending on the button step's direction (held):
-    '2@3 3@3 6+HP@3' -> '2@3 3@3 6@1'."""
+    '2@3 3@3 6+HP@3' -> '2@3 3@3 6@1'. A held button's tail (0.29.0) is part of the button: '... 4+HP@3 5+HP@21'
+    -> '... 4@1'."""
     toks = seq.split()
     if not toks:
         return ""
-    last = toks[-1].split("@")[0].split("+")[0]
-    return " ".join(toks[:-1] + [f"{last}@1"])
+    b = fd.button_start(toks)
+    last = toks[b].split("@")[0].split("+")[0]
+    return " ".join(toks[:b] + [f"{last}@1"])
+
+
+def button_part(seq: str) -> str:
+    """What is left to send once the motion is in: the button step (and a held button's tail)."""
+    toks = seq.split()
+    return " ".join(toks[fd.button_start(toks):]) if toks else ""
 
 
 def _attempt(sess, reader, runner, steps, offsets, neutral_a, neutral_d, movement, lead: int = LEAD,

@@ -379,6 +379,28 @@ def opponent_reversal_supers(chara_name: str, datasets_root: Path) -> list[dict]
     return out
 
 
+def opponent_charge_reversals(chara_name: str, datasets_root: Path) -> list[dict]:
+    """0.29.0 (user: charge "extends to all charge characters, so it's important the bot knows how to perform and defend
+    against it"): the opponent's charge specials ([2]8 / [4]6 inputs) that Capcom notes as invincible (Guile's OD Flash
+    Kick ...): a reversal whenever the charge is held, e.g. on its get-up or while it blocks down-back. OD versions need
+    2 Drive bars."""
+    from . import framedata as fd
+    rows = (fd.load(chara_name, Path(datasets_root) / "framedata") or {}).get("moves") or []
+    out = []
+    for m in rows:
+        inp, n = m.get("input") or "", m.get("name") or ""
+        k = re.search(r"\[([24])\]", inp)
+        if not k or re.match(r"(SA[123]|CA)\b", n) or "invincib" not in (m.get("notes") or "").lower():
+            continue
+        if "(" in re.sub(r"\(Hold\)", "", inp):
+            continue                            # air or stance versions
+        # a reversal against meaties / throws only when invincible to strikes (interrupt_class "all"); one invincible only
+        # to airborne attacks (L Somersault Kick) still makes jumping at it a loss (charged_anti_air)
+        out.append({"name": n, "charge": k.group(1), "drive": 20000 if re.search(r"(^|\]\s*)OD ", n) else 0,
+                    "anti_air": k.group(1) == "2", "reversal": interrupt_class(m) == "all"})
+    return out
+
+
 _num = num
 
 
@@ -421,6 +443,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         # with the config's measured grabs). Rule 1d jumps the ones that take long enough to see coming.
         from .charge import ChargeTracker
         self.op_charge = ChargeTracker()   # 0.28.0: the opponent's charge from its input mask
+        self.own_charge = ChargeTracker()  # 0.29.0: the bot's own (a charge character's routes in matches)
+        self.charge_stats: dict = {}       # 0.29.0: respected (pressure held back), jumps_held (anti-air charged)
         self._op_charges: set = set()      # which charges its Capcom moves use ("4" back, "2" down)
         from .grabs import GrabBook
         self.grabs = GrabBook(None, None)
@@ -570,6 +594,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.op_onset = None                 # game frame the opponent's current action began
         self._onset_act = None
         self._prev_op_act = None             # 0.25.0 the opponent's action before its current one
+        self.op_charge_revs: list = []       # 0.29.0 opponent_charge_reversals
         self.op_rev_supers: list = []        # 0.25.0 opponent_reversal_supers: invincible Super Arts / Critical Arts
         self._ma_for = None                  # 0.25.0 move answers: the opponent action (onset) already answered
         self.answer_stats: dict = {"sent": 0, "by_move": {}, "skipped_unless": 0}
@@ -2221,6 +2246,21 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 return sv
         return None
 
+    def op_charge_reversal(self, op: dict, ahead: int = 0) -> dict | None:
+        """0.29.0: an invincible charge special the opponent has charged now (or `ahead` frames from now) and can
+        afford, or None."""
+        drive = _num(op.get("drive")) or 0
+        for cv in self.op_charge_revs:
+            if cv.get("reversal", True) and drive >= cv["drive"] and self.op_charge.ready(cv["charge"], self._line_t,
+                                                                                            ahead=ahead):
+                return cv
+        return None
+
+    def charged_anti_air(self, ahead: int = 0) -> bool:
+        """0.29.0: the opponent has a [2]8 move (Flash Kick-style anti-air, Capcom inputs) and its down charge is held
+        now or will be in `ahead` frames (charge.py: 45 frames, kept 12 after leaving it): no jumping at it."""
+        return "2" in self._op_charges and self.op_charge.ready("2", self._line_t, ahead=ahead)
+
     def opp_has_super(self, op: dict) -> bool:
         """0.20.0 (user): no Drive Impact of the bot's own while the opponent has Super meter: a Super Art beats a Drive
         Impact on reaction. (The DI-back answer to the opponent's own Drive Impact is not affected.)"""
@@ -2384,6 +2424,20 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 bonus["meaty"] = bonus.get("meaty", 0.0) - float(rc.get("meaty_penalty", 1.5))
                 bonus["throw"] = bonus.get("throw", 0.0) - float(rc.get("throw_penalty", 1.0))
                 turn = f"they have {rs['name']} in the bar"
+        # 0.29.0: no jump option into a charged [2]8 anti-air
+        if dist <= 2.5 and self.charged_anti_air(ahead=20):
+            ex.add("jump")
+            self.charge_stats["jumps_held"] = self.charge_stats.get("jumps_held", 0) + 1
+        # 0.29.0: the same for an invincible charge special whose charge the opponent holds (a charge character blocking
+        # down-back has it on every block): no meaty, throw or frame trap into it
+        cr = self.op_charge_reversal(op) if sit in ("their_wakeup", "corner", "own_rush_block") else None
+        if cr is not None and not (sit == "their_wakeup" and self.op_reversal_super(op, throws=False)):
+            rc = self.c.get("reversal_respect") or {}
+            for o_ in ("meaty", "frame_trap"):
+                bonus[o_] = bonus.get(o_, 0.0) - float(rc.get("meaty_penalty", 1.5))
+            bonus["throw"] = bonus.get("throw", 0.0) - float(rc.get("throw_penalty", 1.0))
+            turn = (turn + "; " if turn else "") + f"{cr['name']} charged"
+            self.charge_stats["respected"] = self.charge_stats.get("respected", 0) + 1
         # 0.25.0: a super that is a throw (Akuma's Raging Demon, at <= 25% vitality with 3 bars) beats blocking, teching and
         # parrying (a grabbed parry is a punish counter): no parry, and a jump or back dash gets a bonus while it is there
         gs = self.op_reversal_super(op, throws=True) if sit != "their_wakeup" else None
@@ -2663,9 +2717,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._pe_track(raw, me, op)
         self._track_grab_chain(oa, tmr)
         self._track_self(me, op, tmr)
+        mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
         if self._op_charges:
-            mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
             self.op_charge.update(op.get("input"), None if mx_ is None or ox_ is None else ox_ < mx_, tmr)
+        self.own_charge.update(me.get("input"), None if mx_ is None or ox_ is None else ox_ > mx_, tmr)
         self._line_t = tmr
         d_ = player_distance(me, op)
         if d_ is not None and isinstance(tmr, int) and (not self._dist_hist or self._dist_hist[-1][0] != tmr):
@@ -3705,6 +3760,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if fighter.zn_stats["thrown"]:
                     summary["fireballs"] = {k: v for k, v in fighter.zn_stats.items() if not k.endswith("_for")}
                 summary["di_wall"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in fighter.di_wall_stats.items()}
+                if fighter._op_charges or fighter.charge_stats:
+                    # 0.29.0: the opponent's charge moves: pressure held back / jumps not made while one was charged
+                    summary["charge"] = dict(fighter.charge_stats, opponent_charges=sorted(fighter._op_charges),
+                                             reversals=[c_["name"] for c_ in fighter.op_charge_revs])
                 if fighter.cmd_grab_ids():
                     summary["command_grabs"] = dict(fighter.cmd_grab_stats, ids=sorted(fighter.cmd_grab_ids()),
                                                     named=list(fighter.grab_named))
@@ -4224,6 +4283,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.round_wins = [0, 0] if tracker.match_over else list(tracker.wins)
                 fighter.rounds_to_win = tracker.rounds_to_win
                 fighter.op_rev_supers = opponent_reversal_supers(summary["opponent"], ds_root)
+                fighter.op_charge_revs = opponent_charge_reversals(summary["opponent"], ds_root)
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():
@@ -4453,6 +4513,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         if d.kind == "route" and (d.route or {}).get("starter") and fighter.book
                                         and not d.adopt else None,
                                         adopt=d.adopt,
+                                        # 0.29.0: a charge move goes out only with the charge already held
+                                        charged={k_ for k_ in ("4", "2") if fighter.own_charge.ready(
+                                            k_, fighter._line_t, ahead=4)},
                                         # 0.24.0: the combo composer re-plans the rest whenever a move starts
                                         on_step=(lambda j_, raw_: fighter.route_on_step(
                                             j_, raw_, me_key, op_key, fighter._route_basis))
