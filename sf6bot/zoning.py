@@ -328,6 +328,14 @@ class ZoningMixin:
         drive = num(me.get("drive")) or 0
         can_parry = (not burn and pc.get("enabled", True) and self.can_spend(me, "drive_parry", reserve=0)
                      and drive >= int(zc.get("parry_min_drive", 10000)))
+        # 0.31.1: no parry with the thrower near. MEASURED (344 ranked recordings): a Drive Parry lasts 30-60 frames
+        # and a throw on it is a punish counter; parries started with the thrower under 2.5 away were thrown 24-30% of
+        # the time (Guile 7 of 25: Sonic Boom, Sonic Blade, walk in, throw for 2,040), from 2.5+ about 1%
+        if can_parry and dist < float(zc.get("parry_min_dist", 0.0)):
+            can_parry = False
+            if getattr(self, "_zn_near_for", None) != s["t0"]:
+                self._zn_near_for = s["t0"]
+                self.zn_stats["parry_too_near"] = self.zn_stats.get("parry_too_near", 0) + 1
         live = bool(self.pt.samples.get(s["id"]))
         early = int(zc.get("parry_early") or (1 if live else 4))
         # walking into it brings it sooner: each frame walked takes b x 0.047 frames off its arrival. A bot that is

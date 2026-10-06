@@ -375,6 +375,7 @@ fireball:
   neutral_jump_min_tau: 8   # a neutral jump over it: the projectile passes at least this many frames into the jump
   act_floor: 0.0
   parry_min_drive: 10000    # a parried projectile gives the Drive back; one bar kept for a parry that misses
+  parry_min_dist: 2.5       # 0.31.1: block, not parry, with the thrower nearer (MEASURED: thrown out of the parry 24-30%)
   block_pad: 6              # block from this many frames (+ input delay) before it arrives
   walk_stop: 0              # extra frames kept between the last walking line and the parry / block
   walk_min_dist: 1.6

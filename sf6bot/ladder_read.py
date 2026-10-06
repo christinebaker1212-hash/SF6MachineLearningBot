@@ -41,21 +41,44 @@ def _int(s: str) -> int:
 
 def parse(text: str) -> dict:
     """{lp: [...], lp_delta: [...], mr: [...], mr_delta: [...], rank: [...]} found in one OCR text (empty lists when
-    nothing). Signed numbers next to LP / MR are changes; unsigned ones are totals."""
+    nothing). Signed numbers next to LP / MR are changes; unsigned ones are totals.
+
+    0.31.1, from the real result screens (user's Master session, 2026-10-06): "25000LP-38 1452 MR. 9", "25075LP+75 1460
+    MR+8", "25067 LP 1458 MR", "25035 W -40 1451 MR. 9", "250350-40 1451 w. 9", "25000LP-35 LOST 1441 MR- 10":
+      - "LP" / "MR" right after a digit ("25000LP-38") was missed (word boundary)
+      - "25067 LP 1458 MR": the MR number was also read as an LP total (it follows "LP"), and the last LP read became
+        "now: 1,458 LP"; a number followed by the other key belongs to that key
+      - a change whose sign was read as "." or "," ("MR. 9", "LP.75") is kept unsigned (`*_delta_abs`); the result screen
+        then takes its sign from the match result
+      - "LP" read as "W" / "0" / "?" between a 5-digit total and a signed change; "MR" read as "W"."""
     t = _clean(text)
-    out = {"lp": [], "lp_delta": [], "mr": [], "mr_delta": [], "rank": []}
-    for key in ("LP", "MR"):
+    out = {"lp": [], "lp_delta": [], "mr": [], "mr_delta": [], "rank": [], "lp_delta_abs": [], "mr_delta_abs": []}
+    for key, other in (("LP", "MR"), ("MR", "LP")):
         k = key.lower()
         for m in re.finditer(r"([+-])\s?" + _NUM + r"\s*" + key + r"\b", t):
             out[k + "_delta"].append(_int(m.group(2)) * (1 if m.group(1) == "+" else -1))
-        for m in re.finditer(r"\b" + key + r"\s*([+-])\s?" + _NUM, t):
+        for m in re.finditer(r"(?<![A-Z])" + key + r"\s*([+-])\s?" + _NUM, t):
             out[k + "_delta"].append(_int(m.group(2)) * (1 if m.group(1) == "+" else -1))
-        for m in re.finditer(r"(?<![+\-\d,.])" + _NUM + r"\s*" + key + r"\b", t):
-            out[k].append(_int(m.group(1)))
-        for m in re.finditer(r"\b" + key + r"\s*:?\s*(?![+-])" + _NUM + r"\b", t):
-            out[k].append(_int(m.group(1)))
+        for m in re.finditer(r"(?<![A-Z])" + key + r"\s?[.,]\s?(\d{1,3})(?![\d,.])", t):
+            out[k + "_delta_abs"].append(int(m.group(1)))
+        before = [_int(m.group(1)) for m in re.finditer(r"(?<![+\-\d,.])" + _NUM + r"\s*" + key + r"(?![A-Z])", t)]
+        after = [_int(m.group(1)) for m in re.finditer(r"(?<![A-Z])" + key + r"\s*:?\s*(?![+-])" + _NUM
+                                                       + r"(?![\d,.])(?!\s*" + other + r"(?![A-Z]))", t)]
+        out[k] = before or after
+    if not out["lp"] and not out["lp_delta"]:
+        for m in re.finditer(r"(?<![\d,.])(\d{5})\s?(?:W|0|\?)?\s*([+-])\s?(\d{1,3})(?![\d,.])", t):
+            out["lp"].append(int(m.group(1)))
+            out["lp_delta"].append(int(m.group(3)) * (1 if m.group(2) == "+" else -1))
+    if not out["mr"]:
+        for m in re.finditer(r"(?<![\d,.])([12]\d{3})\s*W\s?([+\-.,])\s?(\d{1,2})(?![\d,.])", t):
+            out["mr"].append(int(m.group(1)))
+            v = int(m.group(3))
+            if m.group(2) in "+-":
+                out["mr_delta"].append(v if m.group(2) == "+" else -v)
+            else:
+                out["mr_delta_abs"].append(v)
     out["mr"] = [v for v in out["mr"] if 500 <= v <= 3000]           # Master Rate lives around 1000-2500
-    out["lp"] = [v for v in out["lp"] if v <= 100000]
+    out["lp"] = [v for v in out["lp"] if v <= 100000 and v not in out["mr"]]
     for m in _RANK_RE.finditer(t):
         out["rank"].append(m.group(1).title() + (f" {m.group(2)}" if m.group(2) else ""))
     return out
@@ -69,7 +92,7 @@ def _merge(parses: list[dict], last: bool = False) -> dict:
     """One value per field over several reads: the most common (VS screen), or the last one seen (result screen: the
     LP counter animates up or down to its new value)."""
     out = {}
-    for f in ("lp", "lp_delta", "mr", "mr_delta", "rank"):
+    for f in ("lp", "lp_delta", "mr", "mr_delta", "rank", "lp_delta_abs", "mr_delta_abs"):
         seen = [v for p in parses for v in p.get(f, [])]
         if not seen:
             continue
@@ -175,7 +198,7 @@ class LadderReader:
         other = _merge(halves[1 - side_i] if side_i in (0, 1) else [], last=True)
         both = _merge([x for h in halves for x in h], last=True)
         rec = {**self.pending, "reads": len(self.post)}
-        for f in ("lp_delta", "lp", "mr_delta", "mr", "rank"):
+        for f in ("lp_delta", "lp", "mr_delta", "mr", "rank", "lp_delta_abs", "mr_delta_abs"):
             v = mine.get(f)
             if v is None and f not in other:
                 v = both.get(f)           # only one half showed it: the result screen may not be split by side
@@ -183,8 +206,12 @@ class LadderReader:
                 rec[f] = v
         won = self.pending.get("won")
         for f in ("lp_delta", "mr_delta"):
+            ab = rec.pop(f + "_abs", None)
             if rec.get(f) is not None and won is not None and rec[f] != 0:
                 rec[f + "_sign_ok"] = (rec[f] > 0) == bool(won)
+            elif rec.get(f) is None and ab is not None and won is not None:
+                rec[f] = ab if won else -ab   # the sign was misread ("MR. 9"): a win gains, a loss loses
+                rec[f + "_sign_from_result"] = True
         self.pending, self.post = None, []
         self.done.append(rec)
         return rec

@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **First Master matches (0.31.0, 2026-10-06): 1-5 against ~1460 MR players; 0.31.1 fixes found there (section "0.31.1").**
 - **MASTER REACHED (2026-10-06, user's result screen): the long-term goal is met.** Ranked, unattended, 0.27.0, on a
   10-win streak: Master, 25,238 LP (+1,050 for the promotion), 1500 MR. Details: "Master reached" below.
 - **Milestone 1: COMPLETE (2026-10-01).** Acceptance passed both sides; latency measured;
@@ -4018,6 +4019,43 @@ All MOCK / unit-tested (`tests/test_0280.py`, 0.29.0 part); nothing here is veri
   no-anti-air blocking; overrides; training lists per character; borrowed models; progress per character; names; the
   retrain command; own moves from a move map; a MOCK fight session as Ken over the real CPU fight, Ryu's models
   untouched). Not verified in game.
+
+## 0.31.1: first Master matches analysed; Guile's throws, parries near the thrower, MR (user, 2026-10-06)
+User: "Looks like currently the screen recording doesn't measure MR. By the way, the bot is losing - very badly." MEASURED
+on the 6 uploaded fight files (5 on 0.31.0, 1 on 0.30.2; Master opponents ~1450-1470 MR) and the S excerpt.
+- **The record:** 1-5 in the files (Guile 1-2, Terry 0-2, M. Bison 0-1); damage dealt / taken 0.66 (0.27.0: 1.94);
+  openings a minute 4.4 mine / 10.9 theirs (0.27.0: 7.6 / 6.2). Guile (4-8) and Terry (0-5) were already the bot's worst
+  match-ups before Master.
+- **progress.md's "last 20: 2-17" and block 361-374 (win rate 0.07) include the user's two Versus Human sets against the
+  bot (0-5 and 0-4).** The ranked trend now counts ranked matches only (`progress.same_mode`; the line says how many
+  others were left out).
+- No sign the retrained networks (2026-10-06 17:05 / 17:19) caused it: the neutral mix (crouch-block / walk shares by
+  distance) matches 0.27.0's. They can't be checked directly here (they are on the PC).
+- **Where the damage came from (0.31.0, 101k taken in 5 matches):** ground normals in neutral 31%, **thrown out of a Drive
+  Parry 24%** (9 openings), specials / projectiles 19%, **thrown otherwise 14%**, hit in its own attack 11%. Thrown 15 times
+  in 9.4 fight minutes (0.27.0: 9 in 31).
+- **Guile's throws use their own ids (a bug):** forward 700 -> 705 / 707 (victim 706), back 701 -> 709 / 711 (victim 710).
+  The bot knew only 715-717 / 721 / 725: it took 700 for an attack, never teched before or after the connect, and its
+  defence game counted Guile's throws as strikes. Measured the throw ids of 30 characters (344 recordings): Zangief starts
+  with 710; Cammy / Kimberly 715 and 720 (victim 717 / 722); Blanka, Chun-Li, Mai, Viper, Elena, Dhalsim have their own
+  victim ids, which equal Ryu's own throw-connect ids and are left out. `sf6bot/throws.py`, `fighter.set_opponent_throws`
+  per match.
+- **Parrying projectiles near the thrower:** against Guile the bot parried 12-17 times a match (Sonic Boom, then Sonic
+  Blade); a Drive Parry lasts 30-60 frames, and Guile walked in and threw it out of the parry (a punish counter, 2,040)
+  7 times. Over 344 ranked recordings: parries started with the thrower under 1.5 away were thrown 30% of the time, 1.5-2.5
+  9% (Guile 28%), 2.5+ about 1%. `fireball.parry_min_dist` 2.5: nearer, it blocks (`zn_stats.parry_too_near`).
+- Replaying the 3 Guile matches through `decide()` (open loop): projectile parries 37 -> 12 (all from 2.5+); throw techs on
+  Guile's start-up 0 -> 16 and after the connect 0 -> 15 (Guile threw the recorded bot 19 times).
+- **MR / LP from the result screen** (`ladder_read.parse`, the user's real OCR texts):
+  - "25067 LP 1458 MR" read 1458 as an LP total too ("now: 1,458 LP")
+  - "25000LP-38" (no space) lost the change
+  - "MR. 9" (the minus read as a dot) lost the MR change: it is now kept unsigned and given the result's sign
+    (`mr_delta_sign_from_result`)
+  - "25035 W -40" / "250350-40" (LP misread) are read
+  - progress.md shows MR next to LP in the recent matches and the 20-match blocks
+- Not changed (seen): the bot's own throw / tech options being hit, Terry's throws landing with LP+LK pressed during
+  the bot's get-up, the other characters' throw victim ids.
+- Tests: `tests/test_0311.py`. Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

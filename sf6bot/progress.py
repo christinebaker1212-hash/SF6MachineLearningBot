@@ -195,7 +195,9 @@ def markdown(p: dict) -> str:
              + (f"; you played part of {s['assisted']} (won {s['assisted_won']}; not in the bot's record)"
                 if s.get("assisted") else "")
              + (f"; ended by a disconnection: {s['disconnects']} (no result)" if s.get("disconnects") else ""),
-             f"- all recorded matches: {p['history'].get('matches', 0)}"]
+             f"- all recorded matches: {p['history'].get('matches', 0)}"
+             + (f" ranked (left out: {p['other_modes_left_out']} other matches, e.g. Versus Human sets or CPU)"
+                if p.get("other_modes_left_out") else "")]
     for k in ("last_20", "last_50", "last_200"):
         e = p["history"].get(k)
         if e and e.get("win_rate") is not None:
@@ -233,7 +235,8 @@ def lp_markdown(lp: dict) -> list[str]:
     if h.get("read"):
         out.append(f"- all matches read: net {h['net_lp']:+,} LP over {h['read']} (gained {h['gained']:,}, lost {h['lost']:,})")
     for b in (lp.get("blocks") or [])[-10:]:
-        out.append(f"- matches {b['matches']}: net {b['net_lp']:+,} LP ({b['read']} read)")
+        out.append(f"- matches {b['matches']}: net {b['net_lp']:+,} LP ({b['read']} read)"
+                   + (f", net {b['net_mr']:+} MR ({b['mr_read']} read)" if b.get("mr_read") else ""))
     bs = lp.get("by_strength") or {}
     if bs:
         out.append("- record by the opponent's strength (its LP / MR vs the bot's before the match): " + ", ".join(
@@ -250,7 +253,9 @@ def lp_markdown(lp: dict) -> list[str]:
                                        f"{r['opp_mr']} MR" if r.get("opp_mr") is not None else None) if x)
             res = "W" if r.get("won") else "L" if r.get("won") is False else "-"
             ch = (f"{r['lp_delta']:+d} LP" if r.get("lp_delta") is not None else "") + (
-                f" -> {r['bot_lp_after']:,}" if r.get("bot_lp_after") is not None else "")
+                f" -> {r['bot_lp_after']:,}" if r.get("bot_lp_after") is not None else "") + (
+                f", {r['mr_delta']:+d} MR" if r.get("mr_delta") is not None else "") + (
+                f" -> {r['bot_mr_after']} MR" if r.get("bot_mr_after") is not None else "")
             out.append(f"- {res} vs {r.get('opponent')}" + (f" ({opp})" if opp else "") + (f": {ch}" if ch else ""))
     return out
 
@@ -262,10 +267,22 @@ def for_character(rows: list[dict], character: str | None) -> list[dict]:
     return [x for x in rows if (x.get("character") or "Ryu") in (character, "?")]
 
 
+def same_mode(rows: list[dict], session_rows: list[dict]) -> tuple[list[dict], int]:
+    """0.31.1: a ranked session's trend counts ranked matches only (before, the user's Versus Human sets against the bot,
+    e.g. a 0-9 against the bot in two sets, sat in the ranked win rates and blocks). Other sessions keep every match.
+    Returns (rows, number left out)."""
+    if not any(x.get("mode") == "ranked" for x in session_rows):
+        return rows, 0
+    keep = [x for x in rows if x.get("mode") == "ranked"]
+    return keep, len(rows) - len(keep)
+
+
 def _write(ds_root: Path, run_dir: Path, session_rows: list[dict]) -> dict:
     ch = next((x.get("character") for x in reversed(session_rows) if x.get("character") not in (None, "?")), None)
-    prog = summarize(session_rows, for_character(load_ladder(ds_root), ch), load_lp(ds_root))
+    hist, other = same_mode(for_character(load_ladder(ds_root), ch), session_rows)
+    prog = summarize(session_rows, hist, load_lp(ds_root))
     prog["character"] = ch
+    prog["other_modes_left_out"] = other
     run_dir = Path(run_dir)
     (run_dir / "progress.json").write_text(json.dumps(prog, indent=1, default=str), encoding="utf-8")
     (run_dir / "progress.md").write_text(markdown(prog), encoding="utf-8")

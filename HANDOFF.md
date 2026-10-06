@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.31.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-06: code version **0.31.1**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.31.0 is pushed** (CLAUDE.md "0.31.0"): the bot can play any character (`play-as`, menu PA, panel
+**State:** **0.31.1 is pushed** (CLAUDE.md "0.31.1"): after 6 Master matches (1-5 vs Guile x3, Terry x2, M. Bison): Guile's throws have their own ids (700 / 701, victim 706 / 710: never teched before; now `throws.py` per opponent), no projectile parry with the thrower within 2.5 (Guile threw the parrying bot 7 times for 2,040), ranked progress leaves out the Versus Human sets, and MR / LP are read from the result screen's real wording.
+
+**Before that:** **0.31.0 is pushed** (CLAUDE.md "0.31.0"): the bot can play any character (`play-as`, menu PA, panel
 "Play as"; `fight --character`). Ryu's rules, networks and data are unchanged (his networks train only on his own fights).
 Other characters get rules generated from their Capcom data (fighter_profile.py), their own learning, networks
 (borrowing Ryu's read-only until B trains theirs) and progress. Knowledge about OPPONENT characters stays shared.
@@ -372,6 +374,8 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.31.1:** unverified in game: Guile throw techs (start-up 700 / 701 and after the connect, 706 / 710), the parry limit, MR in progress.md. Throw ids of characters not in `throws.BY_CHARACTER` are the shared 715-717 (measured on 30 characters; Kimberly, Elena, Dhalsim, Manon from few samples).
 
 **0.31.0:** unverified in game. Before ranked as another character: C (catalog) with it as P1 (its own ids), then a few CPU
 matches (V / N) and B. Characters with no anti-air special only block jump-ins; charge characters lack their charge moves.
@@ -845,7 +849,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
 | Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers`; 0.27.0: `_aa_cross_guard`, `drive_reversal_late`, `combo_lab.ComboRun._no_window`, `neutral_policy.STANCE` / `NEUTRAL_MAX_DIST` / `CORNER_OUT`, `defense.prior_by_situation`; 0.28.0: `charge.py` (charge timing, opponent charge), `combo_lab.apply_charge`; 0.29.0: `framedata.annotate_holds` / `held`,
-`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for`; 0.30.1: `fighter._crumple_options`, `combo_gen.estimate_after`; 0.31.0: `fighter_profile.py` (rules for other characters), `bot_character.py` (who the bot plays, model dirs), `neutral_policy._own_moves_from_map` |
+`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for`; 0.30.1: `fighter._crumple_options`, `combo_gen.estimate_after`; 0.31.0: `fighter_profile.py` (rules for other characters), `bot_character.py` (who the bot plays, model dirs), `neutral_policy._own_moves_from_map`; 0.31.1: `throws.py` (throw ids per character), `progress.same_mode` |
 | Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning; 0.26.0: `bar_value` set by `fighter._bar_value`, follow-up reach `reach_miss` from config `combo_reach`, `involves_super` / `load_learned` drop pre-0.26.0 super results); `combo_lab.ComboRun.switch` keeps a pre-input motion (0.26.0) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |

@@ -493,6 +493,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.throw_ids = _ids(ids.get("throw_startup"))
         self.hit_ids = _ids(ids.get("hit_reaction"))
         self.thrown_ids = _ids(ids.get("thrown"))
+        self._base_throws = (set(self.throw_ids), set(self.thrown_ids))
         from .grabs import GrabWatch
         self.grab_watch = GrabWatch(self.grabs, is_grab=lambda a: (self.opp.get(a) or {}).get("cmd_grab") == "ground",
                                     reaction_ids=self.hit_ids | self.thrown_ids,
@@ -821,6 +822,14 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return Decision("seq", di["name"], di["seq"], rule="move_answer", timed=True,
                             reason=f"your answer to {name}: Drive Impact through its follow-ups ({ans.get('why', '')})")
         return None
+
+    def set_opponent_throws(self, opponent: str | None) -> None:
+        """0.31.1: the opponent character's own throw ids (throws.py, MEASURED; Guile's are 700 / 701, victim 706 / 710).
+        Updates the grab watch's reaction ids too."""
+        from .throws import ids_for
+        self.throw_ids, self.thrown_ids = ids_for(opponent, *self._base_throws)
+        if getattr(self, "grab_watch", None) is not None and hasattr(self.grab_watch, "reaction_ids"):
+            self.grab_watch.reaction_ids = set(self.hit_ids) | set(self.thrown_ids)
 
     def _thrown_tech(self, me: dict, op: dict) -> Decision | None:
         tc = self.c.get("throw_tech") or {}
@@ -4448,6 +4457,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.rounds_to_win = tracker.rounds_to_win
                 fighter.op_rev_supers = opponent_reversal_supers(summary["opponent"], ds_root)
                 fighter.op_charge_revs = opponent_charge_reversals(summary["opponent"], ds_root)
+                fighter.set_opponent_throws(summary["opponent"])
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():
