@@ -3743,6 +3743,25 @@ below). Same scorecard code as the earlier tables.
 - Minor (log): after every KO the status line reads "the round started before I was watching" until the next round
   starts (the wording of the between-rounds wait; harmless). Two input-delay readings of 17-19 frames out of 700.
 
+## The user (Akuma) vs the bot, 0.27.0 (2026-10-06): FT5, 0-5
+MEASURED on the 5 uploaded fight files (Versus Human offline, bot = P1 on its controller, human limits ON) and the S
+excerpt. Bot damage 29,940 dealt / 100,000 taken; openings a minute bot 3.9 / user 13.8; damage per opening 1,361 / 1,255;
+thrown 20. Analysis scripts in the session scratchpad. Nothing built yet.
+- **Command grab = Ashura Senku (forward) -> Oboro Throw:** 13 landed, ~25,000 damage; 5 of 13 started while the bot was
+  getting up after the previous Oboro (hard knockdown loop). Akuma's ids: 1075 (teleport start) -> 1076 -> 1087 (Oboro
+  start-up, 8F, Capcom) -> 1088 connect, bot 1089. The teleport starts 32-41 frames before the connect, every time; the
+  bot was crouch-blocking (id 5) at the connect each time.
+  - Cause: `grabs.py` links only ids that switch within 2 frames, so the learned grab start is 1087 (8 frames out):
+    "saw too late" 7 times, jumped 0. Capcom's input "(During Ashura Senku (forward)) LP+LK" names the parent.
+- **Fireball -> Drive Parry -> Parry Drive Rush -> Skull Splitter (6MP, id 661):** 12 openings, ~25,600 damage. Of 14
+  rushed Skull Splitters, 10 hit, mostly with the bot holding down-back. Capcom lists it as "* Mid High" (start-up 20,
+  the first hit an overhead).
+  - Cause 1 (bug): `fighter.guard_of` only reads a property starting with "Mid" / "Low", so a leading "*" hides it: 7
+    overheads (Akuma Skull Splitter, Ryu Collarbone Breaker, Chun-Li Lotus Fist, Blanka Rock Crusher, Elena j.HK and
+    [Boosted] Mallet Smash, Sagat j.MP) and 2 lows across the cast.
+  - Cause 2 (setting): with human limits ON the switch to a standing block waits a sampled reaction around 21F
+    (`human_limits.per_kind.guard`), which is longer than this 20F overhead.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.
