@@ -4,47 +4,42 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-06: code version **0.25.0**, REFramework exporter script **v9**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing.*
+*State as of 2026-10-06: code version **0.26.0**, REFramework exporter script **v9**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (491).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.25.0 is pushed** (703dcce) and the working tree is clean. No code work is in progress. All 475 tests pass.
-The user asked for "Everything." from the 0.24.x proposal, then "Aim for a 90% winrate." Next, the user runs
-`update.bat`, starts unattended ranked (`ranked.bat`, or the panel: FIGHT → Versus Human → Ranked, human-like inputs on),
-and sends S plus the fight files.
-
-**The honest number:** the open-loop projection for 0.25.0 is **~80%** (low 78%, high 83%), **not 90%**. By opponent:
-zoners (Akuma / JP / Sagat) ~40%, everyone else ~87%. The user has been told this. Climbing brings stronger opponents, so
-the win rate drifts toward 50%. LP gained and the record against stronger / weaker opponents (`progress.md`) are the
-measures of learning.
+**State:** **0.26.0 is pushed** and the working tree is clean. No code work is in progress. All 491 tests pass. The user
+sent the 0.25.0 ranked run (35 fight files + five run folders) with: "Lots of blocked OD DPs in this one"; "I want you to
+heuristically improve the bot overall, making notes of what you've done in every step"; "the bot is missing damaging combo
+conversions. He requires more interactions to kill than his opponents do when he loses"; "it should know that it can drive
+rush cancel to make some moves that might whiff on followup from long range hit up close ... a max range 5HP"; "drive rush
+into 5HK is an awful option. It keeps whiffing." Next, the user runs `update.bat`, starts unattended ranked and sends S plus
+the fight files.
 
 **Results so far:**
-- Platinum 1 (2026-10-03) → **Diamond, 19,053 LP** (2026-10-05).
-- 0.24.x run: **41-15** (0.24.3 24-9, 0.24.4 13-6). Damage ratio 1.20-1.35. Against non-zoners 36-7; against
-  projectile-heavy opponents 5-8.
-- DI-backs work: 39 of 45 crumples. The user said "DIs were extremely successful"; never treat them as a problem.
+- Platinum 1 (2026-10-03) → Diamond, 19,053 LP (2026-10-05) → **21,592 LP** after the 0.25.0 run (OCR).
+- 0.24.x run: 41-15 (damage ratio 1.20-1.35). **0.25.0 run: 26-8 (76%)**, damage ratio 1.31; projection was ~80%: inside the
+  noise. Ken 6-0, M. Bison 4-0; Alex 1-3, Guile 2-2. Tables: CLAUDE.md "0.25.0 ranked run analysed".
+- DI-backs work (39 of 45 crumples in 0.24.x). The user said "DIs were extremely successful"; never treat them as a problem.
 
-**What 0.25.0 changed, and what to check for each in the next results** (all MOCK / replay-tested; none verified in game):
+**What 0.26.0 changed, and what to check for each in the next results** (all MOCK / replay-tested; none verified in game;
+details CLAUDE.md "0.26.0"):
 | change | where | check in the results | risk to watch |
 |---|---|---|---|
-| keys pressed together go out directions first | `controller.apply` | anti-air: Shoryukens vs 2LP / 2HP against jump-ins (was 21 vs 13 of 144 free) | none expected |
-| tech options throw forward unless the bot's back is within 2.5 of its wall; tech payoffs vs strike / shimmy lowered | `fighter.throw_direction`, `configs/fighter/ryu.yaml: defense` | forward vs back throws (was 87 vs 171); openings during the bot's throw (was 66) | more throws landed on the bot if the bot techs too rarely now |
-| the user's move answers: Ken's Dragonlash → L Shoryuken from its frame 19; Ingrid's Vanishing Sun (Forward) → L Shoryuken; Ken's Jinrai → Drive Impact (not HP into M Jinrai) | `apply_move_answers`, `_move_answer`, `move_answers` in the config | `answers` {sent, by_move, skipped_unless} in `fight_summary.json`; Ken matches | Ingrid's ids are not known yet (needs her move map / catalog); timing is unverified |
-| guard held while a blocked multi-hit move is still active | `_guard_hold`, `guard_hold.margin` 1 | `guard_hold` (lines held); openings after blocking the same move (was 94) | blocking too long and giving up punish windows |
-| held block / delay tech re-faced when the sides switch | fight loop `stop_check` | `refaced_in_sequence`; ground cross-up openings (was 17) | the least certain change: watch for wrong-way blocks |
-| no non-projectile move slower than 8 frames inside the opponent's range | `neutral_policy.STYLE_IN_RANGE_MAX_STARTUP` | openings during the bot's 5HP start-up (was 32) | fewer pokes, more passivity |
-| respect the opponent's invincible supers on its wake-up; no parry vs a possible Raging Demon | `opponent_reversal_supers`, `_turn`, `reversal_respect` | wake-up supers that hit the bot (was 7 of 15); Raging Demons landed (was every one) | less oki pressure when the opponent has a bar |
-| Akuma's held Gou Hadoken (lead-in 903 / 904) blocked; no clash vs projectiles faster than 11 frames a unit; SA1 through fireballs off; walk in against zoners | `zoning.py`, `fireball:` in the config, `neutral_policy.ZONER_FACTOR` | `fireballs.charge_block` / `zoner_on`; the record vs Akuma / JP / Sagat (was 5-8) | passive play vs Akuma (the replay had 51-146 charge blocks per Akuma match) |
-| high-confidence inferred names punish without slack | `punish._pe_know` | blocked -4..-6 moves punished (was 36 of 170) | a wrong name punishing a safe move |
-| a multi-hit move whose first hit misses in a juggle still cancels on its last hit | `combo_lab` (`_hit_n_contact`, `EARLIER_HIT_WINDOW` 5, `LAB_RULES` 0.25.0) | "5HP > OD High Blade > 4HK > 623HP > SA3" finishing | none expected |
+| super freeze: FrameClock stands still while a super freezes a stunned defender; hit confirm allows `SUPER_FREEZE` 56 for supers; pre-0.26.0 learned super results dropped | `game_state.FrameClock`, `combo_lab`, `combo_compose.load_learned`, `learning.Experience` | super enders completing in `routes_completed` / `composer.by_route` (0.25.0: "2MK > SA1: whiff 8" though they hit); supers spent per match (was 12 SA3 + 27 SA1 in 35) | a real super whiff now ends the route ~1 s later (the bot is in the super anyway) |
+| Super bars cheap when the round can end the match (x0.2) or the bot is low (x0.5); 2MK confirms into SA1 then | `fighter._bar_value`, `_price_bars`, `_super_confirm`, config `meter` | bars left at the end of lost matches (was 1-3 in 7 of 8); damage per opening (was 1,399) | bars spent on small enders before a CA chance |
+| follow-ups beyond their measured reach left out: Drive Rush cancel / projectile ender instead (the user's max-range 5HP) | `Composer.reach_miss`, config `combo_reach` | Shoryukens after a normal from 1.4 on (was 5 whiffs of 22); Drive Rush cancels after 5HP (was 4 of 62) | conversions ending on the first hit when no Drive and no projectile ender |
+| no Drive Rush 5HK in neutral; rush normals only within reach + 0.6 (MEASURED rush travel) | config `drive_rush_in`, `punish.PDR_TRAVEL`, `fighter._rush_reach` | Parry Drive Rush normals hit / whiffed (was 5 / 18 of 30) | fewer rushes |
+| reactive reversal not into rushes / parries / holds, unknown moves out > 15 frames, moves going away; the reversal must reach | `fighter._reactive_button`, `_op_backing_off`, `reactive_reversal.unknown_max_age` | OD Shoryukens blocked (was 4 of 49) and whiffed (4); `reversal_stats.not_a_strike` | a real slow meaty (start-up 16+, unknown id) no longer reversed |
+| a first-hit switch keeps a motion already in; a different long motion is refused | `combo_lab.ComboRun.switch`, `fighter.switch_motion_ok`, `SWITCH_MOTION_MAX` 3 | `routes_stopped` "not_out" (was 5LP > 623PP 14, 2LP 9, 2MK 9); `route_hits.refused_motion` | fewer composer extensions at the first hit (they still run at later steps) |
 
 **When the results arrive (S paste + uploaded fight files):**
 1. Scorecard: `python -m sf6bot scorecard` with the fight files under `datasets/fights/`, or the scorecard at the top of S.
-   Compare with the 0.24.x table in CLAUDE.md ("0.24.x ranked run analysed"). State plainly how the real win rate
-   compares with the ~80% projection.
+   Compare with the 0.24.x / 0.25.0 table in CLAUDE.md ("0.25.0 ranked run analysed"). 0.26.0 has no projection: the
+   changes are measured fixes; compare damage per opening (0.25.0: 1,399 mine / 993 theirs) and supers spent.
 2. Read every match's `errors` (0.24.3's safety net). Any entry is a bug to fix first.
 3. Go down the table above: each check, and each risk.
 4. LP from `progress.md` (OCR): net LP, record vs stronger / weaker opponents.
@@ -324,6 +319,13 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.26.0 (user: "heuristically improve the bot overall"):** conversions and meter (CLAUDE.md "0.25.0 ranked run analysed" +
+"0.26.0"): supers in ranked combos were judged whiffs (super freeze) and the composer had stopped spending bars; bars now
+cheap when the round can end the match; Drive Rush cancel where a follow-up is out of reach; no neutral Drive Rush 5HK and
+rush normals only within reach; reversals not into rushes / follow-throughs; first-hit switches keep the motion already
+in. Not built: Akuma's Gou Hadoken (6,607 in the last loss), Alex's big hits (no Alex catalog here to name 915 / 919),
+2MP > Drive Rush cancel routes that never pressed the normal after the rush.
 
 **0.25.0 (user: "Everything."):** all the 0.24.x fixes built (CLAUDE.md "0.25.0"). Unverified in game, most of all the
 facing refresh during held sequences and the move answers' timing. Ingrid's move answer needs her ids named (C for her, or
@@ -769,7 +771,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
 | Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers` |
-| Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning) |
+| Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning; 0.26.0: `bar_value` set by `fighter._bar_value`, follow-up reach `reach_miss` from config `combo_reach`, `involves_super` / `load_learned` drop pre-0.26.0 super results); `combo_lab.ComboRun.switch` keeps a pre-input motion (0.26.0) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |
 
@@ -777,9 +779,12 @@ The `menu.bat` letters are the user's interface. Keep it in sync with `cli.py`.
 
 ## 9. Testing
 
-- `pip install -e ".[dev,mss]" && python -m pytest -q`: ~460 tests (456 at 0.24.0). They are all MOCK/synthetic,
+- `pip install -e ".[dev,mss]" && python -m pytest -q`: 491 tests at 0.26.0 (~5 min). They are all MOCK/synthetic,
   except the **real** match fixtures in `tests/data/`. Those are trimmed REFramework data from
-  the user's games: Ryu vs CPU, and Ken vs Ryu Master replay.
+  the user's games: Ryu vs CPU, the Ken vs Ryu Master replay, Zangief's Siberian Express (0.22.5) and the bot's
+  2MK > SA1 from a 0.25.0 ranked match (`ranked_0.25.0_2mk_sa1.jsonl.gz`, frames frozen as online).
+- `tests/test_session_probe.py::test_policy_loop_report` is timing-sensitive: under a full-suite load it failed once
+  (4 ticks in 1 s) and passed alone; rerun it before suspecting a change.
 - **Lua:** `luac5.4 -p` for syntax. A stubbed REFramework API (`sdk`, `re`, `json`, `imgui`)
   run under `lua5.4` exercises the exporter. That stub was in a scratch directory; recreate it
   if needed. The pattern is described in CLAUDE.md.

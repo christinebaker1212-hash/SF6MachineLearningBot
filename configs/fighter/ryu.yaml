@@ -84,6 +84,17 @@ supers:
   crumple_max_dist: 1.1     # MEASURED: the crumpled opponent is ~0.72 away
   sa3_max_dist: 1.3         # SA3 as a punish only this close (estimate)
   confirm: true             # a 2MK chosen in neutral is confirmed into SA3 with full meter, or into a super that kills
+# 0.26.0 (user: "the bot is missing damaging combo conversions. He requires more interactions to kill than his opponents
+# do"). MEASURED 0.25.0 ranked (35 recordings): it died holding 1-3 Super bars in 7 of 8 lost matches; 12 SA3 and 27 SA1
+# in 35 matches, none of them inside a combo it had started. Bars carry over between rounds, not past the match: what a
+# kept bar is worth to the combo composer (hp, combo_compose._score) drops when the round can end the match (either side
+# one round from winning) and again when the bot is low. ESTIMATES.
+meter:
+  bar_value: 250            # a kept Super bar, in hp (combo_compose.SUPER_BAR_VALUE)
+  match_point_factor: 0.2   # x this in a round that can end the match: bars not spent there are lost either way
+  low_hp: 0.35              # the bot at or below this share of its health...
+  low_hp_factor: 0.5        # ...x this (it may not live to spend them)
+  confirm_sa1_when_spending: true   # a 2MK confirm into SA1 whenever bars are cheap (else only when SA1 kills)
 inputs:
   motion_clear_frames: 10   # MEASURED 0.19.0 ranked: neutral frames between letting go of forward and the motion's
                             # down: 4-5 -> Shoryuken 55 of 56; 8+ -> Hadoken 368 of 368. Counted from the release.
@@ -150,7 +161,8 @@ punish:
     H Tatsumaki Senpu-kyaku: 2.4
   pdr_frames: 24       # ESTIMATE: Parry Drive Rush from the parry's first frame to the normal's (parry out on its frame ~10,
                        # the rush, the normal on rush frame ~11: combo_lab.RUSH_AT, a guess)
-  pdr_reach: 2.9       # ESTIMATE: how far a normal out of a Parry Drive Rush reaches from where the parry started
+  pdr_travel: 0.6      # 0.26.0 MEASURED (0.25.0 ranked, 30 rushes): an 18-frame rush closed 0.62; a normal out of it
+                       # reaches its own reach + this (the old pdr_reach 2.9 let rush normals whiff from 2.0-2.7)
 # Opponents without a catalog: ids from the inferred move map (menu X, datasets/move_maps/), only at
 # this confidence or better. Capcom's on-block value + margin is used, so -4 on Capcom's page is
 # treated as -2 (no punish) and -12 as -10: punishes only where they have room to spare.
@@ -172,6 +184,28 @@ drive_costs:
   od_move: 20000
   drive_reversal: 20000
 drive_reserve: 10000     # 0.20.0 (user's pick: Drive discipline): optional spends keep a bar back; DI-back exempt
+# 0.26.0 (user: "it should know that it can drive rush cancel to make some moves that might whiff on followup from long
+# range hit up close, and extend into a combo ender. For example, a max range 5HP"). MEASURED 0.25.0 ranked (35
+# recordings): a special cancelled from one of the bot's normals that hit, by the distance when it started: H Shoryuken
+# hit 78 of 81 within 1.4, 15 of 18 at 1.4-1.6 (the misses from 1.4 on), 2 of 4 beyond; OD Shoryuken 9 of 9 within 1.4;
+# M Tatsumaki 29 of 31 within 1.8. 2MK and 5HP carry Ryu forward before they hit (distance at the follow-up's start minus
+# at the normal's start, median: 2MK -0.42, 5HP -0.40, 2HP -0.29, Whirlwind Kick -0.54; the others ~0). The combo composer
+# leaves a follow-up out when its start would be farther than this; a Drive Rush cancel (it closes the distance) or a
+# projectile ender (SA1, Hadoken: no limit) takes its place, or the combo ends on the hit it has.
+combo_reach:
+  follow:
+    L Shoryuken: 1.5
+    M Shoryuken: 1.5
+    H Shoryuken: 1.5
+    OD Shoryuken: 1.4
+    SA3 Shin Shoryuken: 1.5
+    CA Shin Shoryuken: 1.5
+    M Tatsumaki Senpu-kyaku: 1.85
+  travel:
+    Crouching Medium Kick: 0.42
+    Standing Heavy Punch: 0.40
+    Crouching Heavy Punch: 0.29
+    Whirlwind Kick: 0.54
 # System moves share action ids across characters. MEASURED in the user's replays (2026-10-02):
 # Ken's Drive Impact 855, parry 480/482, throws 715/720 equal Ryu's catalog ids. Used when the
 # opponent has no move catalog, so DI reactions work against any opponent seen so far.
@@ -428,6 +462,9 @@ defense:
     give_up_after: 3               # stop against this opponent after this many tries averaging below give_up_below
     give_up_below: -0.5            # (thousands of hp: its meaties recover in time, safe jumps)
     hold_direction: 3              # held between the motion and the button (the motion's last direction)
+    unknown_max_age: 15            # 0.26.0: an opponent move with no known active frames counts as a strike only
+                                   # this many frames after it started (MEASURED 0.25.0: the blocked OD
+                                   # Shoryukens answered follow-through ids out 15-19 frames with no contact)
     meaty_id: 640            # Ryu 2MK
     meaty_max_dist: 1.25     # MEASURED 0.14.0: Ryu 2MK connected from up to 1.25 (7 contacts)
     oki_throw_max: 0.9
@@ -528,8 +565,9 @@ drive_rush_in:
        seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+LP@3"}
     - {name: "Drive Rush 2HP", route: "PDR 2HP", follow: "Crouching Heavy Punch", weight: 0.05,
        seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+HP@3"}
-    - {name: "Drive Rush 5HK", route: "PDR 5HK", follow: "Standing Heavy Kick", weight: 0.05,
-       seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+HK@3"}
+    # 0.26.0 (user: "drive rush into 5HK is an awful option. It keeps whiffing"): removed. MEASURED 0.25.0 ranked: out of a
+    # Parry Drive Rush, 5HK hit 1 of 9 (6 whiffed, 2 blocked). After a Drive Rush CANCEL from a 5HP that hit, combos
+    # still use 5HK (4 of 4 hit).
     - {name: "Drive Rush 2LK", route: "PDR 2LK", follow: "Crouching Light Kick", weight: 0.05,
        seq: "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 2+LK@3"}
     - {name: "Drive Rush 2MP", route: "PDR 2MP", follow: "Crouching Medium Punch", weight: 0.05,

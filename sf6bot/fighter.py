@@ -513,6 +513,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._sa3_cmp_for = None
         # 0.24.0: the combo composer (combo_compose.py, set by the fight setup) and the route being performed
         self.composer = None
+        # 0.26.0: rounds won so far in this match (p1, p2) and how many win it, set by the fight loop: Super bars are
+        # spent more freely when the round can end the match (_bar_value)
+        self.round_wins = [0, 0]
+        self.rounds_to_win = 2
+        self._dist_hist: list = []            # (clock, distance) of the last lines: the opponent backing off (0.26.0)
         self._live_route = None
         self._live_kind = None
         self._route_basis = None              # the input delay the running route's recorded timing is replayed for
@@ -1417,8 +1422,25 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         # recovering: a reversal into a -3 move that recovers first is blocked and punished)
         c = self.chain
         fresh = c is not None and c["cur"] == oa and c["contact"] is None and not self.op_recovering(op)
-        attacking = (self._attack(oa) and fresh and oa not in self.parry_ids and not info.get("di")
+        # 0.26.0 (user: "Lots of blocked OD DPs"). MEASURED 0.25.0 ranked: 49 OD Shoryukens, 41 hit, 4 blocked, 4 whiffed.
+        # The blocked ones answered no strike: Alex's Drive Rush on the bot's wake-up (500, then he stopped and blocked);
+        # Ingrid's 663 -> 664 twice (664 out 15+ frames with no contact, moving AWAY 0.97 -> 1.45); Bison's 1042 -> 1043
+        # (1043 out 19 frames, no contact). So: not a rush or a hold / charge (lead-in), not an unknown move that has
+        # been out longer than a strike's start-up without touching the bot, not one moving away.
+        rc = (self.c.get("defense") or {}).get("reactive_reversal") or {}
+        k_ = self._pe_know(oa) if isinstance(oa, int) else {}
+        age_ok = fresh and (isinstance(k_.get("active_end"), int)
+                            or c["el"] <= int(rc.get("unknown_max_age", 15)))
+        # Drive system moves 480-519 (parries, rushes: id kinds MEASURED 0.18.3; Alex's rush is 500 then 502)
+        rushing = oa in RUSH_IDS or (isinstance(oa, int) and 480 <= oa < 520) or bool(k_.get("lead_in"))
+        # ... and the reversal itself must reach: 1 of the 4 whiffed OD Shoryukens went out from 2.01 at a long poke
+        own_reach = ((self.c.get("combo_reach") or {}).get("follow") or {}).get(cand.get("name") or "")
+        reaches = own_reach is None or cand.get("super") or dist <= float(own_reach) + 0.1
+        attacking = (self._attack(oa) and fresh and age_ok and not rushing and not self._op_backing_off()
+                     and oa not in self.parry_ids and not info.get("di") and reaches
                      and dist <= (reach if isinstance(reach, (int, float)) else 1.6) + 0.3)
+        if self._attack(oa) and fresh and not attacking and (rushing or not age_ok or self._op_backing_off()):
+            self.reversal_stats["not_a_strike"] = self.reversal_stats.get("not_a_strike", 0) + 1
         grab = oa in self.throw_ids or oa in self.cmd_grab_ids()
         side = Facing.RIGHT if (_num(op.get("x")) or 0) > (_num(me.get("x")) or 0) else Facing.LEFT
         if attacking or grab:
@@ -1433,6 +1455,16 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                             timed=True, reason=f"{what} coming as I get free ({rem}F): {cand['name']} (invincible)")
         self.reversal_stats["held"] += 1
         return self._commit_defense(sit, raw, me, op, dist, t, rem=rem, extra_exclude={"reversal"})
+
+    def _op_backing_off(self, frames: int = 6, by: float = 0.08) -> bool:
+        """0.26.0: the distance grew by more than `by` over the last `frames` clock ticks: the opponent's move is
+        taking it away (a retreat, a recovery that steps back), not coming at the bot."""
+        h = self._dist_hist
+        if len(h) < 2:
+            return False
+        t1, d1 = h[-1]
+        old = [(t, d) for t, d in h if t1 - t <= frames]
+        return bool(old) and d1 - old[0][1] > by
 
     def _wakeup_anti_air(self, me: dict, op: dict, rem: int, sit: str = "wakeup") -> Decision | None:
         """0.21.0: the opponent jumping at the bot while it gets up (MEASURED, 56 ranked matches: 44 of 518 jumps came on
@@ -1680,20 +1712,48 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         m = (self.c.get("moves") or {}).get(key)
         return m if m and m.get("seq") else None
 
+    def _bar_value(self, me: dict) -> float:
+        """0.26.0: what a Super bar kept is worth (hp) to the combo composer now. MEASURED 0.25.0 ranked: the bot died
+        holding 1-3 bars in 7 of 8 lost matches. Bars carry over between rounds, not past the match, so in a round that
+        can end the match (either side one round from winning) a kept bar is worth little; and less when the bot is
+        low. Config `meter` (ESTIMATES)."""
+        mc = self.c.get("meter") or {}
+        v = float(mc.get("bar_value", 250))
+        if self.match_point():
+            v *= float(mc.get("match_point_factor", 0.2))
+        hp, top = _num(me.get("hp")), _num(me.get("hp_max")) or 10000
+        if hp is not None and hp <= float(mc.get("low_hp", 0.35)) * top:
+            v *= float(mc.get("low_hp_factor", 0.5))
+        return v
+
+    def match_point(self) -> bool:
+        """This round can end the match: either side is one round from winning it."""
+        return max(self.round_wins or [0, 0]) >= max(1, int(self.rounds_to_win or 2)) - 1
+
+    def _spending(self, me: dict) -> bool:
+        """Bars are cheap now (a match-point round or low health): use them rather than keep them."""
+        return self._bar_value(me) < 0.5 * float((self.c.get("meter") or {}).get("bar_value", 250))
+
+    def _price_bars(self, me: dict) -> None:
+        if self.composer is not None:
+            self.composer.bar_value = self._bar_value(me)
+
     def _super_confirm(self, me: dict, op: dict, ch: dict) -> dict | None:
         """0.18.1: a 2MK chosen in neutral (alone or as a route starter) is confirmed into SA3 with a full meter, or into
-        SA1 when that kills. The route runs with hit confirm: a blocked or whiffed 2MK spends nothing."""
+        SA1 when that kills. The route runs with hit confirm: a blocked or whiffed 2MK spends nothing. 0.26.0: SA1 also
+        when bars are cheap (a round that can end the match, low health: _spending), so they are not lost unspent."""
         if not (self.c.get("supers") or {}).get("confirm", True):
             return None
         starter = (ch.get("route") or {}).get("starter")
         if ch.get("move") != "Crouching Medium Kick" and starter not in ("2MK", "Crouching Medium Kick"):
             return None
         meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+        spend = (self.c.get("meter") or {}).get("confirm_sa1_when_spending", True) and self._spending(me)
         for key in ("confirm_sa3", "confirm_sa1"):
             m = (self.c.get("moves") or {}).get(key)
             if not m or meter < int(m.get("super", 30000)):
                 continue
-            if key == "confirm_sa1" and (m.get("damage") or 0) < hp:
+            if key == "confirm_sa1" and (m.get("damage") or 0) < hp and not spend:
                 continue
             self.super_stats["confirm"] += 1
             return m
@@ -2364,6 +2424,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._rush_next = t + float(rc.get("cooldown_s", 5.0))
         opts = rc.get("options") or [{"name": "Drive Rush 5MP", "seq": "5+MP+MK@8 6+MP+MK@3 5+MP+MK@2 6+MP+MK@3 6@8 5+MP@3",
                                       "weight": 0.7}]
+        opts = [o for o in opts if dist <= self._rush_reach(o)]      # 0.26.0: the normal must reach after the rush
+        if not opts:
+            return None
         pick = self.rng.choices(opts, [float(o.get("weight", 1)) for o in opts])[0]
         self.rush_stats["own_rush_in"] = self.rush_stats.get("own_rush_in", 0) + 1
         k_ = "rush_in:" + pick["name"]
@@ -2371,6 +2434,22 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return Decision("seq", pick["name"], pick["seq"], rule="drive_rush_in",
                         reason=f"mid range ({dist:.2f}), {(_num(me.get('drive')) or 0) / 10000:.1f} Drive bars: "
                                f"Drive Rush in")
+
+    def _rush_reach(self, o: dict) -> float:
+        """0.26.0: the farthest a Parry Drive Rush into option o's normal is started from: the normal's reach (measured,
+        else punish.reach_fallback; a throw 0.9) + the rush's measured travel (punish.PDR_TRAVEL). MEASURED 0.25.0 ranked:
+        30 rushes, the normal out of it hit 5 times, whiffed 18 (most started 2.0-2.7 away)."""
+        from .punish import PDR_TRAVEL
+        pc = self.c.get("punish") or {}
+        follow = o.get("follow")
+        if follow == "throw":
+            r = float((self.c.get("ranges") or {}).get("throw", 0.9))
+        else:
+            own = next((m for m in self.own if m.get("name") == follow), None)
+            r = self._pe_reach((own or {}).get("id"), self._reach_fb(follow)) if follow else None
+        if r is None:
+            r = 1.3
+        return float(r) + float(pc.get("pdr_travel", PDR_TRAVEL))
 
     def _oki_walk(self, me: dict, op: dict, dist: float) -> Decision | None:
         """0.18.3: the opponent is knocked down (grounded knockdown / get-up actions 300-349) and out of reach: walk in,
@@ -2469,7 +2548,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             a["composed"] = True
             return None
         a["composed"] = True
-        e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0))
+        self._price_bars(me)
+        e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0), travel_done=a.get("hit_t") is not None)
         if e is None:
             return None
         self.compose_stats["live"] = self.compose_stats.get("live", 0) + 1
@@ -2531,6 +2611,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._track_grab_chain(oa, tmr)
         self._track_self(me, op, tmr)
         self._line_t = tmr
+        d_ = player_distance(me, op)
+        if d_ is not None and isinstance(tmr, int) and (not self._dist_hist or self._dist_hist[-1][0] != tmr):
+            self._dist_hist = (self._dist_hist + [(tmr, d_)])[-8:]
         self._track_own_attack(me, op)
         self._track_damage_taken(me, op)
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
@@ -2817,16 +2900,23 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         new, verdict = after_first_hit(self.book or [], e, kind, me, op,
                                        learned=self.exp.routes() if self.exp else None,
                                        reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+        if verdict == "switch" and new is not None and not switch_motion_ok(e, new):
+            new, verdict = None, "keep" if e.get("hit_type") in HIT_OK.get(kind or "", ("normal",)) else "stop"
+            self.hit_switch["refused_motion"] = self.hit_switch.get("refused_motion", 0) + 1
         self._switched_to = None
         cur = new if verdict == "switch" and new is not None else e
         if self.composer is not None:
+            self._price_bars(me)
             # "stop": the route's own continuation would drop after this hit; compare with ending here
             ext = self.composer.best_tail(cur if verdict != "stop" else dict(e, edges=[]), 0, me, op,
                                           reserve=self.c.get("drive_reserve", 0),
-                                          hit_ok=HIT_OK.get(kind or "", ("normal",)))
-            if ext is not None:
+                                          hit_ok=HIT_OK.get(kind or "", ("normal",)), travel_done=True)
+            if ext is not None and switch_motion_ok(cur, ext):
                 new, verdict = ext, "switch"
                 self.compose_stats["first_hit_extended"] += 1
+            elif ext is not None:
+                # 0.26.0: its next move needs another motion, too late after the hit; the planned one is already in
+                self.hit_switch["refused_motion"] = self.hit_switch.get("refused_motion", 0) + 1
         if verdict == "stop":
             self.hit_switch["stopped"] += 1
         if verdict != "switch" or new is None:
@@ -2854,6 +2944,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if e is None or self.composer is None:
             return None
         from .combo_compose import REF_LEAD, shift_fixed
+        self._price_bars(raw.get(me_key) or {})
         new = self.composer.best_tail(e, k, raw.get(me_key) or {}, raw.get(op_key) or {},
                                       reserve=self.c.get("drive_reserve", 0))
         if new is None:
@@ -2979,15 +3070,16 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             o = self.rush_options.get(ch.get("rush_follow"))
             oa = op.get("action_id")
             if (o is not None and not self.opp_has_super(op) and (_num(op.get("y")) or 0.0) <= 0.05
-                    and not self._attack(oa) and self.can_spend(me, "drive_parry")):
+                    and not self._attack(oa) and self.can_spend(me, "drive_parry")
+                    and dist <= self._rush_reach(o)):
                 self.rush_stats["style_rush"] = self.rush_stats.get("style_rush", 0) + 1
                 k_ = "rush_in:" + o["name"]
                 self.rush_stats[k_] = self.rush_stats.get(k_, 0) + 1
                 return Decision("seq", o["name"], o["seq"], rule="policy:drive_rush", intent="drive_rush",
                                 reason=reason + f" -> {o['name']}")
             self.neutral_stats["rush_held"] = self.neutral_stats.get("rush_held", 0) + 1
-            return Decision("hold", direction=1, reason=reason + "; no Drive Rush now (super meter / attack / Drive)",
-                            rule="policy:crouch_block", intent="crouch")
+            return Decision("hold", direction=1, reason=reason + "; no Drive Rush now (super meter / attack / Drive / "
+                            "out of the follow-up's reach)", rule="policy:crouch_block", intent="crouch")
         if not ch.get("seq") or intent == "idle":
             return Decision("release", reason=reason, rule=rule, intent=intent)
         if intent == "crouch":
@@ -3030,6 +3122,21 @@ def landing_frames(y: float, vy: float, g: float) -> float:
     0.18.0: a jump lasts 37 frames for most characters and peaks at 2.11 (g ~ 0.0123)."""
     y, vy = max(0.0, y), vy
     return (vy + (vy * vy + 2.0 * g * y) ** 0.5) / g if g > 0 else 0.0
+
+
+def switch_motion_ok(old: dict, new: dict) -> bool:
+    """0.26.0: may a route switch at the starter's first hit (route_after_hit) go to `new`? Its next move cancels on that
+    hit, so its motion must already be in (the same motion as the planned next move: combo_lab presends it on the
+    predicted contact) or be short (combo_lab.SWITCH_MOTION_MAX frames). MEASURED 0.25.0 ranked: a cancel's button 13+
+    frames after the hit came out nothing; 3-7 frames after, it came out."""
+    from .combo_lab import SWITCH_MOTION_MAX, motion_part
+    a = ((old.get("plan") or {}).get("steps") or [])
+    b = ((new.get("plan") or {}).get("steps") or [])
+    if len(b) < 2:
+        return True
+    if len(a) >= 2 and motion_part(a[1].get("sequence") or "") == motion_part(b[1].get("sequence") or ""):
+        return True
+    return b[1].get("trigger") != "contact" or (b[1].get("prefix") or 0) <= SWITCH_MOTION_MAX
 
 
 def seq_prefix(seq: str) -> int:
@@ -3724,6 +3831,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                             summary["rounds"][-1]["operator"] = True
                             _operator_round(e.get("round"), won)
                         if fighter is not None:
+                            fighter.round_wins, fighter.rounds_to_win = list(tracker.wins), tracker.rounds_to_win
                             # 0.18.0: review the round and adapt before the next one (0.17.5 ranked: every round 2 and 3 lost)
                             # 0.22.0: not from a round the operator played (the user's play is not the bot's)
                             rv = fighter.round_review(adapt=not op_round)
@@ -4037,6 +4145,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
                 fighter.composer = composer
+                if composer is not None:
+                    cr_ = fcfg.get("combo_reach") or {}
+                    composer.follow_reach = {k: float(v) for k, v in (cr_.get("follow") or {}).items()}
+                    composer.travel = {k: float(v) for k, v in (cr_.get("travel") or {}).items()}
+                # (a tracker still holding the last match's score has not seen this match start yet)
+                fighter.round_wins = [0, 0] if tracker.match_over else list(tracker.wins)
+                fighter.rounds_to_win = tracker.rounds_to_win
                 fighter.op_rev_supers = opponent_reversal_supers(summary["opponent"], ds_root)
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])

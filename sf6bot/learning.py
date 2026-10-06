@@ -59,6 +59,11 @@ class Experience:
         for k in ("neutral", "moves", "routes", "habits", "defense", "responses"):
             self.d.setdefault(k, {})
         self.d.setdefault("matches", [])
+        from .combo_compose import SUPER_FIX_VERSION, involves_super, version_tuple
+        if version_tuple(self.d.get("sf6bot_version")) < SUPER_FIX_VERSION:
+            # 0.26.0: route results saved before then counted every super ender that connected online as a failure
+            # (combo_lab.SUPER_FREEZE): those routes start again from the lab's rate
+            self.d["routes"] = {r: e for r, e in self.d["routes"].items() if not involves_super(r)}
         self.pending: list = []
         self.pending_def: list = []
         self.others_def: dict = {}

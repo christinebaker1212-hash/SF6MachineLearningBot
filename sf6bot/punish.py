@@ -40,7 +40,11 @@ from .move_timing import free_id, move_id, reaction_id
 ROUTE_DELAY = 1        # a route's first input goes out on the next state line (combo_lab.perform_route waits for one)
 PDR_FRAMES = 24        # ESTIMATE: Parry Drive Rush from the parry's first frame to the normal's first frame (parry out on
                        # frame ~10 (catalog), the rush, the normal on rush frame ~11: combo_lab.RUSH_AT, a guess)
-PDR_REACH = 2.9        # ESTIMATE: how far a Parry Drive Rush normal reaches from where the parry started
+PDR_REACH = 2.9        # (before 0.26.0) ESTIMATE: how far a Parry Drive Rush normal reaches from where the parry started
+# 0.26.0: MEASURED (0.25.0 ranked, 30 of the bot's Parry Drive Rushes): the rush ran 18 frames and closed the distance by
+# 0.62 (median), and the normal out of it whiffed 18 times, mostly started 2.0-2.7 away (after parrying a fireball): the
+# 2.9 estimate let a rush 5HP "reach" from 2.9. A normal out of a rush reaches its own reach + this.
+PDR_TRAVEL = 0.6
 ACTIVE_GUESS = 4       # active frames assumed when nothing else is known (whiff_punish.active_frames_guess)
 NAME_TOL = 4           # an inferred name whose Capcom total is this far from the measured total is doubted
 MIN_N = 3
@@ -504,7 +508,7 @@ class PunishEngine:
             steps.append(("dash", int(wc.get("dash_frames", 21)) + 5, dash_d, 0))
             if self.can_spend(me, "drive_parry") and (num(me.get("drive")) or 0) >= int(
                     (self.c.get("drive_rush_in") or {}).get("min_drive", 30000)) and not self.opp_has_super(op):
-                steps.append(("rush", int(pc.get("pdr_frames", PDR_FRAMES)), float(pc.get("pdr_reach", PDR_REACH)), 0))
+                steps.append(("rush", int(pc.get("pdr_frames", PDR_FRAMES)), float(pc.get("pdr_travel", PDR_TRAVEL)), 0))
         else:
             walk_v = 0.047
         startup = w["kind"] == "startup"
@@ -529,8 +533,9 @@ class PunishEngine:
                         continue
                     pre, add = pre_f, f"6@3 5@2 6@3 5@{pre_f - 8} "
                 else:  # rush: the drive_rush_in route with this normal, if there is one
-                    if o.get("override") or o.get("travel") or o["kind"] == "route" or not 0.6 < gap + o["reach"] <= pre_d:
-                        continue
+                    if o.get("override") or o.get("travel") or o["kind"] == "route" or not 0.0 < gap <= pre_d \
+                            or gap + o["reach"] <= 0.6:
+                        continue                    # 0.26.0: the normal's own reach + the rush's measured travel
                     ro = self.rush_options.get(_capcom_name(o["name"])) if self.rush_options else None
                     if ro is None:
                         continue

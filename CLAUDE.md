@@ -3514,6 +3514,107 @@ verified in game. Values marked ESTIMATE are config guesses.
   walk-in, Raging Demon. **90% is not reached on paper**; the gap is mostly the zoners. As the bot climbs, stronger
   opponents pull the rate back toward 50%: LP is the measure.
 
+## 0.25.0 ranked run analysed (user, 2026-10-05): 35 recordings, 26-8 — conversions and meter
+MEASURED on the 35 uploaded fights (all 0.25.0; 1 unfinished) and the five run folders' summaries (19:22-20:52). Analysis
+scripts in the session scratchpad (not kept). The user: "Lots of blocked OD DPs in this one"; "the bot is missing damaging
+combo conversions. He requires more interactions to kill than his opponents do when he loses"; "it should know that it can
+drive rush cancel to make some moves that might whiff on followup from long range hit up close ... a max range 5HP";
+"drive rush into 5HK is an awful option. It keeps whiffing."
+| | 0.24.3 | 0.24.4 | 0.25.0 |
+|---|---|---|---|
+| record / win % | 24-9 / 73% | 13-6 / 68% | 26-8 / 76% |
+| damage dealt / taken | 1.35 | 1.20 | 1.31 |
+| openings a minute (mine / theirs) | 7.6 / 8.5 | 6.7 / 8.1 | 7.7 / 8.3 |
+| damage per opening (mine / theirs) | 1397 / 921 | 1497 / 1036 | 1399 / 993 |
+| thrown / match | 4.1 | 4.2 | 3.3 |
+| back to the wall % | 9 | 7 | 12 |
+- The 0.25.0 projection was ~80% (78-83%); the real 76% over 34 finished matches is inside the noise (about +/-14 points at
+  50 matches). By opponent: Ken 6-0, M. Bison 4-0, Cammy 3-0, E. Honda 2-0, Ingrid 2-0, Ryu 3-1, Akuma 3-1, Guile 2-2 (+1
+  unfinished), Alex 1-3, Lily 0-1. LP (OCR, progress.md): 21,579 -> 21,592; +747 net over the 22 matches read in the main run.
+- No `errors` in any match summary. Every run ended with STOP in the panel.
+- 0.25.0 checks: tech throws forward 144 vs back 30 (0.24.x: 87 / 171); against jump-ins landing near, 2LP / 2HP 1 of 55
+  (0.24.x: 13 of 144); the user's Ken answers went out 10 times (Ken 6-0); guard hold 1,595 lines; Akuma's charge blocked
+  688 lines; punish engine: blocked windows 63 of 93, whiff windows 213 of 214.
+- **OD Shoryukens: 49 out, 41 hit, 4 blocked, 4 whiffed** (wake-up 13 / 1 / 2, after a block 13 / 3 / 1, in combos 14 / 0 / 0).
+  The 4 blocked ones answered no strike: Alex's Drive Rush on the bot's wake-up (500, then 502, then he crouch-blocked);
+  Ingrid's 663 -> 664 twice (664 out 15+ frames with no contact, moving AWAY 0.97 -> 1.45); Bison's 1042 -> 1043 (1043 out 19
+  frames). One whiff went out from 2.01 at a long poke.
+- **Conversions:** in the 8 losses the opponents averaged 1,126 per opening and the bot 1,350; the bot got fewer openings
+  there (84 vs 139). Typical bot conversions: 2MK > H Shoryuken 1,620-1,720, 5HP > H Shoryuken 1,920-2,360, 5LK > M Tatsumaki
+  ~1,160; the opponents' big ones: Alex's 2,200-2,500 single hits (915 / 919), Guile 707 (2,040), Lily 1008 (2,240), 2-4-hit
+  combos for 2,000-3,000.
+- **Meter:** the bot died holding 1-3 Super bars in 7 of its 8 lost matches; 12 SA3 and 27 SA1 in 35 matches; at 314 of its
+  529 openings it held 1+ bars and spent none inside the combo. Drive: 5-6 bars at 286 of the openings.
+- **Cause found (a bug): supers in ranked combos were judged whiffs.** Online the move frames are counted from the clock
+  (FrameClock, 0.17.5) and the count ran through the ~55-tick Super Art freeze: the bot's SA1 after 2MK connected on its "own
+  frame 64", SA3 on 60-61 (Capcom start-up 7 and 5). The hit confirm calls a whiff at start-up + 6, so every super ender was
+  reported "whiff" ("2MK > SA1: whiff 8", "2MK > SA3: whiff 4" while 3 of those SA3s connected) and the combo composer learned
+  that supers fail (its per-transition success shrank to ~0.17): it stopped spending bars in combos.
+- **Cause found (a bug): a first-hit switch re-sent the whole motion.** 127 switches after the first hit (route_after_hit);
+  ComboRun.switch reset the next step, so a motion already pre-input on the predicted hit (presend) went out again AFTER the
+  hit: the cancel's button arrived 13+ frames after the hit and nothing came out ("5LP > 623PP: not_out" 14, "2LP > 623PP" 9,
+  "2MK > 623PP" 9). From the input masks: a button 3-7 frames after the hit came out (2MK > H Shoryuken 52 of 57).
+- **Range:** after one of the bot's normals hit, H Shoryuken connected 78 of 81 from within 1.4 (distance at its start), 15 of
+  18 at 1.4-1.6, 2 of 4 beyond; M Tatsumaki 29 of 31 within 1.8. 2MK and 5HP carry Ryu ~0.4 forward before their hit. 5HP
+  connected mostly from 1.5-2.0; the bot followed it with H Shoryuken 47 of 62 times and a Drive Rush cancel 4 times.
+- **Drive Rush:** 30 Parry Drive Rushes into a normal: 5 hit, 7 blocked, 18 whiffed. The rush ran 18 frames and closed 0.62
+  (median); most whiffs started 2.0-2.7 away, after parrying a fireball (the punish engine's PDR reach estimate was 2.9).
+  5HK out of them: 1 hit, 6 whiffed, 2 blocked. After a Drive Rush CANCEL from a 5HP that hit, 5HK hit 4 of 4; after 2MP
+  cancels the rush ran its full 33 frames with nothing pressed (6 times).
+- Other: SendInput p99 ~40 ms, max 91 ms on the user's PC this session (outside the bot's control; noted).
+
+## 0.26.0: conversions and meter (user, 2026-10-06: "heuristically improve the bot overall, making notes of what you've done in every step")
+All MOCK / replay-tested (`tests/test_0260.py`, 16 tests, one REAL fixture: `tests/data/ranked_0.25.0_2mk_sa1.jsonl.gz`, the
+bot's 2MK > SA1 from the user's ranked match with the exported frames frozen as online); nothing here is verified in game.
+### Step 1. Supers in ranked combos (the freeze bug)
+- `game_state.FrameClock`: while one player is in a super id (1200-1299) and the other's hitstun or blockstun stands still
+  (above 0, same action id, no hitstop on either side), both players' frames stand still. On the real fixture the SA1 now
+  connects on its frame 7 (Capcom 7) instead of 64; 57 freeze lines found. `super_freeze_lines` counts them.
+- `combo_lab`: `SUPER_FREEZE = 56` (MEASURED): a super step gets that many more frames before hit confirm calls a whiff (a
+  super from neutral has no stun to watch).
+- Learned results saved before 0.26.0 that involve a super are dropped when loaded: the composer's transitions
+  (`combo_compose.load_learned`, keys into or out of SA1 / SA2 / SA3 / CA) and the per-opponent route results
+  (`learning.Experience`, routes with 236236 / 214214 / SAx). The rest is kept. `combo_compose.involves_super`.
+### Step 2. Spend Super bars (use it or lose it)
+- `fighter._bar_value`: what a kept bar is worth to the composer (config `meter`, ESTIMATES): 250 hp; x0.2 when the round
+  can end the match (either side one round from winning: bars are not carried past the match); x0.5 at 35% health or less.
+  The fight loop keeps `fighter.round_wins` / `rounds_to_win` from the episode tracker (reset at a new match).
+- `Composer.bar_value` replaces the fixed `SUPER_BAR_VALUE` in its scores; the fighter sets it before every live
+  composition, first-hit extension and re-plan (`_price_bars`).
+- `_super_confirm`: a 2MK confirm goes into SA1 when bars are cheap (`_spending`: match point, or match point + low) even
+  when SA1 does not kill (`meter.confirm_sa1_when_spending`). Low health alone keeps them (they carry to the next round).
+### Step 3. Long-range conversions: Drive Rush cancel where the follow-up would whiff (the user's max-range 5HP)
+- Config `combo_reach` (MEASURED above): the farthest distance at a follow-up's start it is used from (L / M / H Shoryuken 1.5,
+  OD Shoryuken 1.4, SA3 / CA 1.5, M Tatsumaki 1.85; projectiles and Drive Rush: no limit) and the forward travel of a normal
+  before its hit (2MK 0.42, 5HP 0.40, 2HP 0.29, Whirlwind Kick 0.54).
+- `Composer.reach_miss` / `out_of_reach`: a cancel into a move whose start would be beyond its reach is left out at that
+  spacing (the search), valued x0.05 when already planned (`tail_score`), and a planned route ends on the hit it has when
+  nothing fits (`best_tail`, as 0.24.4's learned spacing). `travel_done`: after the hit the distance is taken as it is
+  (route_after_hit), before it (a live composition, a step just started) the normal's travel is taken off.
+- So a 5HP that hits from ~1.9+ (1.5 after its travel) goes on with a Drive Rush cancel when the Drive allows (it closes the
+  distance), else a projectile ender, else ends on the 5HP: no more Shoryukens out of reach.
+### Step 4. Drive Rush follow-ups
+- `drive_rush_in.options`: Drive Rush 5HK removed (user; 1 hit of 9 out of Parry Drive Rushes). After a Drive Rush cancel
+  in a combo 5HK stays (4 of 4 hit).
+- `punish.PDR_TRAVEL = 0.6` (config `punish.pdr_travel`, MEASURED): a normal out of a Parry Drive Rush reaches its own reach +
+  0.6; the old `pdr_reach` 2.9 is gone (rush 5HP "reached" from 2.9).
+- Neutral rushes (the style table's and the rule's own rolls) only within the follow-up's reach + 0.6 (`fighter._rush_reach`:
+  measured reach, else `punish.reach_fallback`; a throw `ranges.throw`); otherwise a crouch block.
+### Step 5. Reversals and first-hit switches
+- Reactive reversal (`_reactive_button`): not into a Drive system move (ids 480-519: parries, rushes; Alex's 500 / 502) or a
+  hold / charge (lead-in); not into an unknown move out longer than `reactive_reversal.unknown_max_age` 15 frames with no
+  contact; not into one moving away (`_op_backing_off`: the distance grew > 0.08 in 6 ticks); and the reversal must reach
+  (`combo_reach.follow`, OD Shoryuken 1.4 + 0.1). Counted as `reversal_stats.not_a_strike`.
+- `ComboRun.switch`: a motion already pre-input is kept when the new next move has the same motion (H -> OD Shoryuken:
+  only the buttons change); a different motion is refused when the next move cancels on the hit and its motion is longer
+  than `SWITCH_MOTION_MAX` 3 frames. `fighter.switch_motion_ok` applies the same rule before switching (route_after_hit;
+  a refused composer extension is counted `hit_switch.refused_motion`; the step's later re-plans still run).
+- `motion_part("")` no longer raises.
+### Not changed (seen, not built)
+- Akuma's H Gou Hadoken still did 6,607 in the last loss (parried 19, blocked 18); Alex (1-3): his 915 / 919 single hits
+  (2,200-2,500, likely command grabs; no Alex catalog here to name them). Throws on the bot: 51 landed of 119 seen.
+- The 2MP > Drive Rush cancel routes never pressed the normal after the rush (6 times, 33-frame rushes): not traced further.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

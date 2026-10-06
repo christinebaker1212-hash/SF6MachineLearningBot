@@ -126,6 +126,16 @@ class Composer:
         self._plans: dict = {}
         self.stats = Counter()
         self.body = "standard"               # the opponent's body class (BIG_BODIES): spacing results are kept per class
+        # 0.26.0: what a Super bar kept is worth now (hp); the fighter lowers it when bars would be lost unspent (a round
+        # that can end the match, low health: fighter._bar_value)
+        self.bar_value = SUPER_BAR_VALUE
+        # 0.26.0 (user: "it should know that it can drive rush cancel to make some moves that might whiff on followup from
+        # long range hit up close ... For example, a max range 5HP"): how far a cancel's follow-up reaches (distance at its
+        # start) and how far the move before it carries the bot forward before its hit (fighter config `combo_reach`,
+        # MEASURED). A follow-up out of reach is left out, so a Drive Rush cancel (which closes the distance) or a
+        # projectile ender takes its place, or the combo ends on the hit it has.
+        self.follow_reach: dict = {}
+        self.travel: dict = {}
         self.starters: dict = {}             # move name -> ([resolved step], [planned step]): moves a combo can start from
         self.starter_ids: dict = {}          # the bot's action id -> that move's name
 
@@ -276,6 +286,21 @@ class Composer:
             return False
         return sum(1 for d in sp.get("miss") or () if d <= dist + SPACING_SLACK) >= SPACING_MISSES
 
+    def reach_miss(self, t: dict, dist: float | None, travel_done: bool = False) -> bool:
+        """Transition t is a cancel / chain into a move whose measured follow-up reach the distance at its start would
+        exceed. `dist` is the distance now: when the move before it has not hit yet (`travel_done` False) its forward
+        travel up to the hit is taken off."""
+        if dist is None or not t["cf"] or not t["hitting"] or t["system"]:
+            return False
+        r = self.follow_reach.get(t["name"])
+        if r is None:
+            return False
+        d = dist - (0.0 if travel_done else float(self.travel.get(t["prev"] or "", 0.0)))
+        return d > r
+
+    def out_of_reach(self, t: dict, dist: float | None, travel_done: bool = False) -> bool:
+        return self.too_far(t, dist) or self.reach_miss(t, dist, travel_done)
+
     def p(self, t: dict) -> float:
         lr = self.learned.get(t["key"]) or {}
         n, ok = lr.get("n", 0), lr.get("ok", 0)
@@ -284,7 +309,7 @@ class Composer:
     # ---- search ------------------------------------------------------------------------------------------------
     def search(self, prefix_steps: list[dict], last_key: str | None, *, drive: float, sup: float, corner: bool,
                hit_ok=("normal",), opp_hp: float | None = None, beam: int = BEAM, max_steps: int = MAX_STEPS,
-               dist: float | None = None) -> list[dict]:
+               dist: float | None = None, travel_done: bool = False) -> list[dict]:
         """Every combo that continues `prefix_steps` (planned steps already performed or chosen), within `drive` /
         `sup` to spend; best first by expected value. Each result: {"path": [transition keys], "ev", "p", "damage",
         "drive", "super", "corner", "hit_req"}."""
@@ -320,8 +345,9 @@ class Composer:
                         continue
                     if s["uses"][t["key"]] >= MAX_REUSE:
                         continue
-                    if depth == 0 and self.too_far(t, dist):
-                        continue                  # the next step whiffs from this spacing (learned per body class)
+                    if depth == 0 and self.out_of_reach(t, dist, travel_done):
+                        continue                  # the next step whiffs from this spacing (learned per body class /
+                                                  # measured follow-up reach, 0.26.0)
                     pt = self.p(t)
                     if s["last"] is not None:
                         prev_t = self.trans.get(s["last"])
@@ -359,14 +385,14 @@ class Composer:
                  "expected": round(s["E"], 1)} for s in out]
 
     def _score(self, s: dict, opp_hp: float | None) -> float:
-        v = s["E"] - s["super"] / 10000 * SUPER_BAR_VALUE - s["drive"] / 10000 * DRIVE_BAR_VALUE \
+        v = s["E"] - s["super"] / 10000 * self.bar_value - s["drive"] / 10000 * DRIVE_BAR_VALUE \
             - (1.0 - s["P"]) * DROP_COST
         if opp_hp is not None and s["D"] >= opp_hp:
             v += KILL_BONUS * s["P"]
         return v
 
     def tail_score(self, prefix_steps: list[dict], last_key: str | None, path: list[str], opp_hp: float | None = None,
-                   dist: float | None = None) -> float | None:
+                   dist: float | None = None, travel_done: bool = False) -> float | None:
         """The same expected value for a given continuation (the route the bot is performing)."""
         from .combo_gen import estimate_damage
         rows = self._hit_rows(prefix_steps)
@@ -378,7 +404,7 @@ class Composer:
             if t is None:
                 return None
             pt = self.p(t)
-            if k == path[0] and self.too_far(t, dist):
+            if k == path[0] and self.out_of_reach(t, dist, travel_done):
                 pt *= OUT_OF_RANGE_P
             if last is not None:
                 pv = self.trans.get(last)
@@ -448,7 +474,7 @@ class Composer:
 
     # ---- live: the best continuation of the route being performed ----------------------------------------------
     def best_tail(self, e: dict, k: int, me: dict, op: dict, *, reserve: float = 0, hit_ok=("normal",),
-                  margin: float = 100.0) -> dict | None:
+                  margin: float = 100.0, travel_done: bool = False) -> dict | None:
         """Route `e` is being performed and its step k has just started. Returns a new entry (same first k+1 steps)
         when a continuation with the resources the bot has NOW is worth more than e's own rest, else None."""
         resolved, edges = e.get("resolved"), e.get("edges")
@@ -463,9 +489,9 @@ class Composer:
         opp_hp = num(op.get("hp"))
         from .game_state import player_distance
         dist = player_distance(me, op)
-        cur = self.tail_score(prefix, last_key, list(edges[k:]), opp_hp, dist)
+        cur = self.tail_score(prefix, last_key, list(edges[k:]), opp_hp, dist, travel_done)
         cands = self.search(prefix, last_key, drive=drive, sup=sup, corner=cornered(op, me), hit_ok=hit_ok,
-                            opp_hp=opp_hp, beam=40, dist=dist)
+                            opp_hp=opp_hp, beam=40, dist=dist, travel_done=travel_done)
         for c in cands[:4]:
             if cur is not None and c["ev"] <= cur + margin:
                 break
@@ -477,7 +503,7 @@ class Composer:
                 new["replanned_at"] = k
                 return new
         if k + 1 < len(steps) and k < len(edges) and self.trans.get(edges[k]) is not None \
-                and self.too_far(self.trans[edges[k]], dist):
+                and self.out_of_reach(self.trans[edges[k]], dist, travel_done):
             # nothing better fits, and the planned next step whiffs from here: end the route on this move (user: "a Super
             # Art 3 that doesn't quite hit because the opponent was just spaced too much")
             new = self.entry(resolved[:k + 1], prefix, {"path": [], "damage": 0, "expected": 0.0, "ev": 0.0, "p": 1.0,
@@ -489,7 +515,7 @@ class Composer:
         return None
 
     def best_from(self, name: str, me: dict, op: dict, *, reserve: float = 0, hit_ok=("normal",),
-                  min_ev: float = MIN_EV) -> dict | None:
+                  min_ev: float = MIN_EV, travel_done: bool = False) -> dict | None:
         """The biggest combo from move `name` (one the bot is doing right now) with the resources it has now."""
         if name not in self.starters:
             return None
@@ -498,7 +524,7 @@ class Composer:
         res0, steps0 = self.starters[name]
         cands = self.search(steps0, None, drive=max(0.0, (num(me.get("drive")) or 0) - reserve - 1),
                             sup=num(me.get("super")) or 0, corner=cornered(op, me), hit_ok=hit_ok,
-                            opp_hp=num(op.get("hp")), beam=60, dist=player_distance(me, op))
+                            opp_hp=num(op.get("hp")), beam=60, dist=player_distance(me, op), travel_done=travel_done)
         for c in cands[:4]:
             if c["ev"] < min_ev:
                 return None
@@ -621,12 +647,35 @@ def learned_path(ds_root: Path, bot: str) -> Path:
     return Path(ds_root) / "learning" / f"{file_stem(bot)}_compose.json"
 
 
+# 0.26.0: results saved before this version judged every super that connected in a ranked combo a whiff (the Super Art
+# freeze was counted as the super's own frames: combo_lab.SUPER_FREEZE), so the composer had learned that supers never
+# connect and stopped spending Super bars in combos. Those results are dropped when loaded; the rest are kept.
+SUPER_FIX_VERSION = (0, 26, 0)
+SUPER_RE = re.compile(r"(?:^|[\s|>,~(])(?:SA[123]|CA)\b|236236|214214")
+
+
+def version_tuple(v) -> tuple:
+    try:
+        return tuple(int(x) for x in str(v).split(".")[:3])
+    except ValueError:
+        return (0, 0, 0)
+
+
+def involves_super(text: str) -> bool:
+    """A transition key ('prev|*|>|SA3 Shin Shoryuken') or route text ('5HP > 623HP > 236236K') with a Super Art in it."""
+    return bool(SUPER_RE.search(text or ""))
+
+
 def load_learned(ds_root: Path, bot: str) -> dict:
     p = learned_path(ds_root, bot)
     try:
-        return json.loads(p.read_text(encoding="utf-8")).get("edges") or {}
+        d = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    edges = d.get("edges") or {}
+    if version_tuple(d.get("sf6bot_version")) < SUPER_FIX_VERSION:
+        edges = {k: v for k, v in edges.items() if not involves_super(k)}
+    return edges
 
 
 def save_learned(ds_root: Path, bot: str, learned: dict) -> None:

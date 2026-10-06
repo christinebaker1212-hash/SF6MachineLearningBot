@@ -227,10 +227,19 @@ class FrameClock:
     `feed(raw)` is called for every line in order. While the exported frame is frozen (both players' values equal
     and unchanged over FROZEN_WINDOW clock ticks, with an action id change or a value no move reaches), each
     player's `action_frame` is replaced by the count, `action_frames_total` is set to null (it is frozen too) and
-    `action_frame_src` = "ticks". Healthy exports pass through unchanged."""
+    `action_frame_src` = "ticks". Healthy exports pass through unchanged.
+
+    0.26.0: the Super Art freeze. MEASURED (0.25.0 ranked, the bot's 2MK > SA1 and 2MK > SA3): from the line after a
+    super's id appears, the defender's hitstun stands still for 55-56 ticks with no hitstop on either side (a stun
+    counts down every tick outside hitstop), then the super's start-up runs (SA1 hit 6 ticks after the stun moved
+    again; Capcom start-up 7). The count used to run through the freeze, so the bot's own SA1 "hit on its frame 64"
+    and every super ender in a ranked combo was judged a whiff. Both players' frames stand still while it lasts.
+    Seen only while the defender is in hitstun or blockstun: a super from neutral still counts the freeze
+    (combo_lab.SUPER_FREEZE allows for it)."""
 
     FROZEN_WINDOW = 30
     NO_MOVE_IS_THIS_LONG = 1000      # offline the exported frame never exceeded 500 (10 matches)
+    SUPER_IDS = (1200, 1300)         # Super Arts / Critical Arts (id ranges MEASURED 0.18.3)
 
     def __init__(self) -> None:
         self.frozen = False
@@ -239,6 +248,27 @@ class FrameClock:
         self._clock = None
         self._round = None
         self._p: dict = {}           # player -> {"id", "n", "hs", "hitstun", "blockstun", "exp"}
+        self.super_freeze_lines = 0
+
+    def _super_freeze(self, raw: dict) -> bool:
+        """A Super Art's freeze on this line: one player in a super id, the other's hitstun or blockstun unchanged
+        (and above 0) with its action id unchanged, and no hitstop now or on the line before on either side."""
+        for pk, qk in (("p1", "p2"), ("p2", "p1")):
+            p, q = raw.get(pk), raw.get(qk)
+            if not isinstance(p, dict) or not isinstance(q, dict):
+                continue
+            aid = p.get("action_id")
+            if not (isinstance(aid, int) and self.SUPER_IDS[0] <= aid < self.SUPER_IDS[1]):
+                continue
+            sp, sq = self._p.get(pk), self._p.get(qk)
+            if sq is None or q.get("action_id") != sq["id"]:
+                continue
+            if (num(p.get("hitstop")) or 0) or (num(q.get("hitstop")) or 0) or sq["hs"] or (sp or {}).get("hs"):
+                continue
+            hst, bst = num(q.get("hitstun")) or 0, num(q.get("blockstun")) or 0
+            if (hst > 0 and hst == sq["hitstun"]) or (bst > 0 and bst == sq["blockstun"]):
+                return True
+        return False
 
     def feed(self, raw: dict) -> dict:
         tick = raw.get("stage_timer")
@@ -252,6 +282,9 @@ class FrameClock:
         self._clock, self._round = tick, rnd
         changed = False
         exported = []
+        freeze = not restart and dt > 0 and self._super_freeze(raw)
+        if freeze:
+            self.super_freeze_lines += 1
         for pk in ("p1", "p2"):
             p = raw.get(pk)
             if not isinstance(p, dict):
@@ -268,7 +301,7 @@ class FrameClock:
                 if (hst > s["hitstun"] or bst > s["blockstun"] or (hs > 0 and s["hs"] == 0)) \
                         and isinstance(aid, int) and 200 <= aid < 400:
                     s["n"] = 0                             # a new hit on the same reaction id
-                elif not (hs > 0 or s["hs"] > 0):
+                elif not (hs > 0 or s["hs"] > 0 or freeze):
                     s["n"] += dt
                 s.update(hs=hs, hitstun=hst, blockstun=bst)
         if dt > 0:

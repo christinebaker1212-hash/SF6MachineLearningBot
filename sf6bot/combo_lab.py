@@ -39,6 +39,13 @@ from .actions import Facing
 LEAD = 4               # measured input -> game read, frames (3-5, mostly 4)
 CONTACT_PLUS = 2       # cancels/chains: reach the game this many frames after contact
 CONFIRM_SLACK = 6      # matches (confirm): a move with no hit this many own frames after its start-up whiffed
+# 0.26.0: a Super Art's freeze, in its own frames when they are counted from the clock (online, FrameClock). MEASURED
+# (0.25.0 ranked, 35 recordings): the bot's SA1 connected 64 ticks after its id appeared (Capcom start-up 7), SA3 60-61
+# (start-up 5): ~55 ticks of freeze. FrameClock now stands still through it while the defender is in a stun; from
+# neutral it cannot tell, so a super gets this much more before it counts as a whiff. Before, every super ender of a
+# hit-confirmed route was judged a whiff online (and the combo composer learned that supers never connect).
+SUPER_FREEZE = 56
+SWITCH_MOTION_MAX = 3   # 0.26.0: frames of motion a first-hit switch may still add before a cancel's button
 RUSH_AT = 11           # GUESS: frame of a Drive Rush on which the next normal is pressed
 OFFSET_RANGE = (-4, 6)
 END_TICKS = 240        # wait at most 4 s after the last move for its hits (lab only since 0.22.2)
@@ -577,9 +584,23 @@ class ComboRun:
         before any later step has been sent; the starter's own record is kept."""
         if any(r["sent"] is not None for r in self.rt[1:]) or not steps:
             return False
+        # 0.26.0: the next move's MOTION may already be in (presend: it goes out on the predicted contact so only the
+        # button waits for the hit). MEASURED 0.25.0 ranked: 127 first-hit switches; every one reset that step, so the
+        # whole motion went out again after the hit, too late for the cancel ("5LP > 623PP: not_out" 14, "2LP > 623PP" 9,
+        # "2MK > 623PP" 9: the button 13+ frames after the hit; it came out when it was 3-7 frames after). The same motion
+        # is kept as sent; a different one is refused when the next move cancels on the hit and its motion takes longer
+        # than SWITCH_MOTION_MAX frames (there is no time left for it).
+        sent1 = self.rt[1].get("motion_sent") if len(self.rt) > 1 else None
+        same = len(self.steps) > 1 and len(steps) > 1 and \
+            motion_part(self.steps[1].get("sequence") or "") == motion_part(steps[1].get("sequence") or "")
+        if len(steps) > 1 and not same and steps[1].get("trigger") == "contact" \
+                and (steps[1].get("prefix") or 0) > SWITCH_MOTION_MAX:
+            return False
         self.steps = [self.steps[0]] + [dict(x) for x in steps[1:]]
         self.rt = self.rt[:1] + [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[])
                                  for _ in steps[1:]]
+        if same and sent1 is not None:
+            self.rt[1]["motion_sent"] = sent1
         self.fixed = ([{}] + list(fixed[1:])) if fixed and len(fixed) == len(steps) else None
         self.offsets = {}
         return True
@@ -853,7 +874,8 @@ class ComboRun:
                 r_ = self.rt[-1]
                 if r_["contact"] is not None or not last.get("hitting"):
                     self._finish(None, None)
-                elif r_["moving"] > (last.get("startup") or 8) + CONFIRM_SLACK or self.escape is not None:
+                elif r_["moving"] > (last.get("startup") or 8) + CONFIRM_SLACK \
+                        + (SUPER_FREEZE if last.get("super_art") else 0) or self.escape is not None:
                     self._finish("whiff", len(self.steps) - 1)
                 return None
             if self.escape is not None or self.ticks_after_last > END_TICKS:
@@ -909,7 +931,8 @@ class ComboRun:
             # Blade Kick only the Axe Kick's 2nd hit connects, at own frame 19; the start-up 10 + 6 deadline called it a
             # whiff at 17, so 'HP > 236KK > 4HK > 623 > SA3' stopped at the 4HK every time)
             hits_ = pst.get("active_hits") or []
-            if pr["moving"] > max(pst.get("startup") or 8, max(hits_) if hits_ else 0) + CONFIRM_SLACK:
+            if pr["moving"] > max(pst.get("startup") or 8, max(hits_) if hits_ else 0) + CONFIRM_SLACK \
+                    + (SUPER_FREEZE if pst.get("super_art") else 0):
                 self._finish("whiff", n - 1)
             return None
         fx = (self.fixed[n] if self.fixed and n < len(self.fixed) else None) or None
@@ -2370,6 +2393,8 @@ def motion_part(seq: str) -> str:
     """The directions of a sequence without its button, ending on the button step's direction (held):
     '2@3 3@3 6+HP@3' -> '2@3 3@3 6@1'."""
     toks = seq.split()
+    if not toks:
+        return ""
     last = toks[-1].split("@")[0].split("+")[0]
     return " ".join(toks[:-1] + [f"{last}@1"])
 
