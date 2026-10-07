@@ -34,6 +34,8 @@ punishes by a sampled reaction time; blocked punishes are predictions and are no
 """
 from __future__ import annotations
 
+import re
+
 from .game_state import num
 from .move_timing import free_id, move_id, reaction_id
 
@@ -50,6 +52,28 @@ NAME_TOL = 4           # an inferred name whose Capcom total is this far from th
 MIN_N = 3
 INTERRUPT_RISK = 2000.0  # ESTIMATE: what being hit by the opponent's move costs when an interrupt loses (hp)
 INTERRUPT_CH = 1.2       # MEASURED (0.10.0, hits.py): a counter hit does 1.2x the damage
+SUPER_FREEZE_DEFAULT = 52  # MEASURED (Ken SA1, learned contact frame 59 vs Capcom start-up 7): the super flash in its frames
+SUPER_FAMILY = 5           # a Super Art's follow-up ids within this many of its first id (Ken SA1 1200-1202, SA2 1210-1213)
+ROUTE_RATE_FLOOR = 0.75    # 0.34.0: a TRUE combo's value is its damage x at least this (the lab's repeat rate below it is
+                           # mostly execution jitter, 0.12.4); a composed one x at least COMPOSED_RATE_FLOOR (ESTIMATES)
+COMPOSED_RATE_FLOOR = 0.6
+
+
+def is_super(aid, name=None) -> bool:
+    """A Super Art / Critical Art: ids 1200-1299 (MEASURED for every character so far) or a Capcom name 'SA1 ...' / 'CA'."""
+    return (isinstance(aid, int) and 1200 <= aid < 1300) or bool(re.match(r"(\[[^\]]*\])?\s*(SA\d|CA)\b", name or ""))
+
+
+def punish_value(e: dict, learned: dict | None = None) -> float:
+    """0.34.0 (user, 2026-10-07: "highest recorded damage combo"): a punish route's value = its damage x max(its rate,
+    a floor), x its success in matches only once it has been tried there 3+ times. route_book.value discounts an
+    untried route to 0.8 and its lab rate in full: "5HP > 623HP , SA3" (4,600, rate 0.67) scored 2,465 against a raw SA3's
+    3,400, so the bot threw raw supers at blocked moves (the user's staged fight)."""
+    real = (learned or {}).get(e["route"]) or {}
+    n, ok = real.get("n", 0), real.get("completed", 0)
+    match_rate = (ok + 1.0) / (n + 1.0) if n >= 3 else 1.0
+    floor = COMPOSED_RATE_FLOOR if e.get("composed") else ROUTE_RATE_FLOOR
+    return (e.get("damage") or 0) * max(floor, min(1.0, e.get("rate") or 0)) * match_rate
 
 
 def _active_end(row_active: str | None, startup) -> int | None:
@@ -154,8 +178,38 @@ class PunishEngine:
                      on_block=self._pe_ob(info, src), source=src if info else None)
         if k.get("active_end") is None and isinstance(k.get("startup"), int) and not k["projectile"]:
             k["active_end"] = k["startup"] - 1 + ACTIVE_GUESS
+        if is_super(aid, k.get("name")) and not isinstance(k.get("on_block"), (int, float)):
+            # 0.34.0: a Super Art whose numbers aren't known (no catalog / move map name, not blocked 3+ times in the
+            # recordings): Capcom's on-block over the whole cast (31 characters): SA1 median -31, SA2 -24, SA3 / CA -41,
+            # ~90% at -16 or worse; assumed `punish.unknown_super_on_block` (-12), opened only once the bot is free
+            k["on_block"] = int((self.c.get("punish") or {}).get("unknown_super_on_block", -12))
+            k["assumed_ob"] = True
+        if k.get("source") != "learned" and is_super(aid, k.get("name")):
+            # 0.34.0: a Super Art's own frames (game ticks) include the super-flash freeze; Capcom's / the meter's numbers
+            # don't. MEASURED (the user's staged Ken fight, 2026-10-07, and Ken's learned timing): SA1 connects on its
+            # frame 59 (Capcom start-up 7), SA2 on 66 (6). Without this the blocked super looked over long before its
+            # recovery (no punish at all) and a whiffed one looked over in its own flash
+            off = self._pe_super_freeze(aid, k)
+            k["freeze"] = off
+            if off == int((self.c.get("punish") or {}).get("super_freeze", SUPER_FREEZE_DEFAULT)) and \
+                    (self.mt_moves.get(aid) or {}).get("n_contact", 0) < MIN_N:
+                k["freeze_default"] = True             # not measured for this super: a whiff window keeps 4 frames more
+                k["slack"] = k.get("slack", 0) + 4
+            for key in ("startup", "active_end", "total"):
+                if isinstance(k.get(key), int):
+                    k[key] += off
         self._pe_cache[aid] = k
         return k
+
+    def _pe_super_freeze(self, aid, k: dict) -> int:
+        """Frames of super-flash freeze inside a Super Art's own frames: the learned contact frame minus its listed
+        start-up (3+ contacts and 10+ apart), else `punish.super_freeze` (default 52: Ken's SA1, MEASURED)."""
+        lt = self.mt_moves.get(aid) or {}
+        su = k.get("startup")
+        if (lt.get("n_contact") or 0) >= MIN_N and isinstance(lt.get("startup"), int) and isinstance(su, int) \
+                and lt["startup"] - su >= 10:
+            return int(lt["startup"] - su)
+        return int((self.c.get("punish") or {}).get("super_freeze", SUPER_FREEZE_DEFAULT))
 
     @staticmethod
     def _pe_ob(info: dict, src) -> int | None:
@@ -171,6 +225,9 @@ class PunishEngine:
         """`a` continues the chain's move by itself: a learned follow-through id, or the catalog's id of the same move."""
         if a in self.mt_follow.get(c["head"], ()) or a in self.mt_follow.get(c["cur"], ()):
             return True
+        h = c["head"]
+        if isinstance(a, int) and isinstance(h, int) and 1200 <= h < 1300 and 0 < a - h <= SUPER_FAMILY:
+            return True               # 0.34.0: a Super Art's next ids (Ken's blocked SA2 goes 1210 -> 1211) are the same move
         ia, ih = self.opp.get(a) or {}, self.opp.get(c["head"]) or {}
         return bool(ia.get("name") and ia.get("name") == ih.get("name") and ia.get("source") != "inferred"
                     and ih.get("source") != "inferred")
@@ -322,8 +379,10 @@ class PunishEngine:
         if c["contact"] == "hit":
             return None                                    # the bot was hit: a combo, not a punish
         k = self._pe_know(c["head"])
-        if k.get("cmd_grab") or k.get("di"):
-            return None                                    # their own rules (rule 1d, the DI-back)
+        if k.get("di"):
+            return None                                    # its own rule (the DI-back)
+        if k.get("cmd_grab") and c["contact"] is not None:
+            return None                                    # a grab that connected (rule 1d / 00 had their turn)
         tmr = raw.get("stage_timer")
         el = c["el"]
         hs_op = int(num(op.get("hitstop")) or 0)
@@ -332,7 +391,7 @@ class PunishEngine:
             return None
         S = k.get("startup")
         if (c["contact"] is None and isinstance(S, int) and not c.get("mid") and el < S - 1 and bot == 0
-                and k.get("interrupt") != "all" and not k.get("lead_in") and c["head"] < 1200
+                and k.get("interrupt") != "all" and not k.get("lead_in") and c["head"] < 1200 and not k.get("cmd_grab")
                 and not 850 <= c["head"] < 870                  # any Drive Impact id (armor), named or not
                 and c["head"] not in self._pe_no_int and (num(op.get("y")) or 0.0) <= 0.05
                 and (k.get("source") != "learned" or (self.mt_moves.get(c["head"]) or {}).get("n_contact", 0) >= 5)):
@@ -341,9 +400,12 @@ class PunishEngine:
             return {"kind": "startup", "free": S - el - 1 - k.get("slack", 0), "bot": 0, "hit_in": 0, "know": k,
                     "chain": c, "elapsed": el}
         frees = []
-        if isinstance(k.get("total"), int) and not c.get("mid"):
-            frees.append(k["total"] - el + hs_op)
         kind = "block" if c["contact"] == "block" else "whiff"
+        if isinstance(k.get("total"), int) and not c.get("mid") and not (kind == "block" and k.get("freeze_default")):
+            # (a blocked super with an unmeasured flash: the bot's blockstun and its on-block, not a guessed total)
+            frees.append(k["total"] - el + hs_op)
+        if kind == "block" and k.get("assumed_ob") and (num(me.get("blockstun")) or 0) > 0:
+            return None                                    # an unknown super: no assumption until its hits are over
         if kind == "block":
             ae = k.get("active_end")
             if k.get("projectile"):
@@ -445,11 +507,31 @@ class PunishEngine:
             s0 = steps[0].get("sequence") or ""
             out.append({"key": "route:" + e["route"], "name": e["route"], "kind": "route", "entry": dict(e, lethal=lethal),
                         "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach,
-                        "value": route_value(e, learned) + (1e6 if lethal else 0.0),
+                        "value": punish_value(e, learned) + (1e6 if lethal else 0.0),
+                        "risk": risk((own_by_name.get(e.get("starter")) or {}).get("block_adv"))})
+        # 1b. 0.34.0 the combo composer's most damaging combo from each ground normal for the Super / Drive the bot has
+        #     NOW (a punish is a punish counter: every hit type), once per window (user: "highest recorded damage combo
+        #     based on whether midscreen or in corner"; a -14 L Tatsumaki "can ALSO [be punished] starting with a 5HP or a
+        #     5HK for an absolutely free punish counter")
+        composed = self._pe_composed(me, op, w)
+        for e in composed:
+            if any(x["name"] == e["route"] for x in out):
+                continue
+            ok, lethal = affordable(e, me, opp_hp, reserve)
+            if not ok or not isinstance(e.get("startup"), int):
+                continue
+            sid = e.get("starter_id") or (own_by_name.get(e.get("starter")) or {}).get("id")
+            reach = self._pe_reach(sid, self._reach_fb(e.get("starter")))
+            if reach is None:
+                continue
+            s0 = ((e.get("plan") or {}).get("steps") or [{}])[0].get("sequence") or ""
+            out.append({"key": "comp:" + e["route"], "name": e["route"], "kind": "route", "entry": dict(e, lethal=lethal),
+                        "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach,
+                        "value": punish_value(e, learned) + (1e6 if lethal else 0.0),
                         "risk": risk((own_by_name.get(e.get("starter")) or {}).get("block_adv"))})
         # 2. the config's punish options (routes on the game clock with hit confirm, single moves, supers): unverified,
         #    so a verified route from the same starter replaces them and they count 0.8
-        book_starters = {e.get("starter") for e in self.book or []}
+        book_starters = {e.get("starter") for e in self.book or []} | {e.get("starter") for e in composed}
         names = {x["name"] for x in out}
         for o in pc.get("engine") or []:
             if o.get("route") and o.get("starter") in book_starters:
@@ -481,7 +563,9 @@ class PunishEngine:
                         "prefix": seq_prefix(seq) + (ROUTE_DELAY if o.get("route") else 0), "reach": reach,
                         # expected value: a single press lands as pressed (0.9); a route from the config is not
                         # verified in the combo lab (0.5, like an untried lab route's rate x match rate); a super 0.85
-                        "value": dmg * (0.85 if sup else 0.5 if o.get("route") else 0.9) + (1e6 if lethal else 0.0),
+                        # 0.34.0: a config route that spends a super is as much an estimate as a composed one (x0.6)
+                        "value": dmg * ((COMPOSED_RATE_FLOOR if o.get("route") else 0.85) if sup
+                                        else 0.5 if o.get("route") else 0.9) + (1e6 if lethal else 0.0),
                         "risk": risk(o.get("on_block")), "travel": bool(o.get("projectile")), "super": sup})
         # 3. the bot's own catalogued pokes, alone (a route from them is above)
         for m in self.own:
@@ -495,6 +579,34 @@ class PunishEngine:
                         "value": 0.9 * float(m.get("damage") or 0), "risk": risk(m.get("block_adv"))})
         return out
 
+    def _pe_composed(self, me: dict, op: dict, w: dict) -> list[dict]:
+        """0.34.0: the composer's best combo from every ground normal it can start one from (any hit type: a punish is a
+        punish counter), with the resources the bot has; computed once per window (each search is a few ms)."""
+        from .fighter import PUNISH_HIT_TYPES
+        comp = getattr(self, "composer", None)
+        c = w.get("chain")
+        if c is None:
+            c = {}
+        if comp is None or not (self.c.get("punish") or {}).get("composed", True):
+            return []
+        if c.get("comp_opts") is not None:
+            return c["comp_opts"]
+        if hasattr(self, "_price_bars"):
+            self._price_bars(me)
+        out = []
+        for name in list(comp.starters):
+            if not name.startswith(("Standing ", "Crouching ")):
+                continue
+            try:
+                e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0), hit_ok=PUNISH_HIT_TYPES,
+                                   min_ev=0.0)
+            except Exception:                           # noqa: BLE001 - optional: the book's own routes still punish
+                e = None
+            if e is not None and not e.get("jump_in"):
+                out.append(e)
+        c["comp_opts"] = out
+        return out
+
     def _pe_plan(self, me: dict, op: dict, dist: float, w: dict, kinds: tuple | None = None,
                  options: list | None = None) -> dict | None:
         """The best feasible option for window w with its send timing, or None. Adds step-ins (walk / dash) and Parry
@@ -503,7 +615,7 @@ class PunishEngine:
         wc = self.c.get("whiff_punish") or {}
         pc = self.c.get("punish") or {}
         delay = self.lead + self.stale
-        best = None
+        best = best_route = None
         tried = []
         opts = [o for o in (self._pe_options(me, op, w) if options is None else options)
                 if kinds is None or o["kind"] in kinds]
@@ -581,6 +693,14 @@ class PunishEngine:
                     cand["rush"] = ro
                 if best is None or ev > best["ev"]:
                     best = cand
+                if o["kind"] == "route" and not o.get("override") and (best_route is None or ev > best_route["ev"]):
+                    best_route = cand
+        # 0.34.0 (user, 2026-10-07: blocked L Tatsumaki / Shoryuken -> "raw super punish" was wrong; the right punish is
+        # the "highest recorded damage combo"): a raw Super Art goes out only when no combo fits the window (or it kills)
+        if best is not None and best_route is not None and best["opt"]["kind"] == "seq" and best["opt"].get("super") \
+                and best["opt"]["value"] < 1e6:
+            self.pe_stats["raw_super_skipped"] = self.pe_stats.get("raw_super_skipped", 0) + 1
+            return best_route
         return best
 
     def _pe_travel(self, dist: float) -> int:

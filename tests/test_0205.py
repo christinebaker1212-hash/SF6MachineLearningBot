@@ -78,10 +78,16 @@ def test_a_bigger_punish_counter_route_beats_a_plain_sa3_on_a_blocked_move():
             break
     assert d.rule == "punish" and d.kind == "route" and d.name == "PC 5HP , 2MP > 623MP > SA3"
     assert f.sa3_vs_route["route"] == 1 and f.sa3_vs_route["sa3"] == 0
-    small = _f([BOOK[0]], opp_moves=opp)             # only a 2,400 route: SA3 (4,000) is the punish
-    d = small.decide(state(me={"blockstun": 12, "action_id": 155, "super": 30000, "drive": 60000},
-                           op={"x": 1.0, "action_id": 905}), 0.0, 0)
-    assert d.name == "SA3 Shin Shoryuken" and small.sa3_vs_route["sa3"] == 1
+    # 0.34.0 (user, 2026-10-07: "Blocked move > ... highest recorded damage combo"; a raw super punish is wrong): with only
+    # a 2,400 route in the book, a combo still goes out (here the config's 5HP > 623HP > SA3), never the raw SA3
+    small = _f([BOOK[0]], opp_moves=opp)
+    d = None
+    for k, bs in enumerate((14, 12, 9, 6, 3)):
+        d = small.decide(state(me={"blockstun": bs, "action_id": 155, "super": 30000, "drive": 60000},
+                               op={"x": 1.0, "action_id": 905}, timer=500 + k), k / 60, 0)
+        if d.rule == "punish":
+            break
+    assert d.rule == "punish" and d.name != "SA3 Shin Shoryuken" and small.sa3_vs_route["sa3"] == 0
 
 
 def test_route_after_hit_reports_the_switch_and_counts_it():

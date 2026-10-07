@@ -124,6 +124,10 @@ punish:
   # Numbers are Capcom's (start-up, on block, damage; route damage = the two moves' listed damage, an ESTIMATE of the
   # scaled total); `id` = the bot's action id of the first move (its measured reach, reach.py), else `reach_fallback`.
   # Routes run on the game clock with hit confirm (combo_lab.perform_route): a blocked or whiffed starter sends no more.
+  # 0.34.0: frames of super-flash freeze inside an opponent Super Art's own frames when its learned timing doesn't say
+  # (MEASURED: Ken's SA1, contact on its frame 59, Capcom start-up 7)
+  super_freeze: 52
+  composed: true             # the combo composer's best combo from each ground normal is a punish option
   engine:
     - {name: "5HP > 623HP", route: "5HP > 623HP", starter: "Standing Heavy Punch", id: 608, startup: 10, damage: 2200,
        on_block: -2, seq: "5+HP@3 5@8 6@3 2@3 3+HP@3"}
@@ -149,6 +153,15 @@ punish:
     - {name: "H Tatsumaki Senpu-kyaku", seq: "2@3 1@3 4+HK@3", starter: "H Tatsumaki Senpu-kyaku", id: 1005, startup: 16,
        damage: 1200, on_block: -13, max_reach: 1.6}
     - {move: punish_l_srk, starter: "L Shoryuken", id: 930, damage: 1100, on_block: -23}
+    # 0.34.0 (user: punish with combos, not raw supers): the Shoryuken super-cancelled into SA3 (Capcom: the Shoryukens'
+    # cancel column is SA3). Damage = an ESTIMATE (5HP + H Shoryuken scaled + SA3 at its 50% minimum and up); the combo
+    # lab's / composer's measured routes replace these when they fit
+    - {name: "5HP > 623HP > SA3", route: "5HP > 623HP > 236236K", starter: "Standing Heavy Punch", id: 608, startup: 10,
+       damage: 4300, super: 30000, on_block: -2,
+       seq: "5+HP@3 5@8 6@3 2@3 3+HP@3 2@3 3@3 6@3 2@3 3@3 6+LK@3"}
+    - {name: "2HP > 623HP > SA3", route: "2HP > 623HP > 236236K", starter: "Crouching Heavy Punch", id: 630, startup: 9,
+       damage: 4300, super: 30000, on_block: -8,
+       seq: "2+HP@3 5@8 6@3 2@3 3+HP@3 2@3 3@3 6@3 2@3 3@3 6+LK@3"}
     - {move: sa3, reach: 1.3, on_block: -52}
     - {move: sa1, reach: 4.5, projectile: true, on_block: -24}
   # MEASURED: where each of Ryu's moves connected in the 202 recordings sent so far (90th percentile of the start distance

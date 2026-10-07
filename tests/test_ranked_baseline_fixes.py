@@ -204,9 +204,16 @@ def test_a_drive_impact_crumple_is_cashed_out_on_the_first_free_frame():
 
 def test_a_blocked_unsafe_move_is_punished_with_sa3_with_three_bars_and_only_in_range():
     opp = {905: {"name": "Big Unsafe Special", "block_adv": -20}}
+    # 0.34.0 (user, 2026-10-07: a raw super punish is wrong; "highest recorded damage combo"): with 3 bars the punish is a
+    # combo that ends in SA3 (here the config's 5HP > 623HP > SA3), not the raw SA3 0.18.1 sent
     f = _fighter(opp_moves=opp)
-    d = f.decide(state(me={"blockstun": 12, "action_id": 155, "super": 30000}, op={"x": 1.0, "action_id": 905}), 0.0, 0)
-    assert d.name == "SA3 Shin Shoryuken" and d.rule == "punish" and f.super_stats["punish"] == 1
+    d = None
+    for k, bs in enumerate((12, 9, 6, 3, 1)):
+        d = f.decide(state(me={"blockstun": bs, "action_id": 155, "super": 30000}, op={"x": 1.0, "action_id": 905},
+                           timer=500 + k), k / 60, 0)
+        if d.rule == "punish":
+            break
+    assert d.rule == "punish" and d.name != "SA3 Shin Shoryuken" and "SA3" in d.name and f.super_stats["punish"] == 1
     g = _fighter(opp_moves=opp)                     # no meter: the normal punish options
     d = g.decide(state(me={"blockstun": 3, "action_id": 155, "super": 0}, op={"x": 1.0, "action_id": 905}), 0.0, 0)
     assert d.rule == "punish" and d.name != "SA3 Shin Shoryuken"

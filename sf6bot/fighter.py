@@ -225,6 +225,17 @@ def interrupt_class(row: dict | None) -> str | None:
     return None
 
 
+def rising_reversal(row: dict | None) -> bool:
+    """0.34.0: a Shoryuken-type move (Capcom notes: invincible to air attacks or completely invincible, AND airborne for
+    part of it): it rises from the ground with its hits. Anti-airing it is pointless (it is invincible / already hitting);
+    it is punished on its landing (user, 2026-10-07: "wait for the shoryureppa to land, on the first landing frame, highest
+    recorded damage combo")."""
+    t = str((row or {}).get("notes") or "")
+    return bool(re.search(r"invincible against mid-air|completely invincible|invincible to strikes", t, re.I)
+                and re.search(r"airborne from frame", t, re.I)
+                and "projectile" not in str((row or {}).get("properties") or "").lower())
+
+
 def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: dict) -> int:
     """Add Capcom's data to known ids by move name: block type, projectile, start-up, damage, and
     on-block advantage where the catalog has no measured guard-All value (a catalog run with the
@@ -253,6 +264,7 @@ def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: 
         info.setdefault("landing", row.get("landing_n"))
         info.setdefault("capcom_on_block", row.get("on_block_n"))
         info.setdefault("interrupt", interrupt_class(row))
+        info.setdefault("rising", rising_reversal(row))
         if info.get("block_adv") is None and isinstance(row.get("on_block_n"), int):
             info["block_adv"] = row["on_block_n"] + margin
             info.setdefault("block_adv_source", "capcom")
@@ -531,6 +543,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._aa_empty_for = None             # 0.32.0: the jump whose late Shoryuken was held (empty)
         self._burnout_super_for = None
         self._burnout_jump_for = None
+        self.rising_stats: dict = {}            # 0.34.0: Shoryuken-type moves waited out
+        self._rw_for = None
         self._me_y_line, self._me_vy = None, None
         self._route_end_t = None              # 0.33.1: the round clock when the last performed route ended
         self._air_atk = None                  # 0.33.0: the bot's own jump attack (id, start, hit) for its ground combo
@@ -739,6 +753,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         info = self.opp.get(a, {})
         if self.op_recovering(op):
             return False          # 0.23.0: a whiffed / blocked Shoryuken coming down is a punish, not an anti-air
+        if info.get("rising") or (1200 <= a < 1300 and info.get("interrupt") == "all"):
+            return False          # 0.34.0: a Shoryuken-type move / an invincible super: wait for its landing, then punish
         return not (info.get("projectile") or info.get("di") or info.get("cmd_grab"))
 
     def _jump_threat(self, me: dict, op: dict) -> tuple[float, float] | None:
@@ -759,6 +775,20 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         return t_land, pdx
 
+    def _rising_wait(self, me: dict, op: dict, block_dir: int, block_face) -> Decision | None:
+        """0.34.0: the opponent is in a Shoryuken-type move (rising_reversal) and off the ground: hold block until it lands
+        (the punish engine times the punish to the landing)."""
+        info = self.opp.get(op.get("action_id")) or {}
+        c = self.chain
+        if c is not None and c.get("cur") == op.get("action_id"):
+            info = self.opp.get(c["head"]) or info
+        if not info.get("rising") or (_num(op.get("y")) or 0.0) <= 0.05 or (_num(me.get("y")) or 0.0) > 0.05:
+            return None
+        self.rising_stats["waited"] = self.rising_stats.get("waited", 0) + (1 if self._rw_for != self.op_onset else 0)
+        self._rw_for = self.op_onset
+        return Decision("hold", direction=block_dir, facing=block_face, rule="dp_wait",
+                        reason=f"{info.get('name') or op.get('action_id')} in the air: blocking, punishing its landing")
+
     def _guard_hold(self, me: dict, op: dict, block_dir: int, block_face) -> Decision | None:
         """0.25.0: the opponent's move the bot is blocking (or just blocked) will still be active when the bot is free:
         hold the block until past its last active frame (Capcom's active column, else measured in recordings). MEASURED
@@ -774,12 +804,19 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             self._gh_onset = self.op_onset
         if getattr(self, "_gh_onset", None) != self.op_onset:
             return None
-        k = self._pe_know(oa)
+        c = self.chain
+        if c is not None and c.get("cur") == oa and c.get("head") != oa and not c.get("mid"):
+            # 0.34.0: a move that went on under another id (Ken's blocked SA2: 1210 -> 1211): the first id's numbers and
+            # frames counted across both; the exported frame restarts at the new id and held the block through the whole
+            # recovery (the user's staged fight: no punish after a blocked SA2)
+            k, fr = self._pe_know(c["head"]), int(c["el"])
+        else:
+            k = self._pe_know(oa)
+            fr = _num(op.get("action_frame"))
+            fr = int(fr) if fr is not None and fr < 900 else self._now - self.op_onset
         ae = k.get("active_end")
         if not isinstance(ae, int) or k.get("projectile"):
             return None
-        fr = _num(op.get("action_frame"))
-        fr = int(fr) if fr is not None and fr < 900 else self._now - self.op_onset
         if fr + stun_left(me) > ae + int((self.c.get("guard_hold") or {}).get("margin", 1)):
             return None
         self.guard_hold_stats = getattr(self, "guard_hold_stats", 0) + 1
@@ -1130,6 +1167,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         pe = self._pe_decide(raw, me, op, dist, block_dir, block_face)
         if pe is not None:
             return pe
+        # 0a'. 0.34.0 the opponent's Shoryuken-type move is still rising / falling and active: block and start nothing; its
+        #      landing is the punish engine's (MEASURED, the user's staged fight: the bot anti-aired whiffed OD Shoryukens
+        #      with an L Shoryuken and poked into their active frames)
+        rw = self._rising_wait(me, op, block_dir, block_face)
+        if rw is not None:
+            return rw
         # 0''. 0.25.0 guard hold: the move the bot blocked is still active when the bot gets free (a multi-hit move, a
         #      Hundred Hand Slap, a Triglav): keep blocking until its last active frame, no pressure option, no button
         gh = self._guard_hold(me, op, block_dir, block_face)
@@ -4246,6 +4289,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["denjin"] = dict(fighter.denjin_stats, stock_at_end=fighter.denjin_stock)
                 summary["stun_followups"] = dict(fighter.stun_stats)
                 summary["jump_attack_combos"] = dict(fighter.jump_combo_stats)
+                summary["rising_reversals"] = dict(fighter.rising_stats)
                 summary["route_hits"] = dict(fighter.hit_switch, sa3_vs_route=dict(fighter.sa3_vs_route))
                 if fighter.composer is not None:
                     summary["composer"] = dict(fighter.compose_stats, routes=len(fighter.composer.entries),
