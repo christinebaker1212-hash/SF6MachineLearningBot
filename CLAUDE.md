@@ -4376,7 +4376,9 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
 - Id 1236 is Ken being hit by Ryu's SA3, not one of Ken's moves.
 ### The user's K run (2026-10-06, 95 routes, 84 TRUE, 9 skipped with F10)
 - The top routes (6,170-6,619: PC 5HK , 5HP > Denjin 214PP , 5HP ( > DRC , 5HK , 5HP )x2 ... > SA3) spend 6 Drive bars
-  (60,000-78,000). That is burnout, so the bot uses them only when they kill (user rule, 0.10.0).
+  (60,000-78,000). That is burnout, so the bot uses them only when they kill (user rule, 0.10.0). User (2026-10-07),
+  asked whether to relax it: "Ryu currently is terrible about handling burnout situations. I don't think it's wise to let
+  up that rule just yet." Kept: no spending into burnout unless the combo kills.
 - Joined by the composer into one-Drive-Rush versions (`5HP > DRC , 5HK , 5HP > 623HP > SA3`, ~6,000), they are affordable
   with 3 bars to spare.
 ### Changes (punish.py, fighter.py)
