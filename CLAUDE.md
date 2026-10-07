@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.33.0 (2026-10-07): a Drive Impact in burnout is jumped when the bot is free; a jump-in is a ground combo with a jump attack in front.**
 - **0.32.0 (2026-10-07): tightening from fights_5 / fights_6 (anti-air velocity bug, empty jumps, fireball jump-in margin, combo reach).**
 - **First Master matches (0.31.0, 2026-10-06): 1-5 against ~1460 MR players; fixes in 0.31.1 and 0.31.2 (throw defence).**
 - **MASTER REACHED (2026-10-06, user's result screen): the long-term goal is met.** Ranked, unattended, 0.27.0, on a
@@ -4210,6 +4211,47 @@ All MOCK / replay-tested (`tests/test_0320.py`; older tests updated where they e
   waits until the release is 15 frames old. Sequences with their own motion (the Denjin Charge itself, Shoryukens, the
   light chain "2+LK 2 2+LP") are untouched. Counted in `fight_summary.denjin_guard`.
 - Not covered: combo routes (`perform_route` sends its steps on the game clock and is not delayed). Tests `tests/test_0320.py`.
+
+## 0.33.0: the burnout Drive Impact jump; jump-ins are ground combos with a jump attack (user, 2026-10-07)
+User: "the bot is in burnout and it notices that a drive impact is coming ... not preceded by an additional attack, so the bot
+is not in block stun and it can act ... [with] no super and no reversal, what the bot should do is immediately read the
+drive impact and jump"; "Jump in attacks and jump in combo routes are treated as their own special category of combo. When
+all a jump in really is, is just the same combo as a ground combo with just a jumping attack added ... anytime Ryu lands a
+jumping heavy punch, he should be choosing his most damaging heavy punch route after that." MOCK-tested
+(`tests/test_0330.py`); not verified in game.
+- **MEASURED (303 Ryu fight recordings, 0.14-0.31):**
+  - 62 opponent Drive Impacts started with the bot in burnout. The bot was free in 21, and 18 of those hit it. It was in
+    blockstun in 18 (17 hit: the user's "checkmate", nothing helps), and busy in its own move or airborne in 23 (20 hit).
+  - The bot's jump attacks hit a grounded opponent only 5 times (it rarely jumps since 0.19.0 / 0.24.2): 3 with nothing
+    after, 1 followed by a hit.
+- **Rule 3b `_di_burnout_jump`:** the opponent's Drive Impact, with no DI-back possible (burnout) and no Super Art from
+  rule 3a (that rule needs the wall within 2.0). The bot must be grounded, not in blockstun or hitstun, and not busy.
+  - It sends a neutral jump (`8@3`) while it can still leave the ground (5 frames) and rise 6 frames before the DI's first
+    active frame (Capcom start-up 26). Seen later than that, it blocks.
+  - On landing, the DI's recovery is a whiff for the punish engine.
+  - Config `di_rules.burnout_jump` (prejump / clear are ESTIMATES); counted in `drive_impact_rules.burnout_jump` /
+    `burnout_jump_late`, with a thoughts line.
+- **A landed jump attack goes on** (rule 0c' `_jump_attack_combo`; tracker `_track_air_attack`):
+  - Applies to any jump attack of the bot's (a normal id while airborne) that hits a grounded opponent, whatever rule
+    jumped: a command grab jumped (j.HK), the fireball jump without a route, a Drive Impact jumped.
+  - It is continued with the combo composer's most damaging combo from the same button's standing or crouching normal
+    (j.HP -> the best 5HP / 2HP combo), with the Super and Drive the bot has (`Composer.best_after_jump`). Example: 3 bars
+    -> j.HP , 5HP > 623HP , SA3; none -> j.HP , 5HP > 236MK > 623HP.
+  - If that button's normals start no combo, any standing or crouching normal's combo is used.
+  - The first ground move is a landing link, the combo lab's verified jump-in timing: it reaches the game on landing + 3
+    frames of landing recovery (Capcom), never while the bot is airborne. It is performed with the jump attack adopted, and
+    the opponent's hitstun must cover its start-up (the executor's window check).
+  - Not after an air-to-air hit (the opponent airborne), a block, or a hit more than 8 ticks ago.
+  - Counted in `jump_attack_combos` {jump_attacks, hit, blocked, continued, no_route, routes}, with a thoughts line.
+- **Chosen jump-ins are composed the same way** (`_composed_jump_in`, `_better_jump_in`; config `jump_in`):
+  - These are the fireball jump-in (anywhere) and the Drive Impact stun jump-in (corner only, as since 0.24.2; a neutral
+    jump within 1.2).
+  - Candidates: j.HP and j.HK + the best ground combo, with the route's rate multiplied by `jump_in.hit_rate` 0.6 (the
+    jump attack must connect first: an ESTIMATE). They compete with the combo lab's verified jump-in routes by
+    `route_book.value`; a verified kill keeps the verified route.
+  - Damage = the jump attack + the ground combo one scaling step later (community scaling table: an ESTIMATE).
+- No new jump-ins from neutral: the bot still jumps in only over a fireball, after a Drive Impact stun in the corner, and
+  over a Drive Impact or a command grab. What changed is what follows the jump attack.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

@@ -454,7 +454,18 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         out.append(("scripted", f"Drive Impact rules: DI-backs {dd.get('di_back', 0)}, blocked instead because losing the "
                                 f"exchange would kill {dd.get('di_back_skipped_lethal', 0)}; my own DIs held because {opp} "
                                 f"had Super meter {dd.get('own_di_skipped_meter', 0)}; supers against a DI in corner "
-                                f"burnout {dd.get('burnout_super', 0)}."))
+                                f"burnout {dd.get('burnout_super', 0)}"
+                                + (f"; jumped over a Drive Impact in burnout {dd['burnout_jump']}" if dd.get("burnout_jump")
+                                   else "")
+                                + (f" (too late to jump {dd['burnout_jump_late']})" if dd.get("burnout_jump_late") else "")
+                                + "."))
+    jc_ = summary.get("jump_attack_combos") or {}
+    if jc_.get("hit") or jc_.get("continued"):
+        top_ = sorted((jc_.get("routes") or {}).items(), key=lambda kv: -kv[1])[:2]
+        out.append(("scripted", f"My jump attacks: {jc_.get('jump_attacks', 0)} out, {jc_.get('hit', 0)} hit, "
+                                f"{jc_.get('blocked', 0)} blocked; landed into a ground combo {jc_.get('continued', 0)} times"
+                                + (f" ({', '.join(f'{r} x{n}' for r, n in top_)})" if top_ else "")
+                                + (f"; no combo fit {jc_['no_route']}" if jc_.get("no_route") else "") + "."))
     th = summary.get("throws_held") or {}
     if th.get("held_not_standing"):
         out.append(("scripted", f"Throws held until {opp} was standing (not thrown at a downed or reeling opponent): "

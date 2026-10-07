@@ -210,12 +210,15 @@ class ZoningMixin:
         """(name, book entry or None, damage) of the jump-in to use: the combo lab's best TRUE jump-in route, else the
         config's first jump route (planned by route_plans at match start)."""
         zc = self.c.get("fireball") or {}
+        e = None
         if self.book:
             from .route_book import choose_jump_in
             e = choose_jump_in(self.book, me, op, learned=self.exp.routes() if self.exp else None,
                                reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock, over_fireball=True)
-            if e is not None:
-                return e["route"], e, float(e.get("damage") or 0)
+        # 0.33.0: a jump-in is a ground combo with a jump attack in front (user): the composer's best one competes
+        e = self._better_jump_in(e, self._composed_jump_in(me, op))
+        if e is not None:
+            return e["route"], e, float(e.get("damage") or 0)
         jr = (zc.get("jump_routes") or [{}])[0]
         return jr.get("name", "forward jump"), None, float(jr.get("damage") or 0)
 

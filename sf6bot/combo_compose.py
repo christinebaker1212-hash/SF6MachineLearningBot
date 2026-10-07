@@ -102,6 +102,15 @@ def shift_fixed(fx: dict | None, d: int) -> dict:
     return out
 
 
+def ground_names_for_jump(air_name: str | None) -> list[str]:
+    """'Jumping Heavy Punch' -> ['Standing Heavy Punch', 'Crouching Heavy Punch'] (Capcom's names): the ground normals of
+    the same button, whose combos a landed jump attack continues with (0.33.0)."""
+    m = re.search(r"\b(Light|Medium|Heavy) (Punch|Kick)\b", air_name or "")
+    if not m or not re.search(r"\bJump", air_name or "", re.I):
+        return []
+    return [f"Standing {m.group(0)}", f"Crouching {m.group(0)}"]
+
+
 def sig(resolved: list[dict]) -> tuple:
     """What a route performs: its moves (or system steps) and connectors."""
     return tuple((s.get("name") or s.get("system") or s.get("token"), s.get("connector") or "") for s in resolved)
@@ -537,6 +546,103 @@ class Composer:
                 new.update(edges=list(edges[:k]), replanned_at=k, stopped_for_spacing=True)
                 return new
         return None
+
+    # ---- 0.33.0: a jump-in is a ground combo with a jump attack in front --------------------------------------------
+    def jump_prefix(self, air_name: str):
+        """(jump step, air step, landing template) for jump attack `air_name` ('Jumping Heavy Punch'), planned by the
+        combo lab's own jump-in planner ('j.HP , 5HP'), or None. Cached."""
+        cache = self.__dict__.setdefault("_jump_prefix", {})
+        if air_name in cache:
+            return cache[air_name]
+        out = None
+        grounds = ground_names_for_jump(air_name)
+        row = self.rows.get(air_name)
+        if isinstance(row, list):
+            row = row[0] if row else None
+        btn = re.search(r"\)\s*(\S+)$", (row or {}).get("input") or "")
+        if row is not None and btn and grounds:
+            from .combos import resolve
+            text = f"j.{btn.group(1)} , {btn.group(1)}"
+            r = resolve(text, self.capcom.get("moves") or [])
+            if not r.get("unresolved"):
+                pl = self.cl.plan_route({"route": text, **r}, self.capcom, self.catalog)
+                st = pl.get("steps") or []
+                if not pl.get("unsupported") and len(st) == 3 and st[0].get("system") == "jump" \
+                        and st[1].get("trigger") == "air" and st[2].get("trigger") == "landing":
+                    out = (st[0], dict(st[1], token=f"j.{btn.group(1)}"), st[2])
+        cache[air_name] = out
+        return out
+
+    def air_name(self, aid) -> str | None:
+        """The jump attack (Capcom name) the bot's action id `aid` is, from the catalog ids of the planned jump-ins."""
+        m = self.__dict__.get("_air_ids")
+        if m is None:
+            m = {}
+            for name in list(self.rows):
+                if ground_names_for_jump(name) and self.jump_prefix(name):
+                    air = self.jump_prefix(name)[1]
+                    for i in [air.get("expect_id")] + list(air.get("known_ids") or []):
+                        if isinstance(i, int):
+                            m.setdefault(i, name)
+            self._air_ids = m
+        return m.get(aid)
+
+    def with_jump_attack(self, e: dict, air_name: str, *, adopt_air: bool = False, neutral: bool = False) -> dict | None:
+        """Ground combo entry `e` (from its first move on) performed after jump attack `air_name`: the jump, the air
+        button on the way down, then e's first move as a landing link (the lab's 'landing' trigger: landing + landing
+        recovery, hit-confirmed on the jump attack), then e's other moves unchanged. `adopt_air`: the jump attack is
+        out already (no jump step). User (2026-10-07): "All a jump in really is, is just the same combo as a ground
+        combo with just a jumping attack added ... anytime Ryu lands a jumping heavy punch, he should be choosing his
+        most damaging heavy punch route after that." Damage: the jump attack + the ground combo one scaling step later
+        (combo_gen.SCALING, community table: an ESTIMATE)."""
+        pre = self.jump_prefix(air_name)
+        steps0 = (e.get("plan") or {}).get("steps") or []
+        if pre is None or not steps0 or steps0[0].get("air") or steps0[0].get("system"):
+            return None
+        jump, air, tpl = pre
+        jump = dict(jump)
+        if neutral:
+            jump["sequence"] = "8" + jump["sequence"][1:]
+        land = dict(steps0[0], trigger="landing", connector=",", floor=tpl.get("floor"),
+                    min_offset=tpl.get("min_offset", -1))
+        steps = ([] if adopt_air else [jump]) + [dict(air), land] + [dict(s) for s in steps0[1:]]
+        pl = dict(e["plan"], steps=steps, jump_in=True)
+        rec = pl.get("recorded_timing")
+        if rec:
+            pl["recorded_timing"] = [{} for _ in range(len(steps) - len(steps0) + 1)] + [dict(x) for x in rec[1:]]
+        from .combo_gen import SCALING
+        n = max(1, sum(1 for s in steps0 if s.get("hitting")))
+        sc = sum(SCALING[min(i + 1, len(SCALING) - 1)] for i in range(n)) / sum(SCALING[min(i, len(SCALING) - 1)]
+                                                                                   for i in range(n))
+        jd = int(air.get("capcom_damage") or 0)
+        dmg = int(jd + (e.get("damage") or 0) * sc)
+        out = dict(e, route=f"{air['token']} , {e['route']}", plan=pl, jump_in=True, neutral_jump=neutral,
+                   starter=air_name, starter_id=air.get("expect_id"), startup=air.get("startup"), damage=dmg,
+                   ground_route=e["route"], jump_attack=air_name, edges=None, resolved=None)
+        if isinstance(e.get("ev"), (int, float)):
+            out["ev"] = jd + e["ev"] * sc
+        return out
+
+    def best_after_jump(self, air_name: str, me: dict, op: dict, *, reserve: float = 0, hit_ok=("normal",),
+                        adopt_air: bool = False, neutral: bool = False, fallback: bool = False) -> dict | None:
+        """The jump attack `air_name` + the most damaging ground combo from the same button's standing or crouching
+        normal (j.HP -> the best 5HP or 2HP combo) with the resources the bot has, or None. `fallback` (a jump attack
+        already out): when that button's normals start no combo, any standing / crouching normal's (the executor still
+        checks that the opponent's stun covers its start-up)."""
+        best = None
+        names = ground_names_for_jump(air_name)
+        if fallback:
+            names += [n for n in self.starters if n not in names and n.startswith(("Standing ", "Crouching "))]
+        for k, g in enumerate(names):
+            if best is not None and k >= 2:
+                break                                # the same button's combo wins when there is one
+            e = self.best_from(g, me, op, reserve=reserve, hit_ok=hit_ok, min_ev=0.0)
+            if e is None:
+                continue
+            j = self.with_jump_attack(e, air_name, adopt_air=adopt_air, neutral=neutral)
+            if j is not None and (best is None or (j.get("ev") or 0) > (best.get("ev") or 0)):
+                best = j
+        return best
 
     def best_from(self, name: str, me: dict, op: dict, *, reserve: float = 0, hit_ok=("normal",),
                   min_ev: float = MIN_EV, travel_done: bool = False) -> dict | None:

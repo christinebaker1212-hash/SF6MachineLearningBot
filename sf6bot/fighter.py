@@ -82,7 +82,7 @@ def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
 
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
                "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer", "cmd_grab_jump", "fireball_jump",
-               "fireball_sa1", "fireball_clash", "fireball_jump_over", "move_answer"}
+               "fireball_sa1", "fireball_clash", "fireball_jump_over", "move_answer", "di_burnout_jump"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -530,6 +530,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._op_air_attack = False           # 0.32.0: the opponent has attacked in this jump
         self._aa_empty_for = None             # 0.32.0: the jump whose late Shoryuken was held (empty)
         self._burnout_super_for = None
+        self._burnout_jump_for = None
+        self._air_atk = None                  # 0.33.0: the bot's own jump attack (id, start, hit) for its ground combo
+        self.jump_combo_stats = {"jump_attacks": 0, "hit": 0, "blocked": 0, "continued": 0, "no_route": 0}
         self._a2a_for = None
         self._corner_fired = None
         # 0.20.3 Denjin Charge: the stock the bot holds (tracked from its own action ids), and when to charge
@@ -1113,6 +1116,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         cx = self._compose_live(me, op, dist)
         if cx is not None:
             return cx
+        # 0c'. 0.33.0 the bot's own jump attack has hit: the most damaging ground combo from the same button's normal,
+        #      its first move a landing link (user: "anytime Ryu lands a jumping heavy punch, he should be choosing his
+        #      most damaging heavy punch route after that")
+        jx = self._jump_attack_combo(me, op, dist)
+        if jx is not None:
+            return jx
         # 0a. 0.23.0 the punish engine (punish.py): the opponent's move can no longer hit and leaves a window -> the best
         #     punish that fits, timed to land on the first frame it can; holds block until then
         self._pe_track(raw, me, op)
@@ -1189,6 +1198,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                                 reason=f"opponent Drive Impact: losing the exchange ({risk:,} hp) would kill me; blocking")
             self.di_stats["di_back"] += 1
             return self._move("drive_impact", "di_reaction", f"opponent Drive Impact at {dist:.2f}")
+        # 3b. 0.33.0 no Drive for a DI-back (burnout), no Super Art for 3a, and the bot FREE (not in blockstun): jump it
+        bj = self._di_burnout_jump(me, op, dist, info)
+        if bj is not None:
+            return bj
         if not info.get("di"):
             self.di_handled_id = None
         # 4. anti-air on a real jump, timed from WHEN the opponent lands (0.18.0). MEASURED 0.17.5 ranked: of 42 jump-ins
@@ -2167,6 +2180,34 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.operator_stats["used"][name] = self.operator_stats["used"].get(name, 0) + 1
         return Decision("seq", name, seq, rule="operator_answer", reason=why)
 
+    def _composed_jump_in(self, me: dict, op: dict, neutral: bool = False) -> dict | None:
+        """0.33.0: the jump attack (`jump_in.attacks`) + the composer's most damaging ground combo from the same button,
+        for the jump-ins the bot chooses (over a fireball, after a Drive Impact stun in the corner). The jump attack has
+        to connect first: its rate is multiplied by `jump_in.hit_rate` (an ESTIMATE)."""
+        comp = self.composer
+        jc = self.c.get("jump_in") or {}
+        if comp is None or not jc.get("enabled", True):
+            return None
+        self._price_bars(me)
+        best = None
+        for name in jc.get("attacks") or ["Jumping Heavy Punch", "Jumping Heavy Kick"]:
+            e = comp.best_after_jump(name, me, op, reserve=self.c.get("drive_reserve", 0), neutral=neutral)
+            if e is not None and (best is None or (e.get("ev") or 0) > (best.get("ev") or 0)):
+                best = e
+        if best is not None:
+            best = dict(best, rate=round(max(0.05, (best.get("rate") or 0) * float(jc.get("hit_rate", 0.6))), 3))
+        return best
+
+    def _better_jump_in(self, book_e: dict | None, comp_e: dict | None) -> dict | None:
+        """The book's verified jump-in route or the composed one, whichever is worth more (route_book.value)."""
+        from .route_book import value
+        if comp_e is None:
+            return book_e
+        learned = self.exp.routes() if self.exp else None
+        if book_e is not None and (book_e.get("lethal") or value(book_e, learned) >= value(comp_e, learned)):
+            return book_e
+        return comp_e
+
     def _stun_jump_in(self, me: dict, op: dict, dist: float, tmr: int, rem: int, sc: dict):
         """0.20.3 (user, 2026-10-05: "Jump ins are supposed to be used after a successful DI stun ... routes starting with a
         jump in"): the combo lab's TRUE jump-in route with the best expected damage, when the stun leaves time for the
@@ -2179,9 +2220,14 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         left = int(jc.get("stun_frames", 140)) - (tmr - self._crumple_t0) - max(0, rem)
         if left < int(jc.get("jump_hit_frames", 44)) + self.lead + self.stale:
             return None
-        from .route_book import choose_jump_in, neutral_jump, value
+        from .route_book import choose_jump_in, cornered, neutral_jump, value
         e = choose_jump_in(self.book, me, op, learned=self.exp.routes() if self.exp else None,
                            reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+        # 0.33.0: a jump-in is a ground combo with a jump attack in front (user): the composer's best one competes (in the
+        # corner only, as the book's: 0.24.2); built from a neutral jump when the opponent is close
+        nj = dist < float(jc.get("neutral_jump_below", 1.2))
+        if cornered(op, me):
+            e = self._better_jump_in(e, self._composed_jump_in(me, op, neutral=nj))
         if e is None:
             return None
         meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
@@ -2191,7 +2237,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None                       # SA3 is worth more here
         if rem > self.lead + self.stale:
             return "wait"                     # the jump goes out when the bot is free (a jump is not buffered)
-        if dist < float(jc.get("neutral_jump_below", 1.2)):
+        if nj and not e.get("neutral_jump"):
             e = neutral_jump(e)
         self._crumple_done = True
         self.stun_stats["jump_in"] += 1
@@ -2497,6 +2543,35 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.di_stats["burnout_super"] += 1
         return Decision("seq", pick["name"], pick["seq"], rule="di_burnout_super",
                         reason=f"opponent Drive Impact with me in burnout and the wall {behind:.2f} behind: {pick['name']}")
+
+    def _di_burnout_jump(self, me: dict, op: dict, dist: float, info: dict) -> Decision | None:
+        """0.33.0 (user, 2026-10-07): "the bot is in burnout and it notices that a drive impact is coming ... not preceded
+        by an additional attack, so the bot is not in block stun and it can act ... the bot has no super and no reversal,
+        what the bot should do is immediately read the drive impact and jump." (Ken's DIs on the burned-out bot worked
+        because a blocked 2MP put it in blockstun first: then nothing helps.) A neutral jump while the jump can still
+        leave the ground and rise `clear` frames before the Drive Impact's first active frame (Capcom: start-up 26);
+        later than that it blocks as before. The landing is a whiff punish (the punish engine). ESTIMATES: `burnout_jump`."""
+        jc = (self.c.get("di_rules") or {}).get("burnout_jump") or {}
+        if not jc.get("enabled", True) or not info.get("di") or self._burnout_jump_for == self.op_onset or dist > 3.0:
+            return None
+        drive = _num(me.get("drive"))
+        if not (self.in_burnout or (drive is not None and drive < 10000)):
+            return None                              # not in burnout: the DI-back answers it (rule 3)
+        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0) \
+                or self.busy(me) is not None or not self._ok("di"):
+            return None                              # blocking (checkmate: nothing helps) or not free
+        tmr = self._now
+        since = tmr - self.op_onset if isinstance(tmr, int) and isinstance(self.op_onset, int) else 0
+        need = self.lead + self.stale + int(jc.get("prejump", 5)) + int(jc.get("clear", 6))
+        if since + need > int(jc.get("startup", 26)):
+            self.di_stats["burnout_jump_late"] = self.di_stats.get("burnout_jump_late", 0) + 1
+            self._burnout_jump_for = self.op_onset
+            return None                              # too late to clear it: block
+        self._burnout_jump_for = self.op_onset
+        self.di_stats["burnout_jump"] = self.di_stats.get("burnout_jump", 0) + 1
+        return Decision("seq", "neutral jump (over a Drive Impact)", str(jc.get("seq", "8@3")), rule="di_burnout_jump",
+                        reason=f"opponent Drive Impact {since}F in, {dist:.2f} away, me in burnout with no Super Art "
+                               f"to answer it and free to act: jumping it")
 
     def _super_punish(self, me: dict, op: dict, dist: float, adv, bs) -> Decision | None:
         """A blocked move that leaves time for SA3 (start-up 5): with 3 bars, SA3 instead of a small punish. Its motion
@@ -2871,6 +2946,68 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                                f"{int(e['p_complete'] * 100)}% to finish; Super {int(num(me.get('super')) or 0) // 10000}, "
                                f"Drive {int(num(me.get('drive')) or 0) // 10000})")
 
+    def _track_air_attack(self, me: dict, op: dict, tmr) -> None:
+        """0.33.0: the bot's own jump attack (a normal id while airborne): its start, the button it was pressed with and
+        whether it hit (the opponent's hitstop rising / hp dropping) or was blocked (blockstun rising)."""
+        aid = me.get("action_id")
+        y = _num(me.get("y")) or 0.0
+        a = self._air_atk
+        if a is not None and isinstance(tmr, int) and isinstance(a.get("t0"), int) and tmr - a["t0"] > 90:
+            a = self._air_atk = None
+        if isinstance(aid, int) and 600 <= aid < 715 and y > 0.05 and (a is None or a["id"] != aid):
+            mask = me.get("input")
+            btn = [b for b in range(4, 10) if isinstance(mask, (int, float)) and int(mask) >> b & 1]
+            a = self._air_atk = {"id": aid, "t0": tmr, "btn": btn[-1] if btn else None,
+                                 "dist": player_distance(me, op), "op_y": _num(op.get("y")) or 0.0,
+                                 "op": (_num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp")))}
+            self.jump_combo_stats["jump_attacks"] += 1
+        if a is None or a.get("hit_t") is not None or a.get("blocked"):
+            return
+        hs, bs, hp = _num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp"))
+        hs0, bs0, hp0 = a["op"]
+        if bs > 0 and not bs0:
+            a["blocked"] = True
+            self.jump_combo_stats["blocked"] += 1
+        elif (hs > 0 and not hs0) or (hp is not None and hp0 is not None and hp < hp0):
+            a["hit_t"] = tmr
+            a["op_y"] = _num(op.get("y")) or 0.0
+            self.jump_combo_stats["hit"] += 1
+        a["op"] = (hs, bs, hp)
+
+    def _jump_attack_combo(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.33.0 (user, 2026-10-07): "All a jump in really is, is just the same combo as a ground combo with just a
+        jumping attack added ... There is no reason why he should be jumping in with a heavy punch and then doing nothing
+        afterwards." The bot's own jump attack hit a grounded opponent (whatever rule jumped: a command grab jumped, a
+        fireball jumped, a neutral jump): the composer's most damaging combo from the same button's standing or
+        crouching normal with the Super / Drive the bot has, its first move pressed to reach the game on landing +
+        landing recovery (the combo lab's verified jump-in timing). Nothing goes out when the opponent's hitstun can't
+        cover the landing move (the executor's window check). Jump-in routes performed whole (the lab's, the fireball
+        and Drive Impact stun jump-ins) are not touched: they are composed the same way when chosen."""
+        a, comp = self._air_atk, self.composer
+        if a is None or a.get("done") or a.get("hit_t") is None or comp is None:
+            return None
+        tmr = self._now
+        a["done"] = True
+        aid = me.get("action_id")
+        if not isinstance(tmr, int) or tmr - a["hit_t"] > 8 or dist > 2.0 or a.get("op_y", 0.0) > 0.1 \
+                or (isinstance(aid, int) and aid != a["id"] and 600 <= aid < 1300):
+            return None                              # late, far, an air-to-air hit, or another move of its own is out
+        name = comp.air_name(a["id"]) or JUMP_BUTTON_NAMES.get(a.get("btn"))
+        if not name:
+            return None
+        self._price_bars(me)
+        e = comp.best_after_jump(name, me, op, reserve=self.c.get("drive_reserve", 0), adopt_air=True, fallback=True)
+        if e is None:
+            self.jump_combo_stats["no_route"] += 1
+            return None
+        self.jump_combo_stats["continued"] += 1
+        by = self.jump_combo_stats.setdefault("routes", {})
+        by[e["ground_route"]] = by.get(e["ground_route"], 0) + 1
+        return Decision("route", e["route"], route=e, rule="jump_attack_combo", timed=True,
+                        adopt={"start": a["t0"], "start_id": a["id"], "contact": a["hit_t"], "dist": a.get("dist")},
+                        reason=f"{name} hit: landing into {e['ground_route']} (about {e['damage']} with the jump attack; "
+                               f"Super {int(num(me.get('super')) or 0) // 10000}, Drive {int(num(me.get('drive')) or 0) // 10000})")
+
     def _track_own_attack(self, me: dict, op: dict) -> None:
         """Each own ground attack (normal or non-projectile special): its start distance and whether it touched the
         opponent (hitstop / blockstun rising or hp lost) before the bot's next action; the result goes to live_reach."""
@@ -2932,6 +3069,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if d_ is not None and isinstance(tmr, int) and (not self._dist_hist or self._dist_hist[-1][0] != tmr):
             self._dist_hist = (self._dist_hist + [(tmr, d_)])[-8:]
         self._track_own_attack(me, op)
+        self._track_air_attack(me, op, tmr)
         self._track_damage_taken(me, op)
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
         if ev_:
@@ -3530,6 +3668,9 @@ def motion_guard(seq: str, since_forward_s: float | None, clear_frames: int) -> 
     return f"5@{wait} " + seq, wait
 
 
+# 0.33.0: the input mask's button bits (MEASURED 0.2.9: LP 0x10 ... HK 0x200) -> the jump attack's Capcom name
+JUMP_BUTTON_NAMES = {4: "Jumping Light Punch", 5: "Jumping Medium Punch", 6: "Jumping Heavy Punch",
+                     7: "Jumping Light Kick", 8: "Jumping Medium Kick", 9: "Jumping Heavy Kick"}
 _PUNCHES = ("LP", "MP", "HP")
 
 
@@ -4045,6 +4186,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["corner_pressure"] = dict(fighter.corner_stats)
                 summary["denjin"] = dict(fighter.denjin_stats, stock_at_end=fighter.denjin_stock)
                 summary["stun_followups"] = dict(fighter.stun_stats)
+                summary["jump_attack_combos"] = dict(fighter.jump_combo_stats)
                 summary["route_hits"] = dict(fighter.hit_switch, sa3_vs_route=dict(fighter.sa3_vs_route))
                 if fighter.composer is not None:
                     summary["composer"] = dict(fighter.compose_stats, routes=len(fighter.composer.entries),

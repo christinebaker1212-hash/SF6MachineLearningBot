@@ -678,6 +678,20 @@ di_rules:
   di_hit: 1000
   follow_up_default: 2000
   wall_dist: 2.0   # 0.32.0 (was 1.5): Ken's Drive Impacts stunned the burned-out bot with its back 1.71 from the wall
+  # 0.33.0 (user, 2026-10-07): in burnout (no DI-back), no Super Art for the wall rule, and FREE (not in blockstun): a
+  # neutral jump on reading the Drive Impact, while it can still leave the ground (prejump) and rise `clear` frames before
+  # the DI's first active frame (Capcom start-up 26). prejump / clear are ESTIMATES (MEASURED jump: 5 frames to leave
+  # the ground; ~1.1 high after 6 airborne frames)
+  burnout_jump: {enabled: true, seq: "8@3", startup: 26, prejump: 5, clear: 6}
+# 0.33.0 (user, 2026-10-07: "a jump in really is just the same combo as a ground combo with just a jumping attack added"):
+# the jump-ins the bot chooses (over a fireball; after a Drive Impact stun in the corner) are also composed as a jump
+# attack + the composer's best ground combo from the same button; the book's verified jump-in routes compete with them.
+# hit_rate: the chance the jump attack connects (an ESTIMATE; it scales the composed route's value). Any jump attack of the
+# bot's that hits a grounded opponent is continued the same way (rule 0c').
+jump_in:
+  enabled: true
+  attacks: ["Jumping Heavy Punch", "Jumping Heavy Kick"]
+  hit_rate: 0.6
 # 0.20.3 (user, 2026-10-05: "It probably should be trying to use Denjin charge when safe ... It shouldn't always give up oki
 # for Denjin"). Capcom: Denjin Charge (22+P) is 52 frames, the stock is added on frame 51, one stock at most; it powers up
 # Hadoken, Hashogeki, SA1 and SA2. The stock is tracked from the bot's own action ids (catalog C; else these MEASURED Ryu
