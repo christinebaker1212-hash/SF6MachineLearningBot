@@ -621,8 +621,13 @@ drive_rush_in:
 # 0.18.4: a ground command grab that whiffed under the airborne bot: a jump attack on the way down (j.HK), then the
 # landing is a whiff punish. Payoffs for "cmd_grab" (above) are ESTIMATES: a neutral jump / back dash / invincible
 # reversal beats a command grab, a block / tech never does, and a grabbed parry is a punish counter.
+# 0.33.1 (user, 2026-10-07: "whenever the bot would jump against a command throw ... start an air attack and then go into
+# any of its heavy punch routes ... while coming down when it would hit the opponent"): j.HP, pressed so it hits
+# JUMP_DEPTH frames before landing (the combo lab's jump-in timing), then the composer's best heavy punch combo
+# (`jump_attack_name`); without Capcom data / a composer, the j.HP alone with the same timing.
 cmd_grab:
-  jump_attack: "5+HK@3"
+  jump_attack: "5+HP@3"
+  jump_attack_name: "Jumping Heavy Punch"
   max_dist: 1.6
   # 0.22.6 (user: "It absolutely refuses to jump before the moment of contact"): a command grab that takes long enough to
   # see coming (grabs.py: learned from being grabbed, seeded below) is jumped so the bot is in the air when it would

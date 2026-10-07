@@ -531,6 +531,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._aa_empty_for = None             # 0.32.0: the jump whose late Shoryuken was held (empty)
         self._burnout_super_for = None
         self._burnout_jump_for = None
+        self._me_y_line, self._me_vy = None, None
+        self._route_end_t = None              # 0.33.1: the round clock when the last performed route ended
         self._air_atk = None                  # 0.33.0: the bot's own jump attack (id, start, hit) for its ground combo
         self.jump_combo_stats = {"jump_attacks": 0, "hit": 0, "blocked": 0, "continued": 0, "no_route": 0}
         self._a2a_for = None
@@ -1755,23 +1757,42 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return self._cg
 
     def _cmd_grab_punish(self, me: dict, op: dict, dist: float) -> Decision | None:
-        """0.18.4: the opponent's ground command grab whiffed under the airborne bot (a jump the defence game chose, or any
-        jump): its recovery is long, so press a jump attack on the way down; the landing is then a whiff punish
-        (rule 6, with the grab's Capcom total). Once per grab."""
+        """0.18.4: the opponent's ground command grab whiffed under the airborne bot (a jump the defence game chose, rule
+        1d's jump, or any jump): its recovery is long. 0.33.1 (user, 2026-10-07: "the bot can immediately start an air
+        attack and then go into any of its heavy punch routes ... while coming down when it would hit the opponent"):
+        the jump attack (`cmd_grab.jump_attack_name`, j.HP) is pressed on the way down so it hits `JUMP_DEPTH` frames
+        before landing (start-up - 1 + depth + input delay + stale frames before the predicted landing: the combo lab's
+        jump-in timing), and it is the first move of the composer's most damaging combo from the same button (j.HP ->
+        the best 5HP / 2HP combo for the meter), its landing move a landing link. Once per grab."""
         cc = self.c.get("cmd_grab") or {}
         oa, y = op.get("action_id"), _num(me.get("y")) or 0.0
-        falling = y < self._me_y_prev
-        self._me_y_prev = y
+        prev, self._me_y_prev = self._me_y_prev, y
         if oa not in self.cmd_grab_ids() or self._cg_punished == self.op_onset or y <= 0.05:
             return None
-        from .neutral_policy import AIR_ATTACK_MAX_Y
-        if not falling or y > AIR_ATTACK_MAX_Y or dist > float(cc.get("max_dist", 1.6)):
-            return None
+        vy = self._me_vy if self._me_vy is not None else (y - prev if prev and prev > 0.05 else None)
+        if vy is None or vy >= 0 or dist > float(cc.get("max_dist", 1.6)):
+            return None                              # still rising: a jump attack goes out on the way DOWN
+        from .combo_lab import JUMP_DEPTH
+        name_ = cc.get("jump_attack_name", "Jumping Heavy Punch")
+        e = None
+        if self.composer is not None:
+            self._price_bars(me)
+            e = self.composer.best_after_jump(name_, me, op, reserve=self.c.get("drive_reserve", 0), adopt_air=True)
+        air = (e["plan"]["steps"][0] if e else None) or {}
+        su = air.get("startup") if isinstance(air.get("startup"), int) else int(cc.get("jump_attack_startup", 9))
+        t_land = landing_frames(y, vy, float((self.c.get("anti_air") or {}).get("gravity", 0.0123)))
+        if t_land > su - 1 + JUMP_DEPTH + self.lead + self.stale:
+            return None                              # too early: it would hit high (or whiff) before the fall
         self._cg_punished = self.op_onset
         self.cmd_grab_stats["jump_punish"] += 1
         name = (self.opp.get(oa) or {}).get("name") or f"action {oa}"
-        return Decision("seq", "jump attack (command grab whiffed)", cc.get("jump_attack", "5+HK@3"), rule="cmd_grab_punish",
-                        reason=f"{name} whiffed under me at {dist:.2f}: jump attack on the way down, then punish the landing")
+        if e is not None:
+            self.cmd_grab_stats["jump_combo"] = self.cmd_grab_stats.get("jump_combo", 0) + 1
+            return Decision("route", e["route"], route=e, rule="cmd_grab_punish", timed=True,
+                            reason=f"{name} whiffed under me at {dist:.2f}: {name_} coming down ({int(t_land)}F to "
+                                   f"landing), then {e['ground_route']} (about {e['damage']})")
+        return Decision("seq", "jump attack (command grab whiffed)", cc.get("jump_attack", "5+HP@3"), rule="cmd_grab_punish",
+                        reason=f"{name} whiffed under me at {dist:.2f}: jump attack coming down, then punish the landing")
 
     def _track_grab_chain(self, oa, tmr) -> None:
         """The command grab the opponent is in, from its first id: an OD version shows the plain one for a frame first
@@ -2951,6 +2972,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         whether it hit (the opponent's hitstop rising / hp dropping) or was blocked (blockstun rising)."""
         aid = me.get("action_id")
         y = _num(me.get("y")) or 0.0
+        # 0.33.1: the bot's own vertical speed from every line (a decision line alone can be several ticks apart)
+        if isinstance(tmr, int) and self._me_y_line is not None and tmr != self._me_y_line[0]:
+            self._me_vy = (y - self._me_y_line[1]) / max(1, tmr - self._me_y_line[0]) if y > 0.05 else None
+        if not isinstance(tmr, int) or self._me_y_line is None or tmr != self._me_y_line[0]:
+            self._me_y_line = (tmr, y)
         a = self._air_atk
         if a is not None and isinstance(tmr, int) and isinstance(a.get("t0"), int) and tmr - a["t0"] > 90:
             a = self._air_atk = None
@@ -2985,6 +3011,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         and Drive Impact stun jump-ins) are not touched: they are composed the same way when chosen."""
         a, comp = self._air_atk, self.composer
         if a is None or a.get("done") or a.get("hit_t") is None or comp is None:
+            return None
+        re_ = self._route_end_t
+        if isinstance(re_, int) and isinstance(a.get("t0"), int) and a["t0"] <= re_:
+            a["done"] = True                         # it was part of a route performed whole (its own landing combo)
             return None
         tmr = self._now
         a["done"] = True
@@ -4961,6 +4991,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                             j_, raw_, me_key, op_key, fighter._route_basis))
                                         if d.kind == "route" and fighter.composer is not None else None)
                     c.apply(InputState(), tag="fighter_route_end")
+                    lt_ = reader.latest()
+                    # 0.33.1: a jump attack inside a route performed whole is not continued again afterwards
+                    fighter._route_end_t = lt_.raw.get("stage_timer") if lt_ is not None else None
                     rk = "routes_completed" if res.get("success") else "routes_stopped"
                     summary.setdefault(rk, {})
                     if not res.get("success") and not res.get("aborted"):

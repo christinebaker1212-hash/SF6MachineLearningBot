@@ -181,3 +181,31 @@ def test_the_burnout_jump_through_decide():
         f.observe_line(raw, 0)
         rules.append(f.decide(raw, k / 60, 0).rule)
     assert "di_burnout_jump" in rules
+
+
+# ---- 0.33.1: the jump over a command grab ----------------------------------------------------------------------------
+
+def test_a_jumped_command_grab_gets_jump_hp_on_the_way_down_then_a_heavy_punch_combo():
+    """User (2026-10-07): "whenever the bot would jump against a command throw ... immediately start an air attack and
+    then go into any of its heavy punch routes ... while coming down when it would hit the opponent." Not while rising,
+    not too high on the way down: j.HP is pressed so it hits ~2 frames before landing (start-up 9 + input delay)."""
+    f = _fighter()
+    f.opp[950] = {"name": "Screw Piledriver", "cmd_grab": "ground", "startup": 5, "total": 60}
+    rules, k_at = [], None
+    ys = [0.4 + 0.2 * k - 0.0123 * k * k / 2 for k in range(40)]          # rises, apex, falls
+    for k, y in enumerate(ys):
+        if y <= 0.05:
+            break
+        raw = _st(800 + k, {"y": y, "action_id": 36}, {"x": 0.8, "action_id": 950})
+        f.observe_line(raw, 0)
+        d = f.decide(raw, k / 60, 0)
+        if d.rule == "cmd_grab_punish" and k_at is None:
+            k_at, dd = k, d
+        rules.append(d.rule)
+    assert k_at is not None and rules.count("cmd_grab_punish") == 1
+    assert ys[k_at] < ys[k_at - 1]                                          # on the way down
+    left = next(i for i in range(k_at, 80) if 0.4 + 0.2 * i - 0.0123 * i * i / 2 <= 0) - k_at
+    assert left <= 9 - 1 + 2 + f.lead + 1                                   # late enough to hit just before landing
+    assert dd.kind == "route" and dd.route["route"].startswith("j.HP , 5HP")
+    assert [s["trigger"] for s in dd.route["plan"]["steps"][:2]] == ["air", "landing"]
+    assert f.cmd_grab_stats["jump_combo"] == 1

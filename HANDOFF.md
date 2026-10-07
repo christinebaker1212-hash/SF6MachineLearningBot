@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-07: code version **0.33.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-07: code version **0.33.1**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.33.0 is pushed** (CLAUDE.md "0.33.0"): in burnout, an opponent Drive Impact on a free bot (no blockstun, no Super Art answer) is jumped (62 burnout DIs in 303 recordings, 21 with the bot free, 18 of those hit); any jump attack of the bot's that hits a grounded opponent is continued with the composer's most damaging combo from the same button's ground normal (j.HP -> the best 5HP route for the meter), its first move a landing link; the fireball and Drive Impact stun jump-ins are composed the same way and compete with the lab's verified jump-in routes. The user is re-running a full K on Ryu (results to analyse).
+**State:** **0.33.1 is pushed** (CLAUDE.md "0.33.1"): the jump over a command grab now presses j.HP on the way down, timed to hit just before landing, and lands into the composer's best heavy punch combo (it was a j.HP-less j.HK with nothing after).
+
+**Before that:** **0.33.0 is pushed** (CLAUDE.md "0.33.0"): in burnout, an opponent Drive Impact on a free bot (no blockstun, no Super Art answer) is jumped (62 burnout DIs in 303 recordings, 21 with the bot free, 18 of those hit); any jump attack of the bot's that hits a grounded opponent is continued with the composer's most damaging combo from the same button's ground normal (j.HP -> the best 5HP route for the meter), its first move a landing link; the fireball and Drive Impact stun jump-ins are composed the same way and compete with the lab's verified jump-in routes. The user is re-running a full K on Ryu (results to analyse).
 
 **Before that:** **0.32.1 is pushed** (CLAUDE.md "0.32.1"): no accidental Denjin Charge: a crouching punch right after down was let go read as 22+P (the user asked if the lab's Denjin setup leaked into matches: it does not; the point-blank Denjin Charges were input misreads). **0.32.0** (CLAUDE.md "fights_5 + fights_6 analysed" and "0.32.0"): the fights_5 / fights_6 diagnosis was redone directly (0.31.2 ranked 3-7 at ~1400-1470 MR; the user's Ken set 2-3). Fixed: the opponent's speed is tracked on every line (a bug: after a sequence the anti-air predicted the landing 13 frames early and the Shoryuken whiffed at the apex), a late Shoryuken only against a jump that attacked (empty jumps blocked 7 of 9), the fireball jump-in keeps 4 frames to spare (2 hit of 20 vs Hadokens), combo steps are not sent beyond their measured reach, and the burnout Drive Impact answer reads the burnout state. Not yet built (seen): throw techs beyond throw range, 5LK > OD High Blade Kick blocked 9 of 37, Zangief's command grabs on the crouch-blocking bot, Ken's Jinrai follow-ups. The research into Ryu's answers per character (#113) is still to do (directly, not multi-agent).
 

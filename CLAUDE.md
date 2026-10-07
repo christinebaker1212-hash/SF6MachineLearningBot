@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.33.1 (2026-10-07): the jump over a command grab ends in j.HP on the way down and the best heavy punch combo.**
 - **0.33.0 (2026-10-07): a Drive Impact in burnout is jumped when the bot is free; a jump-in is a ground combo with a jump attack in front.**
 - **0.32.0 (2026-10-07): tightening from fights_5 / fights_6 (anti-air velocity bug, empty jumps, fireball jump-in margin, combo reach).**
 - **First Master matches (0.31.0, 2026-10-06): 1-5 against ~1460 MR players; fixes in 0.31.1 and 0.31.2 (throw defence).**
@@ -4252,6 +4253,26 @@ jumping heavy punch, he should be choosing his most damaging heavy punch route a
   - Damage = the jump attack + the ground combo one scaling step later (community scaling table: an ESTIMATE).
 - No new jump-ins from neutral: the bot still jumps in only over a fireball, after a Drive Impact stun in the corner, and
   over a Drive Impact or a command grab. What changed is what follows the jump attack.
+
+## 0.33.1: the jump over a command grab ends in j.HP on the way down and a heavy punch combo (user, 2026-10-07)
+- User: "this also extends to whenever the bot would jump against a command throw. The bot can immediately start an air
+  attack and then go into any of its heavy punch routes ... not ... a heavy punch while in the air. I mean while coming
+  down when it would hit the opponent."
+- Before, rule 1a (`_cmd_grab_punish`, 0.18.4) pressed j.HK as soon as the bot was falling below 1.3, and nothing followed
+  it but a whiff punish on landing.
+- **Now:**
+  - The attack is j.HP (`cmd_grab.jump_attack: "5+HP@3"`, `jump_attack_name`).
+  - It is pressed on the way down when the predicted landing is no more than start-up - 1 + `JUMP_DEPTH` (2) + input
+    delay + stale frames away. That is the combo lab's jump-in timing: the hit comes ~2 frames before landing.
+  - It is the first move of the composer's most damaging combo from the same button (`best_after_jump`, as 0.33.0), with
+    the landing move as a landing link and the rest hit-confirmed.
+  - Without a composer (no Capcom data) it is the j.HP alone with the same timing.
+  - Counted: `command_grabs.jump_punish` / `jump_combo`.
+- **Supporting changes:**
+  - The bot's own vertical speed comes from every state line (`_me_vy`), not only decision lines.
+  - A jump attack inside a route performed whole is not continued a second time afterwards (`_route_end_t`).
+- Tests `tests/test_0330.py` (rising: nothing; falling: once, late enough to hit deep; the route starts j.HP , 5HP) and
+  the 0.18.4 test updated to j.HP. Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

@@ -202,7 +202,8 @@ def test_a_whiffed_command_grab_under_a_jump_is_punished_once():
     f = _fighter(opp_moves=dict(GRAB))
     f.decide(state(me={"y": 1.2, "action_id": 36}, op={"x": 1.0, "action_id": 950}, timer=500), 0.0, 0)
     d = f.decide(state(me={"y": 1.1, "action_id": 36}, op={"x": 1.0, "action_id": 950}, timer=501), 0.0, 0)
-    assert d.rule == "cmd_grab_punish" and d.seq == "5+HK@3" and f.cmd_grab_stats["jump_punish"] == 1
+    # 0.33.1 (user): j.HP (then a heavy punch combo when the composer has one), timed to hit on the way down
+    assert d.rule == "cmd_grab_punish" and d.seq == "5+HP@3" and f.cmd_grab_stats["jump_punish"] == 1
     d = f.decide(state(me={"y": 0.9, "action_id": 36}, op={"x": 1.0, "action_id": 950}, timer=502), 0.0, 0)
     assert d.rule != "cmd_grab_punish"
 
