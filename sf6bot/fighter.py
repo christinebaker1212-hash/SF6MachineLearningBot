@@ -3530,6 +3530,42 @@ def motion_guard(seq: str, since_forward_s: float | None, clear_frames: int) -> 
     return f"5@{wait} " + seq, wait
 
 
+_PUNCHES = ("LP", "MP", "HP")
+
+
+def denjin_guard(seq: str, down_now: bool, since_down_s: float | None, guard_frames: int) -> tuple[str, str | None]:
+    """0.32.0: a sequence whose first button is a PUNCH with a down direction (2LP, 2MP, 2HP, 1+P, 3+P), sent within
+    `guard_frames` after the bot let go of down, reads as 22 + P: Ryu's Denjin Charge (52 frames, at point blank a free
+    punish). MEASURED (0.20.3-0.31.2 ranked, 68 Denjin Charges): 16 started within 1.5 of the opponent, almost all from
+    inputs like "6 2 5 2+LP" (a reversal's armed motion, then a crouch jab after a neutral frame) or "2+MK 5 2 2+MP";
+    the down, not-down, down + punch spanned 3-15 frames. Down held now: the waits before the punch keep it held
+    (5 -> 1, a crouch block); down let go recently: wait until it is `guard_frames` old. Returns (sequence, change)."""
+    toks = seq.split()
+    if not toks:
+        return seq, None
+    i = next((k for k, t in enumerate(toks) if any(b in t.split("@")[0].split("+")[1:] for b in _PUNCHES)), None)
+    if i is None:
+        return seq, None
+    d_i = toks[i].split("@")[0].split("+")[0]
+    if d_i not in ("1", "2", "3") or any("+" in t.split("@")[0] for t in toks[:i]):
+        return seq, None
+    pre_dirs = [t.split("@")[0] for t in toks[:i]]
+    if any(d in ("1", "2", "3") for d in pre_dirs):
+        return seq, None                  # a motion of its own (the Denjin Charge itself, a Shoryuken): as written
+    if down_now:
+        if all(d in ("1", "2", "3") for d in pre_dirs):
+            return seq, None
+        if all(d in ("1", "2", "3", "5") for d in pre_dirs):
+            return " ".join(("1" + t[1:]) if t.split("@")[0] == "5" else t for t in toks), "held"
+    if since_down_s is None:
+        return seq, None
+    wait = int(guard_frames - since_down_s * 60.0 + 0.999)
+    if wait <= 0 or (not down_now and pre_dirs and all(d == "5" for d in pre_dirs)
+                     and sum(int(t.split("@")[1]) if "@" in t else 1 for t in toks[:i]) >= wait):
+        return seq, None
+    return f"5@{wait} " + seq, "waited"
+
+
 def _new_match_summary(me_key: str) -> dict:
     return {"player": me_key, "decisions": {}, "landed": {}, "rounds": [], "match": None,
             "opponent_catalog": False, "character": None, "opponent": None, "interrupted": {},
@@ -4815,6 +4851,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 seq_, guard_wait = motion_guard(seq_, since, int((fcfg.get("inputs") or {}).get("motion_clear_frames", 12)))
                 if guard_wait:
                     summary["motion_guard"] = summary.get("motion_guard", 0) + 1
+                # 0.32.0: no accidental 22 + P (Denjin Charge) from a crouching punch right after down was let go
+                down_now = c.current.direction in (1, 2, 3)
+                since_d = None if c.down_t is None else clock.now() - c.down_t
+                seq_, dg_ = denjin_guard(seq_, down_now, since_d,
+                                         int((fcfg.get("inputs") or {}).get("denjin_guard_frames", 15)))
+                if dg_:
+                    dgs_ = summary.setdefault("denjin_guard", {})
+                    dgs_[dg_] = dgs_.get(dg_, 0) + 1
                 _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
                                    abort=stop_check)
                 if d.rule == "reversal_arm":

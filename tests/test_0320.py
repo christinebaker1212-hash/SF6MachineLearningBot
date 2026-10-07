@@ -125,3 +125,42 @@ def test_the_burnout_drive_impact_answer_reads_the_burnout_state():
     op = {"x": -4.9, "y": 0.0, "action_id": 855}
     d = f._di_burnout_super(me, op, 1.0, {"di": True})
     assert d is not None and d.rule == "di_burnout_super"
+
+
+def test_no_accidental_denjin_charge_from_a_crouching_punch_after_down():
+    """MEASURED (0.20.3-0.31.2 ranked): 16 of 68 Denjin Charges started within 1.5 of the opponent, from inputs like
+    "6 2 5 2+LP" (an armed reversal motion, then a crouch jab after a neutral frame): down, not-down, down + punch = 22P."""
+    from sf6bot.fighter import denjin_guard
+    # down held now: the neutral wait before the crouch jab becomes a crouch block
+    assert denjin_guard("5@3 2+LP@3 1@6", True, 0.0, 15) == ("1@3 2+LP@3 1@6", "held")
+    # down let go 5 frames ago: wait until it is 15 frames old
+    seq, how = denjin_guard("2+LP@3 1@6", False, 5 / 60, 15)
+    assert how == "waited" and seq.startswith("5@10 ")
+    # long enough ago, or down still held: as written
+    assert denjin_guard("2+LP@3 1@6", False, 20 / 60, 15) == ("2+LP@3 1@6", None)
+    assert denjin_guard("2+LP@3 1@6", True, 0.0, 15) == ("2+LP@3 1@6", None)
+    # sequences with a motion of their own are untouched: the Denjin Charge itself, a Shoryuken, a light chain
+    for s_ in ("2@3 5@2 2+LP@3", "6@3 2@3 3+HP@3", "2+LK@3 2@7 2+LP@3", "5+LP@3", "2+MK@3"):
+        assert denjin_guard(s_, False, 2 / 60, 15) == (s_, None)
+
+
+def test_the_controller_remembers_when_down_was_last_held():
+    from sf6bot.actions import Facing
+    from sf6bot.controller import Controller
+    from sf6bot.sequences import InputState
+    sent = []
+
+    class _B:
+        def send(self, ev):
+            sent.append(ev)
+
+    c = Controller(_B(), {k: k for k in ("UP", "DOWN", "LEFT", "RIGHT", "LP", "MP", "HP", "LK", "MK", "HK")},
+                   lambda e: None)
+    c.arm()
+    c.set_facing(Facing.RIGHT)
+    assert c.down_t is None
+    c.apply(InputState(2))
+    t1 = c.down_t
+    assert t1 is not None
+    c.apply(InputState(5))               # let go: the release time counts
+    assert c.down_t >= t1

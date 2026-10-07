@@ -4194,6 +4194,23 @@ All MOCK / replay-tested (`tests/test_0320.py`; older tests updated where they e
 - **Drive Impact on the burned-out bot** (`_di_burnout_super`): burnout is the state (`in_burnout`), not "under one bar";
   the wall distance 2.0 (was 1.5).
 
+## 0.32.1: no accidental Denjin Charge (user, 2026-10-07)
+- User: "since the training mode has Ryu charge Denjin before every route with Denjin charge, is it possible that's leaking
+  into matches, causing him to Denjin charge point blank at opponents?"
+- **Not the lab's setup:** matches never run a route's Denjin setup (`perform_route` has no setup step; routes that need a
+  stock are chosen only while the bot holds one, 0.20.3).
+- **But point-blank Denjin Charges are real, and mostly input misreads.** MEASURED (0.20.3-0.31.2 ranked, 68 Denjin Charges):
+  16 started within 1.5 of the opponent; the bot's own input masks show down, not-down, down + punch within 3-15 frames,
+  which SF6 reads as 22 + P: e.g. "6 2 5 2+LP" (the reactive reversal's armed Shoryuken motion, then a crouch jab after a
+  neutral frame; 0.31.2 mirror) and "2+MK 5 2 2+MP" (4, 0.22-0.26). 3 more followed the bot's own Drive Impact crumple on
+  0.22.5 (the cash-out has changed since). The far-range ones (3.0+, 39) are the deliberate range charge (0.20.3).
+- **Fix** (`fighter.denjin_guard`, fight loop, like 0.18.0's motion guard; `Controller.down_t` = when down was last held):
+  a sequence whose first button is a crouching punch (1/2/3 + LP/MP/HP), sent within `inputs.denjin_guard_frames` 15
+  after down was let go: with down still held its neutral waits become crouch blocks (5 -> 1); down already let go: it
+  waits until the release is 15 frames old. Sequences with their own motion (the Denjin Charge itself, Shoryukens, the
+  light chain "2+LK 2 2+LP") are untouched. Counted in `fight_summary.denjin_guard`.
+- Not covered: combo routes (`perform_route` sends its steps on the game clock and is not delayed). Tests `tests/test_0320.py`.
+
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
   Side-specific resets are not known yet.

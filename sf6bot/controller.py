@@ -36,6 +36,7 @@ class Controller:
         # forward + 2-3-6 as a Shoryuken motion (0.18.0, measured: Hadokens after walking forward came out as
         # Shoryukens), so quarter-circle motions wait until forward is old enough (fighter.motion_guard)
         self.forward_t: float | None = None
+        self.down_t: float | None = None
 
     # ---- arming -----------------------------------------------------------
     @property
@@ -81,6 +82,10 @@ class Controller:
             # with 4-5 neutral frames after forward, which the game reads as a Shoryuken (MEASURED: 55 of 56)
             if self._armed and (state.direction in (3, 6, 9) or self.current.direction in (3, 6, 9)):
                 self.forward_t = clock.now()
+            # 0.32.0: the time a down direction was last HELD (also when let go): down, not-down, down + punch reads as
+            # 22 + P = Denjin Charge (fighter.denjin_guard)
+            if self._armed and (state.direction in (1, 2, 3) or self.current.direction in (1, 2, 3)):
+                self.down_t = clock.now()
             self.current = state if self._armed else NEUTRAL
             releases = sorted(self._held - target)
             # 0.25.0: directions before buttons. MEASURED (61 ranked recordings): with the keys sorted by name, 'HP' / 'LP' /
