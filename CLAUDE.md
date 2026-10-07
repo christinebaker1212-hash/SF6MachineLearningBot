@@ -4491,7 +4491,16 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   - `tests/test_state_check.py`: the user's zero boxes fail
   - `tests/test_exporter_lua.py` / `tests/lua/stub_run.lua`: the stub zeroes non-pushbox rects inside hooks, as measured;
     the lines carry the render's boxes, never zeros
-- Not run in game.
+- **VERIFIED IN GAME (user, 2026-10-07, 0.36.1, online build v11 installed, Training Mode Ryu vs Ryu, dummy no block):
+  G all PASS** (super INCONCLUSIVE: Training Mode keeps the gauge full).
+  - Hurtboxes per character: head 1.32-1.66 high, body 0.54-1.38, legs 0-0.54 (0.6-0.8 wide), each covering the
+    player's x.
+  - Throw hurtbox 0-1.3; pushbox 0.7 wide, 0-1.3 high. At contact the two pushboxes touch (gap 0.0).
+  - cr.MK's hitbox front 1.02 in front of Ryu's centre, overlapping the dummy's hurtbox on the hit (500 damage,
+    hitstun 23).
+  - Heartbeat: 6,570 rects read, 10 zero-size (dropped), 2,401 render samples.
+  - So the centre / half-size reading, the render-time read and the kinds are right.
+  - Next: C as Ryu (guard None) for the hit profiles.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
