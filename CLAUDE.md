@@ -4436,8 +4436,8 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
     file small); at most 40 rects a player
   - Lua stub test (`tests/test_exporter_lua.py`): written on change, the full refresh, a projectile's own rects.
 - **The research build must match:** it runs only the exact exporter it was built with, so the GitHub workflow rebuilt
-  it for v10 (run 37580495340); the new zip goes into `refw_research/dist/` when the run finishes (PENDING until then: do
-  not update or install before it is there). Install it with TOOLS -> "Online build: install" (SF6 closed,
+  it for v10 (run 37580495340, sha256 ab044b20... = GitHub's digest; dll marker: until 2033-10-01, exporter
+  d96ed1970f6979c0 = the v10 Lua) and the zip is in `refw_research/dist/`. Install it with TOOLS -> "Online build: install" (SF6 closed,
   administrator); offline-only setups use R.
 - **Python** (`sf6bot/boxes.py`):
   - `BoxTracker` carries the change-only boxes forward on every line (live reader, recordings via `read_recording`):
