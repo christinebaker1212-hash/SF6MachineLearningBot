@@ -169,7 +169,8 @@ class Session:
                                         avoid_rect=None if self.window is None else self.window.client_rect,
                                         screen_rect=None if self.window is None else self.window.monitor_rect,
                                         exclude_from_capture=bool(cfg["overlay"].get("exclude_from_capture", False)),
-                                        sink=self.recorder.event)
+                                        sink=self.recorder.event,
+                                        input_style=str(cfg["overlay"].get("input_style", "arcade")))
             if self.overlay.overlaps_game:
                 print("Note: no room beside the game for the debug overlay, so it may cover part of the game "
                       "and be captured. Move the SF6 window right, or set overlay.exclude_from_capture: true.")

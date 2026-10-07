@@ -4715,6 +4715,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter = None
             if fighter is None and isinstance(op.get("chara"), int):
                 summary["character"] = character_name(me.get("chara"))
+                sess.status["_title"] = f"{summary['character']}  {me_key.upper()}"   # the arcade panel's marquee
                 if (summary["character"] != fcfg.get("character") and summary["character"] in CHARACTERS.values()
                         and side["i"] is not None):
                     # 0.31.0: the game shows the bot on another character than it was set to play: that character's

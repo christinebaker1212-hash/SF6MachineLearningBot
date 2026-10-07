@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.35.0 (2026-10-07): arcade-cabinet input display (ball-top lever, Vewlix 8-button panel, input history) in the overlay.**
 - **0.34.0 (2026-10-07): punishes are the biggest combo that fits, for every character (blocked moves, blocked / whiffed supers, command grabs, reversals on landing); a raw super only when no combo fits.**
 - **0.33.2 (2026-10-07): an L Shoryuken through a Drive Impact in burnout when it is too late to jump.**
 - **0.33.1 (2026-10-07): the jump over a command grab ends in j.HP on the way down and the best heavy punch combo.**
@@ -4365,6 +4366,27 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
 - Blocked SA2: the window is seen (Capcom -5), only a 4-frame jab fits.
 - Whiffed OD Shoryukens: waited out (the recording then diverges: the live bot hit Ken on landing).
 - Tests `tests/test_0340.py`; fixture `tests/data/staged_ken_punishes_0.33.1.json.gz`. Not verified in game.
+
+## 0.35.0: an arcade-cabinet input display with Vewlix buttons (user, 2026-10-07)
+- User: "Is it possible to have a prettier looking input display for the operator to look at, one inspired by old arcade
+  cabinets?"; after a mockup: "Yes, that looks cute. Let's just make sure it has a Vewlix design for the buttons."
+- `sf6bot/arcade_panel.py`, drawn with OpenCV like the rest of the overlay (nothing new to install):
+  - **Marquee:** the bot's character and side (set by the fight: `status["_title"]`) and ARMED / DISARMED.
+  - **Lever:** a ball-top lever that tilts toward the held direction (screen-absolute, as a real stick moves), an 8-way
+    gate, and the direction in numpad notation relative to the facing (6 = forward).
+  - **Buttons:** eight in the Taito Vewlix layout. Two rows of four on the Vewlix curve: the first column lower than the
+    second and third, the fourth dipping slightly. Punches on top, kicks below; blue / yellow / red by strength. A
+    pressed button lights, glows and sinks.
+  - **Fourth column:** SF6's usual Classic macro column, lit when the bot presses Drive Parry (MP+MK) or Drive Impact
+    (HP+HK).
+  - **Input history:** like SF6's training display, newest on top: direction, buttons, frames held (wall-clock 60ths;
+    the overlay draws at ~30 fps).
+- The status lines (facing, capture, fight status) follow under the panel.
+- `overlay.input_style: arcade` (default) or `classic` (the old grey squares and circles), in configs/default.yaml or
+  configs/local.yaml.
+- The overlay column is 430 px wide instead of 260; it still shrinks the frame view to fit beside the game.
+- Tests `tests/test_0350.py` (numpad by facing, the Vewlix curve, the history, lit buttons and the macro column, the
+  overlay in both styles). Rendered here (Linux, headless); not seen on the user's PC or through Parsec yet.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-07: code version **0.34.0**, REFramework exporter script **v9**, branch
+*State as of 2026-10-07: code version **0.35.0**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.34.0 is pushed** (CLAUDE.md "0.34.0"): from the user's staged fight (Ken vs the bot in Training Mode) and their K run (84 TRUE combos): punishes are the most damaging combo that fits, for every character (the composer's best per normal; ~6,000 with 3 bars and one Drive Rush cancel); a raw super only when no combo fits; blocked / whiffed supers are punished (the super flash is counted in their frames; unknown supers assumed -12 once blockstun is over); whiffed command grabs open a punish window; Shoryuken-type reversals are waited out and punished on landing. The lab's 6,000+ six-Drive-bar routes stay kill-only (user, 2026-10-07: the burnout rule stays until Ryu handles burnout better). The burnout L Shoryuken timing (0.33.2) is tabled by the user.
+**State:** **0.35.0 is pushed** (CLAUDE.md "0.35.0"): the overlay's input panel is an arcade cabinet (ball-top lever, Vewlix 8-button layout with Drive Parry / Drive Impact on the fourth column, input history); `overlay.input_style: classic` brings the old panel back. Not yet seen on the user's PC.
+
+**Before that:** **0.34.0 is pushed** (CLAUDE.md "0.34.0"): from the user's staged fight (Ken vs the bot in Training Mode) and their K run (84 TRUE combos): punishes are the most damaging combo that fits, for every character (the composer's best per normal; ~6,000 with 3 bars and one Drive Rush cancel); a raw super only when no combo fits; blocked / whiffed supers are punished (the super flash is counted in their frames; unknown supers assumed -12 once blockstun is over); whiffed command grabs open a punish window; Shoryuken-type reversals are waited out and punished on landing. The lab's 6,000+ six-Drive-bar routes stay kill-only (user, 2026-10-07: the burnout rule stays until Ryu handles burnout better). The burnout L Shoryuken timing (0.33.2) is tabled by the user.
 
 **Before that:** **0.33.2 is pushed** (CLAUDE.md "0.33.2"): in burnout, too late to jump a Drive Impact -> an L Shoryuken timed to be airborne (Capcom 7-34) when the DI is active (26-27). With the current estimates the jump fits whenever the Shoryuken does; the user was asked for the real timing.
 

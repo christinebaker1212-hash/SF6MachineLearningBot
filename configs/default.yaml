@@ -133,6 +133,7 @@ overlay:
   exclude_from_capture: false   # true hides it from screen capture AND from streaming apps like Parsec
   width: 640
   fps: 30
+  input_style: arcade           # arcade = ball-top lever + Vewlix 8-button panel + input history; classic = the old panel
 
 loop:
   max_frame_age_ms: 50    # do not act on frames older than this (stale) -> counted & skipped

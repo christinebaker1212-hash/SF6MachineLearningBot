@@ -22,8 +22,16 @@ TITLE = "sf6bot debug"
 class DebugOverlay:
     def __init__(self, grabber: FrameGrabber, controller: Controller, stop_event: threading.Event,
                  width: int = 640, fps: float = 30.0, status: dict | None = None,
-                 avoid_rect=None, screen_rect=None, exclude_from_capture: bool = False, sink=None) -> None:
+                 avoid_rect=None, screen_rect=None, exclude_from_capture: bool = False, sink=None,
+                 input_style: str = "arcade") -> None:
         self.g = grabber
+        # 0.35.0 (user: "a prettier looking input display ... inspired by old arcade cabinets", "a Vewlix design for the
+        # buttons"): arcade_panel.py; "classic" = the original grey squares and circles
+        self.input_style = "classic" if str(input_style).lower() == "classic" else "arcade"
+        if self.input_style == "arcade":
+            from . import arcade_panel
+            self.PANEL_W = arcade_panel.W
+            self.history = arcade_panel.InputHistory()
         self.exclude_from_capture = exclude_from_capture
         self.sink = sink or (lambda e: None)
         self.pos = None
@@ -64,8 +72,15 @@ class DebugOverlay:
         self._thread.join(timeout)
 
     def _panel(self, h: int) -> np.ndarray:
-        p = np.full((h, 260, 3), 30, np.uint8)
+        p = np.full((h, self.PANEL_W, 3), 30, np.uint8)
         held = self.c.held()
+        if self.input_style == "arcade":
+            from . import arcade_panel as ap
+            from .actions import Facing
+            fr = self.c.facing is Facing.RIGHT
+            self.history.update(clock.now(), ap.numpad(held, fr), ap.button_label(held))
+            ap.draw(p, held, fr, self.history, title=str(self.status.get("_title") or "SF6 BOT"), armed=self.c.armed)
+            return self._status_lines(p, ap.H + 18, armed_line=False)
         # Stick (absolute screen directions)
         cx, cy, s = 60, 60, 28
         vy = -1 if "UP" in held else 1 if "DOWN" in held else 0
@@ -80,11 +95,13 @@ class DebugOverlay:
             col = (0, 220, 0) if b in held else (80, 80, 80)
             cv2.circle(p, (x, y), 16, col, -1)
             cv2.putText(p, b, (x - 12, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+        return self._status_lines(p, 130)
+
+    def _status_lines(self, p: np.ndarray, y0: int, armed_line: bool = True) -> np.ndarray:
         g = self.g
         iv = g.intervals[-120:]
         fps = (len(iv) / sum(iv)) if iv and sum(iv) > 0 else 0.0
-        lines = [
-            f"ARMED" if self.c.armed else "DISARMED (inputs released)",
+        lines = ([f"ARMED" if self.c.armed else "DISARMED (inputs released)"] if armed_line else []) + [
             f"facing: {self.c.facing.value}  state: {self.c.current.label()}",
             f"capture fps: {fps:5.1f}  frames: {g.count}",
             f"dup: {g.duplicates}  est. missed: {g.est_missed_total}",
@@ -94,8 +111,8 @@ class DebugOverlay:
         for k, v in [kv for kv in self.status.items() if not kv[0].startswith("_")][:8]:
             lines.append(f"{k}: {v}")
         for i, line in enumerate(lines):
-            col = (0, 255, 0) if i == 0 and self.c.armed else (0, 0, 255) if i == 0 else (230, 230, 230)
-            cv2.putText(p, line, (8, 130 + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col, 1)
+            col = (230, 230, 230) if not armed_line or i else (0, 255, 0) if self.c.armed else (0, 0, 255)
+            cv2.putText(p, line, (8, y0 + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col, 1)
         return p
 
     def _on_mouse(self, event, x, y, flags, param) -> None:
