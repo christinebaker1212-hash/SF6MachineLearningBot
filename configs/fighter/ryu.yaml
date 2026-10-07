@@ -38,6 +38,9 @@ anti_air:
   # out while it can start before the landing (late_frames); later than that -> block.
   move: anti_air_srk
   late_frames: 4
+  # 0.32.0: against an EMPTY jump (no attack in it) the Shoryuken's first active frame must come this many frames before
+  # the landing (MEASURED: empty jumps landing before it: 2 hit / 7 blocked; attack jumps: 13 hit of 15); else block
+  empty_jump_margin: 2
   gravity: 0.0123      # MEASURED: jumps last 37 frames and peak at 2.11 (most characters)
   early_frames: 6
   crossup_past: 0.3    # MEASURED: predicted landing this far past the bot = a cross-up (54/72, no false alarms)
@@ -355,7 +358,12 @@ fireball:
   jump_attack: "5+HK@3"     # without a planned route (no Capcom data): j.HK on the way down, below this height
   air_attack_y: 0.9
   jump_land_min: 0.2        # ESTIMATE: the forward jump (1.9, MEASURED) must land this close to the thrower ...
-  jump_land_max: 0.9        # ... and not past it (the lab's jump-ins start from travel + 0.3-0.9: 0.20.3)
+  jump_land_max: 0.7        # 0.32.0 (was 0.9): landing 0.8+ from the thrower, the jump attack (pressed ~0.25 before the
+                            # landing) whiffed at 1.0-1.2 (MEASURED 0.28-0.31: 13 whiffs of 20 jump-ins)
+  jump_free_margin: 4       # 0.32.0: frames to spare before the thrower is free (MEASURED: take-off 8 frames after the
+                            # decision, not the 4 predicted)
+  jump_free_margin_lead_in: 2  # 0.32.0: decided on the throw's lead-in (Akuma's Gou Hadoken, seen 8 frames earlier;
+                               # MEASURED 0.28.0 open loop: ~3 frames to spare): a smaller margin
   jump_punish_value: 0.8    # share of the route's damage expected
   jump_fail_cost: 0.3
   sa1: false                # 0.25.0: SA1 through a projectile is off (MEASURED 0.24.x ranked: 5 tries, 5 whiffed and punished)
@@ -666,7 +674,7 @@ di_rules:
   opp_super_min: 10000
   di_hit: 1000
   follow_up_default: 2000
-  wall_dist: 1.5
+  wall_dist: 2.0   # 0.32.0 (was 1.5): Ken's Drive Impacts stunned the burned-out bot with its back 1.71 from the wall
 # 0.20.3 (user, 2026-10-05: "It probably should be trying to use Denjin charge when safe ... It shouldn't always give up oki
 # for Denjin"). Capcom: Denjin Charge (22+P) is 52 frames, the stock is added on frame 51, one stock at most; it powers up
 # Hadoken, Hashogeki, SA1 and SA2. The stock is tracked from the bot's own action ids (catalog C; else these MEASURED Ryu

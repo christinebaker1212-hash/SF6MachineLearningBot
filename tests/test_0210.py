@@ -316,8 +316,9 @@ def test_the_landing_side_decides_the_anti_air():
     f = ScriptedFighter(FCFG, seed=1)
     f.lead = 4
     rules = []
+    # (0.32.0: a jump ATTACK, 653: first seen 12 frames from landing, an empty jump is blocked, see test_0320)
     for k, (x, y) in enumerate([(0.32, 1.55), (0.30, 1.50), (0.28, 1.45), (0.26, 1.40), (0.24, 1.35)]):
-        rules.append(f.decide(state(me={"super": 0}, op={"x": x, "y": y, "action_id": 37}, timer=300 + k), k / 60, 0).rule)
+        rules.append(f.decide(state(me={"super": 0}, op={"x": x, "y": y, "action_id": 653}, timer=300 + k), k / 60, 0).rule)
     assert "anti_air" in rules                                     # lands just in front (0.10): Shoryuken
     g = ScriptedFighter(FCFG, seed=1)
     g.lead = 4

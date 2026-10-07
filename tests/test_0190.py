@@ -28,12 +28,18 @@ def test_no_shoryuken_while_the_opponent_is_overhead():
     assert "anti_air" not in rules and "block_overhead" in rules
     # the same height, predicted to land just in front (0.02): it lands in front 88% of the time and a Shoryuken hits 94%
     # (0.19.0's "too close to call" rule blocked these)
+    # 0.32.0: first seen this low, the Shoryuken's first active frame comes after the landing; that works against a jump
+    # ATTACK (landing recovery), an EMPTY jump blocks it (MEASURED: 2 hit, 7 blocked): block the empty jump
     f1 = _fighter()
-    ds1 = _fall(f1, 0, [0.30 - 0.02 * k for k in range(6)], [1.70 - 0.05 * k for k in range(6)])
+    ds1 = _fall(f1, 0, [0.30 - 0.02 * k for k in range(6)], [1.70 - 0.05 * k for k in range(6)], act=653)
     assert "anti_air" in [d.rule for d in ds1]
+    f1e = _fighter()
+    ds1e = _fall(f1e, 0, [0.30 - 0.02 * k for k in range(6)], [1.70 - 0.05 * k for k in range(6)])
+    assert "anti_air" not in [d.rule for d in ds1e] and "block_empty_jump" in [d.rule for d in ds1e]
     # a jump that comes down in front of the bot, farther out: still the Shoryuken
+    # (0.32.0: a jump attack: first seen ~16 frames from landing, an empty jump is blocked, see test_0320)
     f2 = _fighter()
-    ds2 = _fall(f2, 0, [1.30 - 0.01 * k for k in range(40)], [2.00 - 0.03 * k for k in range(40)])
+    ds2 = _fall(f2, 0, [1.30 - 0.01 * k for k in range(40)], [2.00 - 0.03 * k for k in range(40)], act=653)
     assert "anti_air" in [d.rule for d in ds2] and f2.aa_stats["anti_air"] == 1
 
 

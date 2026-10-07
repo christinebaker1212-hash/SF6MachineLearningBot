@@ -33,10 +33,16 @@ def test_anti_air_where_the_jump_lands():
     # 4) could not even start before the landing: block toward the landing side
     assert d.rule != "anti_air" and d.direction == 4
     # ~12 frames: late (active ~2 frames after the landing) but started in the air, invincible: the Shoryuken goes out
+    # against a jump ATTACK (653, landing recovery); 0.32.0: an EMPTY jump (37) lands and blocks it (MEASURED: 2 hit,
+    # 7 blocked), so it is blocked
     g = ScriptedFighter(FCFG, seed=1)
-    g.decide(state(op={"x": 1.96, "y": 1.50, "action_id": 37}, timer=511), 0.18, 0)
-    d = g.decide(state(op={"x": 1.90, "y": 1.45, "action_id": 37}, timer=512), 0.2, 0)
+    g.decide(state(op={"x": 1.96, "y": 1.50, "action_id": 653}, timer=511), 0.18, 0)
+    d = g.decide(state(op={"x": 1.90, "y": 1.45, "action_id": 653}, timer=512), 0.2, 0)
     assert d.rule == "anti_air" and d.name.startswith("L Shoryuken") and d.facing is Facing.RIGHT
+    e = ScriptedFighter(FCFG, seed=1)
+    e.decide(state(op={"x": 1.96, "y": 1.50, "action_id": 37}, timer=511), 0.18, 0)
+    d = e.decide(state(op={"x": 1.90, "y": 1.45, "action_id": 37}, timer=512), 0.2, 0)
+    assert d.rule == "block_empty_jump" and d.direction == 4
 
 
 def test_no_anti_air_on_juggled_opponent():

@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.32.0 (2026-10-07): tightening from fights_5 / fights_6 (anti-air velocity bug, empty jumps, fireball jump-in margin, combo reach).**
 - **First Master matches (0.31.0, 2026-10-06): 1-5 against ~1460 MR players; fixes in 0.31.1 and 0.31.2 (throw defence).**
 - **MASTER REACHED (2026-10-06, user's result screen): the long-term goal is met.** Ranked, unattended, 0.27.0, on a
   10-win streak: Master, 25,238 LP (+1,050 for the promotion), 1500 MR. Details: "Master reached" below.
@@ -4144,6 +4145,54 @@ ranked recordings 0.23.0-0.31.0 (both players' input masks; the bot's LP+LK pres
   corner route after a midscreen skip resets for itself; the Training Mode check before a pass clears it).
 - Tests `tests/test_0314.py` (the reset goes out on the skip with `now`, the next route uses it, `reset(now=True)` does not
   wait for the players to land, an ordinary reset still does). Not run in game.
+
+## fights_5 + fights_6 analysed (user, 2026-10-06/07): 0.31.2 ranked 3-7 at ~1400-1470 MR, the user's Ken set 2-3
+MEASURED on the uploaded recordings (fights_5: 17 ranked, 10 on 0.31.2; fights_6: the user's Ken FT5, Versus Human
+offline) and, for the rates, on all 303 Ryu fight recordings kept here (0.14-0.31). Analysis scripts in the session
+scratchpad. User: "It already beat a 1400MR player, we just have to tighten it."
+- 0.31.2 ranked: Ryu 3-0, Zangief 0-3, Cammy 0-2, M. Bison 0-2, Guile 0-1 (14 matches with the Ken set: 234,656 damage taken).
+  The biggest shares: hit during the bot's own move ~36%, a normal while walking forward 10%, Zangief's command grabs
+  while crouch-blocking 9%.
+- **The anti-air Shoryuken (607 sent at airborne opponents): 494 hit (~595k dealt), ~70 failed (~70k taken).** Two causes:
+  - **early, at the apex (a bug):** the opponent's speed was computed only on decision lines; after a sequence (a walk, a
+    shimmy) the next decision averaged over the gap, across a take-off that halved the rise (0.10 vs 0.18 a tick), the
+    landing was predicted 13 frames early and the Shoryuken spent its active frames under a rising opponent (14 whiffs on
+    empty jumps since 0.24, e.g. 6,243 after one). Open-loop replays decide on every line, so they never showed it.
+  - **late, against empty jumps:** a Shoryuken whose first active frame comes after the landing hits a jump ATTACK (13 of
+    15: landing recovery) but an EMPTY jump lands and blocks it (2 hit, 7 blocked, 13,720 taken; Cammy 3,570, M. Bison
+    7,919 in fights_5).
+- **The fireball jump-in (0.28.0) against Ken's / Ryu's Hadokens: 2 hit, 5 blocked, 13 whiffed of 20.** Decided with 3
+  frames to spare, the jump took off 8 frames after the decision (4 predicted), the thrower was free first and
+  Shoryukened the landing; the jump attacks went out 1.0-1.2 from the thrower.
+- **A combo follow-up beyond its measured reach:** OD Tatsumaki > H Shoryuken started from 1.87-2.79 whiffed (2 of 9 hit
+  overall); the composer's reach check (0.26.0) did not apply to routes performed as they are.
+- Checked and NOT a problem: Super Arts on a juggled opponent hit 28 of 33 (their damage comes 60-64 ticks after the
+  start, the freeze; a first count with a 45-line window said 0 of 33). OD Shoryuken reversals after a block hit 58 of 77.
+- The Ken set: Ken's Drive Impacts reached the bot while it blocked fireball pressure, 840 each (~6k over the set), the
+  bot in burnout with its gauge refilling (14,620-37,780) or its back 1.71 from the wall; the jump-ins above.
+- Seen, not changed: throws on reaction beyond throw range (opponents' throws connected from p50 0.80 / p90 1.05 / max 1.31,
+  whiffed p50 0.96); a teched whiffing throw is a whiff of the bot's own (Cammy, 2,988); 5LK > OD High Blade Kick blocked
+  9 of 37; Zangief's command grabs on the crouch-blocking bot; Ken's Jinrai follow-up 924 on the blocking bot.
+
+## 0.32.0: tightening (user, 2026-10-07)
+All MOCK / replay-tested (`tests/test_0320.py`; older tests updated where they encoded the old rules); not verified in game.
+- **The opponent's speed from every line** (`fighter._track`, now called by `observe_line`; a second call on the same tick
+  changes nothing). Replaying the Ken example with the live loop's decision gap: rise 0.19 a tick and landing in 34 frames
+  (was 0.10 and 21), the bot waits for the anti-air window.
+- **Empty jumps** (`fighter._op_air_attack`, rule 4, `anti_air.empty_jump_margin` 2): an attack started in the jump arc (any
+  id but 33-40) makes it an attack jump. Against an empty jump the Shoryuken goes out only when its first active frame
+  comes 2+ frames before the landing; later than that -> block toward the landing side (`block_empty_jump`, counted
+  `anti_air.empty_jump_blocked`), decided again every line (a button pressed later makes it an attack jump). Watched from
+  take-off an empty jump still gets its Shoryuken (the window opens ~6 frames before the landing).
+- **Fireball jump-in** (`zoning._zn_jump_fits`): 4 frames to spare before the thrower is free when decided on the
+  projectile (`fireball.jump_free_margin`), 2 when decided on its lead-in (`jump_free_margin_lead_in`: Akuma's Gou
+  Hadoken, seen 8 frames earlier); landing at most 0.7 from the thrower (`jump_land_max`, was 0.9). The Ken example now
+  walks in instead. The Hadoken jump-ins the tests used (3 frames to spare) no longer go out by default.
+- **Reach per combo step in matches** (`ComboRun(reach=...)`, `perform_route(reach=...)` from `combo_reach.follow`): a step
+  whose move has a measured farthest start distance is not sent from farther (`fail.kind: "too_far"`, `reach_skips`); the
+  route ends on the hit it has.
+- **Drive Impact on the burned-out bot** (`_di_burnout_super`): burnout is the state (`in_burnout`), not "under one bar";
+  the wall distance 2.0 (was 1.5).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

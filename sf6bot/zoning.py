@@ -381,14 +381,21 @@ class ZoningMixin:
         return Decision("hold", direction=1, facing=block_face, rule="fireball_block",
                         reason=why0 + ": waiting for it")
 
-    def _zn_jump_fits(self, s: dict) -> dict | None:
+    def _zn_jump_fits(self, s: dict, margin: int | None = None) -> dict | None:
         """The forward jump over projectile `s` onto its thrower, when it clears the projectile, lands `jump_land_min` -
         `jump_land_max` from the thrower and its attack (JUMP_HIT_BEFORE_LAND before the landing) comes before the
         thrower is free; else None."""
         zc = self.c.get("fireball") or {}
         jp = self._zn_jump(s, True)
         lo, hi = float(zc.get("jump_land_min", 0.2)), float(zc.get("jump_land_max", 0.9))
-        if not (jp["clear"] and lo <= jp["land_d"] <= hi and jp["land_k"] - JUMP_HIT_BEFORE_LAND <= s["free_k"] - 1):
+        # 0.32.0: `jump_free_margin` frames to spare. MEASURED (0.28-0.31, 20 jump-ins over Ken's / Ryu's Hadokens): 2 hit,
+        # 5 blocked, 13 whiffed; the jumps were decided with 3 frames to spare (lands on 46, Ken free on 49) and took off
+        # 8 frames after the decision instead of the 4 predicted (input delay + late state), so the thrower was free
+        # first and Shoryukened the landing; the attacks were pressed 1.0-1.2 from him and whiffed
+        # (a jump decided on the throw's lead-in sees it ~8 frames earlier: `jump_free_margin_lead_in`)
+        margin = int(zc.get("jump_free_margin", 0)) if margin is None else int(margin)
+        if not (jp["clear"] and lo <= jp["land_d"] <= hi
+                and jp["land_k"] - JUMP_HIT_BEFORE_LAND <= s["free_k"] - 1 - margin):
             return None
         # 0.28.0: not into an up-charge anti-air (a [2]8 move, Guile's Flash Kick) the thrower will have ready when the
         # bot comes down (charge.py: 45 frames held, kept 12 after leaving it)
@@ -421,7 +428,7 @@ class ZoningMixin:
         m = self._zn_model(pid)
         s = {"model": m, "k": tmr - t0, "d": float(lo_[2]), "left": m.arrival(float(lo_[2])) - (tmr - t0),
              "free_k": kn.get("total") if isinstance(kn.get("total"), int) else 47, "id": pid, "t0": t0}
-        jp = self._zn_jump_fits(s)
+        jp = self._zn_jump_fits(s, margin=int(zc.get("jump_free_margin_lead_in", 0)))
         if jp is None:
             return None
         rname, entry, dmg = self._zn_jump_route(me, op)

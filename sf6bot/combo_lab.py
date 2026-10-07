@@ -616,8 +616,10 @@ class ComboRun:
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
                  movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
                  fixed: list | None = None, learned: dict | None = None, confirm: bool = False,
-                 fixed_lead: int | None = None, adopt: dict | None = None):
+                 fixed_lead: int | None = None, adopt: dict | None = None, reach: dict | None = None):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        # 0.32.0, matches: {move name: the farthest distance it is started from} (fighter config combo_reach.follow)
+        self.reach = dict(reach or {})
         # 0.23.0: the recorded send points were for the input delay of the lab run (`fixed_lead`); with another delay
         # (ranked measured 3, the lab 4) every press moves by the difference, so it lands on the same game frame
         self.fixed_shift = (lead - fixed_lead) if isinstance(fixed_lead, int) and isinstance(lead, int) else 0
@@ -991,6 +993,9 @@ class ComboRun:
         if self.confirm and k_ and self._no_window(k_, p2):
             self._finish("late", k_)
             return None
+        if self.confirm and k_ is not None and k_ > 0 and self._too_far(k_, p1, p2):
+            self._finish("too_far", k_)
+            return None
         if self.confirm and not self.done and k_ is None and self.pending is None:
             # a match (0.22.4, the audit after 0.22.2): the bot back to neutral with the route's next input still not
             # due means the link window has passed (a link is pressed BEFORE the bot is free, by the input delay). The
@@ -1022,6 +1027,20 @@ class ComboRun:
             self.late_skips = getattr(self, "late_skips", 0) + 1
             return True
         return False
+
+    def _too_far(self, n: int, p1: dict, p2: dict) -> bool:
+        """0.32.0, matches only: True when step n is a move with a measured farthest start distance (`reach`, the fighter
+        config's combo_reach.follow) and the opponent is farther now. The combo composer kept such moves out of what
+        it builds (0.26.0), but routes performed as they are did not check: MEASURED (303 ranked recordings) OD
+        Tatsumaki > H Shoryuken started from 1.87-2.79 whiffed 7 of 9."""
+        lim = self.reach.get(self.steps[n].get("name") or "")
+        if not isinstance(lim, (int, float)):
+            return False
+        x1, x2 = num(p1.get("x")), num(p2.get("x"))
+        if x1 is None or x2 is None or abs(x2 - x1) <= float(lim):
+            return False
+        self.reach_skips = getattr(self, "reach_skips", 0) + 1
+        return True
 
     def _next(self) -> int:
         return next((k for k, r in enumerate(self.rt) if r["sent"] is None), len(self.rt) - 1)
@@ -1279,6 +1298,7 @@ class ComboRun:
             return None if px is None or qx is None else (qx > px)
         out = {"success": fail is None, "fail": fail, "hits": len(self.hits), "super_connected": self.super_connected,
                "late_skips": getattr(self, "late_skips", 0),
+               "reach_skips": getattr(self, "reach_skips", 0),
                "damage": (num(d0.get("hp")) - self.min["dummy_hp"]) if num(d0.get("hp")) is not None and "dummy_hp" in self.min else None,
                "drive_spent": (num(b0.get("drive")) - self.min["bot_drive"]) if num(b0.get("drive")) is not None and "bot_drive" in self.min else None,
                "super_spent": (num(b0.get("super")) - self.min["bot_super"]) if num(b0.get("super")) is not None and "bot_super" in self.min else None,
@@ -2506,7 +2526,8 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                   me: str = "p1", op: str = "p2", abort=None, timeout: float = 12.0,
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
                   confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None,
-                  adopt: dict | None = None, precharge: bool | None = None, charged: set | None = None) -> dict:
+                  adopt: dict | None = None, precharge: bool | None = None, charged: set | None = None,
+                  reach: dict | None = None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2530,7 +2551,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     if cut == 0:
         return {"success": False, "fail": {"kind": "no_charge", "step": 0}, "steps": [], "aborted": "no charge held"}
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt)
+                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt, reach=reach)
     if cut:
         run.extra["cut_for_charge"] = cut
     if precharge and any((s_.get("charge") or {}).get("precharge") for s_ in steps):

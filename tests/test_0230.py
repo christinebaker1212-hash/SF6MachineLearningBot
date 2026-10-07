@@ -219,6 +219,8 @@ def test_a_fireball_from_jump_range_is_jumped_onto_the_thrower_on_its_first_fram
     import copy
     f = _zoner()
     assert f.c["fireball"].get("jump_punish")              # 0.24.2: off; 0.28.0: on again (user: jump-in combo)
+    f.c = copy.deepcopy(f.c)
+    f.c["fireball"]["jump_free_margin"] = 0                # 0.32.0: the default keeps 4 frames to spare (test_0320)
     raw = _throw_at(f, 2.5, 1000)
     d = f.decide(raw, 1000 / 60.0, 0)
     assert d.rule == "fireball_jump" and d.seq.startswith("9") and f.zn_stats["jump_punish"] == 1

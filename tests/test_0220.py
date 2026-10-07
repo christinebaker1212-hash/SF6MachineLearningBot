@@ -271,10 +271,17 @@ def test_in_burnout_a_closer_fireball_is_jumped_onto_the_thrower_at_once():
     f = _burnout_fighter()
     f.c = copy.deepcopy(f.c)
     f.c["fireball"]["jump_punish"] = True                  # 0.24.2: off by default
+    f.c["fireball"]["jump_free_margin"] = 0                # 0.32.0: the default keeps 4 frames to spare (see below)
     _throw(f, 2.5, 500)
     d = f.decide(state(me={"drive": 0}, op={"x": 2.5, "action_id": 904}, timer=500), 0.0, 0)
     assert d.rule == "fireball_jump" and d.seq.startswith("9")
     assert f.burnout_stats["jump_fwd"] == 1 and f.burnout_stats["fireballs"] == 1
+    # 0.32.0: with the default margin this jump is too tight (MEASURED live vs Hadokens: 2 hit of 20): no jump-in
+    g = _burnout_fighter()
+    g.c = copy.deepcopy(g.c)
+    g.c["fireball"]["jump_punish"] = True
+    _throw(g, 2.5, 500)
+    assert g.decide(state(me={"drive": 0}, op={"x": 2.5, "action_id": 904}, timer=500), 0.0, 0).rule != "fireball_jump"
 
 
 def test_not_in_burnout_it_walks_in_and_too_late_it_blocks():

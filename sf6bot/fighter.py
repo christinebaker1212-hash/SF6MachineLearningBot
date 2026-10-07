@@ -527,6 +527,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._aa_ready_for = None             # 0.21.0: the jump the bot held still for (counted once)
         self._op_side, self._op_side_t = None, None   # 0.21.1: the opponent's side and when it last changed (cross-overs)
         self._op_jump_arc = False             # 0.21.1: the opponent is in a jump that started with a jump id
+        self._op_air_attack = False           # 0.32.0: the opponent has attacked in this jump
+        self._aa_empty_for = None             # 0.32.0: the jump whose late Shoryuken was held (empty)
         self._burnout_super_for = None
         self._a2a_for = None
         self._corner_fired = None
@@ -650,7 +652,15 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return self.side
 
     def _track(self, raw: dict, op: dict) -> None:
+        """The opponent's speed from consecutive lines. 0.32.0: called on EVERY line (observe_line), not only on the
+        lines a decision is made on, and a second call on the same tick changes nothing. MEASURED (0.24-0.31 ranked):
+        while the bot ran a sequence (a walk, a shimmy) no decision was made, so the next one took the speed over the
+        whole gap; across a take-off that halved the opponent's rise (0.10 for 0.18 a tick), the landing was predicted
+        13 frames early, and the anti-air Shoryuken went out at the apex: 14 whiffs on empty jumps since 0.24, the
+        opponent passing over the spent Shoryuken (one 6,243-damage punish)."""
         tmr, x, y = raw.get("stage_timer"), _num(op.get("x")), _num(op.get("y")) or 0.0
+        if self.prev_op and isinstance(tmr, int) and tmr == self.prev_op[0]:
+            return                                     # this tick is tracked already
         self.vel_ok = False
         if self.prev_op and isinstance(tmr, int) and x is not None and 0 < tmr - self.prev_op[0] <= 6:
             dt = tmr - self.prev_op[0]
@@ -665,8 +675,15 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         a = op.get("action_id")
         if y <= 0.02 or a in self.hit_ids or a in self.thrown_ids:
             self._op_jump_arc = False
+            self._op_air_attack = False
         elif a in self.jump_ids:
+            if not self._op_jump_arc:
+                self._op_air_attack = False            # a new jump: nothing pressed in it yet
             self._op_jump_arc = True
+        # 0.32.0: an attack started in this jump (anything but the plain jump / landing ids 33-40): its landing has
+        # recovery, so a Shoryuken that starts before the landing still hits it; an EMPTY jump can block on landing
+        if self._op_jump_arc and isinstance(a, int) and not 33 <= a <= 40:
+            self._op_air_attack = True
 
     def can_spend(self, me: dict, action: str, lethal: bool = False, reserve: float | None = None) -> bool:
         """Never go into burnout (drive 0) unless the follow-up is certain to kill (user rule,
@@ -1231,6 +1248,20 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                     if t_land >= need - int(aa.get("late_frames", 4)) and not self._aa_on():
                         return Decision("hold", direction=4, facing=Facing.RIGHT if pdx > 0 else Facing.LEFT,
                                         rule="block_air", reason=why + ": no anti-air special, blocking")
+                    # 0.32.0: a late Shoryuken (its hit after the landing) only hits a jump that ATTACKED: an empty jump
+                    # lands and blocks. MEASURED (607 Shoryukens at airborne opponents, 0.14-0.31 ranked): empty jumps
+                    # that landed before the Shoryuken's first active frame: 2 hit, 7 blocked (13,720 taken); jumps with
+                    # an attack out: 13 hit of 15. Empty: its active frames must start `empty_jump_margin` frames before
+                    # the landing, else block (and decide again: a button pressed later makes it an attack jump)
+                    if not (self._op_air_attack or air_move) and t_land < need + int(aa.get("empty_jump_margin", 2)) \
+                            and t_land >= need - int(aa.get("late_frames", 4)):
+                        if self._aa_empty_for != self.op_onset:
+                            self._aa_empty_for = self.op_onset
+                            self.aa_stats["empty_jump_blocked"] = self.aa_stats.get("empty_jump_blocked", 0) + 1
+                        return Decision("hold", direction=4, facing=Facing.RIGHT if pdx > 0 else Facing.LEFT,
+                                        rule="block_empty_jump",
+                                        reason=why + ": an empty jump, too late for the Shoryuken to hit it in the air; "
+                                                     "blocking the landing")
                     if t_land >= need - int(aa.get("late_frames", 4)):
                         self.aa_done_for_jump = True
                         self._aa_kind = "air_moves" if air_move else "anti_air"    # counted once actually sent
@@ -2446,7 +2477,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
     def _di_burnout_super(self, me: dict, op: dict, dist: float, info: dict) -> Decision | None:
         if not info.get("di") or self._burnout_super_for == self.op_onset or dist > 3.0:
             return None
-        if (_num(me.get("drive")) or 0) >= 10000 or (_num(me.get("y")) or 0.0) > 0.05:
+        # 0.32.0: burnout is the state (the gauge refills while it lasts, MEASURED: Ken's Drive Impacts on the burned-out
+        # bot at 14,620 and 37,780 Drive), not "under one bar"
+        if not (self.in_burnout or (_num(me.get("drive")) or 0) < 10000) or (_num(me.get("y")) or 0.0) > 0.05:
             return None                              # not in burnout: the DI-back answers it
         mx, ox = _num(me.get("x")), _num(op.get("x"))
         if mx is None or ox is None:
@@ -2886,6 +2919,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         oa = op.get("action_id")
         tmr = raw.get("stage_timer")
         self._note_onset(oa, tmr)
+        self._track(raw, op)                         # 0.32.0: the opponent's speed from every line
         self._pe_track(raw, me, op)
         self._track_grab_chain(oa, tmr)
         self._track_self(me, op, tmr)
@@ -4739,6 +4773,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         if d.kind == "route" and (d.route or {}).get("starter") and fighter.book
                                         and not d.adopt else None,
                                         adopt=d.adopt,
+                                        # 0.32.0: a follow-up farther than its measured start distance is not sent
+                                        reach=(fcfg.get("combo_reach") or {}).get("follow"),
                                         # 0.29.0: a charge move goes out only with the charge already held
                                         charged={k_ for k_ in ("4", "2") if fighter.own_charge.ready(
                                             k_, fighter._line_t, ahead=4)},
