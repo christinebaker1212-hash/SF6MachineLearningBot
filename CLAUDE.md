@@ -7,7 +7,6 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
-- **0.34.0 (2026-10-07): punishes are the biggest combo that fits (blocked moves, blocked / whiffed supers, Shoryukens on landing), a raw super only when no combo fits.**
 - **0.34.0 (2026-10-07): punishes are the biggest combo that fits, for every character (blocked moves, blocked / whiffed supers, command grabs, reversals on landing); a raw super only when no combo fits.**
 - **0.33.2 (2026-10-07): an L Shoryuken through a Drive Impact in burnout when it is too late to jump.**
 - **0.33.1 (2026-10-07): the jump over a command grab ends in j.HP on the way down and the best heavy punch combo.**
@@ -4295,57 +4294,6 @@ jumping heavy punch, he should be choosing his most damaging heavy punch route a
     clearance is set higher. The real windows are for the user / Training Mode to confirm (asked 2026-10-07).
 - Test `tests/test_0330.py` (a jump needing more room: the L Shoryuken is timed into its airborne frames; seen too late
   for both: block). Not verified in game.
-
-## 0.34.0: punish with the biggest combo, not a raw super or nothing (user's staged fight, 2026-10-07)
-User (a staged Training Mode fight on 0.33.1, Ken vs the bot, resets): blocked L Tatsumaki -> raw super; whiffed or blocked
-Shoryuken -> raw super in the air; blocked SA1 / SA2 / SA3 -> no punish at all. "The correct behavior ...: blocked move >
-during that move's recovery > highest recorded damage combo based on whether midscreen or in corner; whiffed / blocked
-shoryureppa > wait for [it] to land, on the first landing frame, highest recorded damage combo; blocked SA1, SA2, SA3 > wait
-until first frame of Super's recovery, then highest recorded damage combo." "This is exactly where our bot is losing damage."
-### What the recording showed (MEASURED, replaying `decide()` over it with the user's Ken catalog and Capcom data)
-- **Raw supers:** the punish engine valued a combo at damage x its lab rate x 0.8 until tried in matches. A raw SA3 was
-  valued at damage x 0.85. "5HP > 623HP , SA3" (4,600, rate 0.67) scored ~2,465 against the raw SA3's 3,400.
-  - Blocked L Tatsumaki (-14): raw SA3 / 4HK.
-  - Blocked OD Shoryuken (4 times): a raw SA3 sent as Ken came down 0.55-0.76 high.
-- **No punish after supers:**
-  - A Super Art's own frames (game ticks) include the super-flash freeze. Capcom's numbers don't: Ken's SA1 connects on
-    its frame 59 (Capcom start-up 7), SA2 on 66 (6).
-  - So the engine thought a blocked super was over long before its recovery (or a whiffed one over in its flash).
-  - Ken's blocked SA2 goes on under another id (1210 -> 1211), which started a new move. The guard hold restarted its
-    frame count at 1211 and held block through all of Ken's recovery.
-- **Whiffed Shoryukens:** the 0.19.0 air-move anti-air sent an L Shoryuken at Ken's rising OD Shoryuken. The neutral
-  policy also poked into its active frames.
-- Note: id 1236 is Ken being hit by Ryu's SA3 (not one of Ken's moves).
-### Changes (punish.py, fighter.py)
-- **Super freeze** (`_pe_know`, `_pe_super_freeze`): for a Super Art (ids 1200-1299 / 'SA1'... / 'CA'), the catalog /
-  Capcom start-up, last active frame and total are moved by the freeze. The freeze is the learned contact frame minus the
-  listed start-up, else `punish.super_freeze` 52 (MEASURED, Ken SA1).
-- **A super's next ids** within 5 of its first are the same move (`_pe_follows`). The guard hold counts frames across a
-  move's ids (`chain["el"]`).
-- **Values** (`punish_value`): a TRUE combo = damage x max(lab rate, 0.75); a composed one x max(rate, 0.6). Results in
-  matches only count once tried 3+ times. The config's estimated super routes are x0.6.
-- **Raw super = last resort** (`_pe_plan`): a raw Super Art goes out only when no combo fits the window, or when it kills.
-  Counted in `pe_stats.raw_super_skipped`. The 0.20.5 test expecting a raw SA3 over a 2,400 combo is updated.
-- **The composer's best combo from each ground normal** (`_pe_composed`), for the Super and Drive the bot has, is a punish
-  option (once per window, any hit type: a punish is a punish counter). It replaces the config's estimated route for the
-  same starter.
-- **Config fallbacks** (`punish.engine`): "5HP > 623HP > SA3" and "2HP > 623HP > SA3". Capcom: the Shoryukens' cancel
-  column is SA3; damage 4,300 is an ESTIMATE.
-- **Shoryuken-type moves** (`rising_reversal`): Capcom notes invincible (to air attacks / completely / strikes) and
-  airborne frames.
-  - They are never anti-aired (`_air_move`; neither are invincible supers).
-  - While one is in the air the bot blocks and starts nothing (rule 0a' `dp_wait`, `rising_reversals.waited`).
-  - Its landing is the punish engine's: the combo's first hit is timed to the landing.
-### Replay of the staged fight (open loop; the recording's own bot acted)
-- Blocked L Tatsumaki x3: 5HP > 623HP > SA3 (was raw SA3 / 4HK).
-- Blocked SA1 x3: 5HP > 623HP > SA3 from the block (was nothing).
-- Blocked OD Shoryuken x4: wait, then 5HP > 623HP > SA3 timed to the landing (was a raw SA3 in the air).
-- Whiffed SA1: 5HP > 623HP > SA3 / SA1.
-- Blocked SA2: the window is seen (Capcom -5: Ryu is free 5 frames before Ken), only a 4-frame jab fits.
-- Whiffed OD Shoryukens: waited out (no anti-air). The recording then diverges (the live bot hit Ken on landing), so the
-  landing punish itself is checked by the 0.23.0 H Shoryuken test.
-- Tests `tests/test_0340.py`; fixture `tests/data/staged_ken_punishes_0.33.1.json.gz` (the four segments). Not verified
-  in game.
 
 ## 0.34.0: punish with the biggest combo, for every character (user's staged fight + K run, 2026-10-07)
 User (a staged Training Mode fight on 0.33.1, Ken vs the bot, with resets):
