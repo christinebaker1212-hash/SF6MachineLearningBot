@@ -44,6 +44,17 @@ def _meta(path: Path) -> dict:
         return {}
 
 
+def data_weight(meta: dict) -> float:
+    """0.36.2: an optional per-recording weight (0..1) in a fight's meta file, multiplied into both networks' sample
+    weights. Set when a stretch of matches is relabelled, e.g. a custom-room set against a much weaker player that was
+    recorded as ranked (`relabel` in the meta says why). Missing or unreadable = 1.0."""
+    try:
+        w = float(meta.get("data_weight", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    return min(max(w, 0.0), 1.0)
+
+
 def bot_side_ok(meta: dict, bot: int) -> bool:
     """0.18.11: does the recorded bot side hold the bot's character? (Before 0.18.11 the side could be decided from a
     previous match's character ids: the user's ranked session had a Blanka match saved with the bot as P1 = Blanka.)
@@ -74,7 +85,7 @@ def recordings(ds_root: Path, character: str | None = "Ryu") -> list[dict]:
         if bot is None or not bot_side_ok(_meta(p), bot) or (character is not None and of_meta(_meta(p)) != character):
             continue
         src = "ranked" if "vs human ranked" in notes else "human" if "vs human" in notes else "cpu"
-        out.append({"path": p, "players": (1 - bot,), "source": src, "bot": bot})
+        out.append({"path": p, "players": (1 - bot,), "source": src, "bot": bot, "dw": data_weight(_meta(p))})
     return out
 
 
@@ -96,7 +107,7 @@ def build(ds_root: Path, log=print, character: str = "Ryu") -> tuple[list[dict],
             continue
         for x in s:
             x["rec"] = ri
-            x["w"] = OPERATOR_WEIGHT if x["player"] == r.get("bot") else SOURCE_WEIGHT[r["source"]]
+            x["w"] = (OPERATOR_WEIGHT if x["player"] == r.get("bot") else SOURCE_WEIGHT[r["source"]]) * r.get("dw", 1.0)
         samples += s
         made_from = _meta(r["path"]).get("recordings") if r["path"].parent.name == "merged" else None
         info.append({"file": r["path"].name, "source": r["source"], "samples": len(s),

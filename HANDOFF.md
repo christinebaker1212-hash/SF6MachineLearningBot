@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-07: code version **0.36.1**, REFramework exporter script **v11**, branch
+*State as of 2026-10-07: code version **0.36.2**, REFramework exporter script **v11**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.36.1 is pushed** (CLAUDE.md "0.36.1"): the user's G on v10 showed every hurt / hit box as zero (read in the tick hook before the collision update; only pushboxes were right). Exporter v11 samples the boxes at render time; G now fails zero boxes. The research build was rebuilt for v11 (run 37585674748, marker exporter bca17bb85832acbe) and is bundled. **G passed in game on v11 (2026-10-07): real hurt / hit / throw / push boxes.** Next user step: C as Ryu (guard None).
+**State:** **0.36.2 is pushed** (CLAUDE.md "0.36.2"): fight metas may carry `data_weight` (both networks honour it). Waiting for the user's upload (fights + ladder/matches.jsonl + learning/Ryu_vs_Chun-Li.json) to relabel a custom-room Chun-Li set (~1200 MR) recorded as ranked, and to analyse Kimberly / Cammy / Zangief losses.
+
+**Before that:** **0.36.1 is pushed** (CLAUDE.md "0.36.1"): the user's G on v10 showed every hurt / hit box as zero (read in the tick hook before the collision update; only pushboxes were right). Exporter v11 samples the boxes at render time; G now fails zero boxes. The research build was rebuilt for v11 (run 37585674748, marker exporter bca17bb85832acbe) and is bundled. **G passed in game on v11 (2026-10-07): real hurt / hit / throw / push boxes.** Next user step: C as Ryu (guard None).
 
 **Before that:** **0.36.0 is pushed** (CLAUDE.md "0.36.0"): exporter v10 reads both players' collision boxes (and projectiles'); the research build was rebuilt for it (GitHub run 37580495340; bundled in `refw_research/dist`, marker exporter d96ed1970f6979c0). The catalog stores the bot's own hitboxes per move; the punish engine judges reach box to box when both sides are known. User steps: install the online build (TOOLS), G in Training Mode (verifies the box geometry), C as Ryu (guard None). Not run in game.
 

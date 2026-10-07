@@ -62,7 +62,7 @@ def recordings(ds_root: Path, character: str | None = "Ryu") -> list[dict]:
     """[{path, weights: {player: weight}, source}] for the win model. 0.31.0: fights only where the bot played
     `character`."""
     from .bot_character import of_meta
-    from .brain import _meta, bot_side_ok
+    from .brain import _meta, bot_side_ok, data_weight
     from .brain import recordings as bc_recordings
     ds_root = Path(ds_root)
     out = []
@@ -76,11 +76,12 @@ def recordings(ds_root: Path, character: str | None = "Ryu") -> list[dict]:
         bot = 1 if "bot=p2" in notes else 0 if "bot=p1" in notes else None
         if bot is not None and bot_side_ok(meta, bot) and (character is None or of_meta(meta) == character):
             old = _version(meta.get("sf6bot_version")) < CURRENT_SINCE
-            fights.append((p, bot, "ranked" if "ranked" in notes else "human" if "vs human" in notes else "cpu", old))
+            fights.append((p, bot, "ranked" if "ranked" in notes else "human" if "vs human" in notes else "cpu", old,
+                           data_weight(meta)))
     fights = fights[-FIGHTS_MAX:]
     n = len(fights)
-    for k, (p, bot, src, old) in enumerate(fights):
-        rec = 0.5 ** ((n - 1 - k) / RECENCY_HALF) * (OLD_FIGHT_WEIGHT if old else 1.0)
+    for k, (p, bot, src, old, dw) in enumerate(fights):
+        rec = 0.5 ** ((n - 1 - k) / RECENCY_HALF) * (OLD_FIGHT_WEIGHT if old else 1.0) * dw
         out.append({"path": p, "weights": {bot: W_BOT * rec, 1 - bot: W_OPP * rec}, "source": f"fight ({src})",
                     "bot": bot})
     return out

@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.36.2 (2026-10-07): a per-fight `data_weight` in the meta file scales a relabelled match in both networks (custom-room sets).**
 - **0.36.1 (2026-10-07): boxes read at render time (exporter v11): on v10 every hurt / hit box read as zero; G now fails such boxes.**
 - **0.36.0 (2026-10-07): collision boxes from REFramework (exporter v10): the bot sees hitboxes and hurtboxes; punish reach is judged box to box.**
 - **0.35.1 (2026-10-07): the catalog (C) drinks to Jamie's required Drink level before drink-level moves.**
@@ -4501,6 +4502,28 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   - Heartbeat: 6,570 rects read, 10 zero-size (dropped), 2,401 render samples.
   - So the centre / half-size reading, the render-time read and the kinds are right.
   - Next: C as Ryu (guard None) for the hit profiles.
+
+## 0.36.2: relabelled fights carry a weight (user, 2026-10-07)
+- **The set:** the user found a Chun-Li (~1200 MR, a volunteer) for sets in a custom room. The bot was 7-3 after 10
+  games. The bot was started in RANKED mode, so those matches are recorded and counted as ranked.
+- User: "the Chun-Li is only 1200 MR, so it probably should be weighted a little bit less"; "I'll send you the fights
+  ... You will simply relabel it and send it back to me."
+- **Before, a fight's weight came only from its mode** (`notes`): ranked 0.2 in the copy-a-player network, full in the win
+  model. Relabelling a ranked match as a volunteer set would RAISE the copy-a-player weight to 1.0 (volunteers).
+- **Now** a fight's `.meta.json` may carry `data_weight` (0..1; missing = 1.0), and `relabel` (why). Both networks
+  multiply it into that fight's samples:
+  - `brain.data_weight`, `brain.recordings` (`dw`)
+  - `win_model.recordings` (with recency and the old-version factor)
+- The relabel touches only the small meta files; the recordings and their caches stay as they are.
+- **The plan for this set:** the user uploads the fight files plus `datasets/ladder/matches.jsonl` and
+  `datasets/learning/Ryu_vs_Chun-Li.json`. Claude:
+  - picks out the set (consecutive Chun-Li matches, no LP change)
+  - sets `data_weight` and `relabel` in their metas
+  - marks their ladder rows with mode `custom_room` (`progress.same_mode` already keeps non-ranked rows out of the
+    ranked trend)
+  - scales the set's share of the Chun-Li learning file
+  - sends the files back to overwrite
+- Tests `tests/test_0362.py`.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
