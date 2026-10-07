@@ -463,6 +463,25 @@ class PunishEngine:
             r = self.live_reach.get(aid)
         return r if r is not None else fallback
 
+    def _pe_gap(self, o: dict, me: dict, op: dict, dist: float) -> float:
+        """How far the option's first hit falls short of the opponent (negative = it reaches). 0.36.0: with the
+        collision boxes (exporter v10) and the bot's own hitbox profile for the move (catalog C with v10), the gap is
+        from the move's first-hit hitbox front to the opponent's nearest hittable hurtbox at those heights, so a hurtbox
+        stretched forward in recovery (e.g. Guile's Sonic Blade) is reached when the bodies are out of range. Else the
+        centre distance minus the measured reach, as before."""
+        prof = (getattr(self, "own_hit", None) or {}).get(o.get("hit_id")) if o.get("hit_id") is not None else None
+        if prof and not o.get("travel") and isinstance(me.get("x"), (int, float)):
+            from .boxes import hurt_gap
+            g = hurt_gap(float(me["x"]), op, tuple(prof.get("first_y") or prof.get("y") or ()) or None)
+            if g is not None:
+                bs = self.__dict__.setdefault("box_stats", {"box_gaps": 0, "box_reached_out_of_range": 0})
+                bs["box_gaps"] += 1
+                gap = g - float(prof.get("first_front", prof.get("front")))
+                if gap <= 0.0 < dist - o["reach"]:
+                    bs["box_reached_out_of_range"] += 1
+                return gap
+        return dist - o["reach"]
+
     def _reach_fb(self, name):
         """The config's fallback reach for one of the bot's moves by its Capcom name (punish.reach_fallback: MEASURED
         where Ryu's moves connected in the recordings), until reach.py has measured the bot's own (menu B)."""
@@ -506,7 +525,7 @@ class PunishEngine:
             steps = (e.get("plan") or {}).get("steps") or [{}]
             s0 = steps[0].get("sequence") or ""
             out.append({"key": "route:" + e["route"], "name": e["route"], "kind": "route", "entry": dict(e, lethal=lethal),
-                        "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach,
+                        "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach, "hit_id": sid,
                         "value": punish_value(e, learned) + (1e6 if lethal else 0.0),
                         "risk": risk((own_by_name.get(e.get("starter")) or {}).get("block_adv"))})
         # 1b. 0.34.0 the combo composer's most damaging combo from each ground normal for the Super / Drive the bot has
@@ -526,7 +545,7 @@ class PunishEngine:
                 continue
             s0 = ((e.get("plan") or {}).get("steps") or [{}])[0].get("sequence") or ""
             out.append({"key": "comp:" + e["route"], "name": e["route"], "kind": "route", "entry": dict(e, lethal=lethal),
-                        "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach,
+                        "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach, "hit_id": sid,
                         "value": punish_value(e, learned) + (1e6 if lethal else 0.0),
                         "risk": risk((own_by_name.get(e.get("starter")) or {}).get("block_adv"))})
         # 2. the config's punish options (routes on the game clock with hit confirm, single moves, supers): unverified,
@@ -561,6 +580,7 @@ class PunishEngine:
             out.append({"key": "cfg:" + name, "name": name, "kind": "route" if o.get("route") else "seq",
                         "route": o.get("route"), "seq": seq, "startup": int(o.get("startup") or (mv or {}).get("startup")),
                         "prefix": seq_prefix(seq) + (ROUTE_DELAY if o.get("route") else 0), "reach": reach,
+                        "hit_id": o.get("id") or (own_by_name.get(o.get("starter") or name) or {}).get("id"),
                         # expected value: a single press lands as pressed (0.9); a route from the config is not
                         # verified in the combo lab (0.5, like an untried lab route's rate x match rate); a super 0.85
                         # 0.34.0: a config route that spends a super is as much an estimate as a composed one (x0.6)
@@ -575,7 +595,7 @@ class PunishEngine:
             if reach is None:
                 continue
             out.append({"key": "own:" + m["name"], "name": m["name"], "kind": "seq", "seq": m["seq"],
-                        "startup": m["startup"], "prefix": seq_prefix(m["seq"]), "reach": reach,
+                        "startup": m["startup"], "prefix": seq_prefix(m["seq"]), "reach": reach, "hit_id": m["id"],
                         "value": 0.9 * float(m.get("damage") or 0), "risk": risk(m.get("block_adv"))})
         return out
 
@@ -633,8 +653,9 @@ class PunishEngine:
         for o in opts:
             if startup and (o.get("travel") or o.get("override")):
                 continue                                    # a projectile can't arrive in a start-up
+            gap0 = self._pe_gap(o, me, op, dist)
             for how, pre_f, pre_d, _ in steps:
-                gap = dist - o["reach"]
+                gap = gap0
                 if how == "":
                     if gap > 0.0:
                         continue

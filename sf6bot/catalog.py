@@ -672,6 +672,10 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 bar = _bar_of_move(pre + post, r)
                 if bar:
                     r["frame_bar"] = bar
+                from .boxes import move_boxes
+                mb = move_boxes(pre + post, t_last_press, neutral_a | movement)
+                if mb:
+                    r["boxes"] = mb                 # 0.36.0: the move's own hitboxes / hurtboxes per frame (exporter v10)
                 r["own_measure"] = {k: own.get(k) for k in ("result", "startup", "advantage", "total_observed",
                                                             "game_total", "note")}
                 r["own_measure"]["reliability"] = "low: wall-clock/stage_timer heuristics; use frame meter values"

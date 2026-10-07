@@ -257,3 +257,39 @@ def _checks(ck: Checker) -> None:
     ck.add("hit_causes_p2_hitstun", "PASS" if stun else "FAIL", p2_hitstun_max=stun)
     ck.add("hit_builds_p1_super", "PASS" if sup0 is not None and sup1 is not None and sup1 > sup0 else
            "INCONCLUSIVE", p1_super_before=sup0, p1_super_after=sup1)
+    # 8. Collision boxes (exporter v10, 0.36.0) ---------------------------------------------------
+    _box_checks(ck, before, after)
+
+
+def _box_checks(ck, before, after) -> None:
+    """0.36.0 (exporter v10): the collision boxes read, and the geometry the bot assumes (boxes.py: centre + half size,
+    world units). At contact distance after the walk: each pushbox contains its player's x and the two pushboxes touch;
+    during the cr.MK the bot's hitbox is out in front and overlaps the dummy's hurtbox when the hit lands."""
+    from .boxes import has_boxes, of, pushbox_check, pushbox_gap
+    if not (has_boxes(before.p1) and has_boxes(before.p2)):
+        ck.add("boxes_present", "FAIL", reason="no collision boxes in the state lines: exporter v10 not running (update "
+                                               "with R, or the online build with TOOLS -> Online build: install)")
+        return
+    kinds = {k: sorted({b.kind for b in getattr(before, k).get("boxes") or []}) for k in ("p1", "p2")}
+    ck.add("boxes_present", "PASS", kinds=kinds)
+    pc = (pushbox_check(before.p1), pushbox_check(before.p2))
+    ck.add("box_geometry_pushbox_contains_player", "PASS" if pc == (True, True) else "FAIL",
+           p1=pc[0], p2=pc[1], note="FAIL = the centre / half-size reading of the rects is wrong")
+    g = pushbox_gap(before.p1, before.p2)
+    ck.add("box_geometry_pushboxes_touch_at_contact", "PASS" if g is not None and abs(g) <= 0.1 else "FAIL",
+           gap=None if g is None else round(g, 3))
+    hit_ok, front = None, None
+    for a in after:
+        hs, hu = of(a.p1, "h"), of(a.p2, "b")
+        if not hs:
+            continue
+        x1, x2 = a.p1.get("x"), a.p2.get("x")
+        if isinstance(x1, (int, float)) and isinstance(x2, (int, float)):
+            toward = 1 if x2 > x1 else -1
+            front = max((b.x1 - x1) if toward > 0 else (x1 - b.x0) for b in hs)
+        overlap = any(h.x0 <= u.x1 and u.x0 <= h.x1 and h.y0 <= u.y1 and u.y0 <= h.y1 for h in hs for u in hu)
+        hit_ok = bool(hit_ok) or overlap
+    ck.add("box_geometry_hitbox_reaches_dummy", "PASS" if hit_ok else "FAIL" if hit_ok is False else "INCONCLUSIVE",
+           hitbox_front_from_body=None if front is None else round(front, 3),
+           note="the cr.MK's hitbox overlapped the dummy's hurtbox" if hit_ok else
+                "no hitbox seen during the cr.MK" if hit_ok is None else "hitbox seen but never on the dummy's hurtbox")

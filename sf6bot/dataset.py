@@ -89,6 +89,8 @@ class DatasetBuilder:
         row = {"t": round(t, 4), "round": rnd, "seg": self._segment, "frame": timer, "fight": self._fighting}
         if isinstance(raw.get("f"), int):
             row["f"] = raw["f"]          # 0.18.3: the exporter's render counter (game ticks per render = its frame rate)
+        if isinstance(raw.get("bx"), dict):
+            row["bx"] = raw["bx"]        # 0.36.0: collision boxes as exported (on change); read_recording carries them
         if raw.get("operator"):
             row["op"] = 1                # 0.22.0: the operator was playing (takeover.py); judged per round at the end
         for i, pk in enumerate(("p1", "p2")):

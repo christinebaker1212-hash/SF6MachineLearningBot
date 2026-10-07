@@ -28,7 +28,7 @@ STATE_CANDIDATES = [STATE_FILE, Path("sf6bot_state.jsonl"),
                     Path("reframework") / "data" / "reframework" / "data" / "sf6bot_state.jsonl"]
 INFO_FILE = Path("reframework") / "data" / "sf6bot_exporter_info.json"
 LUA_NAME = "sf6bot_state.lua"
-EXPECTED_SCRIPT_VERSION = 9  # must match SCRIPT_VERSION in the Lua script
+EXPECTED_SCRIPT_VERSION = 10 # must match SCRIPT_VERSION in the Lua script
 LUA_SRC = Path(__file__).resolve().parent.parent / "reframework" / "autorun" / LUA_NAME
 
 
@@ -457,11 +457,14 @@ class ArrivalMeter:
 
 def fix_action_frames(rows: list[dict]) -> list[dict]:
     """A recording's rows with frozen exported move frames replaced (FrameClock), in place. Recordings made
-    online before 0.17.5 have the frozen values; the first FROZEN_WINDOW ticks stay as recorded."""
-    fc = FrameClock()
+    online before 0.17.5 have the frozen values; the first FROZEN_WINDOW ticks stay as recorded. 0.36.0: the
+    change-only collision boxes ("bx", exporter v10) are carried forward to every row (boxes.BoxTracker)."""
+    from .boxes import BoxTracker
+    fc, bt = FrameClock(), BoxTracker()
     for r in rows:
         if isinstance(r, dict):
             fc.feed(r)
+            bt.feed(r)
     return rows
 
 
@@ -494,6 +497,8 @@ class StateReader:
         self.truncations = 0
         self.error: BaseException | None = None
         self.frames = FrameClock()     # replaces the move frames when the export is frozen (online, 0.17.5)
+        from .boxes import BoxTracker
+        self.boxes = BoxTracker()      # 0.36.0: collision boxes carried forward (exporter v10 writes them on change)
 
     def start(self) -> "StateReader":
         self._thread.start()
@@ -559,6 +564,7 @@ class StateReader:
                     if isinstance(raw.get("fm"), dict):
                         self.last_fm, self.last_fm_t = raw["fm"], t
                     self.frames.feed(raw)
+                    self.boxes.feed(raw)
                     f_no = raw.get("f")
                     st = GameState(t, int(f_no) if isinstance(f_no, (int, float)) else -1,
                                    bool(raw.get("in_battle")), raw)

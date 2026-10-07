@@ -429,6 +429,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.opp = opp_moves or {}
         self.own = own or []              # the bot's own moves (neutral_policy.own_moves): whiff punishes
         self.own_reach = own_reach or {}  # reach.load: measured reach per action id (own / opponent)
+        self.own_hit: dict = {}           # 0.36.0: own hitbox profiles per action id (catalog C with exporter v10)
         self.opp_reach = opp_reach or {}
         # the bot's input delay in frames: the config's measured 4, replaced live by input_delay.DelayMeter
         self.lead = int((fcfg.get("punish") or {}).get("latency_frames", 4))
@@ -4235,6 +4236,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["projectile_timings"] = {str(k): v for k, v in fighter.pt.samples.items()}
                 summary["whiff_punishes"] = dict(fighter.whiff_stats)
                 summary["punish_engine"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in fighter.pe_stats.items()}
+                if getattr(fighter, "box_stats", None):
+                    summary["hitboxes"] = dict(fighter.box_stats)   # 0.36.0: punish reach judged box to box
                 if fighter.live_reach is not None and fighter.live_reach.changes():
                     summary["live_reach"] = fighter.live_reach.changes()
                 if fighter.busy_stats:
@@ -4812,6 +4815,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                           opp_reach=opp_reach)
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
+                from .boxes import load_own_hit_profiles
+                fighter.own_hit = load_own_hit_profiles(ds_root, summary["character"])
+                summary["hitbox_profiles"] = len(fighter.own_hit)
                 fighter.composer = composer
                 if composer is not None:
                     cr_ = fcfg.get("combo_reach") or {}

@@ -71,9 +71,44 @@ local td_game = typedef("nBattle.sGame", per_tick_on and { "UpdateTick", "Update
 local td_player = typedef("nBattle.cPlayer", fail_first and { "MoveCalc", "IsDead", "move_player" } or { "MoveCalc", "IsDead" })
 local td_med = typedef("app.FBattleMediator", { "UpdateGameInfo" })
 local field = function(v) return { get_data = function() return v end } end
+-- box=1 (v10): both players have collision rects (pushbox, hurtbox, throw hurtbox; a hitbox on ticks 4-6 of every
+-- 10), and one projectile object for P1 on ticks 20-40. Rect fields as the community viewer reads them.
+local box_on = (arg[10] or "0") == "1"
+local FX = 6553600
+local function rect(kind, ox, oy, sx, sy, extra)
+    local f = { OffsetX = { v = ox * FX }, OffsetY = { v = oy * FX }, SizeX = { v = sx * FX }, SizeY = { v = sy * FX } }
+    for k, v in pairs(extra or {}) do f[k] = v end
+    local marker = ({ h = "HitPos", u = "Attr", b = "HitNo", x = "HitNo" })[kind]
+    return setmetatable({ get_field = function(_, n) if n == marker then return 1 end return nil end },
+                        { __index = function(_, k) return f[k] end })
+end
+local function rect_list(fn) return { get_Count = nil, call = function(_, n, i)
+    local rs = fn(); if n == "get_Count" then return #rs end; return rs[i + 1] end } end
+local function player_rects(px)
+    local rs = { rect("u", px, 0.6, 0.3, 0.6), rect("b", px, 0.8, 0.35, 0.8, { TypeFlag = 2, Type = 0, Immune = 0 }),
+                 rect("x", px, 0.6, 0.25, 0.6, { TypeFlag = 0 }) }
+    if timer % 10 >= 4 and timer % 10 <= 6 then
+        rs[#rs + 1] = rect("h", px + 0.9, 1.0, 0.3, 0.1, { TypeFlag = 1, CondFlag = 16 })
+    end
+    return rs
+end
+local function act(px) return { Collision = { Infos = rect_list(function() return player_rects(px) end) },
+                                 ActionPart = { _Engine = { get_ActionID = function() return 1 end,
+                                     get_ActionFrame = function() return nil end, get_ActionFrameNum = function() return nil end } } } end
+local act1, act2 = act(-1.5), act(1.5)
 local player = setmetatable({ get_type_definition = function() return td_player end }, { __index = function(_, k)
     if k == "act_st" and bar_on then return sim_busy and 1 or 0 end
+    if box_on and k == "vital_max" then return 10000 end
+    if box_on and k == "mpActParam" then return act1 end
     return nil end })
+local player2 = setmetatable({ get_type_definition = function() return td_player end }, { __index = function(_, k)
+    if box_on and k == "vital_max" then return 10000 end
+    if box_on and k == "mpActParam" then return act2 end
+    return nil end })
+local proj = { mpActParam = { Collision = { Infos = rect_list(function()
+                   return { rect("h", -0.5 + timer * 0.05, 0.9, 0.2, 0.2, { TypeFlag = 1, CondFlag = 0 }) } end) } },
+               pos = { x = { v = 0 }, y = { v = 0.9 * FX } },
+               get_IsR0Die = function() return false end, get_IsTeam1P = function() return true end }
 local game = setmetatable({ get_type_definition = function() return td_game end }, {
     __index = function(_, k) if k == "stage_timer" then return timer end end })
 local gBattle = {
@@ -81,11 +116,12 @@ local gBattle = {
     get_field = function(_, name)
         if name == "Player" then
             if in_failing then error("player state not readable in this context (simulated)") end
-            return field({ mcPlayer = { [0] = player, [1] = player } })
+            return field({ mcPlayer = { [0] = player, [1] = box_on and player2 or player } })
         end
         if name == "Team" then return field({ mcTeam = { [0] = {}, [1] = {} } }) end
         if name == "Game" then return field(game) end
         if name == "Round" then return field({ RoundNo = 0 }) end
+        if name == "Work" then return field({ Global_work = (box_on and timer >= 20 and timer <= 40) and { proj } or {} }) end
         return field(nil)
     end,
 }

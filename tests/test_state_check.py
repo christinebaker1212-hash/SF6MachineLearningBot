@@ -58,7 +58,14 @@ class SimExporter(threading.Thread):
                 "facing_right": x < (self.x2 if x == self.x1 else self.x1), "action_id": act,
                 "pose": pose, "hitstun": stun}
             p1x = {"chara": self.chara} if self.chara is not None else {}
-            line = {"v": 2, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "fm": self.fm, "round": 1, "missing": [],
+            # 0.36.0: collision boxes (exporter v10), centre + half size: pushboxes 0.4 wide each side (they touch at the
+            # 0.8 the simulated walk stops at), hurtboxes 0.35, the cr.MK's hitbox reaching 0.9 in front while active
+            rects = lambda x: [["u", x, 0.6, 0.4, 0.6, 0, 0, 0], ["b", x, 0.8, 0.35, 0.8, 0, 0, 2]]
+            b1 = rects(self.x1) + ([["h", self.x1 + 0.75, 0.3, 0.15, 0.15, 0, 1, 0]]
+                                   if self.act == 102 and 14 <= self.act_t <= 18 else [])
+            line_bx = {"p1": b1, "p2": rects(self.x2), "pj": []}
+            line = {"v": 10, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "fm": self.fm, "round": 1,
+                    "missing": [], "bx": line_bx,
                     "p1": {**p(self.x1, self.y, 10000, self.sup1, 2 if "S" in d else 0, self.act, 0), **p1x},
                     "p2": p(self.x2, 0.0, self.hp2, 0, 0, 0, self.stun)}
             f.write(json.dumps(line) + "\n")
@@ -90,7 +97,9 @@ def test_state_check_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     status = {r["check"]: r["status"] for r in results}
     for name in ("exporter_alive", "game_frame_clock", "fields_present", "hp_range", "facing_semantics", "walk_back_changes_distance",
                  "walk_forward_changes_distance", "crouch_changes_pose", "jab_changes_action_id",
-                 "jump_raises_y", "hit_reduces_p2_hp", "hit_causes_p2_hitstun", "hit_builds_p1_super"):
+                 "jump_raises_y", "hit_reduces_p2_hp", "hit_causes_p2_hitstun", "hit_builds_p1_super",
+                 "boxes_present", "box_geometry_pushbox_contains_player", "box_geometry_pushboxes_touch_at_contact",
+                 "box_geometry_hitbox_reaches_dummy"):
         assert status.get(name) == "PASS", (name, results)
     assert "REFramework state check" in (s.recorder.dir / "report.md").read_text()
 

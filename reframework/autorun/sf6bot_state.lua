@@ -20,7 +20,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 9          -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 10         -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -522,6 +522,110 @@ local function read_player(p, t, idx)
     return r
 end
 
+-- v10 (0.36.0): collision boxes, READ only, as the community viewer haruno-ku/SF6_Tools SheldonsBoxes.lua reads them:
+-- <object>.mpActParam.Collision.Infos, each rect with OffsetX/OffsetY/SizeX/SizeY (fixed point, /6553600, world
+-- units). Kind from the rect's own fields (as the viewer): HitPos = attack rect (TypeFlag > 0 hitbox "h", TypeFlag 0
+-- with PoseBit or CondFlag 0x2C0 throw "t", GuardBit 0 clash "c", else proximity "p"); Attr = pushbox "u"; HitNo =
+-- hurt rect (TypeFlag > 0 hurtbox "b", else throw hurtbox "x"); KeyData = unique "k"; else throw hurtbox "x".
+-- Each rect: [kind, OffsetX, OffsetY, SizeX, SizeY, f1, f2, f3] (h: CondFlag, TypeFlag, 0; b: Type, Immune, TypeFlag).
+-- Written only when a player's boxes changed, and in full every BOX_FULL_EVERY lines:
+-- "bx":{"p1":[...],"p2":[...],"pj":[[team, x, y, [...]], ...]} (pj = projectiles / other battle objects).
+local BOX_FULL_EVERY = 60
+local BOX_MAX_RECTS = 40
+local box_last = { p1 = nil, p2 = nil, pj = nil, lines = 0 }
+
+local function fx(v) local n = try(function() return v.v end); return n and n / 6553600.0 end
+local function d3(n) return string.format("%.3f", n) end
+local function num(v) local n = tonumber(tostring(v)); return n or 0 end
+
+local function rect_items(infos)
+    local out = {}
+    local n = try(function() return infos:call("get_Count") end)
+    if n then
+        for j = 0, math.min(n, BOX_MAX_RECTS) - 1 do
+            local r = try(function() return infos:call("get_Item", j) end)
+            if r ~= nil then out[#out + 1] = r end
+        end
+        return out
+    end
+    local items = try(function() return infos._items end)
+    local size = try(function() return infos._size end)
+    if items == nil then return out end
+    for j, r in pairs(items) do
+        if r ~= nil and (size == nil or j < size) and #out < BOX_MAX_RECTS then out[#out + 1] = r end
+    end
+    return out
+end
+
+local function has(r, name) return try(function() return r:get_field(name) end) ~= nil end
+
+local function encode_rects(actparam)
+    local infos = try(function() return actparam.Collision.Infos end)
+    if infos == nil then return nil end
+    local parts = {}
+    for _, r in ipairs(rect_items(infos)) do
+        local ox, oy = fx(try(function() return r.OffsetX end)), fx(try(function() return r.OffsetY end))
+        local sx, sy = fx(try(function() return r.SizeX end)), fx(try(function() return r.SizeY end))
+        if ox and oy and sx and sy then
+            local kind, f1, f2, f3 = nil, 0, 0, 0
+            local tflag = num(try(function() return r.TypeFlag end))
+            if has(r, "HitPos") then
+                local cond = num(try(function() return r.CondFlag end))
+                if tflag > 0 then kind, f1, f2 = "h", cond, tflag
+                elseif num(try(function() return r.PoseBit end)) > 0 or cond == 0x2C0 then kind = "t"
+                elseif num(try(function() return r.GuardBit end)) == 0 then kind = "c"
+                else kind = "p" end
+            elseif has(r, "Attr") then kind = "u"
+            elseif has(r, "HitNo") then
+                if tflag > 0 then
+                    kind, f1, f2, f3 = "b", num(try(function() return r.Type end)), num(try(function() return r.Immune end)), tflag
+                else kind = "x" end
+            elseif has(r, "KeyData") then kind = "k"
+            else kind = "x" end
+            parts[#parts + 1] = '["' .. kind .. '",' .. d3(ox) .. "," .. d3(oy) .. "," .. d3(sx) .. "," .. d3(sy) ..
+                                "," .. string.format("%d", f1) .. "," .. string.format("%d", f2) .. "," .. string.format("%d", f3) .. "]"
+        end
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function encode_objects(gb)
+    local work = gb and try(function() return gb:get_field("Work"):get_data(nil).Global_work end)
+    if work == nil then return "[]" end
+    local parts = {}
+    for _, o in pairs(work) do
+        if #parts >= 8 then break end
+        local ap = o and try(function() return o.mpActParam end)
+        if ap ~= nil then
+            local dying = try(function() return o:get_IsR0Die() end)
+            if not dying then
+                local rects = encode_rects(ap)
+                if rects and rects ~= "[]" then
+                    local team = try(function() return o:get_IsTeam1P() end) and 1 or 2
+                    local x, y = fx(try(function() return o.pos.x end)), fx(try(function() return o.pos.y end))
+                    parts[#parts + 1] = "[" .. team .. "," .. enc(x and tonumber(d3(x))) .. "," ..
+                                        enc(y and tonumber(d3(y))) .. "," .. rects .. "]"
+                end
+            end
+        end
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function read_boxes(gb, p1, p2)
+    local b1 = encode_rects(try(function() return p1.mpActParam end))
+    local b2 = encode_rects(try(function() return p2.mpActParam end))
+    local pj = encode_objects(gb)
+    box_last.lines = box_last.lines + 1
+    local full = box_last.lines % BOX_FULL_EVERY == 1
+    local parts = {}
+    if b1 and (full or b1 ~= box_last.p1) then parts[#parts + 1] = '"p1":' .. b1; box_last.p1 = b1 end
+    if b2 and (full or b2 ~= box_last.p2) then parts[#parts + 1] = '"p2":' .. b2; box_last.p2 = b2 end
+    if pj and (full or pj ~= box_last.pj) then parts[#parts + 1] = '"pj":' .. pj; box_last.pj = pj end
+    if #parts == 0 then return nil end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
+
 local function encode_player(r, prefix, missing)
     local parts = {}
     for _, k in ipairs(PFIELDS) do
@@ -581,6 +685,11 @@ export_battle = function(src)
     local okbar, barj = pcall(read_frame_bar, stage_timer,
         (tonumber(tostring(r1.act_st)) or 0) ~= 0 or (tonumber(tostring(r2.act_st)) or 0) ~= 0)
     if okbar and barj then fm_part = fm_part .. ',"bar":' .. barj end
+    if ready then
+        local okbx, bxj = pcall(read_boxes, gb, p1, p2)
+        if okbx and bxj then fm_part = fm_part .. ',"bx":' .. bxj
+        elseif not okbx then last_error = "boxes: " .. tostring(bxj) end
+    end
     last_missing = table.concat(missing, ", ")
     write_line('{"v":' .. SCRIPT_VERSION .. ',"f":' .. frame_no .. ',"src":"' .. src .. '","in_battle":true,"ready":' ..
                enc(ready) .. ',"stage_timer":' .. enc(stage_timer) ..
