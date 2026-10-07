@@ -11,7 +11,7 @@ the project stands, how to work with the user, and what to do next.
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.36.1 is pushed** (CLAUDE.md "0.36.1"): the user's G on v10 showed every hurt / hit box as zero (read in the tick hook before the collision update; only pushboxes were right). Exporter v11 samples the boxes at render time; G now fails zero boxes. The research build must be rebuilt for v11 and bundled (see 0.36.1). User steps: TOOLS -> Online build: install, G, then C as Ryu (guard None).
+**State:** **0.36.1 is pushed** (CLAUDE.md "0.36.1"): the user's G on v10 showed every hurt / hit box as zero (read in the tick hook before the collision update; only pushboxes were right). Exporter v11 samples the boxes at render time; G now fails zero boxes. The research build was rebuilt for v11 (run 37585674748, marker exporter bca17bb85832acbe) and is bundled. User steps: TOOLS -> Online build: install, G, then C as Ryu (guard None).
 
 **Before that:** **0.36.0 is pushed** (CLAUDE.md "0.36.0"): exporter v10 reads both players' collision boxes (and projectiles'); the research build was rebuilt for it (GitHub run 37580495340; bundled in `refw_research/dist`, marker exporter d96ed1970f6979c0). The catalog stores the bot's own hitboxes per move; the punish engine judges reach box to box when both sides are known. User steps: install the online build (TOOLS), G in Training Mode (verifies the box geometry), C as Ryu (guard None). Not run in game.
 

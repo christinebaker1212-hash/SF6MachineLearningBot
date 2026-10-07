@@ -4479,8 +4479,9 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   - no box read inside a game hook
   - each rect's `.v` is read in one expression, as the viewer does
   - heartbeat `boxes` {rects, zero, samples}
-  - The research build must match: rebuilt for v11 and bundled in `refw_research/dist/` (TOOLS -> "Online build:
-    install", SF6 closed, administrator). R alone is not enough with the online build: it refuses any other exporter.
+  - The research build must match: rebuilt for v11 (run 37585674748, sha256 746b80a6... = GitHub's digest; dll
+    marker: until 2033-10-01, exporter bca17bb85832acbe = the v11 Lua) and bundled in `refw_research/dist/` (TOOLS ->
+    "Online build: install", SF6 closed, administrator). R alone is not enough with the online build: it refuses any other exporter.
 - **Python:**
   - zero-size rects are dropped when read, so v10 recordings carry no false boxes
   - G: `boxes_present` needs a hurtbox and a pushbox per player
