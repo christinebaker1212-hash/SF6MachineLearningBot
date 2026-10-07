@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.36.1 (2026-10-07): boxes read at render time (exporter v11): on v10 every hurt / hit box read as zero; G now fails such boxes.**
 - **0.36.0 (2026-10-07): collision boxes from REFramework (exporter v10): the bot sees hitboxes and hurtboxes; punish reach is judged box to box.**
 - **0.35.1 (2026-10-07): the catalog (C) drinks to Jamie's required Drink level before drink-level moves.**
 - **0.35.0 (2026-10-07): arcade-cabinet input display (ball-top lever, Vewlix 8-button panel, input history) in the overlay.**
@@ -4460,6 +4461,36 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   move's stretched hurtbox from recordings. These come after the first real data (state-check + a C run + a session).
 - Tests `tests/test_0360.py` (parsing, carry-forward, hurt gaps by height and invincibility, the move profile from its
   start, the Sonic Blade case), `tests/test_state_check.py` (box checks on the simulated exporter). Not run in game.
+
+## 0.36.1: boxes read at render time (exporter v11) (user's G on v10, 2026-10-07)
+- **G on v10 (user, 2026-10-07; online build installed, Training Mode):** every check passed (the hit test with the dummy
+  on no block: 500 damage, 23 frames of hitstun), but the boxes were wrong.
+  - Only the pushboxes had real positions; they cover each player's x and touch at contact, so the centre / half-size
+    reading is right.
+  - Every hurtbox, throw hurtbox and hitbox was a zero rect at the stage centre (`["b", 0, 0, 0, 0, 0, 0, 3]`).
+  - The hitbox check passed by mistake: a zero hitbox "overlapped" a zero hurtbox, with its front read 1.3 / 2.7 BEHIND
+    Ryu.
+- **Cause:** v10 read the rects in the per-tick hook (`nBattle.sGame.PreUpdateShell`), before the game's collision
+  update. The community viewer (haruno-ku/SF6_Tools SheldonsBoxes.lua, read again) reads the same fields with the same
+  geometry, but in `re.on_frame`, after the update.
+- **Exporter v11:**
+  - each render samples the boxes and the next line written carries them: at 1x, the tick line after a render (one
+    tick later than the rest of that line's state); at fast replay speeds several ticks share one render's boxes
+  - no box read inside a game hook
+  - each rect's `.v` is read in one expression, as the viewer does
+  - heartbeat `boxes` {rects, zero, samples}
+  - The research build must match: rebuilt for v11 and bundled in `refw_research/dist/` (TOOLS -> "Online build:
+    install", SF6 closed, administrator). R alone is not enough with the online build: it refuses any other exporter.
+- **Python:**
+  - zero-size rects are dropped when read, so v10 recordings carry no false boxes
+  - G: `boxes_present` needs a hurtbox and a pushbox per player
+  - new `box_geometry_hurtbox_covers_player`
+  - the hitbox check fails a hitbox that is not in front of the bot
+- Tests:
+  - `tests/test_state_check.py`: the user's zero boxes fail
+  - `tests/test_exporter_lua.py` / `tests/lua/stub_run.lua`: the stub zeroes non-pushbox rects inside hooks, as measured;
+    the lines carry the render's boxes, never zeros
+- Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

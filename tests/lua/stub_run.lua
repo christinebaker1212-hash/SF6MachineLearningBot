@@ -75,8 +75,13 @@ local field = function(v) return { get_data = function() return v end } end
 -- 10), and one projectile object for P1 on ticks 20-40. Rect fields as the community viewer reads them.
 local box_on = (arg[10] or "0") == "1"
 local FX = 6553600
+-- MEASURED on the user's game (0.36.1): read inside the per-tick hook, every rect but the pushbox is at 0 (the
+-- collision update has not run yet); the render callback sees them. in_tick models that.
+local in_tick = false
 local function rect(kind, ox, oy, sx, sy, extra)
-    local f = { OffsetX = { v = ox * FX }, OffsetY = { v = oy * FX }, SizeX = { v = sx * FX }, SizeY = { v = sy * FX } }
+    local z = function(v) return setmetatable({}, { __index = function(_, k)
+        if k == "v" then return (in_tick and kind ~= "u") and 0 or v * FX end end }) end
+    local f = { OffsetX = z(ox), OffsetY = z(oy), SizeX = z(sx), SizeY = z(sy) }
     for k, v in pairs(extra or {}) do f[k] = v end
     local marker = ({ h = "HitPos", u = "Attr", b = "HitNo", x = "HitNo" })[kind]
     return setmetatable({ get_field = function(_, n) if n == marker then return 1 end return nil end },
@@ -148,14 +153,18 @@ for r = 1, renders do
     for _ = 1, tpr do
         if not paused then timer = timer + 1; if bar_on then bar_tick(timer) end end
         in_failing = fail_first
+        in_tick = true
         call("nBattle.sGame.UpdateTick", 1)
         in_failing = false
         call("nBattle.cPlayer.move_player", 1)
+        in_tick = false
     end
     if fail_first and r % 50 == 0 then call("nBattle.cPlayer.move_player", 1) end
+    in_tick = true
     call("app.FBattleMediator.UpdateGameInfo", 1)
     call("nBattle.sGame.UpdateDraw", 1)
     call("nBattle.cPlayer.MoveCalc", 300)
+    in_tick = false
     on_frame()
 end
 local saved = files["sf6bot_tickhook.json"]

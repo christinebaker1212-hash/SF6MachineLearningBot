@@ -21,6 +21,7 @@ class SimExporter(threading.Thread):
         self.hp2, self.sup1, self.act, self.act_t, self.stun = 10000, 0, 0, 0, 0
         self.fm = None  # MOCK of exporter v5 frame meter (made-up numbers)
         self.chara = None  # ESF id for p1 (exporter v4 `chara`), optional
+        self.zero_boxes = False  # 0.36.1: v10 as measured on the user's game (hurt / hit rects all zero)
 
     def run(self):
         f = open(self.path, "a")
@@ -64,7 +65,10 @@ class SimExporter(threading.Thread):
             b1 = rects(self.x1) + ([["h", self.x1 + 0.75, 0.3, 0.15, 0.15, 0, 1, 0]]
                                    if self.act == 102 and 14 <= self.act_t <= 18 else [])
             line_bx = {"p1": b1, "p2": rects(self.x2), "pj": []}
-            line = {"v": 10, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "fm": self.fm, "round": 1,
+            if self.zero_boxes:
+                line_bx = {k: [r if r[0] == "u" else [r[0], 0.0, 0.0, 0.0, 0.0] + r[5:] for r in v]
+                           for k, v in line_bx.items()}
+            line = {"v": 11, "f": n, "in_battle": True, "ready": True, "stage_timer": n, "fm": self.fm, "round": 1,
                     "missing": [], "bx": line_bx,
                     "p1": {**p(self.x1, self.y, 10000, self.sup1, 2 if "S" in d else 0, self.act, 0), **p1x},
                     "p2": p(self.x2, 0.0, self.hp2, 0, 0, 0, self.stun)}
@@ -98,10 +102,40 @@ def test_state_check_against_simulated_exporter(cfg, tmp_path, monkeypatch):
     for name in ("exporter_alive", "game_frame_clock", "fields_present", "hp_range", "facing_semantics", "walk_back_changes_distance",
                  "walk_forward_changes_distance", "crouch_changes_pose", "jab_changes_action_id",
                  "jump_raises_y", "hit_reduces_p2_hp", "hit_causes_p2_hitstun", "hit_builds_p1_super",
-                 "boxes_present", "box_geometry_pushbox_contains_player", "box_geometry_pushboxes_touch_at_contact",
-                 "box_geometry_hitbox_reaches_dummy"):
+                 "boxes_present", "box_geometry_pushbox_contains_player", "box_geometry_hurtbox_covers_player",
+                 "box_geometry_pushboxes_touch_at_contact", "box_geometry_hitbox_reaches_dummy"):
         assert status.get(name) == "PASS", (name, results)
     assert "REFramework state check" in (s.recorder.dir / "report.md").read_text()
+
+
+def test_state_check_fails_zero_size_boxes(cfg, tmp_path, monkeypatch):
+    """0.36.1: the user's G on exporter v10 passed the box checks with every hurt / hit rect at 0 (a zero hitbox at the
+    stage centre "overlapped" a zero hurtbox). Such rects now fail."""
+    import sf6bot.session as sm
+    import sf6bot.state_check as sc
+    from sf6bot.game_state import STATE_FILE
+    from sf6bot.input_backend import MockInputBackend
+    game = tmp_path / "SF6"
+    (game / "reframework" / "autorun").mkdir(parents=True)
+    (game / "reframework" / "data").mkdir()
+    (game / "dinput8.dll").write_text("MOCK")
+    (game / "reframework" / "autorun" / "sf6bot_state.lua").write_text("-- MOCK")
+    inp = MockInputBackend()
+    monkeypatch.setattr(sm, "MockInputBackend", lambda: inp)
+    monkeypatch.setattr(sc, "find_sf6_dir", lambda cfg: game)
+    sim = SimExporter(game / STATE_FILE, inp)
+    sim.zero_boxes = True
+    sim.start()
+    try:
+        with Session(cfg, "state_check_zero", mock=True) as s:
+            results = sc.run_state_check(s, cfg)
+    finally:
+        sim.stop.set()
+    status = {r["check"]: r["status"] for r in results}
+    assert status["box_geometry_pushbox_contains_player"] == "PASS"
+    assert status["boxes_present"] == "FAIL"
+    assert status["box_geometry_hurtbox_covers_player"] == "FAIL"
+    assert status["box_geometry_hitbox_reaches_dummy"] != "PASS"
 
 
 def test_state_check_diagnoses_script_never_ran(cfg, tmp_path, monkeypatch, capsys):

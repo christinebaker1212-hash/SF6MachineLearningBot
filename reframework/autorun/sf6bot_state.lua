@@ -20,7 +20,7 @@
 -- Verified on the user's REFramework (2026-10-01): io.open paths are relative to reframework/data,
 -- so the plain name lands in <SF6>/reframework/data/sf6bot_state.jsonl. The others are fallbacks.
 local CANDIDATE_PATHS = { "sf6bot_state.jsonl", "reframework/data/sf6bot_state.jsonl" }
-local SCRIPT_VERSION = 10         -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
+local SCRIPT_VERSION = 11         -- must match sf6bot/game_state.py EXPECTED_SCRIPT_VERSION
 local OUT_PATH = "(none)"
 local INFO_EVERY = 60             -- heartbeat file (json.dump_file -> reframework/data) every N frames
 local MAX_LINES = 200000          -- truncate the file after this many lines (~1 hour at 60 fps)
@@ -36,6 +36,7 @@ local last_missing = ""
 local hook_calls, tick_lines, frame_lines = 0, 0, 0
 local last_key = nil              -- "round:stage_timer" of the last battle line written
 local renders_since_write = 0
+local box_stats = { rects = 0, zero = 0, samples = 0 }   -- v11 box counts (heartbeat)
 local export_battle = nil         -- defined below; called from the hooks and from re.on_frame
 local tick_report = nil           -- defined below (v7 discovery report for the heartbeat file)
 local ugi_lines = 0
@@ -65,7 +66,7 @@ local function write_info(in_battle)
             version = SCRIPT_VERSION, frame = frame_no, path = OUT_PATH, lines = lines, enabled = enabled,
             hook_calls = hook_calls, tick_lines = tick_lines, frame_lines = frame_lines,
             ugi_lines = ugi_lines, tick_hook = tick_report and tick_report() or nil,
-            in_battle = in_battle, last_error = last_error, missing = last_missing,
+            in_battle = in_battle, last_error = last_error, missing = last_missing, boxes = box_stats,
             open_errors = table.concat(open_errors, " | "),
         })
     end)
@@ -533,8 +534,19 @@ end
 local BOX_FULL_EVERY = 60
 local BOX_MAX_RECTS = 40
 local box_last = { p1 = nil, p2 = nil, pj = nil, lines = 0 }
+-- v11 (0.36.1): MEASURED on the user's game with v10, boxes read in the per-tick hook (PreUpdateShell, before the
+-- game's collision update) had every hurt / hit / throw-hurt rect at 0 (only the pushbox kept its place). The viewer
+-- reads them in re.on_frame, after the update; so do we now: each render samples the boxes (box_cache) and the next
+-- line written carries them (at 1x the tick line after a render = the state that render showed; at fast replay
+-- speeds several ticks share one render's boxes). box_stats counts rects and zero-size rects for the heartbeat.
+local box_cache = nil
 
 local function fx(v) local n = try(function() return v.v end); return n and n / 6553600.0 end
+local function fxf(r, name)       -- the field's .v read in one expression, as the viewer does
+    local n = try(function() return r[name].v end)
+    if n == nil then return fx(try(function() return r[name] end)) end
+    return n / 6553600.0
+end
 local function d3(n) return string.format("%.3f", n) end
 local function num(v) local n = tonumber(tostring(v)); return n or 0 end
 
@@ -564,9 +576,10 @@ local function encode_rects(actparam)
     if infos == nil then return nil end
     local parts = {}
     for _, r in ipairs(rect_items(infos)) do
-        local ox, oy = fx(try(function() return r.OffsetX end)), fx(try(function() return r.OffsetY end))
-        local sx, sy = fx(try(function() return r.SizeX end)), fx(try(function() return r.SizeY end))
+        local ox, oy, sx, sy = fxf(r, "OffsetX"), fxf(r, "OffsetY"), fxf(r, "SizeX"), fxf(r, "SizeY")
         if ox and oy and sx and sy then
+            box_stats.rects = box_stats.rects + 1
+            if sx == 0 and sy == 0 then box_stats.zero = box_stats.zero + 1 end
             local kind, f1, f2, f3 = nil, 0, 0, 0
             local tflag = num(try(function() return r.TypeFlag end))
             if has(r, "HitPos") then
@@ -612,10 +625,21 @@ local function encode_objects(gb)
     return "[" .. table.concat(parts, ",") .. "]"
 end
 
+local function sample_boxes()
+    local gb = sdk.find_type_definition("gBattle")
+    local players = gb and try(function() return gb:get_field("Player"):get_data(nil).mcPlayer end)
+    local p1 = players and try(function() return players[0] end)
+    local p2 = players and try(function() return players[1] end)
+    if p1 == nil or p2 == nil then box_cache = nil; return end
+    box_cache = { b1 = encode_rects(try(function() return p1.mpActParam end)),
+                  b2 = encode_rects(try(function() return p2.mpActParam end)), pj = encode_objects(gb) }
+    box_stats.samples = box_stats.samples + 1
+end
+
 local function read_boxes(gb, p1, p2)
-    local b1 = encode_rects(try(function() return p1.mpActParam end))
-    local b2 = encode_rects(try(function() return p2.mpActParam end))
-    local pj = encode_objects(gb)
+    -- only boxes sampled at a render: read inside a game hook they are all zero (no fallback read here)
+    if box_cache == nil then return nil end
+    local b1, b2, pj = box_cache.b1, box_cache.b2, box_cache.pj
     box_last.lines = box_last.lines + 1
     local full = box_last.lines % BOX_FULL_EVERY == 1
     local parts = {}
@@ -708,6 +732,8 @@ re.on_frame(function()
     frame_no = frame_no + 1
     renders_since_write = renders_since_write + 1
     local ok, err = pcall(function()
+        local okb, eb = pcall(sample_boxes)
+        if not okb then box_cache = nil; last_error = "boxes: " .. tostring(eb) end
         local in_battle = export_battle("frame")
         if in_battle then
             if not tick.started then

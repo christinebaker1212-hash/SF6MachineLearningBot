@@ -265,13 +265,18 @@ def _box_checks(ck, before, after) -> None:
     """0.36.0 (exporter v10): the collision boxes read, and the geometry the bot assumes (boxes.py: centre + half size,
     world units). At contact distance after the walk: each pushbox contains its player's x and the two pushboxes touch;
     during the cr.MK the bot's hitbox is out in front and overlaps the dummy's hurtbox when the hit lands."""
-    from .boxes import has_boxes, of, pushbox_check, pushbox_gap
+    from .boxes import has_boxes, hurtbox_check, of, pushbox_check, pushbox_gap
     if not (has_boxes(before.p1) and has_boxes(before.p2)):
-        ck.add("boxes_present", "FAIL", reason="no collision boxes in the state lines: exporter v10 not running (update "
-                                               "with R, or the online build with TOOLS -> Online build: install)")
+        ck.add("boxes_present", "FAIL", reason="no collision boxes in the state lines: exporter v11 not running (the "
+                                               "online build: TOOLS -> Online build: install; offline only: R)")
         return
     kinds = {k: sorted({b.kind for b in getattr(before, k).get("boxes") or []}) for k in ("p1", "p2")}
-    ck.add("boxes_present", "PASS", kinds=kinds)
+    # 0.36.1: empty (zero-size) rects are dropped when read, so a hurtbox must be there with a real size
+    ok = all("b" in kinds[k] and "u" in kinds[k] for k in ("p1", "p2"))
+    ck.add("boxes_present", "PASS" if ok else "FAIL", kinds=kinds,
+           note=None if ok else "hurtboxes missing or zero size: the boxes are read at the wrong moment")
+    hc = (hurtbox_check(before.p1), hurtbox_check(before.p2))
+    ck.add("box_geometry_hurtbox_covers_player", "PASS" if hc == (True, True) else "FAIL", p1=hc[0], p2=hc[1])
     pc = (pushbox_check(before.p1), pushbox_check(before.p2))
     ck.add("box_geometry_pushbox_contains_player", "PASS" if pc == (True, True) else "FAIL",
            p1=pc[0], p2=pc[1], note="FAIL = the centre / half-size reading of the rects is wrong")
@@ -289,6 +294,8 @@ def _box_checks(ck, before, after) -> None:
             front = max((b.x1 - x1) if toward > 0 else (x1 - b.x0) for b in hs)
         overlap = any(h.x0 <= u.x1 and u.x0 <= h.x1 and h.y0 <= u.y1 and u.y0 <= h.y1 for h in hs for u in hu)
         hit_ok = bool(hit_ok) or overlap
+    if hit_ok and (front is None or front <= 0):
+        hit_ok = False           # a hitbox behind the bot is a misread, not a reach
     ck.add("box_geometry_hitbox_reaches_dummy", "PASS" if hit_ok else "FAIL" if hit_ok is False else "INCONCLUSIVE",
            hitbox_front_from_body=None if front is None else round(front, 3),
            note="the cr.MK's hitbox overlapped the dummy's hurtbox" if hit_ok else

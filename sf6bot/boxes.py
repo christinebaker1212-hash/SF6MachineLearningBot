@@ -44,6 +44,8 @@ def parse_rects(rects) -> list[Box]:
             k, ox, oy, sx, sy = r[0], float(r[1]), float(r[2]), abs(float(r[3])), abs(float(r[4]))
         except (TypeError, ValueError, IndexError):
             continue
+        if sx == 0 and sy == 0:
+            continue          # an empty rect (v10 read hurt / hit rects before the collision update: all zero)
         fl = [int(v) if isinstance(v, (int, float)) else 0 for v in (list(r[5:8]) + [0, 0, 0])[:3]]
         out.append(Box(str(k), ox - sx, ox + sx, oy - sy, oy + sy, *fl))
     return out
@@ -125,6 +127,15 @@ def pushbox_check(p: dict | None) -> bool | None:
     if not pu or not isinstance(x, (int, float)):
         return None
     return any(b.x0 - 0.02 <= x <= b.x1 + 0.02 for b in pu)
+
+
+def hurtbox_check(p: dict | None) -> bool | None:
+    """Geometry check: a hurtbox of real size covers the player's x (state-check)."""
+    hb = of(p, "b")
+    x = (p or {}).get("x")
+    if not hb or not isinstance(x, (int, float)):
+        return None
+    return any(b.x0 - 0.1 <= x <= b.x1 + 0.1 and b.x1 - b.x0 > 0.05 and b.y1 - b.y0 > 0.2 for b in hb)
 
 
 def pushbox_gap(p1: dict | None, p2: dict | None) -> float | None:

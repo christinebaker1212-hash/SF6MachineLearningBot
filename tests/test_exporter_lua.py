@@ -84,18 +84,23 @@ def test_frame_bar_cells_are_exported_once_each_in_order(tmp_path):
 
 def test_collision_boxes_written_when_they_change(tmp_path):
     """v10 (0.36.0): both players' collision rects and the battle objects' (projectiles) rects, as the community
-    viewer reads them: written when they change and in full every 60 lines; nothing while unchanged."""
+    viewer reads them: written when they change and in full every 60 lines; nothing while unchanged.
+    v11 (0.36.1): MEASURED on the user's game, inside the per-tick hook every rect but the pushbox reads 0 (the stub
+    models it); the boxes are sampled at each render and the next line carries them (one tick later at 1x)."""
     subprocess.run([LUA, str(ROOT / "tests/lua/stub_run.lua"), str(ROOT / "reframework/autorun/sf6bot_state.lua"),
                     str(tmp_path), "1", "130", "1", "-1", "0", "0", "0", "1"], check=True, timeout=120,
                    capture_output=True, text=True)
     lines = [json.loads(l) for l in (tmp_path / "sf6bot_state.jsonl").read_text().splitlines() if l.strip()]
     rows = {l["stage_timer"]: l.get("bx") for l in lines if l.get("in_battle")}
-    assert rows[1]["p1"][0] == ["u", -1.5, 0.6, 0.3, 0.6, 0, 0, 0] and rows[1]["p2"][1] == ["b", 1.5, 0.8, 0.35, 0.8, 0, 0, 2]
-    assert rows[2] is None and rows[3] is None                       # unchanged: nothing written
-    hit = [r for r in rows[4]["p1"] if r[0] == "h"]
+    assert rows[1] is None                                             # before any render: no boxes (not zeros)
+    assert rows[2]["p1"][0] == ["u", -1.5, 0.6, 0.3, 0.6, 0, 0, 0] and rows[2]["p2"][1] == ["b", 1.5, 0.8, 0.35, 0.8, 0, 0, 2]
+    assert not any(r[1:5] == [0, 0, 0, 0] for l in rows.values() if l for k in ("p1", "p2") for r in l.get(k, []))
+    assert rows[3] is None and rows[4] is None                       # unchanged: nothing written
+    hit = [r for r in rows[5]["p1"] if r[0] == "h"]                  # tick 4's hitbox, sampled at its render
     assert hit == [["h", -0.6, 1.0, 0.3, 0.1, 16, 1, 0]]              # the hitbox appears with its flags
-    assert not any(r[0] == "h" for r in rows[7]["p1"])               # and is gone again
-    assert rows[61] and "p1" in rows[61] and "p2" in rows[61]        # full refresh
-    pj = rows[20]["pj"]
+    assert not any(r[0] == "h" for r in rows[8]["p1"])               # and is gone again
+    full = [t for t in range(55, 70) if rows.get(t) and "p1" in rows[t] and "p2" in rows[t] and "pj" in rows[t]]
+    assert full                                                      # full refresh
+    pj = rows[21]["pj"]
     assert pj[0][0] == 1 and pj[0][3][0][0] == "h"                   # P1's projectile, its own hitbox
-    assert all(l.get("v") == 10 for l in lines)
+    assert all(l.get("v") == 11 for l in lines)
