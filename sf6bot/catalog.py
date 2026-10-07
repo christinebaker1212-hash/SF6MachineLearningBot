@@ -421,7 +421,8 @@ def _move_plan(name: str, cfg: dict, generic: bool):
                   "alternatives": t.get("alternatives") or [], "parent": t.get("parent"),
                   "kind": t.get("kind"), "parent_sequence": t.get("parent_sequence"),
                   "child_sequence": t.get("child_sequence"), "press_at": t.get("press_at"),
-                  "hold_parent": t.get("hold_parent")} for t in todo]
+                  "hold_parent": t.get("hold_parent"), "setup": t.get("setup"), "level": t.get("level")}
+                 for t in todo]
         return moves, skipped, "capcom_movelist"
     moves = [{"name": n, "sequence": q, "approach": a, "long": n.startswith(LONG_WINDOW_PREFIXES),
               "throw": n == "throw", "input": None} for n, q, a in MOVES]
@@ -575,6 +576,14 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
             stopped = False
             for attempt in range(attempts):
                 reset()
+                if mv.get("setup"):
+                    # 0.35.1: build the resource level first (Jamie: 22+P once per drink level), outside the move's
+                    # measurement; then wait until both are neutral again
+                    _t, ok = runner.run(parse_sequence(mv["setup"], mname + " (setup)"), stop_event=sess.stop_event)
+                    if not ok:
+                        stopped = True
+                        break
+                    _wait_settled(reader, sess, neutral_a, neutral_d, 4.0)
                 if approach:
                     walk_to_contact(sess, reader)
                 fm_before = reader.last_fm
@@ -584,7 +593,7 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                 import threading
                 post: list = []
                 # Supers: 9 s. With 6 s, SA3 on hit (cinematic) left the meter mid-move (total 5F).
-                window = 9.0 if mv["long"] else 3.6 if mv.get("parent") else 2.6
+                window = 9.0 if mv["long"] else 3.6 if mv.get("parent") or mv.get("kind") == "timed_follow_up" else 2.6
                 th = threading.Thread(target=lambda: post.extend(_ready_dicts(reader.collect(window))))
                 th.start()
                 parent_id = (parent_res or {}).get("move_id")
@@ -675,6 +684,8 @@ def run_catalog(sess: Session, cfg: dict, guard: str, only: list[str] | None = N
                     r["same_as"] = first_ids[fid]
                 else:
                     first_ids[fid] = mname
+                if mv.get("level"):
+                    r["resource_level"] = mv["level"]
                 if mv.get("parent"):
                     r["parent"], r["kind"], r["timing_variant"] = mv["parent"], mv.get("kind"), attempt % len(variants)
                 if (r.get("same_as") or (mv.get("parent") and fid is None)) and attempt + 1 < attempts:

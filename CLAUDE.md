@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.35.1 (2026-10-07): the catalog (C) drinks to Jamie's required Drink level before drink-level moves.**
 - **0.35.0 (2026-10-07): arcade-cabinet input display (ball-top lever, Vewlix 8-button panel, input history) in the overlay.**
 - **0.34.0 (2026-10-07): punishes are the biggest combo that fits, for every character (blocked moves, blocked / whiffed supers, command grabs, reversals on landing); a raw super only when no combo fits.**
 - **0.33.2 (2026-10-07): an L Shoryuken through a Drive Impact in burnout when it is too late to jump.**
@@ -4387,6 +4388,36 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
 - The overlay column is 430 px wide instead of 260; it still shrinks the frame view to fit beside the game.
 - Tests `tests/test_0350.py` (numpad by facing, the Vewlix curve, the history, lit buttons and the macro column, the
   overlay in both styles). Rendered here (Linux, headless); not seen on the user's PC or through Parsec yet.
+
+## 0.35.1: the catalog drinks before Jamie's drink-level moves (user, 2026-10-07)
+- User: "it is unable to test moves that require drink level 4 because it doesn't drink beforehand ... the moves
+  constantly come out as what they would come out as without any drinks".
+- **Before:** of Jamie's 35 drink-level rows, 27 were skipped ("needs setup: Drink level N"; "variant of another
+  row"). The 4 '[Drink level 4] Freeflow Strikes(2/3)' chains were performed as plain target combos with no drinks,
+  so they came out as the drink-0 moves. The other 4 were merged into the plain row.
+- **Now** (`framedata.resource_level`, `level_setup`, `catalog_moves`):
+  - A row needing a Drink level, written '(Drink level N or higher) ...' or '[Drink level N] Name', is performed
+    with a `setup`: The Devil Inside (22+P, the row whose notes say "Adds a Drink level", Capcom total 50) tapped
+    once per level, each followed by 58 frames.
+  - The catalog runs the setup after the reset and before the walk to contact, then waits until both players are
+    neutral. The move's capture and frame meter start after it, so the drink's ids are not taken for the move's.
+    Results record `resource_level`.
+  - '[Drink level 4] L Freeflow Strikes(1)' etc. are their own entries (same input as the plain rows, after 4 drinks).
+  - Order: plain rows first, then rows that add a drink (Phantom Sway(3), Freeflow Kicks(3), The Devil Inside, SA2
+    The Devil's Song), then drink-level rows, lowest level first. Whether Training Mode's reset ("/") clears drinks
+    is not known; this order keeps the plain rows at drink 0 either way. A level-N row only needs N or more
+    (Capcom: "N or higher"), so leftover drinks do not hurt it; the drink-level-4 rows need exactly 4, the maximum.
+- **Ransui Haze's third hits** (`timed_follow_ups`): Capcom tells the three apart only by when the button is
+  pressed during Ransui Haze(2) ("Frames 6-25 / 31-55 / 63-80"). Each is performed with P at the middle of its
+  window (then 3 frames earlier / later). Before, 'delayed' and 'longest possible delay' were skipped as the same
+  input as 'immediate'.
+- Jamie: 68 -> 97 moves performed; still skipped: Full Moon Kick(1) (same input as a normal), the CA, Drive
+  Reversals, Perfect Parries. Every other character's catalog plan is unchanged (checked on all 31 imported pages).
+- Not done: the drink level is not read from the game (it is in `cPlayer.mStyleNo`, community; the exporter does not
+  export it, and adding it needs a new research build), so a drink that did not come out is not noticed. The combo
+  lab (K) does not set up drinks for Jamie's routes. The held 22+P (several drinks in one) is not used: the taps
+  are the documented one-drink move.
+- Tests `tests/test_0351.py`. Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

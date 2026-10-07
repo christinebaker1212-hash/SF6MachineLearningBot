@@ -846,15 +846,120 @@ def unique_names(moves: list[dict]) -> list[dict]:
     return out
 
 
+# ---- resource levels the catalog builds up before a move (0.35.1: Jamie's drinks) -------------------------------
+# Capcom writes the requirement as a qualifier '(Drink level 2 or higher) 236+LK' or a state name
+# '[Drink level 4]L Freeflow Strikes(1)'. The level is built with the row whose notes say it adds one ('The Devil
+# Inside' 22+P: "Adds a Drink level on frame 49", 50 frames), tapped once per level before the move.
+_LEVEL_QUAL = re.compile(r"\(\s*Drink level (\d)(?: or higher)?\s*\)\s*", re.I)
+_LEVEL_NAME = re.compile(r"^\[\s*Drink level (\d)\s*\]\s*", re.I)
+_LEVEL_ADDS = re.compile(r"\bAdds (?:a|one|1) Drink level\b", re.I)
+_LEVEL_CHANGES = re.compile(r"\b(?:Adds (?:a|one|1)|raises) Drink level\b", re.I)
+LEVEL_SETUP_MARGIN = 8      # frames after the setup move's total before the next tap
+
+
+def resource_level(move: dict) -> int | None:
+    """The resource level a row needs (Jamie's 'Drink level N'), or None."""
+    m = _LEVEL_QUAL.search(move.get("input") or "") or _LEVEL_NAME.match(move.get("name") or "")
+    return int(m.group(1)) if m else None
+
+
+def level_setup(framedata: dict, level: int) -> str | None:
+    """The sequence that builds `level` from none: the plain 'adds a level' row tapped `level` times, each
+    followed by its total + a margin. None when the character has no such row."""
+    for row in framedata.get("moves") or []:
+        if not _LEVEL_ADDS.search(row.get("notes") or "") or ">" in (row.get("input") or ""):
+            continue
+        seq, _ = to_sequence(dict(row, hold_frames=None))
+        if seq:
+            wait = (row.get("total_n") or 50) + LEVEL_SETUP_MARGIN
+            return " ".join(f"{seq} 5@{wait}" for _ in range(level))
+    return None
+
+
+_TIMED_ORDER = ("immediate", "delayed", "longest")
+
+
+def timed_follow_ups(framedata: dict, chains: dict | None = None) -> dict:
+    """Rows told apart only by WHEN the last button is pressed. Jamie's Ransui Haze(2) notes "Frames 6-25: Ransui
+    Haze 1 / Frames 31-55: Ransui Haze 2 / Frames 63-80: Ransui Haze 3" pick the '(3rd hit / immediate | delayed |
+    longest possible delay)' rows. Returns {row name: [sequences]}: the parent row's sequence, then the button in the
+    middle of its window (then 3 frames earlier / later)."""
+    out: dict = {}
+    for parent in framedata.get("moves") or []:
+        wins = re.findall(r"Frames (\d+)\s*-\s*(\d+):\s*([^/]+?)\s*(\d)\s*(?:/|$)", parent.get("notes") or "")
+        if len(wins) < 2:
+            continue
+        pseq = to_sequence(dict(parent, name=_LEVEL_NAME.sub("", parent["name"])))[0]
+        if pseq is None and parent["name"] in (chains or {}):
+            pseq = chains[parent["name"]]["sequences"][0]
+        if not pseq:
+            continue
+        base = re.sub(r"\(\d+\)$", "", parent["name"]).strip()
+        for row in framedata["moves"]:
+            m = re.match(re.escape(base) + r"\s*\(3rd hit / (\w+)", row["name"])
+            if not m or m.group(1) not in _TIMED_ORDER:
+                continue
+            k = _TIMED_ORDER.index(m.group(1))
+            if k >= len(wins):
+                continue
+            a, b = int(wins[k][0]), int(wins[k][1])
+            last = (row.get("input") or "").split(">")[-1]
+            cseq = to_sequence({"name": "x", "input": last if "+" in last else f"5+{last}", "section": ""})[0]
+            if cseq:
+                mid = (a + b) // 2
+                out[row["name"]] = [_chain(pseq, cseq, t) for t in (mid, max(a, mid - 3), min(b, mid + 3))]
+    return out
+
+
 def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
     """(moves to perform, skipped rows) for one character, in Capcom's order.
 
     Rows with the same sequence are performed once; the later rows record `same_input_as`.
+    Rows that need a resource level (Jamie's drinks, 0.35.1) carry a `setup` sequence (performed before the
+    move, outside its measurement) and come last, lowest level first, after the rows that add a level: if
+    Training Mode's reset does not clear the level, the plain rows are still performed without it.
     """
     todo, skipped, by_seq = [], [], {}
     framedata = dict(framedata, moves=annotate_holds(unique_names(framedata["moves"])))
+    levels: dict = {}
+    stripped = []
+    for m in framedata["moves"]:
+        lv = resource_level(m)
+        if lv:
+            levels[m["name"]] = lv
+            m = dict(m, input=_LEVEL_QUAL.sub("", m["input"] or "").strip())
+        stripped.append(m)
+    framedata = dict(framedata, moves=stripped)
     chains = chain_plans(framedata)
+    for name, seqs in timed_follow_ups(framedata, chains).items():
+        chains[name] = {"parent": None, "kind": "timed_follow_up", "sequences": seqs}
+    level_todo, level_seen = [], {}
     for mv in framedata["moves"]:
+        lv = levels.get(mv["name"])
+        if lv:
+            setup = level_setup(framedata, lv)
+            seq, reason = to_sequence(dict(mv, name=_LEVEL_NAME.sub("", mv["name"])))
+            ch = chains.get(mv["name"]) if seq is None else None
+            if setup is None or (seq is None and ch is None):
+                skipped.append({"name": mv["name"], "input": mv["input"],
+                                "reason": f"needs setup: Drink level {lv}" if setup is None else reason})
+                continue
+            key = (lv, seq or ch["sequences"][0])
+            if key in level_seen:
+                skipped.append({"name": mv["name"], "input": mv["input"],
+                                "reason": f"same input as {level_seen[key]}"})
+                continue
+            level_seen[key] = mv["name"]
+            t = {"name": mv["name"], "input": mv["input"], "section": mv["section"], "setup": setup,
+                 "level": lv, "long": mv["section"] == "Super Arts",
+                 "throw": mv["section"] == "Throws" or "(When near opponent)" in mv["input"] and "360" in mv["input"]}
+            if seq is not None:
+                t.update(sequence=seq, jump=seq[0] in "89" and " 5@14 " in seq)
+            else:
+                t.update(sequence=ch["sequences"][0], alternatives=ch["sequences"][1:], parent=None,
+                         kind=ch["kind"], jump=False)
+            level_todo.append(t)
+            continue
         seq, reason = to_sequence(mv)
         if seq is None and mv["name"] in chains:
             ch = chains[mv["name"]]
@@ -878,4 +983,8 @@ def catalog_moves(framedata: dict) -> tuple[list[dict], list[dict]]:
                      "long": mv["section"] == "Super Arts",
                      "throw": mv["section"] == "Throws" or "(When near opponent)" in mv["input"]
                               and "360" in mv["input"]})
+    if level_todo:
+        rows = {m["name"]: m for m in framedata["moves"]}
+        changes = [t for t in todo if _LEVEL_CHANGES.search(rows.get(t["name"], {}).get("notes") or "")]
+        todo = [t for t in todo if t not in changes] + changes + sorted(level_todo, key=lambda t: t["level"])
     return todo, skipped
