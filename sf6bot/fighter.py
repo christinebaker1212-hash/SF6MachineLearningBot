@@ -82,7 +82,7 @@ def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
 
 GATED_RULES = {"anti_air", "whiff_punish", "di_reaction", "di_punish", "perfect_parry", "parry_throw", "di_wall",
                "di_burnout_super", "anti_air_a2a", "denjin", "operator_answer", "cmd_grab_jump", "fireball_jump",
-               "fireball_sa1", "fireball_clash", "fireball_jump_over", "move_answer", "di_burnout_jump"}
+               "fireball_sa1", "fireball_clash", "fireball_jump_over", "move_answer", "di_burnout_jump", "di_burnout_srk"}
 GATED_PREFIX = ("policy:", "neutral:")  # match intro actions (real match data, 2026-10-01)
 
 
@@ -2585,14 +2585,43 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         since = tmr - self.op_onset if isinstance(tmr, int) and isinstance(self.op_onset, int) else 0
         need = self.lead + self.stale + int(jc.get("prejump", 5)) + int(jc.get("clear", 6))
         if since + need > int(jc.get("startup", 26)):
-            self.di_stats["burnout_jump_late"] = self.di_stats.get("burnout_jump_late", 0) + 1
             self._burnout_jump_for = self.op_onset
+            sr = self._di_burnout_srk(since, dist, jc)
+            if sr is not None:
+                return sr
+            self.di_stats["burnout_jump_late"] = self.di_stats.get("burnout_jump_late", 0) + 1
             return None                              # too late to clear it: block
         self._burnout_jump_for = self.op_onset
         self.di_stats["burnout_jump"] = self.di_stats.get("burnout_jump", 0) + 1
         return Decision("seq", "neutral jump (over a Drive Impact)", str(jc.get("seq", "8@3")), rule="di_burnout_jump",
                         reason=f"opponent Drive Impact {since}F in, {dist:.2f} away, me in burnout with no Super Art "
                                f"to answer it and free to act: jumping it")
+
+    def _di_burnout_srk(self, since: int, dist: float, jc: dict) -> Decision | None:
+        """0.33.2 (user, 2026-10-07): "when he's in burnout, not in block stun, and he doesn't have enough time to jump. A
+        Shoryuken, a light Shoryuken, if timed well, will actually completely avoid a drive impact." Capcom: L Shoryuken is
+        airborne from its frame 7 to 34; the Drive Impact is active on 26-27. The L Shoryuken goes out so that its own
+        frame is `frame_target` (inside [`frame_min`, `frame_max`]) on the DI's first active frame: Ryu is well up in the
+        air through both active frames. Sent at once when it is already late enough (then it must still reach
+        `frame_min`), else after a crouch block for the difference. The frame window is an ESTIMATE (how high Ryu must be
+        to clear the DI's hitbox is not measured)."""
+        sc = jc.get("srk") or {}
+        mv = (self.c.get("moves") or {}).get(sc.get("move", "punish_l_srk"))
+        if not sc.get("enabled", True) or not mv:
+            return None
+        di_active = int(jc.get("startup", 26))
+        pre = seq_prefix(mv["seq"])
+        arrive = since + self.lead + self.stale + pre       # the DI frame the Shoryuken's frame 1 lands on, if sent now
+        own_at_di = di_active - arrive + 1
+        lo, hi, tgt = int(sc.get("frame_min", 12)), int(sc.get("frame_max", 24)), int(sc.get("frame_target", 16))
+        if own_at_di < lo:
+            return None                                       # too late even for this: block
+        wait = max(0, own_at_di - min(max(tgt, lo), hi))
+        seq = (f"1@{wait} " if wait else "") + mv["seq"]
+        self.di_stats["burnout_srk"] = self.di_stats.get("burnout_srk", 0) + 1
+        return Decision("seq", "L Shoryuken (through a Drive Impact)", seq, rule="di_burnout_srk", timed=True,
+                        reason=f"opponent Drive Impact {since}F in, {dist:.2f} away, me in burnout, too late to jump: L "
+                               f"Shoryuken timed to be on its frame {own_at_di - wait} (airborne) when the DI is active")
 
     def _super_punish(self, me: dict, op: dict, dist: float, adv, bs) -> Decision | None:
         """A blocked move that leaves time for SA3 (start-up 5): with 3 bars, SA3 instead of a small punish. Its motion

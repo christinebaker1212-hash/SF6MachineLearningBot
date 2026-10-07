@@ -457,7 +457,8 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"burnout {dd.get('burnout_super', 0)}"
                                 + (f"; jumped over a Drive Impact in burnout {dd['burnout_jump']}" if dd.get("burnout_jump")
                                    else "")
-                                + (f" (too late to jump {dd['burnout_jump_late']})" if dd.get("burnout_jump_late") else "")
+                                + (f"; L Shoryuken through it {dd['burnout_srk']}" if dd.get("burnout_srk") else "")
+                                + (f" (too late for either {dd['burnout_jump_late']})" if dd.get("burnout_jump_late") else "")
                                 + "."))
     jc_ = summary.get("jump_attack_combos") or {}
     if jc_.get("hit") or jc_.get("continued"):

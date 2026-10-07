@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.33.2 (2026-10-07): an L Shoryuken through a Drive Impact in burnout when it is too late to jump.**
 - **0.33.1 (2026-10-07): the jump over a command grab ends in j.HP on the way down and the best heavy punch combo.**
 - **0.33.0 (2026-10-07): a Drive Impact in burnout is jumped when the bot is free; a jump-in is a ground combo with a jump attack in front.**
 - **0.32.0 (2026-10-07): tightening from fights_5 / fights_6 (anti-air velocity bug, empty jumps, fireball jump-in margin, combo reach).**
@@ -4273,6 +4274,25 @@ jumping heavy punch, he should be choosing his most damaging heavy punch route a
   - A jump attack inside a route performed whole is not continued a second time afterwards (`_route_end_t`).
 - Tests `tests/test_0330.py` (rising: nothing; falling: once, late enough to hit deep; the route starts j.HP , 5HP) and
   the 0.18.4 test updated to j.HP. Not verified in game.
+
+## 0.33.2: an L Shoryuken through a Drive Impact when it is too late to jump (user, 2026-10-07)
+- User: "when he's in burnout, not in block stun, and he doesn't have enough time to jump. A Shoryuken, a light Shoryuken,
+  if timed well, will actually completely avoid a drive impact."
+- **`_di_burnout_srk`** (in rule 3b): when the 0.33.0 jump no longer fits, the L Shoryuken (`punish_l_srk`) is sent so that
+  it is on its own frame `frame_target` (16) when the Drive Impact becomes active.
+  - Capcom: L Shoryuken airborne frames 7-34; Drive Impact active 26-27.
+  - Sent at once when already later than the target; still allowed down to `frame_min` (12), up to `frame_max` (24).
+  - Earlier than the target, it crouch-blocks for the difference first.
+  - Seen later than that, it blocks.
+  - Config `di_rules.burnout_jump.srk`; the frame window is an ESTIMATE (how high Ryu must be to clear the DI's hitbox is
+    not measured). Counted in `drive_impact_rules.burnout_srk`, with a thoughts line.
+- **Timing check (Capcom frames + the estimates):** from the frame the bot sees the DI start, with input delay 3:
+  - The jump needs 5 frames to leave the ground + `clear` 6.
+  - The L Shoryuken needs its 6-frame motion + 7 frames until it is airborne.
+  - So with these numbers the jump fits whenever the L Shoryuken does, and the fallback only fires if the jump's
+    clearance is set higher. The real windows are for the user / Training Mode to confirm (asked 2026-10-07).
+- Test `tests/test_0330.py` (a jump needing more room: the L Shoryuken is timed into its airborne frames; seen too late
+  for both: block). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

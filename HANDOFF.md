@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-07: code version **0.33.1**, REFramework exporter script **v9**, branch
+*State as of 2026-10-07: code version **0.33.2**, REFramework exporter script **v9**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.33.1 is pushed** (CLAUDE.md "0.33.1"): the jump over a command grab now presses j.HP on the way down, timed to hit just before landing, and lands into the composer's best heavy punch combo (it was a j.HP-less j.HK with nothing after).
+**State:** **0.33.2 is pushed** (CLAUDE.md "0.33.2"): in burnout, too late to jump a Drive Impact -> an L Shoryuken timed to be airborne (Capcom 7-34) when the DI is active (26-27). With the current estimates the jump fits whenever the Shoryuken does; the user was asked for the real timing.
+
+**Before that:** **0.33.1 is pushed** (CLAUDE.md "0.33.1"): the jump over a command grab now presses j.HP on the way down, timed to hit just before landing, and lands into the composer's best heavy punch combo (it was a j.HP-less j.HK with nothing after).
 
 **Before that:** **0.33.0 is pushed** (CLAUDE.md "0.33.0"): in burnout, an opponent Drive Impact on a free bot (no blockstun, no Super Art answer) is jumped (62 burnout DIs in 303 recordings, 21 with the bot free, 18 of those hit); any jump attack of the bot's that hits a grounded opponent is continued with the composer's most damaging combo from the same button's ground normal (j.HP -> the best 5HP route for the meter), its first move a landing link; the fireball and Drive Impact stun jump-ins are composed the same way and compete with the lab's verified jump-in routes. The user is re-running a full K on Ryu (results to analyse).
 

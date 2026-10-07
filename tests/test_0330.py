@@ -209,3 +209,31 @@ def test_a_jumped_command_grab_gets_jump_hp_on_the_way_down_then_a_heavy_punch_c
     assert dd.kind == "route" and dd.route["route"].startswith("j.HP , 5HP")
     assert [s["trigger"] for s in dd.route["plan"]["steps"][:2]] == ["air", "landing"]
     assert f.cmd_grab_stats["jump_combo"] == 1
+
+
+# ---- 0.33.2: an L Shoryuken through the Drive Impact when the jump no longer fits ------------------------------------
+
+def test_too_late_to_jump_an_l_shoryuken_is_timed_to_be_airborne_when_the_di_is_active():
+    """User (2026-10-07): "when he's in burnout, not in block stun, and he doesn't have enough time to jump. A Shoryuken, a
+    light Shoryuken, if timed well, will actually completely avoid a drive impact." Capcom: L Shoryuken airborne 7-34,
+    Drive Impact active 26-27."""
+    import copy
+    from sf6bot.fighter import seq_prefix
+    me = {"x": 0.0, "y": 0.0, "drive": 0, "super": 0, "action_id": 1, "hitstun": 0, "blockstun": 0}
+    op = {"x": 1.5, "y": 0.0, "action_id": 855}
+    cfg = copy.deepcopy(FCFG)
+    cfg["di_rules"]["burnout_jump"]["clear"] = 16          # a jump needing more room than the L Shoryuken here
+    f = ScriptedFighter(cfg, seed=1)
+    f.lead, f.stale, f.in_burnout, f.op_onset = 3, 0, True, 400
+    f._now = 405                                           # 5 + 3 + 5 + 16 = 29 > 26: too late to jump
+    d = f._di_burnout_jump(me, op, 1.5, {"di": True})
+    assert d is not None and d.rule == "di_burnout_srk" and d.timed and "3+LP" in d.seq
+    pre = seq_prefix(d.seq)                                # frames before the button, with any wait
+    own_at_di = 26 - (5 + 3 + 0 + pre) + 1
+    sc = cfg["di_rules"]["burnout_jump"]["srk"]
+    assert sc["frame_min"] <= own_at_di <= sc["frame_max"]
+    assert f.di_stats["burnout_srk"] == 1
+    # seen too late for the L Shoryuken too: block
+    g = ScriptedFighter(cfg, seed=1)
+    g.lead, g.stale, g.in_burnout, g.op_onset, g._now = 3, 0, True, 400, 412
+    assert g._di_burnout_jump(me, op, 1.5, {"di": True}) is None and g.di_stats["burnout_jump_late"] == 1

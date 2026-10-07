@@ -687,7 +687,10 @@ di_rules:
   # neutral jump on reading the Drive Impact, while it can still leave the ground (prejump) and rise `clear` frames before
   # the DI's first active frame (Capcom start-up 26). prejump / clear are ESTIMATES (MEASURED jump: 5 frames to leave
   # the ground; ~1.1 high after 6 airborne frames)
-  burnout_jump: {enabled: true, seq: "8@3", startup: 26, prejump: 5, clear: 6}
+  burnout_jump: {enabled: true, seq: "8@3", startup: 26, prejump: 5, clear: 6,
+                 # 0.33.2 (user): too late to jump -> L Shoryuken timed so it is on its own frame frame_target (Capcom:
+                 # airborne 7-34) when the DI is active (26-27); frame_min / frame_max / frame_target are ESTIMATES
+                 srk: {enabled: true, move: punish_l_srk, frame_min: 12, frame_max: 24, frame_target: 16}}
 # 0.33.0 (user, 2026-10-07: "a jump in really is just the same combo as a ground combo with just a jumping attack added"):
 # the jump-ins the bot chooses (over a fireball; after a Drive Impact stun in the corner) are also composed as a jump
 # attack + the composer's best ground combo from the same button; the book's verified jump-in routes compete with them.
