@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-07: code version **0.35.1**, REFramework exporter script **v9**, branch
+*State as of 2026-10-07: code version **0.36.0**, REFramework exporter script **v10**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing.*
 
 ---
 
 ## 0. Right now (handover, 2026-10-06)
 
-**State:** **0.35.1 is pushed** (CLAUDE.md "0.35.1"): the catalog (C) taps The Devil Inside up to the required Drink level before Jamie's drink-level moves (27 more rows performed, the drink-4 Freeflow Strikes as their own entries), and Ransui Haze's three third hits by their press timing. Not run in game.
+**State:** **0.36.0 is pushed** (CLAUDE.md "0.36.0"): exporter v10 reads both players' collision boxes (and projectiles'); the research build is being rebuilt for it (GitHub run 37580495340; its zip goes into `refw_research/dist` when done: PENDING, the user must not update before that). The catalog stores the bot's own hitboxes per move; the punish engine judges reach box to box when both sides are known. User steps: install the online build (TOOLS), G in Training Mode (verifies the box geometry), C as Ryu (guard None). Not run in game.
+
+**Before that:** **0.35.1 is pushed** (CLAUDE.md "0.35.1"): the catalog (C) taps The Devil Inside up to the required Drink level before Jamie's drink-level moves (27 more rows performed, the drink-4 Freeflow Strikes as their own entries), and Ransui Haze's three third hits by their press timing. Not run in game.
 
 **Before that:** **0.35.0 is pushed** (CLAUDE.md "0.35.0"): the overlay's input panel is an arcade cabinet (ball-top lever, Vewlix 8-button layout with Drive Parry / Drive Impact on the fourth column, input history); `overlay.input_style: classic` brings the old panel back. Not yet seen on the user's PC.
 

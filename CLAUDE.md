@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.36.0 (2026-10-07): collision boxes from REFramework (exporter v10): the bot sees hitboxes and hurtboxes; punish reach is judged box to box.**
 - **0.35.1 (2026-10-07): the catalog (C) drinks to Jamie's required Drink level before drink-level moves.**
 - **0.35.0 (2026-10-07): arcade-cabinet input display (ball-top lever, Vewlix 8-button panel, input history) in the overlay.**
 - **0.34.0 (2026-10-07): punishes are the biggest combo that fits, for every character (blocked moves, blocked / whiffed supers, command grabs, reversals on landing); a raw super only when no combo fits.**
@@ -4418,6 +4419,47 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   lab (K) does not set up drinks for Jamie's routes. The held 22+P (several drinks in one) is not used: the taps
   are the documented one-drink move.
 - Tests `tests/test_0351.py`. Not run in game.
+
+## 0.36.0: collision boxes from REFramework (exporter v10) (user, 2026-10-07)
+- User: "feed the bot hitbox data directly from REFramework so it can discover punishes humans may not go for in the
+  moment? For example, Sonic Blade has an extended hit box in front of Guile that can be swept. This will also help it
+  judge its spacing more effectively." Capcom was asked about it first (a material addition to the disclosed memory
+  reading): "They gave me the okay."
+- **Exporter v10** (`reframework/autorun/sf6bot_state.lua`), READ only, the way the community viewer haruno-ku/SF6_Tools
+  SheldonsBoxes.lua reads them:
+  - every rect of `<player>.mpActParam.Collision.Infos` for both players, and of the battle objects in
+    `gBattle.Work.Global_work` (projectiles; at most 8, with their team and position)
+  - kinds, from each rect's own fields as the viewer does: hitbox "h", hurtbox "b", throw hurtbox "x", throw box "t",
+    pushbox "u", clash "c", proximity "p", unique "k"; flags: hitbox CondFlag / TypeFlag, hurtbox Type / Immune /
+    TypeFlag
+  - `"bx":{"p1":[...],"p2":[...],"pj":[...]}` only when a player's rects changed, and in full every 60 lines (keeps the
+    file small); at most 40 rects a player
+  - Lua stub test (`tests/test_exporter_lua.py`): written on change, the full refresh, a projectile's own rects.
+- **The research build must match:** it runs only the exact exporter it was built with, so the GitHub workflow rebuilt
+  it for v10 (run 37580495340); the new zip goes into `refw_research/dist/` when the run finishes (PENDING until then: do
+  not update or install before it is there). Install it with TOOLS -> "Online build: install" (SF6 closed,
+  administrator); offline-only setups use R.
+- **Python** (`sf6bot/boxes.py`):
+  - `BoxTracker` carries the change-only boxes forward on every line (live reader, recordings via `read_recording`):
+    `p1["boxes"]`, `p2["boxes"]`, `projectiles`. Recordings keep the raw `bx`.
+  - Geometry ASSUMPTION: OffsetX / OffsetY = the rect's centre, SizeX / SizeY = its half size, world units (as the
+    viewer draws them). **state-check (menu G) now verifies it in Training Mode:** boxes present; each pushbox contains
+    its player's x; the two pushboxes touch at contact distance; the cr.MK's hitbox overlaps the dummy's hurtbox.
+  - Flag meanings are community readings (UNVERIFIED): hurtbox Type 1 / 2 = invincible; Immune / CondFlag bits for
+    standing / crouching / airborne.
+- **Catalog (C):** each move now stores the bot's own boxes per game frame (`boxes`: frames on change, relative to where
+  the move started so its travel counts, mirrored so + is forward), with a hit profile: the farthest hitbox front, the
+  heights it covers, and the same for the FIRST hit only (`first_front`, `first_y`), and how far its hurtbox sticks out.
+  Re-run C as Ryu (guard None is enough) after installing v10 to get them.
+- **Punish engine** (`punish._pe_gap`): when the bot's move has a hit profile AND the opponent's live hurtboxes are known,
+  the reach check is box to box: the first hit's hitbox front against the opponent's nearest hittable hurtbox at those
+  heights (invincible hurtboxes left out). A hurtbox stretched forward in recovery (the user's Sonic Blade) is reached
+  even when the bodies are out of range. Without either, the old centre distance vs measured reach. Counted per match
+  in `fight_summary.hitboxes` {box_gaps, box_reached_out_of_range}.
+- Not yet: neutral spacing by boxes (pokes, anti-air, throws), projectile boxes in fireball play, learning each opponent
+  move's stretched hurtbox from recordings. These come after the first real data (state-check + a C run + a session).
+- Tests `tests/test_0360.py` (parsing, carry-forward, hurt gaps by height and invincibility, the move profile from its
+  start, the Sonic Blade case), `tests/test_state_check.py` (box checks on the simulated exporter). Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
