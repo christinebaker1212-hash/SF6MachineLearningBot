@@ -265,6 +265,25 @@ class Composer:
                 self.trans[k] = t
                 self.by_prev.setdefault(a, []).append(t)
                 self.stats["capcom_cancels"] += 1
+        # 0.37.0 (user: "2MK can also be used as a cancel window for more damaging offensive opportunities using Drive
+        # rush cancel"): a Drive Rush cancel verified from one normal is usable from every special-cancelable normal the
+        # bot performs in a verified route; what follows the rush is the rush's own verified transitions
+        rush = next((t for t in self.trans.values() if t["cf"] and t["system"] == "drive_rush"
+                     and t["step"].get("connector") == ">" and not t["capcom"]), None)
+        if rush is not None:
+            for a in sorted(n for n in nodes if n):
+                ra = self.row(a)
+                if ra is None or not (ra.get("section") or "").startswith("Normal") \
+                        or "C" not in (ra.get("cancel") or "").upper().replace("SA", ""):
+                    continue
+                k = f"{a}|*|>|{rush['name']}"
+                if k in self.trans:
+                    continue
+                t = dict(rush, key=k, prev=a, prev_ctx=(False, False), srcs=set(), fx={}, p0=P_CAPCOM, capcom=True,
+                         corner=False, first_ok={"normal"}, later_ok=True, step=dict(rush["step"]))
+                self.trans[k] = t
+                self.by_prev.setdefault(a, []).append(t)
+                self.stats["capcom_rush_cancels"] = self.stats.get("capcom_rush_cancels", 0) + 1
 
     def calibrate(self, book: list[dict]) -> None:
         from .combo_gen import estimate_damage

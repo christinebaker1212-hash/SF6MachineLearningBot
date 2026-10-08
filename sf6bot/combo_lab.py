@@ -619,6 +619,8 @@ class ComboRun:
                  fixed_lead: int | None = None, adopt: dict | None = None, reach: dict | None = None,
                  block_ok: bool = False):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        self.confirm = confirm
+        self._tighten(0)
         self.block_ok = block_ok          # 0.37.0, matches: the first move's block counts as its contact (a blockstring)
         self.block_contact = None
         # 0.32.0, matches: {move name: the farthest distance it is started from} (fighter config combo_reach.follow)
@@ -696,6 +698,7 @@ class ComboRun:
                 and (steps[1].get("prefix") or 0) > SWITCH_MOTION_MAX:
             return False
         self.steps = [self.steps[0]] + [dict(x) for x in steps[1:]]
+        self._tighten(1)
         self.rt = self.rt[:1] + [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[])
                                  for _ in steps[1:]]
         if same and sent1 is not None:
@@ -715,6 +718,7 @@ class ComboRun:
             return False
         old_fixed = self.fixed
         self.steps = self.steps[:j] + [dict(x) for x in steps[j:]]
+        self._tighten(j)
         self.rt = self.rt[:j] + [dict(sent=None, start=None, moving=0, contact=None, start_id=None, contacts=[])
                                  for _ in steps[j:]]
         if fixed and len(fixed) == len(steps):
@@ -1152,6 +1156,25 @@ class ComboRun:
         if base is None:
             return None
         return n if tick >= base + CONTACT_PLUS + off - self.lead - st["prefix"] else None
+
+    def _tighten(self, j0: int) -> None:
+        """0.37.0, matches only: a special / Super Art cancelled from a crouching move (the bot already holds down) leaves
+        out its motion's first '2' (down stays held from the move into the motion): the button reaches the game 3 frames
+        sooner. MEASURED (0.36.1 ranked, 213 2MK hits): the
+        super came out when its button was read 10-11 frames after the hit (54 of 54) and never at 12-14 (46: the
+        15-frame 236236 motion; '2MK > SA1: not_out' 113 in the run summaries)."""
+        if not self.confirm:
+            return
+        for n in range(max(1, j0), len(self.steps)):
+            st, prev = self.steps[n], self.steps[n - 1]
+            seq, pseq = (st.get("sequence") or "").split(), (prev.get("sequence") or "").split()
+            if not st.get("hitting") or st.get("system") or st.get("trigger") != "contact" or len(seq) < 3 or not pseq \
+                    or st.get("tightened"):
+                continue
+            if seq[0].startswith("2@") and pseq[-1][:1] == "2":
+                fr = int(seq[0].split("@")[1]) if seq[0].split("@")[1].isdigit() else 3
+                self.steps[n] = dict(st, sequence=" ".join(seq[1:]), prefix=max(0, int(st.get("prefix") or 0) - fr),
+                                     tightened=True)
 
     def _contact_base(self, n: int, tick: int, p1: dict) -> int | None:
         """The tick step n's cancel is timed from: the previous move's contact, seen or predicted. For a cancel
@@ -2662,7 +2685,9 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
             # a Parry Drive Rush's parry stays held until its dash (0.20.5)
             # 0.28.0: a move held through for a later charge move ends still holding the charge (apply_charge)
             _, ok = runner.run(parse_sequence(seq, run.steps[k]["name"]), stop_event=sess.stop_event,
-                               end_neutral=not (run.steps[k].get("pdr") or run.steps[k].get("charge_hold")))
+                               end_neutral=not (run.steps[k].get("pdr") or run.steps[k].get("charge_hold")
+                                                # 0.37.0: down stays held into a super motion that leaves out its '2'
+                                                or (k + 1 < len(run.steps) and run.steps[k + 1].get("tightened"))))
             if not ok:
                 break
         if run.super_connected is not None and not confirm:

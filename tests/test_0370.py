@@ -501,3 +501,56 @@ def test_a_punish_counter_link_is_used_after_a_drive_rush_cancel_5hp():
     names = [[comp.trans[k]["name"] for k in c["path"]] for c in found]
     assert any(n[:3] == ["drive_rush", "Standing Heavy Punch", "Standing Heavy Punch"] for n in names), names[:5]
     assert all(c["hit_req"] == "normal" for c in found)
+
+
+# ---- item 27: a super cancelled from a crouching move reaches the game 3 frames sooner ----------------------------------
+
+def test_a_super_after_a_crouching_move_leaves_out_its_first_down_in_matches():
+    """MEASURED (0.36.1 ranked): after a 2MK hit the super came out with its button read 10-11 frames after the hit, never
+    at 12-14 (the 15-frame 236236 motion)."""
+    from sf6bot import combo_lab as cl
+    from tests.test_0240 import _entry
+    steps = _entry("2MK > 236236P", 2600)["plan"]["steps"]
+    run = cl.ComboRun([dict(s) for s in steps], {}, {1}, {1}, set(), confirm=True)
+    assert run.steps[1]["sequence"] == "3@3 6@3 2@3 3@3 6+HP@3" and run.steps[1]["prefix"] == 12
+    lab = cl.ComboRun([dict(s) for s in steps], {}, {1}, {1}, set())
+    assert lab.steps[1]["sequence"].startswith("2@3 3@3") and lab.steps[1]["prefix"] == 15     # the lab is unchanged
+    standing = _entry("5HP > 623HP , 236236K", 4000)["plan"]["steps"]
+    run2 = cl.ComboRun([dict(s) for s in standing], {}, {1}, {1}, set(), confirm=True)
+    assert run2.steps[2]["sequence"].startswith("2@3")                                          # not after a 623
+
+
+def test_a_2mk_can_drive_rush_cancel_into_the_rushs_verified_follow_ups():
+    """User: "2MK can also be used as a cancel window for more damaging offensive opportunities using Drive rush cancel"."""
+    from sf6bot import combo_compose as cc
+    from tests.test_0240 import CAP, _book, _entry
+    comp = cc.build(_book(), CAP)
+    t = comp.trans["Crouching Medium Kick|*|>|drive_rush"]
+    assert t["capcom"] and t["drive"] == 30000
+    s0 = _entry("2MK > 236MK", 1500)["plan"]["steps"][:1]
+    found = comp.search(s0, None, drive=60000, sup=30000, corner=False, hit_ok=("normal",))
+    names = [[comp.trans[k]["name"] for k in c["path"]] for c in found]
+    assert any(n[:2] == ["drive_rush", "Standing Heavy Kick"] for n in names)
+    # without the Drive to spare (never into burnout) it does not rush
+    poor = comp.search(s0, None, drive=0, sup=0, corner=False, hit_ok=("normal",))
+    assert not any("drive_rush" in [comp.trans[k]["name"] for k in c["path"]] for c in poor)
+
+
+# ---- item 12: a mirror's side from the bot's name on the VS screen --------------------------------------------------
+
+def test_the_bots_name_on_one_half_of_the_vs_screen_gives_its_side():
+    from sf6bot.ladder_read import LadderReader
+    texts = {"left": "MASTER 1452 MR RYU ExampleBot Frame Perfect", "right": "DIAMOND 4 21000 LP Opponent"}
+    lr = LadderReader(lambda part, keep=None: texts[part])
+    assert lr.side_of(["ExampleBot"]) is None            # nothing read yet
+    lr.tick(0.0, "loading")
+    assert lr.side_of(["ExampleBot"]) == 0 and lr.side_of(["Frame Perfect"]) == 0
+    assert lr.side_of(["Examp1eBot"]) == 0               # one OCR slip
+    assert lr.side_of(["Somebody"]) is None and lr.side_of([]) is None
+    texts["right"] = "ExampleBot"                         # on both halves: unclear
+    lr.tick(5.0, "loading")
+    assert lr.side_of(["ExampleBot"]) is None
+    lr.tick(10.0, "fight")
+    texts.update(left="Opponent", right="ExampleBot")
+    lr.tick(20.0, "loading")                              # a new VS screen starts over
+    assert lr.side_of(["ExampleBot"]) == 1

@@ -4502,6 +4502,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     if screen_reader is None and mwatch is not None and getattr(sess, "screen_text", None) is not None:
         screen_reader = sess.screen_text            # tests: a scripted screen
     # 0.20.1 (user): LP / MR / rank read from the screen (VS screen, result screen, Fighting Ground), never in a fight
+    # 0.37.0: the bot's own name(s) as SF6 shows them on the VS screen (configs/local.yaml ranked.cfn, ranked.side_text;
+    # never in the repo): a mirror's side is read there before "Fight!", so no crouch probe is needed
+    rk_ = cfg.get("ranked") or {}
+    side_names = [x for x in [rk_.get("cfn")] + list(rk_.get("side_text") or []) if isinstance(x, str) and x.strip()]
     ladder = None
     if versus == "ranked" and screen_reader is not None and (cfg.get("ladder_read") or {}).get("enabled", True):
         from .ladder_read import LadderReader, read_half_factory
@@ -5156,6 +5160,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 i_ = by_character(st.raw, fcfg.get("character"))
                 if i_ is not None:
                     side.update(i=i_, how="character")
+                elif ladder is not None and ladder.side_of(side_names) is not None:
+                    # 0.37.0 (user: no crouch probe in mirrors; read the bot's name on the VS screen instead)
+                    side.update(i=ladder.side_of(side_names), how="my name on the VS screen")
                 elif fight_on and c.armed:
                     status("finding my side: crouch probe (neither or both players are "
                            f"{fcfg.get('character')})", detail)

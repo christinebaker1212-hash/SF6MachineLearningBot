@@ -117,6 +117,7 @@ class LadderReader:
         self.phase = None
         self.next_t = 0.0
         self.pre: list[tuple] = []          # (left parse, right parse) on the VS / loading screen
+        self.pre_texts: list[tuple] = []    # 0.37.0: (left text, right text) of the same reads (the side of a mirror)
         self.post: list[tuple] = []         # (left parse, right parse) on the result screen
         self.menu: dict = {}                # the bot's own numbers on Fighting Ground (latest read with any)
         self.raw: list[dict] = []           # texts kept for ladder_reads.md (first matches only)
@@ -143,6 +144,7 @@ class LadderReader:
                 self.post = []
             if phase == "loading" and self.phase != "loading":
                 self.pre = []
+                self.pre_texts = []
             self.phase = phase
         if phase not in ("loading", "result") or now < self.next_t:
             return
@@ -158,9 +160,23 @@ class LadderReader:
             except TypeError:
                 texts.append(self.read(part) or "")
         reads.append((parse(texts[0]), parse(texts[1])))
+        if phase == "loading":
+            self.pre_texts.append((texts[0], texts[1]))
         if self.matches_seen < 10:
             self.raw.append({"match": self.matches_seen + 1, "phase": phase,
                              "left": " ".join(texts[0].split())[:240], "right": " ".join(texts[1].split())[:240]})
+
+    def side_of(self, names) -> int | None:
+        """0.37.0 (user: a mirror match's side without the crouch probe, e.g. the bot's own name or title on the VS
+        screen): 0 when one of `names` (the bot's CFN / title from configs/local.yaml) was read on the left half (P1) and
+        never on the right, 1 the other way round; None when not read or read on both halves."""
+        from .screen_text import contains
+        names = [n for n in (names or []) if isinstance(n, str) and len(n.strip()) >= 3]
+        if not names or not self.pre_texts:
+            return None
+        left = any(contains(a, n) for a, _ in self.pre_texts for n in names)
+        right = any(contains(b, n) for _, b in self.pre_texts for n in names)
+        return 0 if left and not right else 1 if right and not left else None
 
     def menu_text(self, text: str | None) -> None:
         p = parse(text or "")

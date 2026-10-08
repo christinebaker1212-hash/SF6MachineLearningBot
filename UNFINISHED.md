@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08. Steps 1-6 done; step 7 in progress (29, 31/10, 34, 35 done; next 20, 27). Full suite passed after step 6.** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08. Steps 1-6 done; step 7 done (20 / 27: the measured causes fixed, see below); step 8 done; next: step 9 (full suite, version, docs, push). Full suite passed after step 6.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -239,3 +239,18 @@ CA 3.6%; DI performed 0.5 a match.
   block as its contact and the cancel goes out on a block too (whiff: nothing more). Tests in test_0370.
 - 35: `combo_compose.Composer.rush_as_pc` / `RUSH_AS_PC` 0.85: a link verified only after a CH / PC opener is used after
   the same move out of a Drive Rush (the +4). The burnout rule still stands (the composer never spends into burnout).
+
+### Step 7, items 20 / 27 + the user's 2MK note (done, committed)
+- MEASURED (0.36.1, 213 2MK hits): the super came out when its button was read 10-11 frames after the hit (54 of 54), never
+  at 12-14 (46). Run summaries: "2MK > SA1: not_out" 113. Fix: `ComboRun._tighten` (matches only): a cancelled motion
+  starting with '2' after a crouching move leaves out that '2' (prefix -3) and the crouching move ends still holding down
+  (`end_neutral` False when the next step is `tightened`). After a 623 nothing changes.
+- The other "not_out" counts for specials (5HP, 2MP ...) were mostly an artefact: a cancelled special's id shows only once
+  hitstop ends (~12 frames after the hit).
+- User (mid-step): "2MK can also be used as a cancel window for more damaging offensive opportunities using Drive rush
+  cancel": `Composer.add_capcom_cancels` adds the verified Drive Rush cancel to every special-cancelable normal the bot
+  performs in a verified route (P_CAPCOM 0.75). Never into burnout (unchanged).
+### Step 8, mirror side (done, committed)
+- `LadderReader.side_of(names)` (ranked: the VS screen is already OCR'd in two halves): the bot's name read on one half
+  only = its side, checked before the crouch probe. Names from configs/local.yaml `ranked.cfn` and `ranked.side_text`
+  (a list, e.g. its title; the user mentioned "Frame Perfect"). Never put them in the repo. SideCheck still verifies.
