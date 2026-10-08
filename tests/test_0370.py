@@ -331,3 +331,31 @@ def test_multi_hit_moves_are_counted_and_never_get_a_reaction_drive_impact():
              "active": "15-39 15-17, 36-39", "notes": "", "input": "236+HK"}]
     got = {m["name"]: r["do"] for m, r in _auto_rules(rows, FCFG)}
     assert got == {"Double Rolling Sobat": "di_react"}                       # 2 hits: the armor holds
+
+
+def test_ken_pressing_for_a_jinrai_follow_up_after_a_blocked_jinrai_gets_a_drive_impact():
+    """User: "Ken's jinrai kick follow ups are all perfectly DIable, AS LONG AS HE INITIATES THEM"."""
+    moves = {920: {"name": "L Jinrai Kick", "answer": {"do": "di_followup", "name": "L Jinrai Kick",
+                                                        "buttons": ["LK", "MK", "HK"],
+                                                        "never_after": ["^Standing Heavy Punch$", "^M Jinrai Kick$"]}},
+             921: {"name": "M Jinrai Kick", "answer": {"do": "di_followup", "name": "M Jinrai Kick",
+                                                        "buttons": ["LK", "MK", "HK"],
+                                                        "never_after": ["^Standing Heavy Punch$", "^M Jinrai Kick$"]}},
+             608: {"name": "Standing Heavy Punch"}}
+
+    def play(aid, blocked, press, before=1):
+        f = ScriptedFighter(FCFG, moves, seed=1)
+        f.lead = 4
+        _line(f, op={"x": 1.2, "action_id": before}, timer=800)
+        out = []
+        for k in range(30):
+            bs = max(0, 20 - k) if blocked and k >= 12 else 0
+            op = {"x": 1.2, "action_id": aid, "dir": 6 if press and k >= 22 else 5,
+                  "buttons": ["MK"] if press and k == 22 else []}
+            out.append(_line(f, me={"blockstun": bs, "action_id": 160 if bs else 1}, op=op, timer=801 + k))
+        return [d for d in out if d.rule == "move_answer"]
+    got = play(920, blocked=True, press=True)
+    assert len(got) == 1 and got[0].seq.endswith("5+HP+HK@3")
+    assert not play(920, blocked=True, press=False)                 # no follow-up initiated: nothing
+    assert not play(920, blocked=False, press=True)                 # Jinrai whiffed: nothing
+    assert not play(921, blocked=True, press=True, before=608)      # HP > M Jinrai: never

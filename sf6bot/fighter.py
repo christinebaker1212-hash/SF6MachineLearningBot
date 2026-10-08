@@ -363,6 +363,7 @@ def _answer_info(m: dict, r: dict) -> dict:
             "react_by": r.get("react_by"), "after": r.get("after"), "after_blocked": r.get("after_blocked"),
             "never_after": r.get("never_after"), "fallback": r.get("fallback"),
             "unless_after": r.get("unless_after"), "unless_match": r.get("unless_match"), "name": m["name"],
+            "buttons": r.get("buttons"), "min_frame": r.get("min_frame"),
             "auto": bool(r.get("auto")), "teleport": bool(r.get("teleport"))}
 
 
@@ -1045,6 +1046,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         md = ans.get("max_dist")
         name = ans.get("name") or str(oa)
         L = self.lead + self.stale
+        if ans["do"] == "di_followup":
+            return self._di_followup(ans, me, op, name, fr, L)
         if ans["do"] == "di_react":
             d = self._di_react(ans, me, op, dist, fr, L, name)
             if d is not None or not ans.get("fallback"):
@@ -1103,6 +1106,44 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return Decision("seq", di["name"], di["seq"], rule="move_answer", timed=True,
                             reason=f"your answer to {name}: Drive Impact through its follow-ups ({ans.get('why', '')})")
         return None
+
+    def _di_followup(self, ans: dict, me: dict, op: dict, name: str, fr: int, L: int) -> Decision | None:
+        """0.37.0 (user: "Ken's jinrai kick follow ups are all perfectly DIable, AS LONG AS HE INITIATES THEM"; earlier: only
+        after the Jinrai Kick was BLOCKED, never after HP > M Jinrai): the follow-up's button press (forward + a kick, read
+        from Ken's input during the Jinrai) is the trigger, not the follow-up's start-up: the Drive Impact goes out at once,
+        timed to the bot's first free frame after the blocked Jinrai, so its armor is up before the follow-up (Capcom:
+        follow-ups from Jinrai frames 30-35, Kazekama start-up 6)."""
+        if not self._cur_op_blocked or fr < int(ans.get("min_frame") or 8):
+            return None
+        nv = ans.get("never_after")
+        prev_name = (self.opp.get(self._prev_op_act) or {}).get("name") or ""
+        if nv and len(nv) == 2 and re.search(nv[0], prev_name, re.I) and re.search(nv[1], name, re.I):
+            if self._ma_for != self.op_onset:
+                self.answer_stats["skipped_unless"] += 1
+            self._ma_for = self.op_onset
+            return None
+        btn = set(op.get("buttons") or ())
+        mask = op.get("input")
+        bits = {"LK": 0x80, "MK": 0x100, "HK": 0x200}
+        if isinstance(mask, (int, float)) and not btn:
+            btn = {b for b, v in bits.items() if int(mask) & v}
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        fwd = op.get("dir") in (3, 6, 9) if "dir" in op else (
+            isinstance(mask, (int, float)) and mx is not None and ox is not None
+            and bool(int(mask) & (0x8 if mx > ox else 0x4)))
+        if not (btn & set(ans.get("buttons") or bits)) or not fwd:
+            return None
+        if (_num(me.get("hitstun")) or 0) or (_num(me.get("y")) or 0.0) > 0.05 \
+                or not self.can_spend(me, "drive_impact", reserve=int(self.c.get("drive_reserve", 10000))):
+            return None
+        pad = max(0, stun_left(me) - L)
+        di = (self.c.get("moves") or {}).get("drive_impact") or {"name": "Drive Impact", "seq": "5+HP+HK@3"}
+        self._ma_for = self.op_onset
+        self.answer_stats["sent"] += 1
+        self.answer_stats["by_move"][name + " follow-up"] = self.answer_stats["by_move"].get(name + " follow-up", 0) + 1
+        return Decision("seq", di["name"], (f"5@{pad} " if pad else "") + di["seq"], rule="move_answer", timed=True,
+                        reason=f"{name} blocked and Ken pressed for a follow-up: Drive Impact on my first free frame "
+                               f"({ans.get('why', '')})")
 
     def _di_react(self, ans: dict, me: dict, op: dict, dist: float, fr: int, L: int, name: str) -> Decision | None:
         """0.37.0: the reaction Drive Impact of `_move_answer` (see there), or None (not now / not this move)."""

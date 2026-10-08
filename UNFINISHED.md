@@ -197,6 +197,10 @@ CA 3.6%; DI performed 0.5 a match.
   59 Shoryuken, 113 Drive Impact (lists were shown to the user in chat). The user was asked to name any others to drop;
   candidates flagged as doubtful: Viper's Focus Force (armored in game), Jamie's Swagger Step, Elena's Moon Glider, Ken's
   Kasai Thrust Kick (a follow-up), Cammy's Spiral Arrow (a low slide marked airborne).
+- User (2026-10-08): "Ken's jinrai kick follow ups are all perfectly DIable, AS LONG AS HE INITIATES THEM": new answer
+  `do: di_followup` (fighter._di_followup) on L/M/H Jinrai: Ken's forward + kick press during a BLOCKED Jinrai triggers
+  the Drive Impact at once, timed to the bot's first free frame (`5@pad 5+HP+HK@3`); never after 5HP > M Jinrai. The
+  follow-up-id rule stays as a fallback. Test added.
 - KNOWN FAILING TEST (fix first): tests/test_ranked_baseline_fixes.py::test_supers_parries_and_drive_impacts_need_a_reason
   expects a lethal SA1 from neutral; 0.37.0 turned that off. Replace its lines
   `low = dict(idle, hp=1500)` / `assert any(... == "super" ...)` with: off by default (assert not any over 300 picks),

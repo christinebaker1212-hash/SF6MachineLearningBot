@@ -138,7 +138,7 @@ def test_a_jinrai_follow_up_after_a_blocked_jinrai_gets_a_drive_impact_but_not_o
     _, got = play(920, blocked=False)                         # whiffed Jinrai: no Drive Impact on the follow-up
     assert not got
     g, got = play(921, blocked=True, before=608)              # HP > M Jinrai: never
-    assert not got and g.answer_stats["skipped_unless"] == 1
+    assert not got and g.answer_stats["skipped_unless"] >= 1      # 0.37.0: the press rule refuses it too
 
 
 def test_ingrid_vanishing_sun_gets_the_shoryuken_after_its_invincibility(tmp_path):

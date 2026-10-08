@@ -299,6 +299,10 @@ move_answers:
     - {match: "^(L|M|OD) Dragonlash Kick$|^\\[Quick Dash\\] Dragonlash Kick$", do: anti_air, move: punish_l_srk,
        max_dist: 2.0, why: "user: Dragonlash must be Shoryukened"}
     - {match: "^Standing Heavy Kick$", do: di_react, normal: true, max_dist: 2.2, why: "user: DI it on reaction"}
+    # the user (2026-10-08): "Ken's jinrai kick follow ups are all perfectly DIable, AS LONG AS HE INITIATES THEM": the
+    # trigger is Ken's follow-up press (forward + a kick) during a BLOCKED Jinrai, not the follow-up's start-up
+    - {match: "^(L|M|H) Jinrai Kick$", do: di_followup, buttons: [LK, MK, HK],
+       never_after: ["^Standing Heavy Punch$", "^M Jinrai Kick$"], why: "user: DI the Jinrai follow-ups he initiates"}
     - {match: "^(OD )?(Kazekama Shin Kick|Gorai Axe Kick|Senka Snap Kick)$", do: di_react, after: "Jinrai Kick$",
        after_blocked: true, never_after: ["^Standing Heavy Punch$", "^M Jinrai Kick$"], max_dist: 2.2,
        why: "user: DI the follow-up after a blocked Jinrai Kick"}
