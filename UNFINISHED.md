@@ -191,6 +191,12 @@ CA 3.6%; DI performed 0.5 a match.
   - Grapplers (item 5): no specific rule; their damage came from pokes walked into (Manon 5MP 43k at 1.7, Alex Lariat
     1.8) and command grabs (victim ids overlap Ryu's ids, so the "own move" split is meaningless): covered by STANCE.
   - Drive spent blocking (item 6): not addressed beyond fewer openings / reaction DIs / rush checks. Say so in the report.
+- User correction (2026-10-08): "H Hundred Lightning Kicks is 5 hits, it'll break DI. E. Honda's Hundred Hand Slaps will
+  break DI." Cause: `_answer_info` counted hits from the last token of Capcom's active column ("23-47 23-24, 28-29, ..."),
+  so every multi-hit move read as 1 hit. Fixed (counts the ranges after the first token); test added. Auto answers now:
+  59 Shoryuken, 113 Drive Impact (lists were shown to the user in chat). The user was asked to name any others to drop;
+  candidates flagged as doubtful: Viper's Focus Force (armored in game), Jamie's Swagger Step, Elena's Moon Glider, Ken's
+  Kasai Thrust Kick (a follow-up), Cammy's Spiral Arrow (a low slide marked airborne).
 - KNOWN FAILING TEST (fix first): tests/test_ranked_baseline_fixes.py::test_supers_parries_and_drive_impacts_need_a_reason
   expects a lethal SA1 from neutral; 0.37.0 turned that off. Replace its lines
   `low = dict(idle, hp=1500)` / `assert any(... == "super" ...)` with: off by default (assert not any over 300 picks),

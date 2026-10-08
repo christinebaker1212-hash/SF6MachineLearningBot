@@ -347,7 +347,11 @@ def _answer_info(m: dict, r: dict) -> dict:
                 break
     act = m.get("active") or ""
     nums = [int(x) for x in re.findall(r"\d+", act)]
-    groups = act.split()[-1].split(",") if len(act.split()) > 1 else ([act] if act else [])
+    # Capcom writes a multi-hit move as "23-47 23-24, 28-29, ..." (the whole range, then each hit): count the hits after
+    # the first token (0.37.0 fix: the last token alone read every multi-hit move as 1 hit; the user caught H Hundred
+    # Lightning Kicks and the Hundred Hand Slaps, which break Drive Impact's 2-hit armor)
+    parts = act.split(None, 1)
+    groups = [g for g in parts[1].split(",") if g.strip()] if len(parts) > 1 else ([act] if act else [])
     canc = m.get("cancel") or ""
     sa = sorted({int(x) if x else 1 for x in re.findall(r"SA(\d)?", canc)})
     return {"do": r["do"], "move": r.get("move"), "max_dist": r.get("max_dist"), "why": r.get("why", ""),

@@ -319,3 +319,15 @@ def test_walking_forward_inside_two_is_discouraged_at_master():
     wf, cr = npol.it.INTENTS.index("walk_fwd"), npol.it.INTENTS.index("crouch")
     near = pol.style({"x": 0.0}, {"x": 1.3})
     assert near[wf] < 0.5 and near[cr] > 1.0
+
+
+def test_multi_hit_moves_are_counted_and_never_get_a_reaction_drive_impact():
+    """User: "H Hundred Lightning Kicks is 5 hits, it'll break DI. E. Honda's Hundred Hand Slaps will break DI"."""
+    rows = [{"section": "Special Moves", "name": "H Hundred Lightning Kicks", "startup_n": 23, "total_n": 62,
+             "active": "23-47 23-24, 28-29, 32-33, 38-39, 46-47", "notes": "", "input": "236+HK"},
+            {"section": "Special Moves", "name": "M Hundred Hand Slap", "startup_n": 16, "total_n": 64,
+             "active": "16-47 16-17, 22-23, 25, 29, 32, 36, 40, 43, 46-47", "notes": "", "input": "214+MP"},
+            {"section": "Special Moves", "name": "Double Rolling Sobat", "startup_n": 15, "total_n": 63,
+             "active": "15-39 15-17, 36-39", "notes": "", "input": "236+HK"}]
+    got = {m["name"]: r["do"] for m, r in _auto_rules(rows, FCFG)}
+    assert got == {"Double Rolling Sobat": "di_react"}                       # 2 hits: the armor holds
