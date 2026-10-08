@@ -255,3 +255,29 @@ def test_the_throw_tech_comes_before_the_punish_engine_on_a_free_bot():
     _line(g, op={"x": 0.8, "action_id": 9}, timer=600)
     d2 = _line(g, me={"hitstun": 6, "action_id": 212}, op={"x": 0.8, "action_id": 715}, timer=601)
     assert d2.rule != "throw_tech" and g.tech_handled is None
+
+
+def test_a_sequence_without_the_final_neutral_still_holds_its_last_step():
+    # 0.38.2: 0.38.1 ran fight sequences with end_neutral=False and the runner then returned as soon as the last step was
+    # pressed, so the fight loop's end_guard replaced it at once (a live 8-frame walk lasted 1-3 frames vs Cammy)
+    import time
+    from sf6bot.sequences import SequenceRunner, parse_sequence
+    from tests.test_actions_sequences import make
+    from sf6bot.controller import Facing
+    seq = parse_sequence("6@8")
+    _, c = make(Facing.RIGHT)
+    t0 = time.perf_counter()
+    SequenceRunner(c, frame_s=0.01).run(seq, end_neutral=False, wait_last=True)
+    assert time.perf_counter() - t0 >= 0.075                       # the walk's 8 frames were waited
+    assert c.current.direction == 6                                 # and nothing released it
+    _, c = make(Facing.RIGHT)
+    t0 = time.perf_counter()
+    SequenceRunner(c, frame_s=0.01).run(seq, end_neutral=False)    # the old call returns at once (lab callers)
+    assert time.perf_counter() - t0 < 0.05
+
+
+def test_the_fight_loop_waits_out_the_last_step():
+    import inspect
+    from sf6bot import fighter
+    src = inspect.getsource(fighter.run_fight)
+    assert "end_neutral=False, wait_last=True" in src

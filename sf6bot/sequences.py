@@ -83,7 +83,7 @@ class SequenceRunner:
 
     def run(self, seq: Sequence, stop_event: threading.Event | None = None,
             end_neutral: bool = True, start_at: float | None = None,
-            abort=None) -> tuple[list[StepTiming], bool]:
+            abort=None, wait_last: bool = False) -> tuple[list[StepTiming], bool]:
         """Execute blocking. Returns (step timings, completed). `abort`: optional callable polled
         while waiting (~1 ms); a truthy return stops the sequence and is kept in `self.aborted`."""
         t0 = start_at if start_at is not None else clock.now()
@@ -93,7 +93,9 @@ class SequenceRunner:
         completed = True
         self.sink({"type": "sequence_start", "t": clock.now(), "name": seq.name,
                    "notation": seq.notation(), "facing": self.controller.facing.value})
-        plan = list(seq.steps) + ([Step(NEUTRAL, 0)] if end_neutral else [])
+        plan = list(seq.steps) + ([Step(NEUTRAL, 0)] if end_neutral else [None] if wait_last else [])
+        # wait_last (0.38.2): without the final neutral step the last step's own frames were not waited, so the caller's
+        # next input replaced it at once (0.38.1: an 8-frame walk lasted 1-3 frames). None = wait, press nothing.
         for i, step in enumerate(plan):
             scheduled = t0 + cum * self.frame_s
             if abort is not None:
@@ -108,6 +110,8 @@ class SequenceRunner:
                     break
             if not clock.precise_sleep_until(scheduled, stop_event=stop_event):
                 completed = False
+                break
+            if step is None:
                 break
             if not self.controller.armed:
                 completed = False

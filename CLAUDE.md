@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.38.2 (2026-10-08): fixes 0.38.1's regression: every sequence's last input was cut short (walks lasted 1-3 frames; he stood in place).**
 - **HIGH MASTER (user's Battle Settings screen, 2026-10-08): Ryu 1601 MR, 47,280 LP, rank badge "High Master".** From the screenshot; the matches since 1530 MR (0.37.3 / 0.38.x) are not measured from the files yet.
 - **0.38.1 (2026-10-08): sequences end on the guard, not on neutral (~10% of the damage taken landed in that gap); the throw tech before the punish engine.**
 - **0.38.0 (2026-10-08): from the 0.37.x run (38-11): multi-hit projectile parries held, Hooligan Shoryukened, the 3-lights rule, no reversal guesses, no late super cancels, OD Hadoken clash limits, no Hadoken into Cammy SA3, Luke's charged Flash Knuckle.**
@@ -4770,6 +4771,21 @@ MEASURED on the same 49 finished 0.37.x matches (750k damage taken in 96 fight m
 - Which version played these matches, the record and the scorecard are not known yet: waiting for the fight files and S.
   MR is the measure from here; matchmaking by MR pulls the win rate toward 50%. "Competitive with top players" stays a
   separate, open claim (M5).
+
+## 0.38.2: 0.38.1 cut every sequence's last input short (user, 2026-10-08)
+- User: "Did you...maybe accidentally break anything in the last update? ... his neutral seemed worse. He just stood in
+  place." Uploaded one 0.38.1 ranked round vs Cammy.
+- MEASURED (the bot free, the opponent free): at 1.5-2.5 apart down-back 92%, walking ~3%; the six 0.37.3 Cammy matches
+  at the same distances: down-back 36-60%, walking forward / back 35-52%. Forward walks ran 1-3 frames (8-frame runs: 0);
+  in 0.37.3 the 8-frame walk was the most common run. A replay of `decide()` with the user's models chose walks as often
+  as 0.37.3 / 0.38.0 did, so the choices were the same: the execution was broken.
+- Cause (my bug in 0.38.1): to end sequences on the guard, the fight loop ran `SequenceRunner.run(end_neutral=False)`.
+  The runner waited each step's frames only before the NEXT step; the last step's frames were waited only before the
+  final neutral step. Without it the runner returned at once and `end_guard` (down-back) replaced the last input within a
+  line: walks, crouch blocks, and the last button of a poke (a jab was held 1 frame).
+- Fix: `SequenceRunner.run(wait_last=True)` waits the last step's frames, presses nothing more, then the fight loop
+  applies end_guard as intended. Combo lab and catalog callers keep their old behaviour. Tests in `tests/test_0380.py`.
+- 0.38.1 recordings: their neutral is not representative (not a measure of 0.38.0's or 0.38.1's rules).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

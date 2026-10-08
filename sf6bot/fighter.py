@@ -5893,7 +5893,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     dgs_[dg_] = dgs_.get(dg_, 0) + 1
                 held_ = d.rule in PARRY_HOLD_RULES
                 _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
-                                   abort=stop_check, end_neutral=False)
+                                   abort=stop_check, end_neutral=False, wait_last=True)
                 if held_:
                     parry_held = True    # 0.38.0: MP+MK stay down into the next decision (a projectile's next hit)
                 elif d.rule == "reversal_arm":
