@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.42.0 (2026-10-08): human limits vary the reactions instead of making them instant: delay tech 2-6 frames after the connect, reaction DIs and answer Shoryukens on drawn frames, no reaction DI twice in a row on the same move.**
 - **0.41.0 (2026-10-08): corner Drive Impacts answered out of blockstun (a 0.25.0 guard-hold bug held block through them); the DI crumple cash-out no longer loses its timing; whiffed DIs punished; combos and punishes vary; no OD High Blade Kick follow-up near the wall; the rush check is an adaptive mix; buttons beaten by a poke from a distance are dropped there.**
 - **0.40.0 (2026-10-08): the bot remembers what each opponent beat this match (losing buttons per distance, walk-ins into pokes, the fireball jump-in, the rush check) and stops doing it, through rematches; no parry guesses.**
 - **0.39.0 (2026-10-08): the DI-back waits a human reaction time (default 15-21 frames of the opponent's DI, never past 22); a setting on the panel and `fight --di-delay`.**
@@ -4917,6 +4918,36 @@ loop). All MOCK / replay-tested (`tests/test_0410.py`); nothing verified in game
   back more, so its poke whiffs into the punish engine. Kept for a rematch.
 ### Not changed
 - E. Honda's 984 (14 hits), Juri's Senkai Kick, Lily's specials: no move answers yet.
+
+## 0.42.0: human limits vary the reactions (user, 2026-10-08)
+- User: "The throw escapes need their own individual settings, just like DI. It shouldn't be an instant escape - that is
+  very obviously cheating ... instantly react to the grab still, but delay the actual press of the button by enough frames
+  so it LOOKS like a delay tech"; "This goes for every single button that has a DI response or immediate reaction ...
+  Instant DI responses should not fire off on the same move multiple times in succession. Eg, a Sagat doing Tiger Knee";
+  "Still respond with Shoryuken, still respond to DI, and still 'Delay tech', but vary it up. This will be in the human
+  limits settings, not in the unlimited settings."
+- Before, with human limits on, the throw tech waited human limits' reaction sample (median 16 frames from the start-up),
+  past the tech window (MEASURED 0.23.0: a press read 1-7 frames after the connect techs, +8 never): it no longer teched.
+  The move answers (reaction DIs, answer Shoryukens) were not gated at all: their first possible frame.
+- **Now, only with human limits ON** (`configs/fighter/ryu.yaml: human_limits`, `HumanLimits.pick`: one value drawn per
+  event; human limits off = unchanged):
+  - **delay tech** (`delay_tech {min: 2, max: 6, startup: 5}`, `fighter._delay_tech_wait`): on the opponent's throw
+    start-up the bot holds block at once and starts nothing; LP+LK reaches the game 2-6 frames after the connect (frame
+    5 of the start-up), drawn per throw. A throw first seen as the bot's thrown state is anchored on that line (the
+    connect). Rules 00, 00' and 2; `throw_tech_after_connect.delayed`.
+  - **reaction Drive Impacts** (move answers, `answer_di {min: 10}`): the DI's first frame drawn from the move's frame 10
+    (or later if first seen later) to the latest frame it still beats the move (its armor before the hit, its hit before
+    the move recovers); holding block until then. `react_by` (normals seen by their frame 8) uses the first sighting.
+  - **answer Shoryukens** (`answer_srk`): the active frame drawn across the move's window (one frame of slack at its
+    end), not its first frame; the hitbox-timed Shoryuken (Hooligan) 0-`box_srk_extra` 3 frames after it first meets,
+    still only while it meets.
+  - **no reaction DI on the same move twice in a row** (`repeat_di {within_s: 20}`, `_di_repeat_skip`): the next
+    sighting of a move just answered with a Drive Impact gets none (its fallback Shoryuken if it has one, else block);
+    the one after can again. `answer_stats.repeat_skipped`.
+- Unchanged: the DI-back against the opponent's Drive Impact keeps its own delay (0.39.0 `di_reaction`, on in every
+  mode, as the user asked then); the jump anti-air keeps human limits' reaction gate (median 15 from take-off).
+- Summary `human_limits.varied` (per kind: n / min / median / max), a thoughts line "Varied timing: ...".
+- The windows are ESTIMATES inside measured / Capcom limits. Tests `tests/test_0420.py`. Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

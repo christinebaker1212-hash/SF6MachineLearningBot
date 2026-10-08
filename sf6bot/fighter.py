@@ -833,6 +833,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.reversal_stats = {"moments": 0, "reversal": 0, "held": 0}
         self._thrown_for = None
         self.tech_stats: dict = {}
+        # 0.42.0 human limits: delay tech, varied answers, no reaction DI twice in a row on the same move
+        self._tt_onset = None                # the opponent's throw start-up onset (frame 1) last seen
+        self._thrown_t0 = None               # the line the bot's thrown state was first seen (the connect)
+        self._ma_first = (None, None)        # (onset, the move's frame when first seen)
+        self._box_meet = (None, None)        # (onset, the line the hitbox Shoryuken first met)
+        self._di_ans_last = None             # (move name, frame, onset, skipped)
         self._zn_air = None
 
     def _attack(self, a) -> bool:
@@ -1194,6 +1200,32 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                         reason=f"{k.get('name') or oa} still active until its frame {ae} (now {fr}): holding the block")
 
     def _move_answer(self, raw: dict, me: dict, op: dict, dist: float) -> Decision | None:
+        d = self._move_answer0(raw, me, op, dist)
+        if d is not None and d.kind == "seq" and d.rule == "move_answer" and "HP+HK" in (d.seq or ""):
+            nm = (self.opp.get(op.get("action_id")) or {}).get("answer", {}).get("name") or str(op.get("action_id"))
+            self._di_ans_last = (nm, self._now, self.op_onset, False)
+        return d
+
+    def _di_repeat_skip(self, name: str) -> bool:
+        """0.42.0 human limits (user: "Instant DI responses should not fire off on the same move multiple times in
+        succession. Eg, a Sagat doing Tiger Knee should not get ANOTHER immediate DI on a subsequent Tiger Knee"): the
+        next sighting of a move the bot just answered with a reaction Drive Impact (within `repeat_di.within_s`) gets no
+        Drive Impact; the one after can again."""
+        if self.human is None:
+            return False
+        rp = self.human.c.get("repeat_di") or {}
+        last = self._di_ans_last
+        if not rp.get("enabled", True) or last is None or last[0] != name or not isinstance(self._now, int):
+            return False
+        if last[2] == self.op_onset:
+            return bool(last[3])                       # this sighting: skipped already (or the one answered)
+        if last[3] or not isinstance(last[1], int) or self._now - last[1] > 60 * float(rp.get("within_s", 20)):
+            return False
+        self._di_ans_last = (name, self._now, self.op_onset, True)
+        self.answer_stats["repeat_skipped"] = self.answer_stats.get("repeat_skipped", 0) + 1
+        return True
+
+    def _move_answer0(self, raw: dict, me: dict, op: dict, dist: float) -> Decision | None:
         """0.25.0 the user's answers (configs: move_answers), decided on the opponent's move itself, not its height.
         MEASURED (61 ranked matches on 0.24.x): Ken's H Dragonlash Kick (start-up 28, airborne 19-37, peak ~0.76): 13 within
         3.0, 10 hit the bot with no answer, 3 Shoryukens all won; the airborne-move anti-air waited for height > 0.4, too
@@ -1220,6 +1252,14 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         md = ans.get("max_dist")
         name = ans.get("name") or str(oa)
         L = self.lead + self.stale
+        if self._ma_first[0] != self.op_onset:
+            self._ma_first = (self.op_onset, fr)
+        if ans["do"] in ("di_react", "drive_impact", "di_followup") and self._di_repeat_skip(name):
+            if ans["do"] == "di_react" and ans.get("fallback"):
+                ans = dict(ans, do="anti_air", move=ans["fallback"])
+            else:
+                self._ma_for = self.op_onset
+                return None
         if ans["do"] == "di_followup":
             return self._di_followup(ans, me, op, name, fr, L)
         if ans["do"] == "di_react":
@@ -1249,6 +1289,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if land < lo:
                 return Decision("hold", direction=1, rule="answer_wait",
                                 reason=f"{name}: Shoryuken in {lo - land} frames")
+            if self.human is not None and self.human.c.get("answer_srk", True):
+                # 0.42.0 human limits: the active frame drawn across the window (one frame of slack at its end)
+                tgt = self.human.pick("answer_srk", self.op_onset, max(lo, land), max(lo, land, hi - 1))
+                if land < tgt:
+                    return Decision("hold", direction=1, rule="answer_wait",
+                                    reason=f"{name}: Shoryuken in {tgt - land} frames (varied)")
             if md is not None and dist > float(md):
                 return None
             if not ans.get("teleport"):
@@ -1307,6 +1353,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         hit = self._hitbox_meets(me, op, L + pre + 1, srb) if srb else None
         if hit is None:
             return None
+        if self.human is not None and isinstance(self._now, int):
+            # 0.42.0 human limits: 0..box_srk_extra frames after it first meets, still only while it meets
+            if self._box_meet[0] != self.op_onset:
+                self._box_meet = (self.op_onset, self._now)
+            extra = self.human.pick("box_srk", self.op_onset, 0, int(self.human.c.get("box_srk_extra", 3)))
+            if self._now - self._box_meet[1] < extra:
+                return Decision("hold", direction=1, rule="answer_wait", reason=f"{name}: Shoryuken (varied)")
         self._ma_for = self.op_onset
         self.answer_stats["sent"] += 1
         self.answer_stats["by_move"][name] = self.answer_stats["by_move"].get(name, 0) + 1
@@ -1377,7 +1430,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         start = fr + L + 1                              # the move's own frame on the Drive Impact's first frame
         react_by = ans.get("react_by") or (8 if ans.get("normal") else None)
-        if start > S - 1 or start + 25 > T - 1 or (react_by is not None and fr > int(react_by)):
+        first = self._ma_first[1] if self._ma_first[0] == self.op_onset and self._ma_first[1] is not None else fr
+        latest = min(S - 1, T - 26)
+        if start > latest or (react_by is not None and first > int(react_by)):
             self._ma_for = self.op_onset
             self.answer_stats["late"] += 1
             return None
@@ -1402,6 +1457,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if (_num(me.get("y")) or 0.0) > 0.05 or stun_left(me) > 0 or self.busy(me) is not None \
                 or not self.can_spend(me, "drive_impact", reserve=int(self.c.get("drive_reserve", 10000))):
             return None
+        if self.human is not None:
+            # 0.42.0 human limits: the Drive Impact's first frame drawn from [answer_di.min, the latest that still works]
+            lo = max(first + L + 1, int((self.human.c.get("answer_di") or {}).get("min", 10)))
+            tgt = self.human.pick("answer_di", self.op_onset, min(lo, latest), latest)
+            if start < tgt:
+                return Decision("hold", direction=1, rule="answer_wait",
+                                reason=f"{name}: Drive Impact on its frame {tgt} (varied)")
         di = (self.c.get("moves") or {}).get("drive_impact") or {"name": "Drive Impact", "seq": "5+HP+HK@3"}
         self._ma_for = self.op_onset
         self.answer_stats["sent"] += 1
@@ -1438,13 +1500,44 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return True
         return a in self.thrown_ambiguous and self._my_act == a and self._my_prev_act not in OWN_THROW_STARTUP
 
+    def _delay_tech_wait(self, key, frame: int) -> Decision | None:
+        """0.42.0 human limits (user: "It shouldn't be an instant escape ... instantly react to the grab still, but delay
+        the actual press of the button by enough frames so it LOOKS like a delay tech"): the LP+LK reaches the game
+        `delay_tech.min..max` frames after the connect, drawn per throw. `frame` = the throw's own frame the press would
+        reach the game on (start-up frame 1 = its onset; the connect = `delay_tech.startup`). MEASURED (0.23.0): a press
+        read 1-7 frames after the connect still teched most throws; from +8 none did. Hold (block) until then."""
+        dt = self.human.c.get("delay_tech") or {}
+        C = int(dt.get("startup", 5))
+        d = self.human.pick("delay_tech", key, int(dt.get("min", 2)), int(dt.get("max", 6)))
+        if frame >= C + d:
+            return None
+        return Decision("hold", direction=1, rule="tech_wait",
+                        reason=f"throw seen: delay tech {d}F after the connect (in {C + d - frame}F)")
+
     def _thrown_tech(self, me: dict, op: dict) -> Decision | None:
         tc = self.c.get("throw_tech") or {}
         if not tc.get("after_connect", True) or not self.being_thrown(me):
             if not self.being_thrown(me):
                 self._thrown_for = None
+                self._thrown_t0 = None
             return None
-        if self._thrown_for is not None or not self._ok("throw"):
+        if self._thrown_for is not None:
+            return None
+        if self.human is not None and isinstance(self._now, int):
+            if self._thrown_t0 is None:
+                self._thrown_t0 = self._now
+            C = int((self.human.c.get("delay_tech") or {}).get("startup", 5))
+            L = int(self.lead + self.stale)
+            if isinstance(self._tt_onset, int) and 0 <= self._now - self._tt_onset <= C + 15:
+                if getattr(self, "_tt_sent", None) == self._tt_onset:
+                    return None                        # pressed on the start-up already (0.42.0)
+                w = self._delay_tech_wait(self._tt_onset, self._now - self._tt_onset + 1 + L)
+            else:
+                w = self._delay_tech_wait(("thrown", self._thrown_t0), C + self._now - self._thrown_t0 + L)
+            if w is not None:
+                return w
+            self.tech_stats["delayed"] = self.tech_stats.get("delayed", 0) + 1
+        elif not self._ok("throw"):
             return None
         self._thrown_for = self._now
         self.tech_stats["after_connect"] = self.tech_stats.get("after_connect", 0) + 1
@@ -1480,10 +1573,21 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         op_act = op.get("action_id")
         if op_act not in self.throw_ids:
             self.tech_handled = None
-        if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05 and self._ok("throw"):
+        if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05:
+            if self.human is not None:
+                self._tt_onset = self.op_onset
+                if isinstance(self._now, int) and isinstance(self.op_onset, int):
+                    hw = self._delay_tech_wait(self.op_onset,
+                                               self._now - self.op_onset + 1 + int(self.lead + self.stale))
+                    if hw is not None:
+                        return hw
+                self.tech_stats["delayed"] = self.tech_stats.get("delayed", 0) + 1
+                self._tt_sent = self.op_onset
+            elif not self._ok("throw"):
+                return None
             self.tech_handled = op_act
             d = self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
-            w = self._tech_wait(me, raw.get("stage_timer"))
+            w = self._tech_wait(me, raw.get("stage_timer")) if self.human is None else 0
             if w:
                 d.seq = f"1@{w} " + d.seq
                 d.reason += f" (held {w}F: not on my first free frame)"

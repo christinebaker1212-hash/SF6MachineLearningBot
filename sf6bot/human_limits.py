@@ -29,6 +29,13 @@ DEFAULTS = {
     "per_kind": {"guard": {"median": 21, "sigma": 0.2, "floor": 14},       # overhead / low: harder to react to
                  "anti_air": {"median": 15, "sigma": 0.2, "floor": 10}},
     "hold_jitter": 1,            # +/- frames on each button hold
+    # 0.42.0 (user: "Still respond with Shoryuken, still respond to DI, and still 'Delay tech', but vary it up"): the
+    # reactions below still happen, at a timing drawn per event inside the window where they still work
+    "delay_tech": {"min": 2, "max": 6, "startup": 5},   # frames after the throw connects that LP+LK reaches the game
+    "answer_di": {"min": 10},          # the move's own frame on the reaction DI's first frame: drawn from here to its latest
+    "answer_srk": True,                # the answer Shoryuken's active frame drawn across its window, not its first frame
+    "box_srk_extra": 3,                # the hitbox-timed Shoryuken (Hooligan): 0..N frames after it first meets
+    "repeat_di": {"enabled": True, "within_s": 20},   # no reaction DI on the same move twice in a row
 }
 REACTIVE = ("throw", "di", "anti_air", "guard", "whiff", "di_punish")
 
@@ -46,9 +53,25 @@ class HumanLimits:
         self.rng = random.Random(seed)
         self._samples: dict = {}                 # kind -> (onset frame, sampled frames)
         self.stats = {"held_back": {}, "reactions": {}, "jittered": 0}
+        self._picks: dict = {}                   # key -> (event, drawn value)
+        self.varied: dict = {}                   # kind -> drawn values (0.42.0)
+
+    def pick(self, key: str, event, lo: int, hi: int) -> int:
+        """0.42.0: one value drawn from [lo, hi] per event (an opponent action's onset), kept while the event lasts."""
+        p = self._picks.get(key)
+        if p is None or p[0] != event:
+            lo, hi = int(lo), int(hi)
+            v = self.rng.randint(min(lo, hi), max(lo, hi))
+            p = (event, v)
+            self._picks[key] = p
+            r = self.varied.setdefault(key, [])
+            r.append(v)
+            del r[:-200]
+        return p[1]
 
     def settings(self) -> dict:
-        return {k: self.c[k] for k in ("reaction", "per_kind", "hold_jitter")}
+        return {k: self.c[k] for k in ("reaction", "per_kind", "hold_jitter", "delay_tech", "answer_di", "answer_srk",
+                                       "box_srk_extra", "repeat_di")}
 
     def sample(self, kind: str) -> int:
         p = _merge(self.c["reaction"], self.c["per_kind"].get(kind))
@@ -91,12 +114,15 @@ class HumanLimits:
 
     def reset_stats(self) -> None:
         self.stats = {"held_back": {}, "reactions": {}, "jittered": 0}
+        self.varied = {}
 
     def summary(self) -> dict:
         r = {k: [f for _, f in v] for k, v in self.stats["reactions"].items()}
         return {"settings": self.settings(), "held_back_lines": dict(self.stats["held_back"]),
                 "reactions_frames": {k: {"n": len(v), "median": sorted(v)[len(v) // 2]} for k, v in r.items() if v},
-                "jittered_sequences": self.stats["jittered"]}
+                "jittered_sequences": self.stats["jittered"],
+                "varied": {k: {"n": len(v), "min": min(v), "median": sorted(v)[len(v) // 2], "max": max(v)}
+                           for k, v in self.varied.items() if v}}
 
 
 def thoughts(summary: dict) -> list[tuple[str, str]]:
@@ -108,6 +134,13 @@ def thoughts(summary: dict) -> list[tuple[str, str]]:
     line = (f"Human limits ON (disclosed setting): reactions drawn around {(s.get('reaction') or {}).get('median')}F, "
             f"button holds +/-{s.get('hold_jitter')}F. Reactions this match: {rx or 'none'}.")
     out = [("scripted", line)]
+    names = {"delay_tech": "throw techs (frames after the grab connected)",
+             "answer_di": "reaction Drive Impacts (the move's frame)",
+             "answer_srk": "answer Shoryukens (the move's frame)", "box_srk": "hitbox Shoryukens (frames late)"}
+    v = h.get("varied") or {}
+    if v:
+        out.append(("scripted", "Varied timing: " + "; ".join(
+            f"{names.get(k, k)} {e['min']}-{e['max']} (median {e['median']}, {e['n']})" for k, e in v.items()) + "."))
     if summary.get("blind"):
         b = summary["blind"]
         out.append(("measured", f"Blind evaluation: the participant's guess after this match: {b.get('guess') or 'not given'}."))

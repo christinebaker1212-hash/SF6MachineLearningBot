@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-08: code version **0.41.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (705).*
+*State as of 2026-10-08: code version **0.42.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (711).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.42.0 is pushed** (CLAUDE.md "0.42.0"): with human limits ON, reactions still happen but at a timing drawn per event: the throw tech lands 2-6 frames after the connect (a delay tech; it was instant, and human limits' 16-frame gate made it miss), reaction DIs on the move's frame 10..latest, answer Shoryukens across their window, the Hooligan Shoryuken 0-3 frames late, and no reaction DI on the same move twice in a row. Human limits OFF is unchanged. Check `human_limits.varied`, `throw_tech_after_connect.delayed`, `answer_stats.repeat_skipped`.
 
 **State:** **0.41.0 is pushed** (CLAUDE.md "0.41.0"): corner DI-backs out of blockstun (guard-hold bug fixed), burnout super buffered in blockstun, no lethal skip near the wall, DI crumple follow-up holds its timing / walks in, whiffed DIs punished, punish + composer variety (matches only), OD High Blade Kick not continued within 2.9 of the wall, adaptive rush-check mix, poke-danger bands in the match memory. The user is running custom rooms next: check `di_stats.di_back_buffered`, `super_stats.crumple_walk`, `adapt.rush_check_p` / `poke_hits` in the summaries.
 

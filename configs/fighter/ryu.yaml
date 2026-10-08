@@ -461,6 +461,13 @@ human_limits:
     guard: {median: 21, sigma: 0.2, floor: 14}        # switching block height for an overhead / low
     anti_air: {median: 15, sigma: 0.2, floor: 10}
   hold_jitter: 1
+  # 0.42.0 (user: "Still respond with Shoryuken, still respond to DI, and still 'Delay tech', but vary it up"; human
+  # limits only). The reactions still happen, at a timing drawn per event inside the window where they still work:
+  delay_tech: {min: 2, max: 6, startup: 5}   # LP+LK reaches the game 2-6 frames after the connect (MEASURED: +1..+7 techs, +8 never)
+  answer_di: {min: 10}        # reaction DI: its first frame on the move's frame 10 .. the latest that still beats it
+  answer_srk: true            # answer Shoryuken: its active frame drawn across the move's window
+  box_srk_extra: 3            # hitbox-timed Shoryuken (Hooligan): 0-3 frames after it first meets
+  repeat_di: {enabled: true, within_s: 20}   # no reaction DI on the same move twice in a row (user: Sagat's Tiger Knee)
 perfect_parry:
   enabled: true
   min_dist: 1.2            # closer, a projectile arrives too soon to time; block instead
