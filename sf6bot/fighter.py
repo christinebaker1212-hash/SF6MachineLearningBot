@@ -710,6 +710,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._prev2_op_act = None            # 0.37.0 ... and the one before that
         self._rc_for = None                  # 0.37.0 the opponent rush (onset) already checked
         self._dg_for = None
+        self._ma_far_for = None
         self.bad_target_stats: dict = {}
         self._op_box_poke = None
         self._cur_op_blocked = self._prev_op_blocked = False   # 0.37.0 the current / previous action was blocked by the bot
@@ -906,6 +907,32 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                                        f"it at {max(0.0, d_hit):.2f}")
         return None
 
+    def _hitbox_meets(self, me: dict, op: dict, start: int, frames: list, side: float | None = None) -> int | None:
+        """0.37.0 (user: "make sure the DI on reaction and Shoryuken on reaction moves are properly initiated based on their
+        proximity ... and whether or not it will hit in time ... we have the data on spacing of certain moves, as well as
+        the hitboxes"): the first of the bot's move's hit frames on which its hitbox meets the opponent's hurtbox, or None.
+        `frames`: [[own frame, front0, front1, y0, y1], ...] (forward from where the bot stands now, MEASURED from its
+        catalog boxes); `start`: frames from now until the move's frame 1 (input delay + stale + motion). The opponent's
+        hurtboxes (its live boxes, else +-0.4 x 0-1.4 around it) are moved along its current motion (horizontal speed;
+        gravity when airborne)."""
+        mx, ox, oy = _num(me.get("x")), _num(op.get("x")), _num(op.get("y")) or 0.0
+        if mx is None or ox is None:
+            return None
+        side = side if side is not None else (1.0 if ox > mx else -1.0)
+        g = float((self.c.get("anti_air") or {}).get("gravity", 0.0123))
+        vx, vy = (self.op_vx, self.op_vy) if self.vel_ok else (0.0, 0.0)
+        hb = [b for b in (op.get("boxes") or []) if b.kind == "b" and not b.invuln]
+        rel = [(b.x0 - ox, b.x1 - ox, b.y0 - oy, b.y1 - oy) for b in hb] or [(-0.4, 0.4, 0.0, 1.4)]
+        for f, f0, f1, y0, y1 in frames:
+            k = start + int(f) - 1
+            px = ox + vx * k
+            py = max(0.0, oy + vy * k - g * k * k / 2.0) if oy > 0.05 else oy
+            for a0, a1, b0, b1 in rel:
+                fa, fb = sorted(((px + a0 - mx) * side, (px + a1 - mx) * side))
+                if fb >= f0 and fa <= f1 and py + b1 >= y0 and py + b0 <= y1:
+                    return int(f)
+        return None
+
     def _crosscut(self, me: dict, op: dict) -> Decision | None:
         """0.37.0 (user: "Cross ups are still extremely effective, Ryu simply blocks them. Ryu should be performing cross cut
         shoryukens on them when they cross over with a normal jump"). MEASURED (0.36.1 ranked): 295 cross-overs, 147 with
@@ -932,27 +959,16 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if (ox + self.op_vx * t_land - mx) * side > -float(aa.get("crossup_past", 0.3)):
             return None                                         # not crossing: the ordinary anti-air
         srk = self._aa_move()
-        k0 = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5)) - 1
-        f0, f1 = float(xc.get("front0", 0.29)), float(xc.get("front1", 0.96))
-        y0, ytop = float(xc.get("y0", 0.27)), xc.get("y_top", [1.17, 1.49, 1.75])
-        hb = [b for b in (op.get("boxes") or []) if b.kind == "b"]
-        rel = [(b.x0 - ox, b.x1 - ox, b.y0 - oy, b.y1 - oy) for b in hb] or [(-0.4, 0.4, 0.0, 1.4)]
-        for i in range(int(xc.get("active", 10))):
-            k = k0 + i
-            if k >= t_land:
-                break
-            px, py = ox + self.op_vx * k, oy + self.op_vy * k - g * k * k / 2.0
-            top = float(ytop[min(i, len(ytop) - 1)])
-            for a0, a1, b0, b1 in rel:
-                fa, fb = sorted(((px + a0 - mx) * side, (px + a1 - mx) * side))
-                if fb >= f0 and fa <= f1 and py + b1 >= y0 and py + b0 <= top:
-                    self.aa_done_for_jump = True
-                    self._aa_kind = "crosscut"
-                    return Decision("seq", srk["name"], srk["seq"], rule="anti_air",
-                                    facing=Facing.RIGHT if side > 0 else Facing.LEFT,
-                                    reason=f"cross-cut Shoryuken: the opponent crosses over (lands {t_land:.0f}f), its "
-                                           f"hurtbox meets the Shoryuken's hitbox on its active frame {i + 1}")
-        return None
+        start = seq_prefix(srk["seq"]) + self.lead + self.stale + 1
+        srb = [fr_ for fr_ in (aa.get("srk_hitbox") or []) if start + fr_[0] - 1 < t_land]
+        hit = self._hitbox_meets(me, op, start, srb, side=side) if srb else None
+        if hit is None:
+            return None
+        self.aa_done_for_jump = True
+        self._aa_kind = "crosscut"
+        return Decision("seq", srk["name"], srk["seq"], rule="anti_air", facing=Facing.RIGHT if side > 0 else Facing.LEFT,
+                        reason=f"cross-cut Shoryuken: the opponent crosses over (lands {t_land:.0f}f), its hurtbox meets "
+                               f"the Shoryuken's hitbox on its frame {hit}")
 
     def _jump_threat(self, me: dict, op: dict) -> tuple[float, float] | None:
         """0.21.0: the opponent is in the air (a jump or an airborne attack) and will land within the bot's anti-air reach
@@ -1073,14 +1089,14 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if land < lo:
                 return Decision("hold", direction=1, rule="answer_wait",
                                 reason=f"{name}: Shoryuken in {lo - land} frames")
-            reach = float((self.c.get("anti_air") or {}).get("answer_reach", 1.35))
             if md is not None and dist > float(md):
                 return None
-            if air_active and md is None and not ans.get("teleport"):
-                # 0.37.0: where it will be when the Shoryuken is active (it is coming: its closing speed now)
-                closing = max(0.0, -self.op_vx * (1 if (_num(op.get("x")) or 0) > (_num(me.get("x")) or 0) else -1))
-                if dist - closing * (L + pre + su - 1) > reach:
-                    return None                          # not in reach yet: decide again on the next line
+            if not ans.get("teleport"):
+                # 0.37.0: the Shoryuken's hitbox frames (MEASURED, catalog boxes) against where the opponent's hurtbox will
+                # be in them; not yet = decide again on the next line (a teleport's position jumps: frames only)
+                srb = (self.c.get("anti_air") or {}).get("srk_hitbox") or []
+                if srb and self._hitbox_meets(me, op, L + pre + 1, srb) is None:
+                    return None
             self._ma_for = self.op_onset
             self.answer_stats["sent"] += 1
             self.answer_stats["by_move"][name] = self.answer_stats["by_move"].get(name, 0) + 1
@@ -1137,6 +1153,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 or not self.can_spend(me, "drive_impact", reserve=int(self.c.get("drive_reserve", 10000))):
             return None
         pad = max(0, stun_left(me) - L)
+        dib = (self.c.get("drive_impact_hitbox") or {}).get("frames") or [[26, 1.0, 1.8, 0.89, 1.41]]
+        if self._hitbox_meets(me, op, L + pad + 1, dib) is None:
+            return None                                  # 0.37.0: out of the Drive Impact's reach
         di = (self.c.get("moves") or {}).get("drive_impact") or {"name": "Drive Impact", "seq": "5+HP+HK@3"}
         self._ma_for = self.op_onset
         self.answer_stats["sent"] += 1
@@ -1171,6 +1190,15 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             self.answer_stats["late"] += 1
             return None
         if ans.get("max_dist") is not None and dist > float(ans["max_dist"]):
+            return None
+        # 0.37.0: the Drive Impact must actually reach: its hitbox (frame 26, MEASURED 1.0-1.8 in front of where the bot
+        # started, its travel included; catalog boxes) against where the opponent's hurtbox will be then. (User: OD Seismic
+        # Hammer can be done from anywhere: a Drive Impact from full screen would be punished.)
+        dib = (self.c.get("drive_impact_hitbox") or {}).get("frames") or [[26, 1.0, 1.8, 0.89, 1.41]]
+        if self._hitbox_meets(me, op, L + 1, dib) is None:
+            if self._ma_far_for != self.op_onset:
+                self._ma_far_for = self.op_onset
+                self.answer_stats["too_far"] += 1
             return None
         sc = ans.get("super_cancel")
         if sc is not None and (_num(op.get("super")) or 0) >= 10000 * int(sc):

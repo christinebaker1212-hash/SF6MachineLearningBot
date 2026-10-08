@@ -359,3 +359,55 @@ def test_ken_pressing_for_a_jinrai_follow_up_after_a_blocked_jinrai_gets_a_drive
     assert not play(920, blocked=True, press=False)                 # no follow-up initiated: nothing
     assert not play(920, blocked=False, press=True)                 # Jinrai whiffed: nothing
     assert not play(921, blocked=True, press=True, before=608)      # HP > M Jinrai: never
+
+
+# ---- reaction answers only where their hitbox will reach (user: OD Seismic Hammer from across the screen) --------------
+
+def _hammer_moves():
+    return {1050: {"name": "OD Seismic Hammer", "answer": {
+        "do": "di_react", "name": "OD Seismic Hammer", "startup": 19, "total": 52, "hits": 1, "normal": False}}}
+
+
+def test_no_reaction_drive_impact_from_too_far_away():
+    """Drive Impact hits on its frame 26, 1.0-1.8 in front of where the bot started (catalog boxes): from 3.5 apart (an
+    opponent standing still) it can't reach; from 2.0 it can."""
+    for x, want in ((3.5, False), (2.0, True)):
+        f = ScriptedFighter(FCFG, _hammer_moves(), seed=1)
+        f.lead = 3
+        _line(f, op={"x": x, "action_id": 1}, timer=600)
+        ds = [_line(f, op={"x": x, "action_id": 1050, "action_frame": k}, timer=601 + k) for k in range(6)]
+        assert bool([d for d in ds if d.rule == "move_answer"]) == want
+    assert f.answer_stats["too_far"] == 0
+
+
+def test_a_reaction_drive_impact_waits_for_an_approaching_move_to_come_into_reach():
+    moves = {1000: {"name": "H Burning Knuckle", "answer": {
+        "do": "di_react", "name": "H Burning Knuckle", "startup": 22, "total": 60, "hits": 1, "normal": False}}}
+    f = ScriptedFighter(FCFG, moves, seed=1)
+    f.lead = 3
+    _line(f, op={"x": 3.4, "action_id": 1}, timer=600)
+    got = []
+    for k in range(12):
+        x = 3.4 - 0.06 * k                                     # it travels toward the bot
+        got.append((k, _line(f, op={"x": x, "action_id": 1000, "action_frame": k}, timer=601 + k)))
+    sent = [k for k, d in got if d.rule == "move_answer"]
+    assert sent and sent[0] >= 1                               # not on its first frame (no speed yet: too far)
+    k = sent[0]
+    x_hit = 3.4 - 0.06 * (k + 3 + 1 + 25)                      # where it is on the DI's frame 26
+    assert x_hit - 0.4 <= 1.8
+
+
+def test_a_shoryuken_answer_waits_until_the_hitbox_will_meet_the_ball():
+    moves = {958: {"name": "H Rolling Attack", "answer": {
+        "do": "anti_air", "move": "punish_l_srk", "name": "H Rolling Attack", "startup": 22, "active_end": 41,
+        "airborne_from": 20, "airborne_to": 42, "inv_to": None, "hits": 1}}}
+    f = ScriptedFighter(FCFG, moves, seed=1)
+    f.lead = 3
+    _line(f, op={"x": 4.0, "action_id": 1}, timer=600)
+    got = []
+    for k in range(40):
+        x = 4.0 if k < 20 else 4.0 - 0.12 * (k - 20)
+        got.append((k, x, _line(f, op={"x": x, "y": 0.5 if k >= 20 else 0.0, "action_id": 958, "action_frame": k},
+                                timer=601 + k)))
+    sent = [(k, x) for k, x, d in got if d.rule == "move_answer"]
+    assert sent and sent[0][0] > 20                            # only once the ball comes close enough

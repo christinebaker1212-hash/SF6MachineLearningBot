@@ -55,7 +55,21 @@ anti_air:
   # its CURRENT side when its hurtbox (moved along its arc) meets the Shoryuken's hitbox in an active frame. Hitbox MEASURED
   # from the bot's catalog boxes (L Shoryuken: 0.29-0.96 forward, from 0.27 high; top 1.17 / 1.49 / 1.75 on its first
   # active frames); `active` = Capcom's active frames 5-14.
-  crosscut: {enabled: true, front0: 0.29, front1: 0.96, y0: 0.27, y_top: [1.17, 1.49, 1.75], active: 10}
+  crosscut: {enabled: true}
+  # 0.37.0 L Shoryuken's hitbox per own frame, MEASURED from the bot's catalog boxes (the catalog's frames include the
+  # dummy's hitstop after frame 5; own frames here): [frame, forward from, forward to, height from, to]. Used by the
+  # cross-cut and the Shoryuken answers (fighter._hitbox_meets). Capcom: active 5-14.
+  srk_hitbox:
+    - [5, 0.288, 0.888, 0.27, 1.17]
+    - [6, 0.456, 0.956, 0.59, 1.49]
+    - [7, 0.463, 0.963, 0.85, 1.75]
+    - [8, 0.292, 0.792, 1.139, 2.339]
+    - [9, 0.352, 0.852, 1.268, 2.468]
+    - [10, 0.362, 0.862, 1.386, 2.586]
+    - [11, 0.367, 0.867, 1.494, 2.694]
+    - [12, 0.367, 0.867, 1.591, 2.791]
+    - [13, 0.367, 0.867, 1.677, 2.877]
+    - [14, 0.367, 0.867, 1.753, 2.953]
   # 0.21.1: frames the opponent must have been on its current side (since it last passed over the bot) before a
   # Shoryuken goes out; else block toward the landing side
   cross_settle: 2
@@ -335,6 +349,12 @@ move_answers:
   Kimberly:
     - {match: "^(OD )?(Torso Cleaver|Shadow Slide|Neck Hunter)$", do: di_react, max_dist: 2.5,
        why: "user: DI the Sprint follow-ups other than Emergency Stop"}
+# 0.37.0 Drive Impact's hitbox, MEASURED from the bot's catalog boxes: only on its frame 26, 1.0-1.8 in front of where the
+# bot started (its forward travel included), 0.89-1.41 high. A reaction Drive Impact goes out only when the opponent's
+# hurtbox will be inside it then (fighter._hitbox_meets).
+drive_impact_hitbox:
+  frames:
+    - [26, 0.996, 1.796, 0.89, 1.41]
 # 0.37.0 answers derived from Capcom's frame data for moves no rule above names (fighter._auto_rules): a Shoryuken against
 # specials airborne in their active frames, a Drive Impact against slow specials (at most 2 hits, not projectiles); both
 # gated by distance, the opponent's Super for a super cancel, and the bot's Drive. `react`: frames seen before deciding

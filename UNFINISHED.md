@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08 (usage limit near), step 6 nearly done. FIRST: fix the one known failing test (below), run the full suite (~5 min), then step 7.** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08. Steps 1-6 done; full suite passes (646 passed, golden updated for the new decisions). Next: step 7 (offence).** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -201,11 +201,12 @@ CA 3.6%; DI performed 0.5 a match.
   `do: di_followup` (fighter._di_followup) on L/M/H Jinrai: Ken's forward + kick press during a BLOCKED Jinrai triggers
   the Drive Impact at once, timed to the bot's first free frame (`5@pad 5+HP+HK@3`); never after 5HP > M Jinrai. The
   follow-up-id rule stays as a fallback. Test added.
-- KNOWN FAILING TEST (fix first): tests/test_ranked_baseline_fixes.py::test_supers_parries_and_drive_impacts_need_a_reason
-  expects a lethal SA1 from neutral; 0.37.0 turned that off. Replace its lines
-  `low = dict(idle, hp=1500)` / `assert any(... == "super" ...)` with: off by default (assert not any over 300 picks),
-  and on with `NeutralPolicy(_Brain(), MOVES, cfg={"explore": 0.5, "neutral_super": True}, seed=1)` (assert any over 600).
-  Then run `python -m pytest -q tests/` (all passed before step 6's last edits except this one; not yet re-run fully).
+
+- User (2026-10-08): reaction answers must check proximity / whether they hit in time ("OD Seismic Hammer can be performed
+  at any screen position"). `fighter._hitbox_meets(me, op, start, frames)`: the bot's hitbox frames (MEASURED from its
+  catalog boxes: ryu.yaml `drive_impact_hitbox` = frame 26, 1.0-1.8 forward, 0.89-1.41 high; `anti_air.srk_hitbox` =
+  L Shoryuken frames 5-14) against the opponent's live hurtboxes moved along its current motion. Used by di_react,
+  di_followup, the Shoryuken answers (teleports exempt) and the cross-cut. Tests added.
 
 ## Next steps (in order; the task list in the session mirrors these)
 2. Finish measuring (scripts were in the scratchpad; rebuild as needed): walking forward into attacks (bot id 9 / dir 6
@@ -214,7 +215,7 @@ CA 3.6%; DI performed 0.5 a match.
    blocking, opponent burnout behaviour, timeouts, cross-ups, corner DIs, Drive Rush responses, combo variety.
 4. DONE (see above).
 5. DONE (see above).
-6. Remaining of step 6: tests for `_bad_target` and the no-jump / no-neutral-super changes (test_0370.py).
+6. DONE except a test for `_bad_target` (sweep at an airborne opponent; far reversal Shoryuken).
 7. Offence (items 10, 20, 27, 29, 31, 34, 35): DI a burned-out opponent near its wall (user overrides "no DI in neutral"
    for this: opponent drive <= 0, back <= ~2.5, bot has 2+ bars, not vs a Super bar it could super through?); pressure
    them; combo variety (20: composer `completed` 522 of 2,463 started); punish gaps (27: punishes chances 812 / taken 560,
