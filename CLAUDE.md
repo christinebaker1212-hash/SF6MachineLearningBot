@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.37.2 (2026-10-08): the Drive Rush check uses each opponent character's measured rush ids and speed.**
 - **0.37.1 (2026-10-08): a Drive Rush into 5HK only after 5HP (5HP forces stand on hit).**
 - **0.37.0 (2026-10-08): fixes from ~300 Master matches: projectile hitboxes, reaction Shoryukens / Drive Impacts that check reach, spacing, 2MK supers and Drive Rush cancels, mirror side from the VS screen.**
 - **0.36.2 (2026-10-07): a per-fight `data_weight` in the meta file scales a relabelled match in both networks (custom-room sets).**
@@ -4639,6 +4640,25 @@ All MOCK / replay-tested (`tests/test_0370.py`, 36 tests); nothing here is verif
 - Tests in `tests/test_0370.py`. Not verified in game.
 - Also from the user (2026-10-08): Chun-Li's "6HP" question is dropped, and the custom-room Chun-Li set is not to be
   relabelled.
+
+## 0.37.2: the Drive Rush check per character (user, 2026-10-08)
+- User: "Different characters have different Drive Rush speeds - make sure the
+  Drive Rush check accounts for these differences"). MEASURED (0.35.0-0.36.1 ranked recordings, both players, rushes out
+  of a parry; `configs/rush_profiles.json`, `sf6bot/rush_profiles.py`):
+  - The rush ids differ: Guile 731; Chun-Li, Mai, Viper 760; Marisa, Zangief 501; Ken, Juri, Alex, Terry, Yasmine,
+    Cammy, Kimberly, Manon, Blanka 500; most others 740. The bot knew only 500 / 501 / 739-741, so Guile's, Chun-Li's,
+    Mai's and Viper's rushes were never checked. Now `fighter.set_opponent_rush` gives each opponent its own ids (an
+    unknown opponent: every measured one; 731 / 760 / 761 are not taken as a rush for characters measured otherwise).
+    The same ids now mark the opponent's rushed normals (+4) and the reactive reversal's "not a strike".
+  - A rush barely moves for ~10 frames, then accelerates; travel 24 frames after its id appeared: Dee Jay ~1.85, Ken /
+    Luke ~1.6, Guile ~1.3, Alex ~0.9, Zangief ~0.88; its normal comes out ~18 frames in (Zangief 25, Blanka 26).
+    `_rush_check` used the speed on the current line as constant, so early in the rush it saw nothing coming and later it
+    under-predicted. It now times 5MP / 2LP from the character's measured curve at the rush's own frame (21 characters
+    with 5+ rushes measured; others the median curve; with no frame known, the old constant speed).
+  - A rush that has fallen well behind its curve by frame 13 (under half of it, -0.1) or is moving away was pulled back:
+    not checked (`rush_stats.pulled_back`).
+  - Tests in `tests/test_0370.py` (Dee Jay checked earlier than Zangief from the same distance, each meeting 5MP inside
+    its reach; Guile's 731; a pulled-back rush). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

@@ -584,3 +584,54 @@ def test_a_drive_rush_goes_into_5hk_only_after_5hp():
     assert rush_follows_ok(["Standing Heavy Punch", "drive_rush", "Standing Heavy Kick"])
     assert not rush_follows_ok(["Crouching Medium Kick", "drive_rush", "Standing Heavy Kick"])
     assert rush_follows_ok(["Crouching Medium Kick", "drive_rush", "Standing Heavy Punch"])
+
+
+# ---- 0.37.1: each character's own Drive Rush (user: "Different characters have different Drive Rush speeds") ---------
+
+def _rush_lines(char, start=2.9, frames=30, pull_back_at=None):
+    from sf6bot.rush_profiles import profile
+    p = profile(char)
+    ids = p.get("ids") or [740]
+    cur = p["travel"]
+    lines = [state(op={"x": start, "action_id": 480}, timer=999)]
+    for k in range(frames):
+        d = cur[min(k, len(cur) - 1)]
+        if pull_back_at is not None and k >= pull_back_at:
+            d = cur[pull_back_at]
+        lines.append(state(op={"x": start - d, "action_id": ids[0]}, timer=1000 + k))
+    return lines
+
+
+def _first_check(char, **kw):
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead = 4
+    f.set_opponent_rush(char)
+    got = [(t - 1000, d) for t, d in _run(f, _rush_lines(char, **kw)) if d.rule == "rush_check"]
+    return f, got
+
+
+def test_the_rush_check_uses_each_characters_measured_rush():
+    from sf6bot.rush_profiles import ahead, profile
+    for char in ("Dee Jay", "Zangief", "Ken"):
+        f, got = _first_check(char)
+        assert len(got) == 1, char
+        t, d = got[0]
+        cur = profile(char)["travel"]
+        # 5MP's first active frame (input delay 4 + start-up 6 - 1 = 9 frames on) meets the rusher inside its reach
+        assert 2.9 - ahead(cur, 0, t + 9) <= f._pe_reach(605, 1.3) + 1e-6, char
+    # a fast rush is checked earlier than a slow one from the same distance
+    assert _first_check("Dee Jay")[1][0][0] < _first_check("Zangief")[1][0][0]
+
+
+def test_rush_ids_are_per_character():
+    from sf6bot.rush_profiles import rush_ids
+    assert 731 in rush_ids("Guile") and 760 in rush_ids("Chun-Li") and 501 in rush_ids("Zangief")
+    assert 731 not in rush_ids("Ken") and 760 not in rush_ids("Ken")
+    assert {731, 760} <= rush_ids(None)                     # unknown opponent: every measured rush id
+    f, got = _first_check("Guile")
+    assert len(got) == 1                                     # Guile's 731 was never checked before 0.37.1
+
+
+def test_a_rush_that_falls_behind_its_curve_is_not_checked():
+    f, got = _first_check("Ken", pull_back_at=12)
+    assert not got and f.rush_stats.get("pulled_back") == 1

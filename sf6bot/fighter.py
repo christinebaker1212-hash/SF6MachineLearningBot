@@ -705,6 +705,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         # 0.17.0 human limits (human_limits.py): reactive rules wait for a sampled human reaction time
         self.human = None
         self.op_onset = None                 # game frame the opponent's current action began
+        self._op_char, self.op_rush, self.op_rush_ids = None, None, set(RUSH_IDS)   # 0.37.1: set_opponent_rush
+        self._rc_seen, self._rc_x0 = None, None
         self._onset_act = None
         self._prev_op_act = None             # 0.25.0 the opponent's action before its current one
         self._prev2_op_act = None            # 0.37.0 ... and the one before that
@@ -880,32 +882,55 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         thrown 23, the bot hit them 19. The button whose active frame meets the rusher inside its reach (the closing speed
         now), so it lands in the rushed normal's start-up (a counter hit) or beats a rush throw. Once per rush; the bot free,
         on the ground, not in blockstun (a cancel rush inside a blockstring is the guard rules')."""
+        from .rush_profiles import ahead
         rc = self.c.get("rush_check") or {}
         a = op.get("action_id")
-        if not rc.get("enabled", True) or a not in RUSH_IDS or self._rc_for == self.op_onset:
-            return None
-        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0) \
-                or self.busy(me) is not None or not self.vel_ok:
+        if not rc.get("enabled", True) or a not in self.op_rush_ids or self._rc_for == self.op_onset:
             return None
         mx, ox = _num(me.get("x")), _num(op.get("x"))
         if mx is None or ox is None:
             return None
-        closing = -self.op_vx * (1.0 if ox > mx else -1.0)
-        if closing < float(rc.get("min_closing", 0.015)):
-            return None                                    # not coming (or pulled back): nothing to check
+        side = 1.0 if ox > mx else -1.0
+        if self._rc_seen != self.op_onset:                  # 0.37.1: where this rush started (pulled back or not)
+            self._rc_seen, self._rc_x0 = self.op_onset, ox
+        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0) \
+                or self.busy(me) is not None or not self.vel_ok:
+            return None
+        now = self._op_hist[-1][0] if self._op_hist else None
+        t = now - self.op_onset if isinstance(now, int) and isinstance(self.op_onset, int) else None
+        travel = (self.op_rush or {}).get("travel") or []
+        closing = -self.op_vx * side
+        if t is None or t < 0 or not travel:
+            # no curve: the speed on this line, as before 0.37.1
+            if closing < float(rc.get("min_closing", 0.015)):
+                return None
+            move = lambda k: closing * k                   # noqa: E731
+            how = f"{closing:.3f} a frame"
+        else:
+            # 0.37.1 (user: "Different characters have different Drive Rush speeds"): the character's own measured curve
+            # from the frame since its rush began; a rush that has fallen well behind it was pulled back (or slowed)
+            done = (self._rc_x0 - ox) * side if self._rc_x0 is not None else 0.0
+            if closing < -0.01 or (t >= int(rc.get("pullback_after", 13))
+                                   and done < ahead(travel, 0, t) * 0.5 - 0.1):
+                if self._rc_for != ("pulled", self.op_onset):
+                    self._rc_for = ("pulled", self.op_onset)
+                    self.rush_stats["pulled_back"] = self.rush_stats.get("pulled_back", 0) + 1
+                return None
+            move = lambda k: ahead(travel, t, k)            # noqa: E731
+            how = f"{self._op_char or 'its'} rush curve, frame {t}"
         L = self.lead + self.stale
         for o in rc.get("moves") or []:
             su = int(o.get("startup", 6))
             reach = self._pe_reach(o.get("id"), (self.c.get("punish", {}).get("reach_fallback") or {}).get(o["name"], 1.2))
             if o.get("max_reach") is not None:
                 reach = min(reach, float(o["max_reach"]))
-            d_hit = dist - closing * (L + seq_prefix(o["seq"]) + su - 1)
+            d_hit = dist - move(L + seq_prefix(o["seq"]) + su - 1)
             if d_hit <= reach and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
                 self._rc_for = self.op_onset
                 self.rush_stats["checked"] = self.rush_stats.get("checked", 0) + 1
                 return Decision("seq", o["name"], o["seq"], rule="rush_check", timed=True,
-                                reason=f"Drive Rush coming in ({closing:.3f} a frame, {dist:.2f} away): {o['name']} meets "
-                                       f"it at {max(0.0, d_hit):.2f}")
+                                reason=f"Drive Rush coming in ({how}, {dist:.2f} away): {o['name']} meets it at "
+                                       f"{max(0.0, d_hit):.2f}")
         return None
 
     def _hitbox_meets(self, me: dict, op: dict, start: int, frames: list, side: float | None = None) -> int | None:
@@ -1218,6 +1243,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return Decision("seq", di["name"], di["seq"], rule="move_answer", timed=True,
                         reason=f"{name} seen on its frame {fr}: Drive Impact, armor up on its frame {start} before its hit "
                                f"on {S} ({ans.get('why', '')})")
+
+    def set_opponent_rush(self, opponent: str | None) -> None:
+        """0.37.1: the opponent character's Drive Rush ids and travel curve (rush_profiles.py, MEASURED)."""
+        from .rush_profiles import profile, rush_ids
+        self._op_char = opponent
+        self.op_rush = profile(opponent)
+        self.op_rush_ids = rush_ids(opponent)
 
     def set_opponent_throws(self, opponent: str | None) -> None:
         """0.31.1: the opponent character's own throw ids (throws.py, MEASURED; Guile's are 700 / 701, victim 706 / 710).
@@ -2047,7 +2079,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         age_ok = fresh and (isinstance(k_.get("active_end"), int)
                             or c["el"] <= int(rc.get("unknown_max_age", 15)))
         # Drive system moves 480-519 (parries, rushes: id kinds MEASURED 0.18.3; Alex's rush is 500 then 502)
-        rushing = oa in RUSH_IDS or (isinstance(oa, int) and 480 <= oa < 520) or bool(k_.get("lead_in"))
+        rushing = oa in self.op_rush_ids or (isinstance(oa, int) and 480 <= oa < 520) or bool(k_.get("lead_in"))
         # ... and the reversal itself must reach: 1 of the 4 whiffed OD Shoryukens went out from 2.01 at a long poke
         own_reach = ((self.c.get("combo_reach") or {}).get("follow") or {}).get(cand.get("name") or "")
         reaches = own_reach is None or cand.get("super") or dist <= float(own_reach) + 0.1
@@ -3667,7 +3699,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 self.di_wall_stats["after_ids"][k_] = self.di_wall_stats["after_ids"].get(k_, 0) + 1
                 self._di_wall_watch = None
         if oa != self.op_move["id"]:
-            rushed = isinstance(oa, int) and 600 <= oa < 715 and (self.op_move["id"] in RUSH_IDS
+            rushed = isinstance(oa, int) and 600 <= oa < 715 and (self.op_move["id"] in self.op_rush_ids
                                                                     or self._rushed_by_gauge(me, op))
             prev_oa_ = self.op_move["id"]
             self.op_move = {"id": oa, "connected": False, "chance": False, "punished": False, "rushed": rushed}
@@ -5340,6 +5372,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.op_rev_supers = opponent_reversal_supers(summary["opponent"], ds_root)
                 fighter.op_charge_revs = opponent_charge_reversals(summary["opponent"], ds_root)
                 fighter.set_opponent_throws(summary["opponent"])
+                fighter.set_opponent_rush(summary["opponent"])
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():
