@@ -4,14 +4,15 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-08: code version **0.37.2**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (661).*
+*State as of 2026-10-08: code version **0.37.3**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (663).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
 
-**State: 0.37.2 is pushed** (CLAUDE.md "0.37.2"); 0.37.1: a Drive Rush goes into 5HK only after 5HP (user rule).
+**State: 0.37.3 is pushed** (CLAUDE.md "0.37.3"): the user's report "the OCR always thinks it's P2": the VS-screen name
+read is off; the side comes from a tap + backdash + crouch probe at "Fight!". 0.37.2 (CLAUDE.md "0.37.2"): 0.37.1: a Drive Rush goes into 5HK only after 5HP (user rule).
 - 0.37.2: the Drive Rush check per opponent character (`configs/rush_profiles.json`, `sf6bot/rush_profiles.py`):
   its own rush ids (Guile 731, Chun-Li / Mai / Viper 760 were never checked before) and its measured travel curve.
 - The user dropped the Chun-Li 6HP question and the custom-room relabel (2026-10-08).

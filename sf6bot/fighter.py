@@ -4539,6 +4539,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     # never in the repo): a mirror's side is read there before "Fight!", so no crouch probe is needed
     # 0.37.0 (user): the name comes from the panel's entry box (`--my-name`), else ladder_read.my_name, so a renamed CFN
     # needs no code change
+    # 0.37.3 (user: "The OCR...doesn't work. It always thinks it's P2"): off unless ladder_read.side_from_name is true
+    side_by_name = bool((cfg.get("ladder_read") or {}).get("side_from_name", False))
     rk_ = cfg.get("ranked") or {}
     side_names = [x.strip() for x in [my_name, (cfg.get("ladder_read") or {}).get("my_name"), rk_.get("cfn")]
                   + list(rk_.get("side_text") or []) if isinstance(x, str) and x.strip()]
@@ -5196,11 +5198,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 i_ = by_character(st.raw, fcfg.get("character"))
                 if i_ is not None:
                     side.update(i=i_, how="character")
-                elif ladder is not None and ladder.side_of(side_names) is not None:
+                elif side_by_name and ladder is not None and ladder.side_of(side_names) is not None:
                     # 0.37.0 (user: no crouch probe in mirrors; read the bot's name on the VS screen instead)
                     side.update(i=ladder.side_of(side_names), how="my name on the VS screen")
                 elif fight_on and c.armed:
-                    status("finding my side: crouch probe (neither or both players are "
+                    status("finding my side: backdash + crouch probe (neither or both players are "
                            f"{fcfg.get('character')})", detail)
                     res = probe(sess, reader)
                     summary["side_probe"] = res

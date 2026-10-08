@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.37.3 (2026-10-08): side at "Fight!" from a tap, a backdash and a crouch; the VS-screen name read is off (it always said P2).**
 - **0.37.2 (2026-10-08): the Drive Rush check uses each opponent character's measured rush ids and speed.**
 - **0.37.1 (2026-10-08): a Drive Rush into 5HK only after 5HP (5HP forces stand on hit).**
 - **0.37.0 (2026-10-08): fixes from ~300 Master matches: projectile hitboxes, reaction Shoryukens / Drive Impacts that check reach, spacing, 2MK supers and Drive Rush cancels, mirror side from the VS screen.**
@@ -4659,6 +4660,26 @@ All MOCK / replay-tested (`tests/test_0370.py`, 36 tests); nothing here is verif
     not checked (`rush_stats.pulled_back`).
   - Tests in `tests/test_0370.py` (Dee Jay checked earlier than Zangief from the same distance, each meeting 5MP inside
     its reach; Guile's 731; a pulled-back rush). Not verified in game.
+
+## 0.37.3: the side from a tap, a backdash and a crouch; no screen read (user, 2026-10-08)
+- User: "The OCR...doesn't work. It always thinks it's P2. Let's fall back to the crouching, but just make it a backdash,
+  then a crouch."
+- The VS-screen name read (0.37.0) is off (`ladder_read.side_from_name: false`, configs/default.yaml); the panel's
+  "Bot's CFN" box stays but decides nothing unless that setting is turned back on. Why it always read P2 was not
+  found (no screen texts seen here).
+- `side_probe.probe` at "Fight!" (characters alike or unknown):
+  - a 2-frame tap of screen LEFT (a one-frame step either way). The player whose input mask shows LEFT rising, held
+    exactly 2 frames, then let go, at one delay, is the bot (`tap_side`); a player holding LEFT all along shows no
+    rising edge. The bot knows its side and input delay ~4-6 frames after the tap.
+  - then a backdash AWAY from the opponent (by the positions; numpad = screen directions during the probe) and a
+    crouch: 2 back, 2 neutral, 2 back, 6 neutral, 10 down
+  - the whole pattern is scored on the masks' direction bits (`score_bits`); if it disagrees with the tap, the tap's
+    answer is kept (`how: tap only`)
+  - the tap unclear (both players tapping LEFT, no mask): the old crouch on / off pattern (`probe_crouch`); unclear twice:
+    P2 as before, and `SideCheck` still swaps a wrong side on the bot's presses
+  - `fight_summary.side_probe.how` says which.
+- Tests in `tests/test_0370.py` (a simulated game echoing the bot's keys on either player's mask: both sides found, the
+  backdash goes away from the opponent, the other player holding LEFT). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

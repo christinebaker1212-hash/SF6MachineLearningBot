@@ -99,6 +99,9 @@ ladder_read:
   # 0.37.0 (user): the bot's name as the VS screen shows it; read on one half there = its side (a mirror needs no crouch
   # probe). The panel's "Bot's CFN" box (Versus Human, Ranked) overrides it for that run; change either if the CFN changes.
   my_name: "Frame Perfect"
+  # 0.37.3 (user: "The OCR...doesn't work. It always thinks it's P2"): the side is NOT read from the VS screen any more;
+  # the input probe at "Fight!" (a tap, a backdash, a crouch) decides. true = try the name read first again.
+  side_from_name: false
 
 # 0.22.0 operator takeover in fights (takeover.py): a real controller input (any XInput pad: the Ally's own, or yours
 # through Parsec) or safety.takeover_key hands the match to you; rounds you WIN teach the bot your answers, lost rounds

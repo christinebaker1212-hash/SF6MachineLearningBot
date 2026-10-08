@@ -635,3 +635,68 @@ def test_rush_ids_are_per_character():
 def test_a_rush_that_falls_behind_its_curve_is_not_checked():
     f, got = _first_check("Ken", pull_back_at=12)
     assert not got and f.rush_stats.get("pulled_back") == 1
+
+
+# ---- 0.37.3: side probe = a tap, a backdash, a crouch (user: the OCR always said P2) ------------------------------------
+
+class _ProbeGame:
+    """The bot's held keys show on player `me`'s input mask `lag` frames later; the other player holds `other_mask`."""
+
+    def __init__(self, me, lag=4, other_mask=0, xs=(-1.5, 1.5)):
+        import threading
+        from types import SimpleNamespace
+        from sf6bot.actions import Facing, absolute_to_keys, to_absolute
+        self.me, self.lag, self.other, self.xs = me, lag, other_mask, xs
+        self.held, self.hist, self.f = 0, [], 1000
+        game = self
+
+        class Ctl:
+            facing = Facing.LEFT
+
+            def set_facing(self, f):
+                self.facing = f
+
+            def apply(self, state, tag=""):
+                keys = absolute_to_keys(to_absolute(state.direction, self.facing))
+                game.held = sum({"LEFT": 4, "RIGHT": 8, "DOWN": 2, "UP": 1}[k] for k in keys)
+                game.applied.append((game.f, state.direction))
+        self.applied = []
+        self.sess = SimpleNamespace(controller=Ctl(), stop_event=threading.Event())
+
+    def subscribe(self):
+        game = self
+
+        class Q:
+            def get(self, timeout=None):
+                from types import SimpleNamespace
+                game.hist.append(game.held)
+                game.f += 1
+                m = game.hist[-1 - game.lag] if len(game.hist) > game.lag else 0
+                p = [{"input": game.other, "x": game.xs[0]}, {"input": game.other, "x": game.xs[1]}]
+                p[game.me] = dict(p[game.me], input=m)
+                return SimpleNamespace(raw={"stage_timer": game.f, "p1": p[0], "p2": p[1]})
+        return Q()
+
+    def unsubscribe(self, q):
+        pass
+
+
+def test_the_side_probe_taps_then_backdashes_away_and_crouches():
+    from sf6bot.side_probe import probe
+    for me in (0, 1):
+        g = _ProbeGame(me)
+        r = probe(g.sess, g)
+        assert r["player"] == me and r["lag"] in (4, 5) and r["how"] == "tap + backdash + crouch", r
+        dirs = [d for _, d in g.applied]
+        back = 4 if me == 0 else 6                    # P1 on the left backs off to the left, P2 to the right
+        i = dirs.index(back, 1)                       # after the identifying tap
+        assert dirs[i:i + 3] == [back, 5, back] and 2 in dirs[i:]
+    # the other player holding LEFT (walking back) on the tap: still decided, by the crouch pattern if not the tap
+    g = _ProbeGame(1, other_mask=4)
+    r = probe(g.sess, g)
+    assert r["player"] == 1
+
+
+def test_the_vs_screen_name_no_longer_decides_the_side():
+    from sf6bot.config import load_config
+    assert load_config()["ladder_read"]["side_from_name"] is False
