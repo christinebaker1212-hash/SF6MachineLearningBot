@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08, after step 3 (bug fixes a + b).** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08, after step 2 (measuring) and step 3 (bug fixes a + b). Building step 4 next.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -92,6 +92,32 @@ CA 3.6%; DI performed 0.5 a match.
 - Run summaries (190 matches): composer started 2,463 / completed 522; routes_completed spread over many routes;
   punish_engine raw_super_skipped 887; anti_air 220 sent, held_overhead 220, blocked_crossup 142, ready 884;
   reactive_reversal moments 3,159 -> 105 reversals; drive burnouts 42; opp_rushed_normals 874.
+
+- More (0.36.1, 171 matches; scripts in the old session's scratchpad, easy to rebuild):
+  - Walking forward when the opponent's move started: 15.3% of all damage taken (481 openings); Akuma H Gou Hadoken 53,
+    Chun-Li 2MK 19 / 5LP 13, Ryu Hadokens 21. Distance spread 1.0-2.5+.
+  - Hit during the bot's own move: 48.8% of damage. Own moves: Shoulder Throw 164 (its throw whiffing), 2MK 142,
+    Drive Impact 107, 2LP 57, L Shoryuken 51, 2MP 46.
+  - Bot throws (225 starts): within 0.8 landed 55 / 59; 0.8-1.0 landed 52 / 119 (52 whiffs, 15 hit out of it);
+    1.0-1.3 landed 11 / 43. -> throws only within ~0.85.
+  - 2MK by start distance: <1.3 hit 59 / block 56 / whiff 45; 1.6-1.9 146 / 112 / 50; 1.9+ 33 / 17 / 111. Whiffed 2MKs
+    were hit right after 123 times (the "freeze" the user sees is whiff recovery). Live reach had grown 2MK to 1.85
+    (likely inflated by bug b).
+  - cr.HP 630: <1.2 hit 35/35; 1.5-1.8 12 hit / 23 whiff; 1.8+ 2 hit / 57 whiff.
+  - 5HP 608: 1.8-2.2 70 hit / 42 whiff; 2.2+ 4 hit / 21 whiff.
+  - True idle stretches (free, nothing pressed, within 2.2, 12+ frames): 463, only 12 ended in a hit: not the problem.
+  - Drive spent: blocking 44%, OD moves 32%, parry 8%, DI 6%, hit 5%, rush 1%.
+  - Opponent in burnout: 18,599 frames; the bot started 1 Drive Impact on them.
+  - Opponent Drive Impacts: 106; corner 76 (hit 27, blocked 31, DI-back 18); midscreen hit 38. Bot usually had a bar.
+  - Opponent Drive Rushes: 509; blocked 293, bot hit 202 (40%), bot hit them 2.
+  - Rounds: 398 KO, 11 timeouts.
+  - Cross-overs (opponent airborne passes over the bot): 295; 147 with 16+ frames from the cross to the landing, but the
+    bot blocks through (replay: block_crossup / block_overhead); only 12 hit the opponent. Ryu's Shoryuken hitboxes
+    (catalog boxes) are always IN FRONT: L SRK frame 5 x 0.29-0.89 fwd, y 0.27-1.17, later frames up to y 1.75 / x 0.96.
+    A cross-cut Shoryuken must be active while the opponent is still on the original side.
+  - SA1 starts: in combos 73 hit / 1 blocked; from neutral 22 hit, 11 blocked, 5 whiffed.
+  - Reversal Shoryukens (from block / wake-up): L SRK 930 vs a grounded opponent from 1.4+: 32 whiffs / 5 hits (reach
+    ~1.35 centre to centre); OD SRK 936: 37 hit / 13 not.
 
 ## Done in this session (uncommitted until pushed; check `git log`)
 - Step 3, bug fixes from the previous session's 0.25.0 findings:
