@@ -11,6 +11,8 @@ the project stands, how to work with the user, and what to do next.
 
 ## 0. Right now (handover, 2026-10-08)
 
+**User report (2026-10-08, screenshot): Ryu is HIGH MASTER, 1601 MR, 47,280 LP.** Not yet measured from fight files; ask for them (and which version played) when the session ends.
+
 **0.38.1 is pushed** (CLAUDE.md "0.38.1"): sequences end on down-back near the opponent (`fighter.end_guard`; 77 hits came in
 the 0-3 frames after a full release), and the throw tech runs before the punish engine on a free bot.
 
