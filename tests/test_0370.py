@@ -303,3 +303,19 @@ def test_a_wakeup_drive_reversal_that_would_land_after_the_get_up_is_dropped():
     assert drive_reversal_late({"action_id": 340, "action_frame": 20}, 5, wf) is None
     assert drive_reversal_late({"action_id": 340, "action_frame": 26}, 5, wf) is not None
     assert drive_reversal_late({"action_id": 320, "action_frame": 26}, 5, wf) is None      # earlier in the knockdown
+
+
+def test_the_opponents_poke_reach_comes_from_its_real_hitboxes():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    assert f.opp_poke_reach() is None
+    raw = state(op={"x": 2.0, "action_id": 614, "boxes": [Box("h", 0.5, 0.95, 0.3, 0.9), Box("b", 1.6, 2.4, 0, 1.4)]})
+    f.observe_line(raw, 0)
+    assert abs(f.opp_poke_reach() - (2.0 - 0.5 + 0.4)) < 1e-9          # its hitbox 1.5 in front + the bot's half-width
+
+
+def test_walking_forward_inside_two_is_discouraged_at_master():
+    from tests.test_0200 import _Brain
+    pol = npol.NeutralPolicy(_Brain(), [], cfg={}, seed=1)
+    wf, cr = npol.it.INTENTS.index("walk_fwd"), npol.it.INTENTS.index("crouch")
+    near = pol.style({"x": 0.0}, {"x": 1.3})
+    assert near[wf] < 0.5 and near[cr] > 1.0

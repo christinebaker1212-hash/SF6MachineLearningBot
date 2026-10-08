@@ -705,6 +705,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._prev2_op_act = None            # 0.37.0 ... and the one before that
         self._rc_for = None                  # 0.37.0 the opponent rush (onset) already checked
         self._dg_for = None
+        self.bad_target_stats: dict = {}
+        self._op_box_poke = None
         self._cur_op_blocked = self._prev_op_blocked = False   # 0.37.0 the current / previous action was blocked by the bot
         self._me_bs_prev = 0
         self.op_charge_revs: list = []       # 0.29.0 opponent_charge_reversals
@@ -1258,7 +1260,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 return Decision("none", reason=f"busy: {why}")
         if d.kind in ("seq", "route") and self._throw_too_early(d, raw, me_i):
             return Decision("none", reason="throw held: the opponent is not standing yet")
-        tr = self._throw_out_of_range(d, raw, me_i)
+        tr = self._throw_out_of_range(d, raw, me_i) or self._bad_target(d, raw, me_i)
         if tr is not None:
             return tr
         cg = self._aa_cross_guard(d, raw, me_i)
@@ -1318,6 +1320,30 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.throw_stats["out_of_range"] = self.throw_stats.get("out_of_range", 0) + 1
         return Decision("hold", direction=1, rule="throw_out_of_range",
                         reason=f"{d.name or 'throw'} held: {dist:.2f} away, throws land from {lim:.2f} or closer")
+
+    def _bad_target(self, d: Decision, raw: dict, me_i: int) -> Decision | None:
+        """0.37.0: two moves that cannot hit where the opponent is:
+        - a sweep (2HK) at an opponent in the air or in a juggle / knockdown reaction (user: "Sometimes Ryu sweeps during
+          moves that leave opponents airborne"; a sweep hits grounded opponents only)
+        - a reversal Shoryuken (the defence game's, the reactive reversal's) at a GROUNDED opponent beyond its reach
+          (MEASURED 0.36.1: L Shoryuken reversals at grounded opponents from 1.4+ whiffed 32 times and hit 5; its hitbox
+          reaches 0.96 in front, catalog boxes, + the opponent's hurtbox ~0.4)"""
+        if d.kind != "seq" or not d.seq:
+            return None
+        me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
+        oy, oa = _num(op.get("y")) or 0.0, op.get("action_id")
+        if re.match(r"^[123]\+HK@", d.seq) and (oy > 0.05 or (isinstance(oa, int) and 230 <= oa < 300)):
+            self.bad_target_stats["sweep_air"] = self.bad_target_stats.get("sweep_air", 0) + 1
+            return Decision("hold", direction=1, rule="no_sweep_air", reason="no sweep at an airborne / juggled opponent")
+        if re.search(r"(^|\s)6@\d+ 2@\d+ 3\+[LMH]?[PK]", d.seq) and ("reversal" in (d.rule or "")
+                                                                 or (d.rule or "").startswith("defense:")):
+            dist = player_distance(me, op)
+            lim = float((self.c.get("anti_air") or {}).get("reversal_reach", 1.45))
+            if oy <= 0.05 and dist is not None and dist > lim:
+                self.bad_target_stats["srk_far"] = self.bad_target_stats.get("srk_far", 0) + 1
+                return Decision("hold", direction=1, rule="no_srk_far",
+                                reason=f"reversal Shoryuken held: the opponent is on the ground {dist:.2f} away")
+        return None
 
     def _throw_too_early(self, d: Decision, raw: dict, me_i: int) -> bool:
         """0.20.0 (user: "it mistimes meaty grabs constantly, choosing to grab as soon as the opponent is on the ground. It
@@ -2739,6 +2765,25 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.parry_throw_stats["taken"] += 1
         return self._move("throw", "parry_throw", f"opponent holding Drive Parry at {dist:.2f}: a throw beats a parry")
 
+    def _track_op_hitbox(self, me: dict, op: dict) -> None:
+        """0.37.0 (user: "He can SEE the hitboxes now"): the farthest the opponent's grounded normals' hitboxes have reached
+        in front of it this match (exporter v11 boxes), + the bot's standing hurtbox half-width (0.4, MEASURED by G) = the
+        centre-to-centre distance at which its pokes touch the bot. It raises the measured poke reach the neutral spacing
+        uses (opp_poke_reach), never lowers it. MEASURED (0.36.1): walking forward at 1.0-2.0 was the stance most opened."""
+        a = op.get("action_id")
+        if not isinstance(a, int) or not 600 <= a < 715 or (_num(op.get("y")) or 0.0) > 0.05:
+            return
+        hs = [b for b in (op.get("boxes") or []) if b.kind == "h"]
+        ox, mx = _num(op.get("x")), _num(me.get("x"))
+        if not hs or ox is None or mx is None:
+            return
+        toward = 1.0 if mx > ox else -1.0
+        front = max(((b.x1 - ox) if toward > 0 else (ox - b.x0)) for b in hs)
+        r = front + float((self.c.get("ranges") or {}).get("hurt_half", 0.4))
+        if 0.3 < r < 3.5 and r > (self._op_box_poke or 0.0):
+            self._op_box_poke = r
+            self._opp_poke = max(self.opp_poke_reach() or 0.0, r)      # (initialises the measured reach first)
+
     def opp_poke_reach(self) -> float | None:
         """The opponent's longest measured ground normal (reach.py: 75th percentile of where it connected, 3+ contacts)."""
         if self._opp_poke is None:
@@ -3531,6 +3576,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 if d_ is not None and isinstance(tmr, int) and (_num(op.get("y")) or 0.0) <= 0.05:
                     self.pt.thrown(oa, tmr, d_, _num(op.get("x")))
         self._zn_box_track(raw, me, op, me_i)          # 0.37.0: the opponent's projectile from its own hitbox
+        self._track_op_hitbox(me, op)                   # 0.37.0: how far its grounded normals really reach
         bs_ = _num(me.get("blockstun")) or 0
         if bs_ > 0 and self._prev_me_bs <= 0:
             self._blocked_rush = bool(self.op_move.get("rushed"))

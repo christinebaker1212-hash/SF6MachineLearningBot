@@ -47,7 +47,10 @@ SPEND = {"super", "drive_impact", "parry", "drive_rush"}
 JUMPS = ("jump_fwd", "jump_neutral", "jump_back")
 # 0.24.2 (user: "there's no reason to initiate any attack with a jumping attack. Unless it is a DI stun in the corner"): no
 # forward jumps and no air attacks from neutral (a jump-in without an attack only lands next to the opponent)
-INTENT_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.25, "jump_back": 0.25, "air_attack": 0.0}
+# 0.37.0 (user: "Random neutral jumping not in response to a command grab is getting Ryu killed by anti airs"): no neutral
+# or back jumps from the neutral policy either (jumps over a command grab, a fireball or a burned-out Drive Impact are
+# their own rules)
+INTENT_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.0, "air_attack": 0.0}
 # 0.19.0 (user: "it tends to corner itself"). MEASURED: the bot's back was within 1.5 of the wall 15% of the fight
 # time (its opponents' 8%) and it took 25% more damage a second there; 13 of 99 entries came from its own walking
 # back, back dashes or back jumps. Retreating weighs less the less room is behind it.
@@ -68,8 +71,16 @@ SPACING = (((-0.35, 0.05), {"walk_back": 1.5, "walk_fwd": 0.6, "idle": 0.8}),
 # at 1.0-1.5 walking forward +420 (it walks in and lands 2MK / 2MP), crouch-blocking +305, standing -195, walking back -640;
 # at 1.5-2.0 crouch-blocking +805, standing +755, walking forward +405, walking back +180. So: no standing still or backing
 # up into their pokes inside 1.5 (crouch-block instead), and less backing up at 1.5-2.0
-STANCE = (((1.0, 1.5), {"walk_back": 0.4, "idle": 0.5, "crouch": 1.6}),
-          ((1.5, 2.0), {"walk_back": 0.5, "crouch": 1.3}))
+# 0.37.0 re-measured at Master (0.36.1 ranked, 171 matches; the bot free and grounded, the opponent not in a stun; hp a
+# second = the bot's openings' damage minus the opponent's, attributed to the stance 6 frames before): walking forward is
+# the worst stance inside 2.0 (user: "Walking forward into attacks is still a major problem"): <1.0 walk fwd -293 / walk
+# back -375 / crouch +196 / stand -446; 1.0-1.5 walk fwd -672 (opened 0.72 a second) / back -373 / crouch -53 / stand -30;
+# 1.5-2.0 fwd -303 / back -138 / crouch -49 / stand -19; 2.0-2.5 fwd -115 / back -7 / crouch -69; 2.5+ fwd -41. The
+# approach (ADVANCE) stays beyond the opponent's reach + 0.6.
+STANCE = (((0.0, 1.0), {"walk_fwd": 0.5, "walk_back": 0.6, "idle": 0.5, "crouch": 1.5}),
+          ((1.0, 1.5), {"walk_fwd": 0.3, "walk_back": 0.4, "idle": 0.6, "crouch": 1.6}),
+          ((1.5, 2.0), {"walk_fwd": 0.4, "walk_back": 0.6, "crouch": 1.3}),
+          ((2.0, 2.5), {"walk_fwd": 0.6}))
 # 0.20.0: when the opponent's next combo would kill, or late in a round with a lead, play safe (ESTIMATES)
 SAFE_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.2, "drive_impact": 0.0, "drive_rush": 0.0,
                "dash_fwd": 0.3, "poke": 0.6, "crouch": 1.8, "walk_back": 1.4}
@@ -77,7 +88,7 @@ WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, fac
 # 0.27.0: with the wall this close behind, walk OUT (forward) more. MEASURED (0.26.0 ranked, 33 Diamond matches): the bot's
 # back within 1.5 of its wall 20% of the time (0.24.x: 7-12%), taking 188 hp a second there and dealing 103 (midscreen
 # 118 / 186); it walked back into the corner itself 28 times
-CORNER_OUT = (1.5, {"walk_fwd": 1.6, "idle": 0.7})
+CORNER_OUT = (1.5, {"walk_fwd": 1.8, "idle": 0.7})   # 0.37.0: 1.6 -> 1.8 (the Master STANCE factors walk in less)
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
 # 0.21.0: MEASURED 7 ranked matches on 0.20.5 / 0.20.6: ~2.3 parries a minute, many mid-blockstring, and 3 burnouts. A
@@ -246,6 +257,9 @@ class NeutralPolicy:
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
         self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
         self.op_burnout = False               # 0.37.0: the opponent is in burnout (fighter)
+        # 0.37.0 (user: "Shinku Hadoken being used often in situations where it would be blocked"): no Super Art from
+        # neutral; supers come from punishes, confirms and combos
+        self.neutral_super = bool(c.get("neutral_super", False))
         self.chasing = False                  # 0.37.0: behind on health late in the round (fighter)
         # 0.20.7 (user: "It's using DI in fucking neutral"): the neutral policy never chooses a Drive Impact unless the
         # config turns it back on (policy.neutral_drive_impact)
@@ -286,8 +300,8 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "drive_rush" and not any(e["kind"] == "drive_rush" for e in self.book):
                 ok[i] = False
-            elif name == "super" and not self._lethal_super(me, op):
-                ok[i] = False
+            elif name == "super" and (not self.neutral_super or not self._lethal_super(me, op)):
+                ok[i] = False                  # 0.37.0: off by default (MEASURED 0.36.1: 11 of 38 neutral SA1s blocked)
             elif name == "parry" and not (op is not None and it.category(op) in PARRY_WHEN and dist <= PARRY_DIST):
                 ok[i] = False
             elif name == "parry" and (num(me.get("drive")) or 0) < self.parry_min_drive:
@@ -379,7 +393,8 @@ class NeutralPolicy:
                                                 and m["block_adv"] >= NEUTRAL_SPECIAL_MIN_BLOCK):
                 return False
         elif m["intent"] == "super":
-            if not (m["super_cost"] <= (num(me.get("super")) or 0) and (m.get("damage") or 0) >= (num(op.get("hp")) or 1e9)):
+            if not self.neutral_super or not (m["super_cost"] <= (num(me.get("super")) or 0)
+                                              and (m.get("damage") or 0) >= (num(op.get("hp")) or 1e9)):
                 return False
         elif m["intent"] != "poke":
             return False

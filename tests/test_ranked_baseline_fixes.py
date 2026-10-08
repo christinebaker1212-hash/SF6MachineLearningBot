@@ -93,8 +93,11 @@ def test_supers_parries_and_drive_impacts_need_a_reason():
     intents = {p["intent"] for p in picks}
     assert not intents & {"super", "parry", "drive_impact"}
     assert not {p["move"] for p in picks} & {"OD Hadoken", "L Shoryuken"}     # no OD / reversal from neutral
-    low = dict(idle, hp=1500)                                                   # SA1 (2000) kills: allowed
-    assert any(pol.choose(me, low, None, None, 500, lambda a: True)["intent"] == "super" for _ in range(600))
+    low = dict(idle, hp=1500)                                                   # SA1 (2000) kills ...
+    # 0.37.0 (user: "Shinku Hadoken being used often in situations where it would be blocked"): off by default
+    assert not any(pol.choose(me, low, None, None, 500, lambda a: True)["intent"] == "super" for _ in range(300))
+    pol2 = NeutralPolicy(_Brain(), MOVES, cfg={"explore": 0.5, "neutral_super": True}, seed=1)
+    assert any(pol2.choose(me, low, None, None, 500, lambda a: True)["intent"] == "super" for _ in range(600))
     attacking = dict(idle, x=1.5, action_id=605)                               # something to parry
     ok = pol.allowed(me, 1.5, lambda a: True, None, attacking)
     assert ok[it.INTENTS.index("parry")]

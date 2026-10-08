@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08, step 6 in progress (defence / neutral). Done in step 6 so far: throw range, neutral range caps, cross-cut, rush check, DI guard, wake-up DR. Next in step 6: walking forward into attacks (boxes), grapplers, Drive spent blocking, random neutral jumps, SA1 into block, sweeps into airborne, L SRK reversal reach.** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08 (usage limit near), step 6 nearly done. FIRST: fix the one known failing test (below), run the full suite (~5 min), then step 7.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -180,6 +180,23 @@ CA 3.6%; DI performed 0.5 a match.
   - Wake-up Drive Reversal: excluded when it would land < 3 frames before the get-up ends; `drive_reversal_late`
     covers get-ups (wakeup_frames + action_frame).
 
+- Step 6 continued:
+  - STANCE re-measured at Master (neutral_policy.STANCE; walk forward 0.5 / 0.3 / 0.4 / 0.6 by band <1 / 1-1.5 /
+    1.5-2 / 2-2.5; MEASURED table in the comment), CORNER_OUT walk_fwd 1.8.
+  - `_track_op_hitbox`: the opponent's grounded normals' real hitbox front + 0.4 raises opp_poke_reach.
+  - INTENT_FACTOR: no neutral / back jumps from the policy (item 19).
+  - `policy.neutral_super` (default off): no Super Art from neutral (item 33).
+  - `_bad_target` post-filter: no sweep at an airborne / juggled opponent (item 32); no reversal Shoryuken (rules with
+    "reversal" or "defense:") at a grounded opponent beyond `anti_air.reversal_reach` 1.45 (item 18).
+  - Grapplers (item 5): no specific rule; their damage came from pokes walked into (Manon 5MP 43k at 1.7, Alex Lariat
+    1.8) and command grabs (victim ids overlap Ryu's ids, so the "own move" split is meaningless): covered by STANCE.
+  - Drive spent blocking (item 6): not addressed beyond fewer openings / reaction DIs / rush checks. Say so in the report.
+- KNOWN FAILING TEST (fix first): tests/test_ranked_baseline_fixes.py::test_supers_parries_and_drive_impacts_need_a_reason
+  expects a lethal SA1 from neutral; 0.37.0 turned that off. Replace its lines
+  `low = dict(idle, hp=1500)` / `assert any(... == "super" ...)` with: off by default (assert not any over 300 picks),
+  and on with `NeutralPolicy(_Brain(), MOVES, cfg={"explore": 0.5, "neutral_super": True}, seed=1)` (assert any over 600).
+  Then run `python -m pytest -q tests/` (all passed before step 6's last edits except this one; not yet re-run fully).
+
 ## Next steps (in order; the task list in the session mirrors these)
 2. Finish measuring (scripts were in the scratchpad; rebuild as needed): walking forward into attacks (bot id 9 / dir 6
    at the opponent's move start), far cr.HP (630) / sweep (643) / 5HP (608) / SA1 (1200) by start distance and result,
@@ -187,6 +204,15 @@ CA 3.6%; DI performed 0.5 a match.
    blocking, opponent burnout behaviour, timeouts, cross-ups, corner DIs, Drive Rush responses, combo variety.
 4. DONE (see above).
 5. DONE (see above).
-6/7/8. Defence, offence, mirror side (see the list above).
+6. Remaining of step 6: tests for `_bad_target` and the no-jump / no-neutral-super changes (test_0370.py).
+7. Offence (items 10, 20, 27, 29, 31, 34, 35): DI a burned-out opponent near its wall (user overrides "no DI in neutral"
+   for this: opponent drive <= 0, back <= ~2.5, bot has 2+ bars, not vs a Super bar it could super through?); pressure
+   them; combo variety (20: composer `completed` 522 of 2,463 started); punish gaps (27: punishes chances 812 / taken 560,
+   engine waits 1,243, raw_super_skipped 887); after a DI crumple never start with a jump attack midscreen (29: check
+   `_stun_jump_in` / `_crumple_options` composed jump-ins); max-range 5HP > M High Blade Kick as a spacing ender (34);
+   DRC 5HP extensions when they beat the 2-bar route (35: composer + DRC transitions; burnout rule still applies).
+8. Mirror side (item 12): instead of the crouch probe, the bot's own first presses on the input masks (input_delay.
+   SideCheck already swaps on 6+ presses) or OCR of the VS screen; the user suggested OCR "Frame Perfect" on the match
+   screen (likely the bot's CFN / title on its side): check screen_text / ladder_read for where names are read.
 9. Tests, `__version__` 0.37.0 (sf6bot/__init__.py + pyproject), CLAUDE.md section "0.37.0" before "## Training Mode
    reset", HANDOFF §0, commit with the session trailers, push.
