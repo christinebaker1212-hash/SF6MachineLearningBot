@@ -601,7 +601,10 @@ defense:
         - {name: "OD Shoryuken", seq: "6@3 2@3 3+LP+MP@3", drive: od_move}
         - {name: "SA1", seq: "2@3 3@3 6@3 2@3 3@3 6+LP@3", super: 10000}
         - {name: "SA3", seq: "2@3 3@3 6@3 2@3 3@3 6+LK@3", super: 30000}
-    parry:      {seq: "5+MP+MK@14", drive: drive_parry}
+    # 0.40.0: off. MEASURED (0.38.2 / 0.39.0 ranked, 59 matches): 37 of the bot's parries had nothing to parry, 13 of them
+    # ended in a throw (a punish counter, 2,040 each); opponents walked up and threw the held parry. Like the tech guesses
+    # (0.31.2): at pressure moments the bot blocks and answers what it sees
+    parry:      {seq: "5+MP+MK@14", drive: drive_parry, enabled: false}
     # 0.20.0 (user's pick): Drive Reversal, 6+HP+HK while blocking (Classic), 2 Drive bars; Capcom's notes allow it only
     # during guard or a knockdown, so it is input `early` frames before the stun ends (it must come out IN the stun)
     drive_reversal: {seq: "6+HP+HK@3", early: 8, drive: drive_reversal,
@@ -938,3 +941,19 @@ whiff_punish:
   dash_gap: 1.25
   dash_frames: 21
   block_margin: 0.3        # block an opponent move only within its measured reach + this
+# 0.40.0 (user, 2026-10-08: "players who took advantage of clear patterns in its play ... by round 2, a human in High
+# Master can immediately tell what's happening"): what this opponent beat, kept for the match and a rematch (adapt.py).
+# MEASURED (0.38.2 / 0.39.0 ranked, 59 matches): rounds won R1 34-25, R2 29-28, R3 9-14.
+adapt:
+  enabled: true
+  burn_after: 3          # a button used this often from about the same distance ...
+  band: 0.25             # ... (within this much) ...
+  burn_net: -500         # ... that lost this much on net (dealt - taken in `window` frames after each press) ...
+  window: 40
+  burn_factor: 0.1       # ... is chosen this much as often there for the rest of the match
+  walk_margin: 0.15      # walking in from where a poke caught the bot walking in (+ this) or closer ...
+  walk_factor: 0.2       # ... is chosen this much as often
+  jump_burn_after: 1     # the fireball jump-in, once anti-aired / punished on landing
+  rush_burn_after: 1     # the rush check, once beaten
+  carry_s: 180           # a rematch against the same character within this keeps the memory
+

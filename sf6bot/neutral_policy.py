@@ -283,6 +283,7 @@ class NeutralPolicy:
         self.rush_follows: dict = {}          # Drive Rush follow-up move name -> the fighter's rush option (set by the fighter)
         self.rush_min_drive = int(c.get("rush_min_drive", 30000))
         self.parry_min_drive = int(c.get("parry_min_drive", PARRY_MIN_DRIVE))
+        self.memory = None                    # 0.40.0: adapt.MatchMemory (set by the fighter): what this opponent beat
 
     def allowed(self, me: dict, dist: float, can_spend, falling: bool | None = None, op: dict | None = None) -> np.ndarray:
         air = (num(me.get("y")) or 0.0) > 0.05
@@ -455,7 +456,7 @@ class NeutralPolicy:
                 intent = STYLE_INTENT.get(act)
                 if intent is None or (intent not in FREE_MOVES and not ok[idx[intent]]):
                     continue
-            v = w * fac[idx[intent]]
+            v = w * fac[idx[intent]] * self._mem(intent, m, dist)
             if self.exp is not None:
                 v *= self.exp.factor(zone, intent) * (self.exp.move_factor(zone, m["name"]) if m is not None else 1.0)
             if v > 0:
@@ -519,6 +520,7 @@ class NeutralPolicy:
             source += "+win"
         if self.exp is not None:
             p = p * np.array([self.exp.factor(zone, i) for i in it.INTENTS])
+        p = p * np.array([self._mem(i, None, dist) for i in it.INTENTS])
         py, y = num((prev_me or {}).get("y")), num(me.get("y"))
         falling = None if py is None or y is None else y < py
         ok = self.allowed(me, dist, can_spend, falling, op)
@@ -561,6 +563,19 @@ class NeutralPolicy:
                         out["route"] = e
         self.last = out
         return out
+
+    def _mem(self, intent: str, m: dict | None, dist) -> float:
+        """0.40.0: what this opponent beat this match (adapt.MatchMemory): a button beaten from about here, a walk in from
+        where a poke caught the bot."""
+        mem = self.memory
+        if mem is None:
+            return 1.0
+        f = 1.0
+        if m is not None and isinstance(m.get("id"), int):
+            f *= mem.move_factor(m["id"], dist)
+        if intent == "walk_fwd" and not mem.walk_in_ok(dist):
+            f *= mem.walk_factor
+        return f
 
     def win_push(self) -> dict:
         """{intent: mean advantage (1000s of hp)} the win model gave each choice this match."""
@@ -620,6 +635,7 @@ class NeutralPolicy:
             v = _prior(m, zone) + 3.0 * seen.get(m["id"], 0) / max(1.0, sum(seen.values()) or 1.0) * len(cands)
             if self.exp is not None:
                 v *= self.exp.move_factor(zone, m["name"])
+            v *= self._mem(intent, m, dist)
             if intent == "poke" and isinstance(m.get("block_adv"), int) and m["block_adv"] <= UNSAFE_BLOCK_ADV:
                 v *= UNSAFE_POKE_FACTOR
             w.append(max(v, 1e-3))

@@ -482,8 +482,8 @@ def test_a_match_counts_only_rounds_after_its_start():
 
 
 def _tech_on(f):
-    """0.31.1: the tech guesses are off by default; these tests check how they are valued when on."""
+    """0.31.1: the tech guesses are off by default (0.40.0: the parry guess too); these tests check how they are valued when on."""
     import copy
     f.defense.options = copy.deepcopy(f.defense.options)
-    for k in ("tech", "delay_tech"):
+    for k in ("tech", "delay_tech", "parry"):
         f.defense.options[k]["enabled"] = True

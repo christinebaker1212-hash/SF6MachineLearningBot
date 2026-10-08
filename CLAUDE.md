@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.40.0 (2026-10-08): the bot remembers what each opponent beat this match (losing buttons per distance, walk-ins into pokes, the fireball jump-in, the rush check) and stops doing it, through rematches; no parry guesses.**
 - **0.39.0 (2026-10-08): the DI-back waits a human reaction time (default 15-21 frames of the opponent's DI, never past 22); a setting on the panel and `fight --di-delay`.**
 - **0.38.2 (2026-10-08): fixes 0.38.1's regression: every sequence's last input was cut short (walks lasted 1-3 frames; he stood in place).**
 - **HIGH MASTER, PEAK 1630 MR (user, 2026-10-08).** Battle Settings screen earlier: Ryu 1601 MR, 47,280 LP, rank badge "High Master". From the screenshot; the matches since 1530 MR (0.37.3 / 0.38.x) are not measured from the files yet.
@@ -4813,6 +4814,49 @@ MEASURED on the same 49 finished 0.37.x matches (750k damage taken in 96 fight m
 - Not changed: the other Drive Impacts on reaction (the move answers, Jinrai follow-ups, burnout jump / Shoryuken).
 - Tests `tests/test_0390.py` (clamping, the landing frame inside the drawn range over 40 seeds, varied timings, a late
   sighting, off = instant, a narrow setting, the lethal skip, the panel / CLI). Not verified in game.
+
+## fights_2 analysed and 0.40.0: what this opponent beat, remembered for the match (user, 2026-10-08)
+User (67 ranked recordings, 1545-1630 MR, the light-kick match among them): "players who were able to tell that this was a
+bot, as well as players who took advantage of clear patterns in its play. Find those patterns, patch them out ... by round 2,
+a human in High Master can immediately tell what's happening." MEASURED on the 59 finished matches of 0.38.0-0.39.0 (bot side
+from the metas; scripts in the session scratchpad, not kept). `human_limits` was off in every match.
+- **Record:** 0.38.0 6-0, 0.38.2 7-11, 0.39.0 21-18. MR ~1545-1619 over the day (ladder files), 1616 at the end.
+- **It fades as the match goes on:** rounds won R1 34-25, R2 29-28, R3 9-14; damage dealt / taken 1.31 / 1.09 / 0.98. In
+  rematches the first match of a set was 22-22, the second 10-7, the third 2-0.
+  - The bot's ground buttons: hp lost within 30 frames per press R1 18, R2 62, R3 98; hit in their own start-up 9% / 11% / 13%;
+    about 45% of neutral buttons whiffed.
+  - Its jumps (mostly the fireball jump-in): R1 net +1,700 hp, R2 and R3 -11,000 to -13,000 each.
+  - The rules and models are the same in round 3 as in round 1, so an opponent who finds what beats a habit keeps doing it.
+- **The light-kick match** (20261008_083757, Ryu): Standing Light Kick landed 19 times from 1.2-1.8, with the bot walking
+  forward or flickering between crouch-block and walk. Manon's Standing Medium Punch landed 15 times in another match.
+- **Movement tells:** crouch-block straight to walk forward 1,171 times, back 1,234 (people pass through neutral); a quarter
+  of the bot's direction holds lasted one frame.
+- **The Drive Rush check's crouching jab:** hit 18, lost 7 (3 of them a rush into a throw: A.K.I., Luke, Ryu, Alex).
+- **Parries on nothing:** 37 (13 thrown out of them), from the defence game's parry option and the policy.
+- Seen, not changed: Juri's Senkai Kick (an overhead) from 1.95 after the bot blocked; E. Honda's command grab 984 landed 10
+  times; perfect reaction tells (anti-air, throw tech: human limits would blur them, off in these matches).
+### 0.40.0 (`sf6bot/adapt.py: MatchMemory`, `adapt:` in configs/fighter/ryu.yaml)
+- Every line (`fighter.observe_line`) the memory follows the match and keeps, until the match ends:
+  - **a ground button that lost on net**: the damage dealt - taken in the `window` 40 frames after each press, per distance;
+    with `burn_after` 3+ uses within `band` 0.25 of a distance adding up below `burn_net` -500, that button is chosen
+    x`burn_factor` 0.1 there (neutral policy: style table, network + counts and the move pick, `NeutralPolicy._mem`).
+    Replayed over the 59 matches: the presses this would have stopped averaged -184 hp each, all others +260. (A ban after two
+    counter hits instead would have stopped presses still +35 each: not used.)
+  - **a walk forward caught by a poke** (an opponent normal that began within 6 frames of the bot walking in, hitting it
+    free): walking forward from that distance + `walk_margin` 0.15 or closer x`walk_factor` 0.2 (banned-band walk-ins
+    measured: e.g. at 1.25 lost 283 per walk vs 59 elsewhere)
+  - **the fireball jump-in anti-aired or punished on landing** (within 15 frames): no more fireball jump-ins
+    (`zoning._zn_jump_allowed` / `_zn_judge_jump`)
+  - **the rush check beaten** (hit or thrown within 40 frames of it): no more rush checks; the rush is blocked
+  - Replayed over the 59 matches: walk-ins learned 64 times, button bans fired 15 times; learning in R1 35, R2 39, R3 20.
+- **A rematch keeps it:** the same opponent character within `adapt.carry_s` 180 s gets the previous match's memory (the
+  same human remembers too); the round clock restarting keeps it as well.
+- **A walk forward out of the opponent's range ends on neutral**, not on down-back (fight loop `walk_out_`,
+  `_latest_dist`): no crouch-block <-> walk flicker between decisions there.
+- **No parry guesses at pressure moments** (`defense.options.parry.enabled: false`).
+- Summary `adapt` {burned, walk_danger, jump_burns, rush_burns, learned}; thoughts: "What X beat this match, and what I
+  stopped doing: ...".
+- Tests `tests/test_0400.py`. Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

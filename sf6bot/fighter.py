@@ -749,6 +749,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._dist_hist: list = []            # (clock, distance) of the last lines: the opponent backing off (0.26.0)
         self._ls_n, self._ls_last, self._ls_bs = 0, None, 0   # 0.38.0: light attacks blocked in the current string
         self.light_stats: dict = {"held": 0, "strings": 0}
+        # 0.40.0: what this opponent has beaten this match (adapt.py); the fight loop hands a rematch the same memory
+        from .adapt import MatchMemory
+        self.memory = MatchMemory(self.c.get("adapt"))
+        self.memory.names = {m["id"]: m.get("name") for m in self.own if isinstance(m.get("id"), int)}
+        if self.policy is not None:
+            self.policy.memory = self.memory
         self._lsh_for = None
         self._hw_for, self.hold_stats = None, {"held": 0}
         self._live_route = None
@@ -976,6 +982,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         a = op.get("action_id")
         if not rc.get("enabled", True) or a not in self.op_rush_ids or self._rc_for == self.op_onset:
             return None
+        if not self.memory.rush_check_ok():
+            # 0.40.0: this opponent beat the check (a rush into a throw, or the jab punished): block the rush instead
+            return None
         mx, ox = _num(me.get("x")), _num(op.get("x"))
         if mx is None or ox is None:
             return None
@@ -1017,6 +1026,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if d_hit <= reach and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
                 self._rc_for = self.op_onset
                 self.rush_stats["checked"] = self.rush_stats.get("checked", 0) + 1
+                self.memory.note_rush_check(self._line_t)
                 return Decision("seq", o["name"], o["seq"], rule="rush_check", timed=True,
                                 reason=f"Drive Rush coming in ({how}, {dist:.2f} away): {o['name']} meets it at "
                                        f"{max(0.0, d_hit):.2f}")
@@ -3960,6 +3970,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._track_lights(me, op, tmr)
         self._track_air_attack(me, op, tmr)
         self._track_damage_taken(me, op)
+        self.memory.observe(me, op, tmr)               # 0.40.0
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
         if ev_:
             st_ = self.cmd_grab_stats
@@ -4746,6 +4757,13 @@ def _safe_route(summary: dict, sess, perform, *args, **kw) -> dict:
         return {"success": False, "fail": {"kind": "error"}, "aborted": None, "steps": []}
 
 
+def _latest_dist(latest, me_i: int | None):
+    raw = getattr(latest, "raw", None) or {}
+    if me_i is None:
+        return None
+    return player_distance(raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {})
+
+
 def end_guard(latest, me_i: int | None, fcfg: dict) -> InputState:
     """0.38.1: what the bot holds when a sequence ends: down-back (standing back against an airborne opponent) with the
     opponent within `inputs.end_guard_dist`, else neutral. Directions are relative to the facing (the controller
@@ -5103,6 +5121,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                      "stuns_seen": fighter.super_stats.get("stuns_seen", 0),
                                      "crumple_estimates": dict(fighter.super_stats.get("crumple_estimates") or {})}
                 summary["drive_rush"] = dict(fighter.rush_stats)
+                summary["adapt"] = fighter.memory.summary()           # 0.40.0: what this opponent beat
+                cur["memory"] = (summary.get("opponent"), clock.now(), fighter.memory)
                 summary["anti_air"] = dict(fighter.aa_stats)
                 summary["parry_throws"] = dict(fighter.parry_throw_stats)
                 summary["answers"] = {"sent": fighter.answer_stats["sent"], "by_move": dict(fighter.answer_stats["by_move"]),
@@ -5677,6 +5697,17 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter = ScriptedFighter(mcfg, opp_moves, policy=policy, book=book, experience=exp,
                                           own=own_moves(summary["character"], ds_root), own_reach=own_reach,
                                           opp_reach=opp_reach)
+                # 0.40.0: a rematch (same character, soon after) keeps what that opponent beat (adapt.MatchMemory)
+                mem_ = cur.get("memory")
+                carry_ = float((fcfg.get("adapt") or {}).get("carry_s", 180))
+                if mem_ is not None and mem_[0] == summary.get("opponent") and clock.now() - mem_[1] <= carry_:
+                    fighter.memory = mem_[2]
+                    fighter.memory.new_match()
+                    if policy is not None:
+                        policy.memory = fighter.memory
+                    if fighter.memory.log:
+                        sess.narrate("Rematch: keeping what this opponent beat last match (" +
+                                     "; ".join(fighter.memory.log[-4:]) + ").", source="learned")
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
                 if di_delay is not None:
@@ -6002,7 +6033,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     # matches) 77 hits (~77k, ~10% of the damage taken) landed 0-3 frames after the bot had let go of
                     # everything, between one sequence and the next decision (after a block option, a poke, a walk)
                     jumped_ = bool(re.search(r"(^|\s)[789][@+]", seq_ or ""))   # a jump: no down-back in its pre-jump
-                    c.apply(InputState() if jumped_ else end_guard(reader.latest(), side["i"], fcfg),
+                    # 0.40.0: a walk forward out of the opponent's reach stops on neutral, as a human's does. MEASURED
+                    # (0.38.2 / 0.39.0 ranked): the bot went straight from walking forward to down-back and back
+                    # (1,234 + 1,171 times; humans pass through neutral), a quarter of its direction holds 1 frame long
+                    walk_out_ = d.intent == "walk_fwd" and fighter.policy is not None \
+                        and not fighter.policy.in_their_range(_latest_dist(reader.latest(), side["i"]))
+                    c.apply(InputState() if jumped_ or walk_out_ else end_guard(reader.latest(), side["i"], fcfg),
                             tag="fighter_seq_end")
                 if runner.aborted:
                     summary["interrupted"][runner.aborted] = summary["interrupted"].get(runner.aborted, 0) + 1

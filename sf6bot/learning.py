@@ -408,6 +408,9 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                     for k, v in cr.items()) + "; ") if cr else "")
                                 + f"2MK confirmed into a super x{su.get('confirms', 0)}; Super Art punishes "
                                   f"x{su.get('punishes', 0)}."))
+    ad = summary.get("adapt") or {}
+    if ad.get("learned"):
+        out.append(("learned", f"What {opp} beat this match, and what I stopped doing: " + "; ".join(ad["learned"]) + "."))
     dr = summary.get("drive_rush") or {}
     if dr.get("opp_rushed_normals") or dr.get("own_moments"):
         out.append(("measured", f"{opp}'s normals out of a Drive Rush (+4): {dr.get('opp_rushed_normals', 0)}, I blocked "

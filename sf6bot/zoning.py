@@ -362,7 +362,8 @@ class ZoningMixin:
             # 1. jump forward over it onto the thrower (a punish: it is still recovering when the jump attack lands)
             # 0.24.2: off by default (user: no attack starts with a jumping attack except after a DI stun in the corner);
             # 0.28.0: on again (user: "Jump with a jump-in combo"), also decided on the throw's lead-in (_zn_pre_jump)
-            jp = self._zn_jump_fits(s) if zc.get("jump_punish", False) else None
+            # 0.40.0: not once this opponent has anti-aired one (adapt.MatchMemory)
+            jp = self._zn_jump_fits(s) if zc.get("jump_punish", False) and self._zn_jump_allowed() else None
             if jp is not None:
                 rname, entry, dmg = self._zn_jump_route(me, op)
                 v = self._zn_learned("jump_punish", float(zc.get("jump_punish_value", 0.8)) * dmg / 1000.0
@@ -428,6 +429,7 @@ class ZoningMixin:
                     key = {"jump_punish": "jump_fwd", "jump_over": "jump_neutral"}.get(opt, opt)
                     self.burnout_stats[key] = self.burnout_stats.get(key, 0) + 1
                 if opt == "jump_punish":
+                    self._zn_judge_jump()
                     why = (why0 + f": jumping over it, landing {info['land_d']:.2f} from the thrower on frame "
                                   f"{info['land_k']} (it recovers on {s['free_k']}): {nm}")
                     if entry is not None:
@@ -565,6 +567,15 @@ class ZoningMixin:
             return None
         return jp
 
+    def _zn_jump_allowed(self) -> bool:
+        m = getattr(self, "memory", None)
+        return m is None or m.jump_in_ok()
+
+    def _zn_judge_jump(self) -> None:
+        m = getattr(self, "memory", None)
+        if m is not None:
+            m.jump_src = "fireball jump-in"
+
     def _zn_pre_jump(self, raw: dict, me: dict, op: dict, t: float):
         """0.28.0 (the user, 2026-10-06: "Jump with a jump-in combo"): the jump over a projectile onto its thrower decided
         on the throw's LEAD-IN, before the projectile id appears. MEASURED (the user's Akuma zoning, 9 matches): L Gou
@@ -575,7 +586,8 @@ class ZoningMixin:
         zc = self.c.get("fireball") or {}
         lo_ = self._zn_lead_on
         tmr = raw.get("stage_timer")
-        if not zc.get("jump_punish", False) or lo_ is None or op.get("action_id") != lo_[0] or not isinstance(tmr, int):
+        if not zc.get("jump_punish", False) or lo_ is None or op.get("action_id") != lo_[0] or not isinstance(tmr, int) \
+                or not self._zn_jump_allowed():
             return None
         info = self._zn_lead_info(lo_[0])
         if info is None or lo_[2] is None:
@@ -600,6 +612,7 @@ class ZoningMixin:
         self._zn_for = t0
         self.zn_stats["jump_punish"] += 1
         self.zn_stats["jump_on_lead_in"] += 1
+        self._zn_judge_jump()
         if self.exp is not None:
             self.exp.defended(t, "fireball", "jump_punish", me.get("hp"), op.get("hp"))
         side = Facing.RIGHT if (num(op.get("x")) or 0) > (num(me.get("x")) or 0) else Facing.LEFT
