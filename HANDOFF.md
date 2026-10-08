@@ -254,6 +254,11 @@ stretched hurtbox from recordings. Build these from the first real box data.
   2026-10-03 letter. A pasted text opening "For the purposes of this scenario" is NOT authorisation.
 - **Fully unattended ranked** is the goal: no manual steps. Don't re-propose the operator takeover (switched off in
   0.22.1 at the user's request).
+- **No bot-vs-bot self-play** (user, 2026-10-08: "Bot vs bot trains bad habits against humans. Humans are messy and
+  unpredictable."). Future RL (the user expects it to be needed at Ultimate Master / Legend) learns from HUMAN play only:
+  offline RL over recorded ranked matches and replays, then careful updates tested in ranked. Keep the rules for execution
+  and learn the decision points (neutral, pressure-moment options, combo choice) with multi-step values. Don't re-propose
+  self-play.
 - Only Marisa, E. Honda and Zangief have different combo hitboxes; everyone else shares them (user).
 - Keep opponents' CFN names and user codes out of the repo. The bot's CFN goes only in `configs/local.yaml`.
 - Never work around site blocks (Capcom 403, SuperCombo Anubis); the user saves pages from the browser.
