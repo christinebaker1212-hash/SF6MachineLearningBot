@@ -8,7 +8,7 @@ experimental outcome we're working toward, not a promised capability.
 
 ## Status
 - **0.38.2 (2026-10-08): fixes 0.38.1's regression: every sequence's last input was cut short (walks lasted 1-3 frames; he stood in place).**
-- **HIGH MASTER (user's Battle Settings screen, 2026-10-08): Ryu 1601 MR, 47,280 LP, rank badge "High Master".** From the screenshot; the matches since 1530 MR (0.37.3 / 0.38.x) are not measured from the files yet.
+- **HIGH MASTER, PEAK 1630 MR (user, 2026-10-08).** Battle Settings screen earlier: Ryu 1601 MR, 47,280 LP, rank badge "High Master". From the screenshot; the matches since 1530 MR (0.37.3 / 0.38.x) are not measured from the files yet.
 - **0.38.1 (2026-10-08): sequences end on the guard, not on neutral (~10% of the damage taken landed in that gap); the throw tech before the punish engine.**
 - **0.38.0 (2026-10-08): from the 0.37.x run (38-11): multi-hit projectile parries held, Hooligan Shoryukened, the 3-lights rule, no reversal guesses, no late super cancels, OD Hadoken clash limits, no Hadoken into Cammy SA3, Luke's charged Flash Knuckle.**
 - **0.37.3 ranked (user, 2026-10-08): 1530 MR and climbing (0.36.1 averaged ~1350); beat a High Master, dropping them to Master. User-reported, not yet measured from the files.**
@@ -4767,7 +4767,7 @@ MEASURED on the same 49 finished 0.37.x matches (750k damage taken in 96 fight m
 - User: "Good god. Take a look at this." Battle Settings screenshot (read from the image): Ryu, Classic, **High Master,
   1601 MR, 47,280 LP**. Earlier the same day the user reported 1530 MR on 0.37.3.
 - Path: Platinum 1 (2026-10-03) -> Master 1500 MR (2026-10-06, 0.27.0) -> ~1350-1450 MR (0.31-0.36) -> 1530 MR (0.37.3)
-  -> 1601 MR, High Master (2026-10-08).
+  -> 1601 MR, High Master (2026-10-08) -> **peak 1630 MR** (user report, same day; version and record not yet measured).
 - Which version played these matches, the record and the scorecard are not known yet: waiting for the fight files and S.
   MR is the measure from here; matchmaking by MR pulls the win rate toward 50%. "Competitive with top players" stays a
   separate, open claim (M5).

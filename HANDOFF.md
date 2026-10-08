@@ -11,7 +11,7 @@ the project stands, how to work with the user, and what to do next.
 
 ## 0. Right now (handover, 2026-10-08)
 
-**User report (2026-10-08, screenshot): Ryu is HIGH MASTER, 1601 MR, 47,280 LP.** Not yet measured from fight files; ask for them (and which version played) when the session ends.
+**User report (2026-10-08): Ryu is HIGH MASTER, peak 1630 MR** (screenshot earlier: 1601 MR, 47,280 LP). Not yet measured from fight files; ask for them (and which version played) when the session ends.
 
 **0.38.2 is pushed** (CLAUDE.md "0.38.2"): FIXES A REGRESSION OF 0.38.1. 0.38.1 ran fight sequences without the final
 neutral step, and the runner then did not wait out the last step: every sequence's last input (an 8-frame walk, a block, a
