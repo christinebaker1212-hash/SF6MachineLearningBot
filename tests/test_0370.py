@@ -530,7 +530,8 @@ def test_a_2mk_can_drive_rush_cancel_into_the_rushs_verified_follow_ups():
     s0 = _entry("2MK > 236MK", 1500)["plan"]["steps"][:1]
     found = comp.search(s0, None, drive=60000, sup=30000, corner=False, hit_ok=("normal",))
     names = [[comp.trans[k]["name"] for k in c["path"]] for c in found]
-    assert any(n[:2] == ["drive_rush", "Standing Heavy Kick"] for n in names)
+    # 0.37.1 (user): the rush's only verified follow-up here is 5HK, which needs 5HP before the rush: none after 2MK
+    assert not any(n[:2] == ["drive_rush", "Standing Heavy Kick"] for n in names)
     # without the Drive to spare (never into burnout) it does not rush
     poor = comp.search(s0, None, drive=0, sup=0, corner=False, hit_ok=("normal",))
     assert not any("drive_rush" in [comp.trans[k]["name"] for k in c["path"]] for c in poor)
@@ -566,3 +567,20 @@ def test_the_bots_cfn_is_an_entry_box_and_a_config_value_not_code():
     assert "--my-name" not in build("versus", {"mode": "ranked", "my_name": " "})[0]["args"]
     assert "--my-name" not in build("versus", {"mode": "offline"})[0]["args"]
     assert load_config()["ladder_read"]["my_name"] == "Frame Perfect"
+
+
+def test_a_drive_rush_goes_into_5hk_only_after_5hp():
+    """User: "2MK > DRC > 5HK will whiff constantly ... never drive rush into a 5HK unless the prior attack was a 5HP"."""
+    from sf6bot import combo_compose as cc
+    from tests.test_0240 import CAP, _book, _entry
+    comp = cc.build(_book(), CAP)
+    def paths(route):
+        s0 = _entry(route, 1500)["plan"]["steps"][:1]
+        found = comp.search(s0, None, drive=60000, sup=30000, corner=False, hit_ok=("normal",))
+        return [[comp.trans[k]["name"] for k in c["path"]] for c in found]
+    assert not any(n[:2] == ["drive_rush", "Standing Heavy Kick"] for n in paths("2MK > 236MK"))
+    assert any(n[:2] == ["drive_rush", "Standing Heavy Kick"] for n in paths("5HP > 623HP"))
+    from sf6bot.route_book import rush_follows_ok
+    assert rush_follows_ok(["Standing Heavy Punch", "drive_rush", "Standing Heavy Kick"])
+    assert not rush_follows_ok(["Crouching Medium Kick", "drive_rush", "Standing Heavy Kick"])
+    assert rush_follows_ok(["Crouching Medium Kick", "drive_rush", "Standing Heavy Punch"])

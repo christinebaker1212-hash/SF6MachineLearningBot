@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.37.1 (2026-10-08): a Drive Rush into 5HK only after 5HP (5HP forces stand on hit).**
 - **0.37.0 (2026-10-08): fixes from ~300 Master matches: projectile hitboxes, reaction Shoryukens / Drive Impacts that check reach, spacing, 2MK supers and Drive Rush cancels, mirror side from the VS screen.**
 - **0.36.2 (2026-10-07): a per-fight `data_weight` in the meta file scales a relabelled match in both networks (custom-room sets).**
 - **0.36.1 (2026-10-07): boxes read at render time (exporter v11): on v10 every hurt / hit box read as zero; G now fails such boxes.**
@@ -4623,9 +4624,21 @@ All MOCK / replay-tested (`tests/test_0370.py`, 36 tests); nothing here is verif
 - Grapplers (item 5) have no rule of their own: their damage came from pokes walked into and command grabs (covered by
   STANCE and the throw range). The Drive spent blocking (item 6) is only reduced indirectly (fewer openings, reaction
   DIs, rush checks).
-- Chun-Li's "6HP" for the DI list: Capcom lists no 6+HP (Hakkei is 4+HP, too fast for a reaction DI by the numbers):
-  waiting for the user. Doubtful auto answers to confirm: Viper's Focus Force, Jamie's Swagger Step, Elena's Moon Glider,
+- Chun-Li's "6HP" for the DI list: dropped by the user (2026-10-08). Doubtful auto answers to confirm: Viper's Focus Force, Jamie's Swagger Step, Elena's Moon Glider,
   Ken's Kasai Thrust Kick, Cammy's Spiral Arrow.
+
+## 0.37.1: a Drive Rush into 5HK only after 5HP (user, 2026-10-08)
+- User: "2MK > DRC > 5HK will whiff constantly. The reason we use 5HP DRC 5HK is because 5HP forces stand on hit - so
+  therefore, we must add this rule - never drive rush into a 5HK unless the prior attack was a 5HP."
+- Since 0.37.0 the composer lets every special-cancelable normal (2MK too) Drive Rush cancel into the rush's verified
+  follow-ups, and 5HK was one of them.
+- `combo_compose.RUSH_FOLLOW_ONLY_AFTER` {"Standing Heavy Kick": {"Standing Heavy Punch"}}: the composer's search
+  (`Composer.rush_follow_ok`: live compositions, re-plans, first-hit extensions, punishes, the crumple cash-out) and the
+  route book (`route_book.rush_follows_ok`, lab-verified routes too) drop a Drive Rush into 5HK unless the attack before
+  the rush was 5HP. Other rush follow-ups after 2MK stay.
+- Tests in `tests/test_0370.py`. Not verified in game.
+- Also from the user (2026-10-08): Chun-Li's "6HP" question is dropped, and the custom-room Chun-Li set is not to be
+  relabelled.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

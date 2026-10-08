@@ -29,6 +29,19 @@ def _starter_kind(plan: dict) -> str:
     return "air" if s0.get("air") or s0.get("system") == "jump" else "ground"
 
 
+def rush_follows_ok(names) -> bool:
+    """0.37.1 (user: "never drive rush into a 5HK unless the prior attack was a 5HP": 5HP forces stand on hit, after 2MK
+    the 5HK whiffs): every move out of a Drive Rush that needs it (combo_compose.RUSH_FOLLOW_ONLY_AFTER) follows a rush
+    that came from one of its allowed moves."""
+    from .combo_compose import RUSH_FOLLOW_ONLY_AFTER
+    names = list(names)
+    for i, n in enumerate(names):
+        need = RUSH_FOLLOW_ONLY_AFTER.get(n)
+        if need and i >= 1 and names[i - 1] == "drive_rush" and not (i >= 2 and names[i - 2] in need):
+            return False
+    return True
+
+
 def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | None = None) -> list[dict]:
     """The book. 0.31.4: no route that performs a combo the operator skipped in the lab (F10, route_bans); `stats`
     gets the number left out (`banned`)."""
@@ -60,6 +73,10 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | No
         if route_bans.find(route_bans.names_of(plan["steps"]), ban_seqs):
             if stats is not None:
                 stats["banned"] = stats.get("banned", 0) + 1
+            continue
+        if not rush_follows_ok(route_bans.names_of(plan["steps"])):
+            if stats is not None:          # 0.37.1 (user): a Drive Rush into 5HK only after 5HP
+                stats["rush_rule"] = stats.get("rush_rule", 0) + 1
             continue
         # 0.20.3: Denjin routes are used while the bot holds a Denjin stock (it charges at safe moments: fighter
         # `_denjin_*`); jump-in routes after a successful Drive Impact stun (user: "Jump ins are supposed to be used

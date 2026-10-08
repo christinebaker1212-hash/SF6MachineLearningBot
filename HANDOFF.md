@@ -4,14 +4,22 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-08: code version **0.37.0**, REFramework exporter script **v11**, branch
+*State as of 2026-10-08: code version **0.37.1**, REFramework exporter script **v11**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing (657).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
 
-**State: 0.37.0 is pushed** (CLAUDE.md "0.36.1 ranked run analysed" and "0.37.0"). The ~300-match upload (0.36.1, ~1350 MR)
+**State: 0.37.1 is pushed** (CLAUDE.md "0.37.1"): a Drive Rush goes into 5HK only after 5HP (user rule).
+- **In progress, not built:** the Drive Rush check (`fighter._rush_check`) per opponent character. It knows only Ryu's /
+  Ken's rush ids (`RUSH_IDS`) and predicts from the speed on the current line. Planned: rush ids learned per character
+  (what comes straight out of its parry) and a distance-by-frame profile per character measured from recordings (Dee Jay
+  / Juri ~0.06 a frame, Alex ~0.03). The measuring script `rushprof.py` was in the session scratchpad (not kept). The
+  user stopped the work there; ask before picking it up.
+- The user dropped the Chun-Li 6HP question and the custom-room relabel (2026-10-08).
+
+**Before that: 0.37.0 is pushed** (CLAUDE.md "0.36.1 ranked run analysed" and "0.37.0"). The ~300-match upload (0.36.1, ~1350 MR)
 was measured and the user's 36-item list built: projectile hitboxes for parries / OD Hadoken / approach, reaction
 Shoryukens and Drive Impacts (the user's lists + 59 / 113 from Capcom data) that check the bot's measured hitbox reaches,
 throw and poke ranges, cross-cuts, Drive Rush checks, a burned-out opponent gets a Drive Impact (user's exception), the
@@ -19,10 +27,8 @@ max-range 5HP > M High Blade Kick spacing trap, Drive Rush links with punish-cou
 supers after 2MK reaching the cancel window, and the mirror side read from the VS screen (panel box "Bot's CFN", default
 "Frame Perfect"; config `ladder_read.my_name`). Nothing verified in game.
 - **Waiting on the user:**
-  - Chun-Li's "6HP" for the Drive Impact list (Capcom has no 6+HP; Hakkei is 4+HP).
   - Confirm or drop doubtful auto answers: Viper's Focus Force, Jamie's Swagger Step, Elena's Moon Glider, Ken's Kasai
     Thrust Kick, Cammy's Spiral Arrow.
-  - The Chun-Li custom-room relabel (below) was NOT done in the 0.37.0 session.
 - **Judge 0.37.0** by the average MR over 100+ ranked matches (target 1400-1450), and re-run the scorecard on its fights.
 - Not built: grapplers have no rule of their own; Drive spent blocking is only reduced indirectly. Ragequit matches
   (item 7): their recordings already train the models; the record keeps them as "no result".

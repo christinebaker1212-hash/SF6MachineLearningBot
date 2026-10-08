@@ -42,6 +42,9 @@ SPLICE = 0.85           # ESTIMATE: two verified transitions joined where no ver
 # 0.37.0 (user: "a DRC 5HP has PC 5HP's frames"): a link the lab verified only right after a counter-hit / punish-counter
 # opener is also usable after the same move performed out of a Drive Rush (+4 on hit, community value), x RUSH_AS_PC
 RUSH_AS_PC = 0.85       # ESTIMATE: never performed in that order in the lab
+# 0.37.1 (user: "2MK > DRC > 5HK will whiff constantly. The reason we use 5HP DRC 5HK is because 5HP forces stand on hit ...
+# never drive rush into a 5HK unless the prior attack was a 5HP"): {move out of a Drive Rush: the moves the rush may follow}
+RUSH_FOLLOW_ONLY_AFTER = {"Standing Heavy Kick": {"Standing Heavy Punch"}}
 P_MIN = 0.5             # a verified transition is never rated below this from its route's rate alone
 MAX_STEPS = 10          # moves (and Drive Rush tokens) in a composed combo
 MAX_REUSE = 2           # the same transition at most twice (5HP > DRC 5HK , 5HP > DRC 5HK , ...)
@@ -311,6 +314,15 @@ class Composer:
         return out
 
     @staticmethod
+    def rush_follow_ok(names, t: dict) -> bool:
+        """0.37.1: a move out of a Drive Rush that needs the opponent standing (5HK) only after the attack that forces
+        stand on hit (5HP): `names` = the moves so far, ending with the rush."""
+        need = RUSH_FOLLOW_ONLY_AFTER.get(t.get("name") or "")
+        if not need or not names or names[-1] != "drive_rush":
+            return True
+        return len(names) >= 2 and names[-2] in need
+
+    @staticmethod
     def rush_as_pc(t: dict, nctx) -> bool:
         """0.37.0: transition t is a link verified only after a counter-hit / punish-counter opener (not rushed), and the
         move before it was performed out of a Drive Rush (same juggle state): the rush's +4 gives it the counter's frames
@@ -411,6 +423,8 @@ class Composer:
                     if depth == 0 and self.out_of_reach(t, dist, travel_done):
                         continue                  # the next step whiffs from this spacing (learned per body class /
                                                   # measured follow-up reach, 0.26.0)
+                    if not self.rush_follow_ok(s["names"], t):
+                        continue
                     names = s["names"] + (t["name"],)
                     if self._ban_by_last and self._bans_hit(names):
                         self.stats["banned_pruned"] += 1      # a combo the operator skipped (F10): never performed
