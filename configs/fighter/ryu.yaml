@@ -392,6 +392,11 @@ moves:
   confirm_sa3: {name: "2MK > SA3", route: "2MK > 236236K", seq: "2+MK@3", super: 30000}
   confirm_sa1: {name: "2MK > SA1", route: "2MK > 236236P", seq: "2+MK@3", super: 10000, damage: 2600}
   drive_impact: {name: "Drive Impact", seq: "5+HP+HK@3"}
+  # 0.37.0 (user: "Max range HP into M High Blade is a spacing trap that pushes opponents away effectively"): a neutral 5HP
+  # from min_dist or farther is cancelled into M High Blade Kick on hit OR block (combo executor, block_ok); a whiff sends
+  # nothing more. 5HP's reach measured 2.0 (neutral cap); min_dist an ESTIMATE of "max range".
+  spacing_trap: {name: "5HP > M High Blade Kick (spacing)", route: "5HP > 236MK", seq: "5+HP@3",
+                 starter: "Standing Heavy Punch", min_dist: 1.7}
   walk_forward: {name: "walk forward", seq: "6@12"}
 neutral:
   far:   {hadoken_lp: 3, hadoken_hp: 2, walk_forward: 3, wait: 2}

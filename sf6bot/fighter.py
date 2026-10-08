@@ -4092,6 +4092,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if sc is not None:
             return Decision("seq", sc["name"], "2+MK@3", rule=rule, intent=intent,
                             reason=reason + f" -> {sc['name']} (only if 2MK hits; super meter {int(_num(me.get('super')) or 0)})")
+        st_ = (self.c.get("moves") or {}).get("spacing_trap") or {}
+        if st_ and ch.get("move") == st_.get("starter") and dist >= float(st_.get("min_dist", 1.7)):
+            # 0.37.0 (user: "Max range HP into M High Blade is a spacing trap that pushes opponents away effectively"):
+            # from max range the 5HP is cancelled into M High Blade Kick whether it hits or is blocked (not on a whiff)
+            self.neutral_stats["spacing_trap"] = self.neutral_stats.get("spacing_trap", 0) + 1
+            return Decision("seq", st_["name"], st_.get("seq", "5+HP@3"), rule=rule, intent=intent,
+                            reason=reason + f" -> {st_['name']} at {dist:.2f} (spacing trap)")
         if ch.get("route"):
             e = ch["route"]
             return Decision("route", e["route"], route=e, rule=rule, intent=intent,
@@ -5550,6 +5557,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         or abs(lead - pl["lead"]) <= 2 else None,
                                         fixed_lead=pl.get("lead"),
                                         confirm=True,
+                                        # 0.37.0: the spacing trap cancels on a block too
+                                        block_ok=bool(((fcfg.get("moves") or {}).get("spacing_trap") or {}).get("name")
+                                                      == d.name and d.kind != "route"),
                                         on_first_hit=(lambda hit, raw_, e_=d.route: fighter.route_after_hit(
                                             e_, hit, raw_.get(me_key) or {}, raw_.get(op_key) or {}))
                                         if d.kind == "route" and (d.route or {}).get("starter") and fighter.book

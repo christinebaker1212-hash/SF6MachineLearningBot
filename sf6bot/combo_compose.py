@@ -39,6 +39,9 @@ from .game_state import file_stem, num
 REF_LEAD = 4            # recorded send points are stored for this input delay (combo_lab.LEAD)
 P_CAPCOM = 0.75         # ESTIMATE: success of a cancel taken from Capcom's cancel column, not performed in that order
 SPLICE = 0.85           # ESTIMATE: two verified transitions joined where no verified route joins them
+# 0.37.0 (user: "a DRC 5HP has PC 5HP's frames"): a link the lab verified only right after a counter-hit / punish-counter
+# opener is also usable after the same move performed out of a Drive Rush (+4 on hit, community value), x RUSH_AS_PC
+RUSH_AS_PC = 0.85       # ESTIMATE: never performed in that order in the lab
 P_MIN = 0.5             # a verified transition is never rated below this from its route's rate alone
 MAX_STEPS = 10          # moves (and Drive Rush tokens) in a composed combo
 MAX_REUSE = 2           # the same transition at most twice (5HP > DRC 5HK , 5HP > DRC 5HK , ...)
@@ -289,6 +292,17 @@ class Composer:
         return out
 
     @staticmethod
+    def rush_as_pc(t: dict, nctx) -> bool:
+        """0.37.0: transition t is a link verified only after a counter-hit / punish-counter opener (not rushed), and the
+        move before it was performed out of a Drive Rush (same juggle state): the rush's +4 gives it the counter's frames
+        (user: "a DRC 5HP has PC 5HP's frames")."""
+        if t["cf"] or t["later_ok"] or "normal" in t["first_ok"] or not t["first_ok"]:
+            return False
+        if not (nctx and nctx[0]) or t["prev_ctx"] != (False, bool(nctx[1])):
+            return False
+        return bool(t["first_ok"] & {"punish_counter", "counter_hit"})
+
+    @staticmethod
     def hit_req(t: dict, idx: int) -> str | None:
         """The opener's hit type transition t needs at step `idx` of a combo (None: not usable there). A cancel is timed
         from the hit itself: any. A link right after the opener needs what it was verified with (a normal hit is also
@@ -363,11 +377,12 @@ class Composer:
                     continue
                 name, nctx = s["node"]
                 for t in self.by_prev.get(name, ()):
-                    if not t["cf"] and t["prev_ctx"] != nctx:
+                    as_pc = self.rush_as_pc(t, nctx)
+                    if not t["cf"] and t["prev_ctx"] != nctx and not as_pc:
                         continue
                     if t["corner"] and not corner:
                         continue
-                    req = self.hit_req(t, n0 + len(s["path"]))
+                    req = "normal" if as_pc else self.hit_req(t, n0 + len(s["path"]))
                     if req is None or req not in hit_ok:
                         continue
                     if s["drive"] + t["drive"] > drive or s["super"] + t["super"] > sup:
@@ -381,7 +396,9 @@ class Composer:
                     if self._ban_by_last and self._bans_hit(names):
                         self.stats["banned_pruned"] += 1      # a combo the operator skipped (F10): never performed
                         continue
-                    pt = self.p(t)
+                    pt = self.p(t) * (RUSH_AS_PC if as_pc else 1.0)
+                    if as_pc:
+                        self.stats["rush_as_pc"] = self.stats.get("rush_as_pc", 0) + 1
                     if s["last"] is not None:
                         prev_t = self.trans.get(s["last"])
                         if prev_t is not None and not any((r, j + 1) in t["srcs"] for r, j in prev_t["srcs"]):

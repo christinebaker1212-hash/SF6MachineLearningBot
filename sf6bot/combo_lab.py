@@ -616,8 +616,11 @@ class ComboRun:
     def __init__(self, steps: list[dict], offsets: dict, neutral_a: set, neutral_d: set,
                  movement: set, lead: int = LEAD, me: str = "p1", op: str = "p2", gravity: float | None = None,
                  fixed: list | None = None, learned: dict | None = None, confirm: bool = False,
-                 fixed_lead: int | None = None, adopt: dict | None = None, reach: dict | None = None):
+                 fixed_lead: int | None = None, adopt: dict | None = None, reach: dict | None = None,
+                 block_ok: bool = False):
         self.steps, self.offsets, self.lead = steps, offsets, lead
+        self.block_ok = block_ok          # 0.37.0, matches: the first move's block counts as its contact (a blockstring)
+        self.block_contact = None
         # 0.32.0, matches: {move name: the farthest distance it is started from} (fighter config combo_reach.follow)
         self.reach = dict(reach or {})
         # 0.23.0: the recorded send points were for the input delay of the lab run (`fixed_lead`); with another delay
@@ -916,7 +919,13 @@ class ComboRun:
         d_prev = (prev or {}).get(self.op) or {}
         hs, hs0 = p2.get("hitstop") or 0, d_prev.get("hitstop") or 0
         hp, hp0 = num(p2.get("hp")), num(d_prev.get("hp"))
-        if (p2.get("blockstun") or 0) > 0 and not (d_prev.get("blockstun") or 0) and self.blocked is None:
+        if (p2.get("blockstun") or 0) > 0 and not (d_prev.get("blockstun") or 0) and self.blocked is None \
+                and self.block_ok and self.confirm and self._active() == 0 and self.rt[0]["contact"] is None:
+            # 0.37.0: a blockstring (the spacing trap 5HP > M High Blade Kick): the first move's block is its contact
+            self.rt[0]["contact"] = tick
+            self.rt[0]["contacts"].append(tick)
+            self.block_contact = tick
+        elif (p2.get("blockstun") or 0) > 0 and not (d_prev.get("blockstun") or 0) and self.blocked is None:
             # Training Mode guard "After first hit" (user, 0.11.1): the dummy blocks whatever is not a
             # TRUE combo. A block after the first hit = a gap before the move that was blocked.
             self.blocked = {"tick": tick, "step": self._active(), "before_first_hit": not self.hits}
@@ -2532,7 +2541,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
                   confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None,
                   adopt: dict | None = None, precharge: bool | None = None, charged: set | None = None,
-                  reach: dict | None = None) -> dict:
+                  reach: dict | None = None, block_ok: bool = False) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2556,7 +2565,8 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     if cut == 0:
         return {"success": False, "fail": {"kind": "no_charge", "step": 0}, "steps": [], "aborted": "no charge held"}
     run = ComboRun(steps, offsets, neutral_a, neutral_d, movement, lead=lead, me=me, op=op, gravity=gravity,
-                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt, reach=reach)
+                   fixed=fixed, learned=learned, confirm=confirm, fixed_lead=fixed_lead, adopt=adopt, reach=reach,
+                   block_ok=block_ok)
     if cut:
         run.extra["cut_for_charge"] = cut
     if precharge and any((s_.get("charge") or {}).get("precharge") for s_ in steps):

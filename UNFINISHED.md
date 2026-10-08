@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08. Steps 1-6 done; step 7 in progress (29, 31/10 done; next 34, 35, 20, 27). Full suite passed after step 6.** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08. Steps 1-6 done; step 7 in progress (29, 31/10, 34, 35 done; next 20, 27). Full suite passed after step 6.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -232,3 +232,10 @@ CA 3.6%; DI performed 0.5 a match.
    screen (likely the bot's CFN / title on its side): check screen_text / ladder_read for where names are read.
 9. Tests, `__version__` 0.37.0 (sf6bot/__init__.py + pyproject), CLAUDE.md section "0.37.0" before "## Training Mode
    reset", HANDOFF §0, commit with the session trailers, push.
+
+### Step 7, items 34 / 35 (done, committed)
+- 34: `moves.spacing_trap` (ryu.yaml): a neutral 5HP from 1.7+ is the seq decision "5HP > M High Blade Kick (spacing)"
+  (`fighter._policy_neutral`); the fight loop passes `block_ok` to `perform_route`, so `ComboRun` counts the first move's
+  block as its contact and the cancel goes out on a block too (whiff: nothing more). Tests in test_0370.
+- 35: `combo_compose.Composer.rush_as_pc` / `RUSH_AS_PC` 0.85: a link verified only after a CH / PC opener is used after
+  the same move out of a Drive Rush (the +4). The burnout rule still stands (the composer never spends into burnout).

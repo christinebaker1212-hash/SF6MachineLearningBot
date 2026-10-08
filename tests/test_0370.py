@@ -450,3 +450,54 @@ def test_a_burned_out_opponent_gets_a_drive_impact_when_it_reaches():
 def test_no_jump_in_after_the_bots_drive_impact_crumple():
     """User: "When Ryu counters a DI, he should never begin an attack with a jumping attack"."""
     assert FCFG["stun_jump_in"]["enabled"] is False
+
+
+# ---- item 34: max-range 5HP > M High Blade Kick is a spacing trap (hit or block) --------------------------------------
+
+def _trap_steps():
+    return [{"name": "5HP", "trigger": "first", "min_offset": 0, "prefix": 0, "expect_id": 606, "startup": 10,
+             "hitting": True, "sequence": "5+HP@3", "connector": ""},
+            {"name": "M High Blade Kick", "trigger": "contact", "min_offset": -3, "prefix": 6, "expect_id": 1027,
+             "startup": 13, "hitting": True, "sequence": "2@2 3@2 6+MK@2", "connector": ">"}]
+
+
+def test_the_spacing_trap_cancels_on_a_block_and_a_plain_route_stops():
+    """User: "Max range HP into M High Blade is a spacing trap that pushes opponents away effectively"."""
+    from sf6bot import combo_lab as cl
+    from tests.test_combo_lab import DUMMY_IDLE, NEUTRAL, _line
+    for block_ok in (True, False):
+        run = cl.ComboRun(_trap_steps(), {}, {NEUTRAL}, {DUMMY_IDLE}, set(), confirm=True, block_ok=block_ok)
+        run.feed(_line(1, NEUTRAL, 0)); run.sent(0)
+        run.feed(_line(4, 606, 0))
+        run.feed(_line(13, 606, 9, d=160, hs=10, block=18))           # the 5HP is blocked
+        if block_ok:
+            assert run.rt[0]["contact"] == 13 and run.blocked is None and not run.done
+        else:
+            assert run.blocked is not None
+
+
+def test_a_neutral_5hp_from_max_range_becomes_the_spacing_trap():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    st_ = FCFG["moves"]["spacing_trap"]
+    assert st_["route"] == "5HP > 236MK" and st_["starter"] == "Standing Heavy Punch"
+    import inspect
+    assert "spacing_trap" in inspect.getsource(ScriptedFighter._policy_neutral)
+
+
+# ---- item 35: a Drive Rush 5HP has a punish-counter 5HP's frames --------------------------------------------------
+
+def test_a_punish_counter_link_is_used_after_a_drive_rush_cancel_5hp():
+    """User: "a DRC 5HP has PC 5HP's frames": PC 5HP , 5HP links also after 5HP > DRC 5HP on a normal hit."""
+    from sf6bot import combo_compose as cc
+    from tests.test_0240 import CAP, _book, _entry
+    book = _book() + [_entry("5HP > DRC 5HP > 623HP", 3000),
+                      _entry("PC 5HP , 5HP > 623HP", 3600, hit="punish_counter")]
+    comp = cc.build(book, CAP)
+    t = comp.trans["Standing Heavy Punch|00|,|Standing Heavy Punch"]
+    assert t["first_ok"] == {"punish_counter"}
+    assert comp.rush_as_pc(t, (True, False)) and not comp.rush_as_pc(t, (False, False))
+    s0 = _entry("5HP > 623HP", 2000)["plan"]["steps"][:1]
+    found = comp.search(s0, None, drive=60000, sup=0, corner=False, hit_ok=("normal",))
+    names = [[comp.trans[k]["name"] for k in c["path"]] for c in found]
+    assert any(n[:3] == ["drive_rush", "Standing Heavy Punch", "Standing Heavy Punch"] for n in names), names[:5]
+    assert all(c["hit_req"] == "normal" for c in found)
