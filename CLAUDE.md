@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.39.0 (2026-10-08): the DI-back waits a human reaction time (default 15-21 frames of the opponent's DI, never past 22); a setting on the panel and `fight --di-delay`.**
 - **0.38.2 (2026-10-08): fixes 0.38.1's regression: every sequence's last input was cut short (walks lasted 1-3 frames; he stood in place).**
 - **HIGH MASTER, PEAK 1630 MR (user, 2026-10-08).** Battle Settings screen earlier: Ryu 1601 MR, 47,280 LP, rank badge "High Master". From the screenshot; the matches since 1530 MR (0.37.3 / 0.38.x) are not measured from the files yet.
 - **0.38.1 (2026-10-08): sequences end on the guard, not on neutral (~10% of the damage taken landed in that gap); the throw tech before the punish engine.**
@@ -4786,6 +4787,32 @@ MEASURED on the same 49 finished 0.37.x matches (750k damage taken in 96 fight m
 - Fix: `SequenceRunner.run(wait_last=True)` waits the last step's frames, presses nothing more, then the fight loop
   applies end_guard as intended. Combo lab and catalog callers keep their old behaviour. Tests in `tests/test_0380.py`.
 - 0.38.1 recordings: their neutral is not representative (not a measure of 0.38.0's or 0.38.1's rules).
+
+## 0.39.0: the DI-back reacts like a person (user, 2026-10-08)
+- User: "the instant DI reaction is ... far too much of a tell ... It needs to be on the level of a real human's reaction
+  to visually confirming the DI ... an option, even in the versus human option, to set a delay for DI reactions ... the
+  absolute maximum ... the furthest it can possibly go before it will miss it consistently."
+- Before, the DI-back went out on the first line the opponent's Drive Impact was seen (~frame 4-5 of their DI with the
+  ranked input delay of 3); human limits (off by default) had a DI reaction too, without a ceiling.
+- **The window** (Capcom, Drive Impact: start-up 26, active 26-27, "Super Armor for 2 hits from frames 1 - 27"): the
+  bot's DI must be out by the opponent's DI frame 26 (its armor takes their hit) and start on frame 3 or later (its own
+  hit, on its frame 26, comes after their armor ends). The bot keeps `DI_SAFE_MARGIN` 4 frames under 26 (input-delay
+  jitter, a DI first seen a line late): **22 is the latest it allows**; 4 the earliest (the old instant reaction).
+- **Now** (`fighter.di_reaction_setting`, `_di_react_ready`; configs/fighter/ryu.yaml `di_reaction: {enabled: true,
+  min: 15, max: 21, safe_max: 22}`): for each opponent DI a frame is drawn from min..max, and the DI-back goes out once
+  its input would reach the game on that frame of their DI (frames since it began + stale state + input delay). Until
+  then the bot holds down-back and starts nothing (`di_wait`). A DI first seen later than the drawn frame goes out at
+  once. The lethal skip (block when losing the exchange would kill) is not delayed. With the setting on, human limits'
+  own DI sample is not used.
+- min / max are ESTIMATES of a human's reaction to a Drive Impact (~0.25-0.35 s).
+- Setting it: the panel's Versus Human tile, "DI reaction" (empty = the config's 15-21; "16-20", one number, or "off"),
+  for every mode incl. ranked; `fight --di-delay 16-20`; or the config (ranked.bat uses it). Anything past 22 or under 4
+  is clamped, and the session's first lines say so.
+- Recorded: `fight_summary.di_reaction` {setting, reactions, frames min / median / max, waited_lines, seen_late} and a
+  thoughts line.
+- Not changed: the other Drive Impacts on reaction (the move answers, Jinrai follow-ups, burnout jump / Shoryuken).
+- Tests `tests/test_0390.py` (clamping, the landing frame inside the drawn range over 40 seeds, varied timings, a late
+  sighting, off = instant, a narrow setting, the lethal skip, the panel / CLI). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

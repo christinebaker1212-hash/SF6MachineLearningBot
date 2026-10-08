@@ -4,14 +4,16 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-08: code version **0.38.2**, REFramework exporter script **v11**, branch
+*State as of 2026-10-08: code version **0.39.0**, REFramework exporter script **v11**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing (679).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
 
-**User report (2026-10-08): Ryu is HIGH MASTER, peak 1630 MR** (screenshot earlier: 1601 MR, 47,280 LP). Not yet measured from fight files; ask for them (and which version played) when the session ends.
+**State:** **0.39.0 is pushed** (CLAUDE.md "0.39.0"): the DI-back waits a human reaction time (user: the instant DI-back was "far too much of a tell"): a frame drawn from 15-21 of the opponent's DI, never past 22 (Capcom: their DI hits on frame 26); the panel's Versus Human "DI reaction" box, `fight --di-delay`, or the config. Check `di_reaction` in the next summaries (frames, and whether DI-backs still win their exchanges).
+
+**Before that:** **User report (2026-10-08): Ryu is HIGH MASTER, peak 1630 MR** (screenshot earlier: 1601 MR, 47,280 LP). Not yet measured from fight files; ask for them (and which version played) when the session ends.
 
 **Coming with the next upload (user, 2026-10-08): a ranked match where the opponent spammed light kicks in the second half of
 round 2, and they were landing on the bot.** Find why: walking forward into them, pressing between them, the 3-lights rule

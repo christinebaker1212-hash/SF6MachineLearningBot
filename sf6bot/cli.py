@@ -409,7 +409,7 @@ def cmd_fight(args, cfg):
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
                   first_to=first_to or None, versus=vh, opponent_name=args.opponent, human_limits=hl,
-                  blind_ask=blind_ask, my_name=args.my_name)
+                  blind_ask=blind_ask, my_name=args.my_name, di_delay=getattr(args, "di_delay", None))
     _print_report(s)
 
 
@@ -934,6 +934,9 @@ def main(argv=None):
                    "there to find its side in a mirror match (default: ladder_read.my_name in the config)")
     p.add_argument("--human-limits", action="store_true", help="human reaction times and uneven button holds "
                    "(configs/fighter/ryu.yaml human_limits; recorded in every match summary)")
+    p.add_argument("--di-delay", default=None, metavar="MIN-MAX",
+                   help="0.39.0: when the DI-back reaches the game, in frames of the opponent's Drive Impact (e.g. 15-21; "
+                        "capped to the safe range 4-22; 'off' = instant). Default: configs/fighter/ryu.yaml di_reaction")
     p.add_argument("--blind", action="store_true", help="blind evaluation (offline / online sets, participants who "
                    "agreed beforehand): human limits on, the participant's guess asked after each match")
     p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "

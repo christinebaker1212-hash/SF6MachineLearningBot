@@ -149,9 +149,12 @@ def test_punish_unsafe_move_from_catalog(tmp_path):
 
 def test_drive_impact_reaction(tmp_path):
     f = ScriptedFighter(FCFG, _ryu_catalog(tmp_path), seed=1)
-    d = f.decide(state(op={"x": 2.0, "action_id": 855}), 0.0, 0)
-    assert d.rule == "di_reaction" and d.seq == "5+HP+HK@3"
-    assert f.decide(state(op={"x": 1.9, "action_id": 855}), 0.02, 0).rule != "di_reaction"
+    # 0.39.0: the DI-back waits a human reaction time (guarding meanwhile), then goes out once
+    rules = [f.decide(state(op={"x": 2.0, "action_id": 855}, timer=500 + k), k / 60, 0) for k in range(25)]
+    fired = [k for k, d in enumerate(rules) if d.rule == "di_reaction"]
+    assert len(fired) == 1 and all(d.rule == "di_wait" for d in rules[:fired[0]])
+    assert rules[fired[0]].seq == "5+HP+HK@3"
+    assert f.decide(state(op={"x": 1.9, "action_id": 855}, timer=530), 0.6, 0).rule != "di_reaction"
 
 
 def test_neutral_by_distance_and_side():
@@ -181,7 +184,9 @@ def test_di_reaction_without_opponent_catalog():
     """Ken has no catalog, but his Drive Impact uses the shared id 855 (measured in the user's
     replays): the bot must still react (0.5.0 missed a DI vs CPU Ken for this reason)."""
     from sf6bot.fighter import _common_moves
+    from sf6bot.fighter import di_reaction_setting
     f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.di_rx = di_reaction_setting(None, "off")          # 0.39.0: the delay is tested on its own
     d = f.decide(state(op={"x": 2.2, "action_id": 855}), 0.0, 0)
     assert d.rule == "di_reaction"
     d = f.decide(state(me={"blockstun": 3}, op={"x": 0.9, "action_id": 930}), 0.1, 0)
@@ -190,7 +195,9 @@ def test_di_reaction_without_opponent_catalog():
 
 def test_never_spends_into_burnout():
     """User rule: no burnout unless lethal is certain. DI costs 1 bar (10000)."""
+    from sf6bot.fighter import di_reaction_setting
     f = ScriptedFighter(FCFG, {855: {"name": "Drive Impact", "di": True, "block_adv": None}}, seed=1)
+    f.di_rx = di_reaction_setting(None, "off")          # 0.39.0: the reaction delay is tested on its own
     d = f.decide(state(me={"drive": 10000}, op={"x": 1.5, "action_id": 855}), 0.0, 0)
     assert d.rule != "di_reaction"                     # exactly 1 bar left: DI would burn out
     assert f.can_spend({"drive": 10000}, "drive_impact", lethal=True)

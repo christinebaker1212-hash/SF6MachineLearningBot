@@ -831,6 +831,14 @@ parry_throw:
 # reaction); the DI-back answer to the opponent's Drive Impact always, unless losing that exchange would kill (the DI's
 # hit + the opponent's best follow-up with its meter now: assess.threat; ESTIMATES di_hit / follow_up_default). In
 # burnout with the wall this close behind, a Super Art (cheapest affordable) against the opponent's Drive Impact.
+# 0.39.0 (user: "the instant DI reaction is ... far too much of a tell ... It needs to be on the level of a real human's
+# reaction to visually confirming the DI"): the DI-back reaches the game on a frame drawn from min..max of the opponent's
+# Drive Impact (frame 1 = its first frame), as a person seeing it and pressing. Capcom: DI hits on its frame 26, armor
+# frames 1-27, so the bot's DI must be out by frame 26 and start on frame 3 or later to win; the bot keeps 4 frames of
+# margin (input-delay jitter, a DI first seen a line late): safe_max 22 is the most it allows, min is at least 4 (the
+# old instant reaction). min / max are ESTIMATES of a human's reaction to a DI (~0.25-0.35 s); `fight --di-delay`, the
+# panel's "DI reaction" box, or off.
+di_reaction: {enabled: true, min: 15, max: 21, safe_max: 22}
 di_rules:
   opp_super_min: 10000
   di_hit: 1000

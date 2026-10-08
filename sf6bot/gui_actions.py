@@ -52,7 +52,9 @@ ACTIONS: list[Action] = [
             Option("my_name", "Bot's CFN", kind="text", default="Frame Perfect",
                    hint="ranked: as the VS screen shows it (finds the side in mirrors)"),
             Option("limits", "Human limits", choices=[("Off", "off"), ("On", "on"), ("Blind test", "blind")],
-                   default="off")], menu="H"),
+                   default="off"),
+            Option("di_delay", "DI reaction", kind="text", default="",
+                   hint="empty = 15-21 (config). Frames of their DI when the DI-back lands: 4-22 safe, or off")], menu="H"),
     # ---- RECORD ------------------------------------------------------------------------------------------
     Action("replay_one", "record", "One replay", "Record a replay you play back (stops 5 s after the match).",
            menu="D 1"),
@@ -167,6 +169,14 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             args += ["--opponent", str(v["opponent"]).strip()]
         if v["mode"] == "ranked" and str(v.get("my_name") or "").strip():
             args += ["--my-name", str(v["my_name"]).strip()]
+        dd = str(v.get("di_delay") or "").strip()
+        if dd:
+            from .fighter import di_reaction_setting
+            try:
+                di_reaction_setting({}, dd)
+            except ValueError:
+                raise BadInput("DI reaction: frames like 15-21, one number, or off")
+            args += ["--di-delay", dd]
         lim = v.get("limits") or "off"
         if lim == "blind":
             # 0.18.10 (user): in ranked, "Blind test" = the human-like inputs only (Capcom's 2026-10-03 letter approved

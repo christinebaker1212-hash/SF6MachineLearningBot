@@ -460,6 +460,13 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 + (f"; L Shoryuken through it {dd['burnout_srk']}" if dd.get("burnout_srk") else "")
                                 + (f" (too late for either {dd['burnout_jump_late']})" if dd.get("burnout_jump_late") else "")
                                 + "."))
+    rx_ = summary.get("di_reaction") or {}
+    if rx_.get("reactions") and (rx_.get("setting") or {}).get("enabled"):
+        st_, fr_ = rx_["setting"], rx_.get("frames") or {}
+        out.append(("measured", f"DI reactions: {rx_['reactions']}, my Drive Impact reaching the game on their DI's frame "
+                                f"{fr_.get('min')}-{fr_.get('max')} (median {fr_.get('median')}; setting {st_['min']}-"
+                                f"{st_['max']}, safe limit {st_['safe_max']})"
+                                + (f"; seen too late to wait {rx_['seen_late']}" if rx_.get("seen_late") else "") + "."))
     jc_ = summary.get("jump_attack_combos") or {}
     if jc_.get("hit") or jc_.get("continued"):
         top_ = sorted((jc_.get("routes") or {}).items(), key=lambda kv: -kv[1])[:2]

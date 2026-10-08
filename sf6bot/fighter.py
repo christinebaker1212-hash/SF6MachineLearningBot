@@ -181,6 +181,48 @@ def load_inferred_moves(chara_name: str, datasets_root: Path, fcfg: dict) -> dic
     return out
 
 
+# 0.39.0 the DI-back's reaction window (Capcom, Drive Impact: start-up 26, active 26-27, "Super Armor for 2 hits from
+# frames 1 - 27"). The bot's DI must be out (armor up) by the opponent's DI frame 26, when that DI hits; and its own hit
+# (its frame 26) must come after the opponent's armor (to frame 27), so it must start on the opponent's frame 3 or later.
+# The latest frame is kept DI_SAFE_MARGIN under 26: input delay jitter (+/-1), a DI first seen a line or two late (state
+# arriving in bursts), 1 more. The earliest is DI_REACT_FLOOR: about what the bot did before (seen on its first line + 3
+# frames of input delay).
+DI_HIT_FRAME = 26
+DI_SAFE_MARGIN = 4
+DI_REACT_FLOOR = 4
+
+
+def di_reaction_setting(cfg: dict | None, override=None) -> dict:
+    """0.39.0: the DI-back reaction delay from the config (`di_reaction`) and an optional override ("15-21", "18", [lo, hi],
+    "off"). Frames are the opponent's DI frame the bot's DI reaches the game on; clamped to [DI_REACT_FLOOR, safe max]."""
+    c = dict(cfg or {})
+    safe = min(int(c.get("safe_max", DI_HIT_FRAME - DI_SAFE_MARGIN)), DI_HIT_FRAME - DI_SAFE_MARGIN)
+    enabled = bool(c.get("enabled", True))
+    lo, hi = c.get("min", 15), c.get("max", 21)
+    if override is not None:
+        if isinstance(override, str) and override.strip().lower() in ("off", "0", "none", "instant"):
+            enabled = False
+        else:
+            if isinstance(override, str):
+                parts = [p for p in override.replace(" ", "").replace("to", "-").split("-") if p]
+                vals = [int(p) for p in parts]
+            elif isinstance(override, (list, tuple)):
+                vals = [int(v) for v in override]
+            else:
+                vals = [int(override)]
+            if not vals:
+                raise ValueError(f"DI reaction delay: no frames in {override!r}")
+            lo, hi = vals[0], vals[-1]
+            enabled = True
+    lo, hi = int(lo), int(hi)
+    if lo > hi:
+        lo, hi = hi, lo
+    clamped = not (DI_REACT_FLOOR <= lo and hi <= safe)
+    lo = min(max(lo, DI_REACT_FLOOR), safe)
+    hi = min(max(hi, lo), safe)
+    return {"enabled": enabled, "min": lo, "max": hi, "safe_max": safe, "clamped": clamped}
+
+
 def measured_ids(chara_name: str, fcfg: dict) -> dict:
     """0.38.0: ids measured from recordings (`id_names` in the fighter config), above the inferred map, below a catalog.
     `from_parent`: the id appears that many frames after the move's first id (a held button released: the charged
@@ -660,6 +702,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._drive_prev = None
         self.di_stats = {"di_back": 0, "di_back_skipped_lethal": 0, "own_di_skipped_meter": 0, "burnout_super": 0,
                          "drive_reversal_dropped": 0}
+        # 0.39.0 (user): the DI-back waits a human reaction time, never past the frame it can still win the exchange
+        self.di_rx = di_reaction_setting(fcfg.get("di_reaction"))
+        self._di_rx_for, self._di_rx_target = None, None
+        self.di_rx_stats: dict = {"frames": [], "waited_lines": 0, "seen_late": 0}
         self._aa_overhead_for = None
         self._aa_busy_for = None
         self._aa_ready_for = None             # 0.21.0: the jump the bot held still for (counted once)
@@ -1631,6 +1677,37 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         """Human limits: has a human reaction time passed since the opponent's current action began?"""
         return self.human is None or self.human.ready(kind, self.op_onset, self._now, self.lead)
 
+    def _di_since(self) -> int | None:
+        """0.39.0: the game frame of the opponent's Drive Impact the bot's DI would reach the game on (1 = its first frame),
+        if it were sent now: the frames since it began + the state's staleness + the input delay."""
+        if not isinstance(self._now, int) or not isinstance(self.op_onset, int):
+            return None
+        return self._now - self.op_onset + 1 + self.stale + self.lead
+
+    def _di_react_ready(self) -> bool:
+        """0.39.0 (user: "the instant DI reaction is ... far too much of a tell"): the DI-back goes out once its input would
+        reach the game on a frame drawn from the setting's range (a human seeing the DI, then pressing), never later than
+        the safe limit (`di_reaction_setting`). A DI first seen later than the drawn frame goes out at once. Off: the old
+        instant reaction (or human limits' own sample)."""
+        if not self.di_rx["enabled"]:
+            return self._ok("di")
+        land = self._di_since()
+        if land is None:
+            return True
+        if self._di_rx_for != self.op_onset:
+            self._di_rx_for = self.op_onset
+            lo, hi = self.di_rx["min"], self.di_rx["max"]
+            self._di_rx_target = self.rng.randint(lo, hi)
+            if land > self._di_rx_target:
+                self.di_rx_stats["seen_late"] += 1
+        if land >= self._di_rx_target:
+            fr = self.di_rx_stats["frames"]
+            fr.append(land)
+            del fr[:-200]
+            return True
+        self.di_rx_stats["waited_lines"] += 1
+        return False
+
     def _decide(self, raw: dict, t: float, me_i: int) -> Decision:
         me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
         dist = player_distance(me, op)
@@ -1779,14 +1856,19 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if sv is not None:
             return sv
         if (info.get("di") and op_act != self.di_handled_id and dist < 3.0 and me_y <= 0.05
-                and self.can_spend(me, "drive_impact", reserve=0) and self._ok("di")):
-            self.di_handled_id = op_act
+                and self.can_spend(me, "drive_impact", reserve=0)):
             # 0.20.0 (user: "Always DI back unless the amount of health on a counter DI would kill it")
             risk = self._di_back_risk(op)
             if (_num(me.get("hp")) or 0) <= risk:
+                self.di_handled_id = op_act
                 self.di_stats["di_back_skipped_lethal"] += 1
                 return Decision("hold", direction=4, rule="di_back_skipped",
                                 reason=f"opponent Drive Impact: losing the exchange ({risk:,} hp) would kill me; blocking")
+            if not self._di_react_ready():
+                # 0.39.0: still "seeing" it; guard meanwhile and start nothing else
+                return Decision("hold", direction=1, rule="di_wait",
+                                reason="opponent Drive Impact: reacting (human reaction time)")
+            self.di_handled_id = op_act
             self.di_stats["di_back"] += 1
             return self._move("drive_impact", "di_reaction", f"opponent Drive Impact at {dist:.2f}")
         # 3b. 0.33.0 no Drive for a DI-back (burnout), no Super Art for 3a, and the bot FREE (not in blockstun): jump it
@@ -4682,7 +4764,7 @@ def end_guard(latest, me_i: int | None, fcfg: dict) -> InputState:
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, matches: int | None = 1,
               panel=None, first_to: int | None = None, versus: str | None = None,
               opponent_name: str | None = None, human_limits: bool | None = None, blind_ask=None,
-              my_name: str | None = None) -> dict:
+              my_name: str | None = None, di_delay=None) -> dict:
     """Play matches until `matches` are done, someone reaches `first_to` wins, `seconds` pass or F8.
 
     Waits for a battle instead of requiring one at the start, and goes back to waiting after each
@@ -4716,6 +4798,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     fcfg = fprof.profile(playing(cfg), cfg_dir, ds_root)
     if (fcfg.get("profile") or {}).get("generated"):
         print("Playing as " + fprof.summary_line(fcfg))
+    # 0.39.0 (user): the DI-back reaction delay (configs/fighter/ryu.yaml di_reaction; `fight --di-delay`, the panel)
+    di_rx0 = di_reaction_setting(fcfg.get("di_reaction"), di_delay)
+    if di_rx0["enabled"]:
+        print(f"Drive Impact reaction: the DI-back reaches the game on the opponent's DI frame {di_rx0['min']}-"
+              f"{di_rx0['max']} (safe limit {di_rx0['safe_max']}; their DI hits on frame {DI_HIT_FRAME})"
+              + (" [capped to the safe range]" if di_rx0["clamped"] else "") + ".")
+    else:
+        print("Drive Impact reaction: instant (no reaction delay).")
 
     def _models(ch_):
         b_ = Brain(ds_root, ch_) if (fcfg.get("policy") or {}).get("enabled", True) else None
@@ -5047,6 +5137,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["input_delay_used"] = fighter.lead
                 # 0.20.0
                 summary["drive_impact_rules"] = dict(fighter.di_stats)
+                fr_ = sorted(fighter.di_rx_stats["frames"])
+                summary["di_reaction"] = {"setting": {k: fighter.di_rx[k] for k in ("enabled", "min", "max", "safe_max")},
+                                          "reactions": len(fr_),
+                                          "frames": ({"min": fr_[0], "median": fr_[len(fr_) // 2], "max": fr_[-1]}
+                                                     if fr_ else None),
+                                          "waited_lines": fighter.di_rx_stats["waited_lines"],
+                                          "seen_late": fighter.di_rx_stats["seen_late"]}
                 summary["throws_held"] = dict(fighter.throw_stats)
                 summary["safe_mode_s"] = {k: round(v, 1) for k, v in fighter.risk_stats.items()}
                 summary["drive"] = {"burnouts": fighter.drive_stats["burnouts"],
@@ -5582,6 +5679,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                           opp_reach=opp_reach)
                 if meter is not None and meter.lead() is not None:
                     fighter.lead = meter.lead()
+                if di_delay is not None:
+                    fighter.di_rx = di_reaction_setting(fcfg.get("di_reaction"), di_delay)
                 from .boxes import load_own_hit_profiles
                 fighter.own_hit = load_own_hit_profiles(ds_root, summary["character"])
                 summary["hitbox_profiles"] = len(fighter.own_hit)

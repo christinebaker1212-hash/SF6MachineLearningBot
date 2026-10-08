@@ -21,7 +21,9 @@ def _dec(f, raw, t=0.0):
 # ---- Drive Impact rules (user) -----------------------------------------------------------------------------------------
 
 def test_di_back_always_unless_losing_it_would_kill():
+    from sf6bot.fighter import di_reaction_setting
     f = _fighter(opp_moves=dict(DI))
+    f.di_rx = di_reaction_setting(None, "off")          # 0.39.0: the reaction delay is tested on its own (test_0390)
     assert _dec(f, state(op={"x": 2.0, "action_id": 855})).rule == "di_reaction"
     assert f.di_stats["di_back"] == 1
     f2 = _fighter(opp_moves=dict(DI))
