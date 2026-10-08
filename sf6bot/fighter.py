@@ -703,6 +703,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._onset_act = None
         self._prev_op_act = None             # 0.25.0 the opponent's action before its current one
         self._prev2_op_act = None            # 0.37.0 ... and the one before that
+        self._rc_for = None                  # 0.37.0 the opponent rush (onset) already checked
+        self._dg_for = None
         self._cur_op_blocked = self._prev_op_blocked = False   # 0.37.0 the current / previous action was blocked by the bot
         self._me_bs_prev = 0
         self.op_charge_revs: list = []       # 0.29.0 opponent_charge_reversals
@@ -845,6 +847,105 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if info.get("rising") or (1200 <= a < 1300 and info.get("interrupt") == "all"):
             return False          # 0.34.0: a Shoryuken-type move / an invincible super: wait for its landing, then punish
         return not (info.get("projectile") or info.get("di") or info.get("cmd_grab"))
+
+    def _di_guard(self, me: dict, op: dict, info: dict) -> Decision | None:
+        """0.37.0: hold block through the opponent's Drive Impact start-up (its frames before 26, Capcom) while the bot is
+        in blockstun or the DI has been seen and not answered; rule 3 decides when the bot is free (DI-back first)."""
+        if not info.get("di") or not isinstance(self._now, int) or self.op_onset is None:
+            return None
+        if self._now - self.op_onset >= 28 or (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("hitstun")) or 0):
+            return None
+        if (_num(me.get("blockstun")) or 0) > 0:
+            self.di_stats["guarded"] = self.di_stats.get("guarded", 0) + (1 if self._dg_for != self.op_onset else 0)
+            self._dg_for = self.op_onset
+            return Decision("hold", direction=1, rule="di_block",
+                            reason="opponent Drive Impact after the blockstring: holding block, no button into its armor")
+        return None
+
+    def _rush_check(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """0.37.0 (user: "The bot needs to check drive rush as its coming in, not block the normal. Excellent buttons to use
+        are standing medium punch, and crouching light punch. Do not shoryuken, because an opponent can pull back on a drive
+        rush to make it safe. Especially with characters that have extremely fast drive rushes, like Dee Jay or Juri").
+        MEASURED (0.36.1 ranked, 486 Drive Rushes out of a parry): started 2.4-3.0 away, closing ~0.05 a frame (Juri 0.065,
+        Dee Jay 0.058, Alex 0.027), the normal out after 18-23 frames at 1.2-1.6; with the bot free: blocked 236, hit 73,
+        thrown 23, the bot hit them 19. The button whose active frame meets the rusher inside its reach (the closing speed
+        now), so it lands in the rushed normal's start-up (a counter hit) or beats a rush throw. Once per rush; the bot free,
+        on the ground, not in blockstun (a cancel rush inside a blockstring is the guard rules')."""
+        rc = self.c.get("rush_check") or {}
+        a = op.get("action_id")
+        if not rc.get("enabled", True) or a not in RUSH_IDS or self._rc_for == self.op_onset:
+            return None
+        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0) \
+                or self.busy(me) is not None or not self.vel_ok:
+            return None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None:
+            return None
+        closing = -self.op_vx * (1.0 if ox > mx else -1.0)
+        if closing < float(rc.get("min_closing", 0.015)):
+            return None                                    # not coming (or pulled back): nothing to check
+        L = self.lead + self.stale
+        for o in rc.get("moves") or []:
+            su = int(o.get("startup", 6))
+            reach = self._pe_reach(o.get("id"), (self.c.get("punish", {}).get("reach_fallback") or {}).get(o["name"], 1.2))
+            if o.get("max_reach") is not None:
+                reach = min(reach, float(o["max_reach"]))
+            d_hit = dist - closing * (L + seq_prefix(o["seq"]) + su - 1)
+            if d_hit <= reach and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
+                self._rc_for = self.op_onset
+                self.rush_stats["checked"] = self.rush_stats.get("checked", 0) + 1
+                return Decision("seq", o["name"], o["seq"], rule="rush_check", timed=True,
+                                reason=f"Drive Rush coming in ({closing:.3f} a frame, {dist:.2f} away): {o['name']} meets "
+                                       f"it at {max(0.0, d_hit):.2f}")
+        return None
+
+    def _crosscut(self, me: dict, op: dict) -> Decision | None:
+        """0.37.0 (user: "Cross ups are still extremely effective, Ryu simply blocks them. Ryu should be performing cross cut
+        shoryukens on them when they cross over with a normal jump"). MEASURED (0.36.1 ranked): 295 cross-overs, 147 with
+        16+ frames from the cross to the landing; the bot blocked through them (block_crossup / block_overhead) and hit 12.
+        Ryu's Shoryuken hitboxes are always IN FRONT of him (his catalog boxes: L Shoryuken's first active frame 0.29-0.89
+        forward, 0.27-1.17 high, later frames up to 1.75 high / 0.96 forward), so the cross-cut is the Shoryuken facing the
+        side the opponent is on NOW, active while it comes down through that box before passing over. Sent when the
+        opponent's hurtboxes (its live boxes, else +-0.4 x 0-1.4), moved along its predicted arc, overlap that hitbox in one
+        of the Shoryuken's active frames (L Shoryuken 5-14, Capcom). Only a plain jump (not an air special) that is
+        predicted to land behind the bot."""
+        aa = self.c["anti_air"]
+        xc = aa.get("crosscut") or {}
+        if not xc.get("enabled", True) or not self._aa_on() or self.aa_done_for_jump or not self.vel_ok:
+            return None
+        if not self._jumping(op) or self._air_move(op) or (_num(me.get("y")) or 0.0) > 0.05 \
+                or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0) or self.busy(me) is not None:
+            return None
+        mx, ox, oy = _num(me.get("x")), _num(op.get("x")), _num(op.get("y")) or 0.0
+        if mx is None or ox is None or oy <= 0.3 or self.op_vy >= 0:
+            return None                                         # on the way down only: the rise is not predictable enough
+        g = float(aa.get("gravity", 0.0123))
+        t_land = landing_frames(oy, self.op_vy, g)
+        side = 1.0 if ox > mx else -1.0
+        if (ox + self.op_vx * t_land - mx) * side > -float(aa.get("crossup_past", 0.3)):
+            return None                                         # not crossing: the ordinary anti-air
+        srk = self._aa_move()
+        k0 = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5)) - 1
+        f0, f1 = float(xc.get("front0", 0.29)), float(xc.get("front1", 0.96))
+        y0, ytop = float(xc.get("y0", 0.27)), xc.get("y_top", [1.17, 1.49, 1.75])
+        hb = [b for b in (op.get("boxes") or []) if b.kind == "b"]
+        rel = [(b.x0 - ox, b.x1 - ox, b.y0 - oy, b.y1 - oy) for b in hb] or [(-0.4, 0.4, 0.0, 1.4)]
+        for i in range(int(xc.get("active", 10))):
+            k = k0 + i
+            if k >= t_land:
+                break
+            px, py = ox + self.op_vx * k, oy + self.op_vy * k - g * k * k / 2.0
+            top = float(ytop[min(i, len(ytop) - 1)])
+            for a0, a1, b0, b1 in rel:
+                fa, fb = sorted(((px + a0 - mx) * side, (px + a1 - mx) * side))
+                if fb >= f0 and fa <= f1 and py + b1 >= y0 and py + b0 <= top:
+                    self.aa_done_for_jump = True
+                    self._aa_kind = "crosscut"
+                    return Decision("seq", srk["name"], srk["seq"], rule="anti_air",
+                                    facing=Facing.RIGHT if side > 0 else Facing.LEFT,
+                                    reason=f"cross-cut Shoryuken: the opponent crosses over (lands {t_land:.0f}f), its "
+                                           f"hurtbox meets the Shoryuken's hitbox on its active frame {i + 1}")
+        return None
 
     def _jump_threat(self, me: dict, op: dict) -> tuple[float, float] | None:
         """0.21.0: the opponent is in the air (a jump or an airborne attack) and will land within the bot's anti-air reach
@@ -1157,6 +1258,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 return Decision("none", reason=f"busy: {why}")
         if d.kind in ("seq", "route") and self._throw_too_early(d, raw, me_i):
             return Decision("none", reason="throw held: the opponent is not standing yet")
+        tr = self._throw_out_of_range(d, raw, me_i)
+        if tr is not None:
+            return tr
         cg = self._aa_cross_guard(d, raw, me_i)
         if cg is not None:
             return cg
@@ -1173,6 +1277,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         every line). Not for the user's move answers (Dragonlash, Vanishing Sun) or juggles."""
         if d.kind not in ("seq", "route") or d.rule in ("move_answer", "answer_wait") or not self.vel_ok:
             return None
+        if (d.reason or "").startswith("cross-cut"):
+            return None                                   # 0.37.0: timed from the boxes to hit before the cross
         name = d.name or ""
         seq = d.seq if isinstance(d.seq, str) else ""
         dps = (self.c.get("anti_air") or {}).get("dp_names") or []
@@ -1196,6 +1302,22 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return Decision("hold", direction=4, facing=Facing.RIGHT if pdx > 0 else Facing.LEFT, rule="aa_cross_guard",
                         reason=f"{name or 'Shoryuken'} held: the jump is still rising and lands behind me "
                                f"({pdx:+.2f}); blocking toward the landing side")
+
+    def _throw_out_of_range(self, d: Decision, raw: dict, me_i: int) -> Decision | None:
+        """0.37.0: no offensive throw from beyond `ranges.throw_attempt` (whatever rule chose it; throw techs are not
+        affected). MEASURED (0.36.1 ranked, 225 throw starts): within 0.8 landed 55 of 59; 0.8-1.0 landed 52 of 119 (52
+        whiffed, 15 hit out of it); 1.0-1.3 11 of 43; a whiffed throw is punished (the bot's own throw was the move it was
+        in for 164 of the openings it took, the most of any). A crouch block instead."""
+        if d.kind != "seq" or "tech" in (d.rule or "") or not re.match(r"^[1-9]\+LP\+LK@", d.seq or ""):
+            return None
+        me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
+        dist = player_distance(me, op)
+        lim = float(self.c["ranges"].get("throw_attempt", 0.85))
+        if dist is None or dist <= lim:
+            return None
+        self.throw_stats["out_of_range"] = self.throw_stats.get("out_of_range", 0) + 1
+        return Decision("hold", direction=1, rule="throw_out_of_range",
+                        reason=f"{d.name or 'throw'} held: {dist:.2f} away, throws land from {lim:.2f} or closer")
 
     def _throw_too_early(self, d: Decision, raw: dict, me_i: int) -> bool:
         """0.20.0 (user: "it mistimes meaty grabs constantly, choosing to grab as soon as the opponent is on the ground. It
@@ -1345,6 +1467,17 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         gh = self._guard_hold(me, op, block_dir, block_face)
         if gh is not None:
             return gh
+        # 0d. 0.37.0 the opponent's Drive Impact is coming: no pressure option, reversal or button into its armor (rule 3
+        #     answers it: DI-back, the burnout super / jump, else this block). MEASURED (0.36.1 ranked): 27 of 76 opponent
+        #     DIs with the bot's back near the wall hit it, 17 of them right after a blockstring, the bot pressing a pressure
+        #     option out of blockstun; one skipped DI-back was followed by a walk forward into it
+        dg = self._di_guard(me, op, info)
+        if dg is not None:
+            return dg
+        # 0r. 0.37.0 an incoming Drive Rush: check it with a fast button timed to its arrival (user: 5MP / 2LP, no Shoryuken)
+        rc = self._rush_check(me, op, dist)
+        if rc is not None:
+            return rc
         # 0. a pressure moment: about to be free with the opponent close -> commit to a defensive option
         #    now (defense.py: throws can't be teched on reaction, 26 of 29 landed in the user's FT5)
         d = self._pressure(raw, me, op, dist, t) or self._own_rush_pressure(raw, me, op, dist, t)
@@ -1416,10 +1549,18 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return bj
         if not info.get("di"):
             self.di_handled_id = None
+        elif op_act == self.di_handled_id and me_y <= 0.05 and not self.op_recovering(op) \
+                and isinstance(self._now, int) and self.op_onset is not None and self._now - self.op_onset < 28:
+            # 0.37.0: a Drive Impact this rule did not counter (the DI-back skipped): block it, never walk into it
+            # (MEASURED 0.36.1: a skipped DI-back, then the neutral policy walked forward and was hit)
+            return Decision("hold", direction=1, rule="di_block", reason="opponent Drive Impact coming: blocking")
         # 4. anti-air on a real jump, timed from WHEN the opponent lands (0.18.0). MEASURED 0.17.5 ranked: of 42 jump-ins
         #    that landed near the bot, 2 met a Shoryuken in time; the old rule waited for the opponent to fall (apex)
         #    and then needed motion + input delay + start-up, ~20 frames, which is about all of the fall.
         aa = self.c["anti_air"]
+        cc = self._crosscut(me, op)
+        if cc is not None:
+            return cc
         air_move = not self._jumping(op) and self._air_move(op)
         if ((self._jumping(op) or air_move) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
                 and not (_num(me.get("blockstun")) or 0) and self._ok("anti_air")):
@@ -2873,6 +3014,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         exclude = set(exclude) | set(extra_exclude)
         if rem is not None and sit != "wakeup" and int(rem) - self.lead - self.stale < 2:
             exclude.add("drive_reversal")      # 0.27.0: it would land after the blockstun, as a Drive Impact
+        if rem is not None and sit == "wakeup" and int(rem) - self.lead - self.stale < 3:
+            # 0.37.0 (user: "I saw it wakeup DI while the opponent had meter"): landing after the get-up it is a Drive
+            # Impact. MEASURED (0.36.1 ranked): 54 wake-up Drive Reversals and 14 forward Drive Impacts out of get-ups
+            exclude.add("drive_reversal")
         ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
                                  lambda name, oc: self._resolve_option(me, op, oc), wait=wait,
                                  exclude=exclude, bonus=bonus)
@@ -3898,12 +4043,17 @@ def seq_prefix(seq: str) -> int:
     return n
 
 
-def drive_reversal_late(me: dict, arrive: int) -> str | None:
+def drive_reversal_late(me: dict, arrive: int, wakeup_frames: dict | None = None) -> str | None:
     """0.27.0: why a Drive Reversal sent now would come out as a Drive Impact, or None. It needs the bot still in
     blockstun when the input reaches the game (`arrive` frames: input delay + stale state), or in a get-up (wake-up
-    Drive Reversal, id 852 measured)."""
+    Drive Reversal, id 852 measured). 0.37.0: in the last get-up action (MEASURED 30 frames: defense.wakeup_frames) the
+    input must land before it ends."""
     a = me.get("action_id")
     if isinstance(a, int) and 300 <= a < 350:
+        wf = (wakeup_frames or {}).get(a)
+        af = _num(me.get("action_frame"))
+        if isinstance(wf, int) and af is not None and wf - int(af) < max(1, arrive) + 1:
+            return "drive reversal: the get-up ends before the input lands"
         return None
     if (_num(me.get("blockstun")) or 0) <= 0:
         return "drive reversal: no longer blocking"
@@ -5203,7 +5353,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         if latest_ is not None:
                             r_ = latest_.raw
                             me_ = r_.get(f"p{side['i'] + 1}") or {}
-                            why_dr = drive_reversal_late(me_, fighter.lead + fighter.stale)
+                            why_dr = drive_reversal_late(me_, fighter.lead + fighter.stale,
+                                                         (fighter.c.get("defense") or {}).get("wakeup_frames"))
                             if why_dr:
                                 fighter.di_stats["drive_reversal_dropped"] += 1
                                 return why_dr

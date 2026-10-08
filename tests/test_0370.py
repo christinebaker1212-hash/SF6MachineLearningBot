@@ -256,3 +256,50 @@ def test_the_frame_data_research_finds_slow_airborne_and_slow_specials_but_not_p
          "notes": "Can transition to Kazekama Shin Kick", "input": "236+LK"}]
     got = {m["name"]: r["do"] for m, r in _auto_rules(rows, FCFG)}
     assert got == {"H Tiger Knee Crush": "anti_air", "H Psycho Blitz": "di_react"}
+
+
+# ---- checking an incoming Drive Rush ----------------------------------------------------------------------------------
+
+def test_an_incoming_drive_rush_is_checked_with_5mp_as_it_arrives_never_a_shoryuken():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead = 4
+    lines = [state(op={"x": 2.9, "action_id": 480}, timer=999)]
+    # MEASURED: a parry Drive Rush closes ~0.077 a frame (Ken 2.82 -> 1.28 in 20 frames), its normal out at ~1.3
+    lines += [state(op={"x": 2.9 - 0.077 * k, "action_id": 739}, timer=1000 + k) for k in range(22)]
+    got = [(t, d) for t, d in _run(f, lines) if d.rule == "rush_check"]
+    assert len(got) == 1
+    t, d = got[0]
+    assert d.name == "Standing Medium Punch" and "623" not in d.seq and "6@3 2@3" not in d.seq
+    # sent so 5MP's active frame (input delay 4 + start-up 6 - 1) meets it inside its reach (fallback 1.3)
+    k = t - 1000
+    assert 2.9 - 0.077 * (k + 9) <= 1.3 < 2.9 - 0.077 * (k + 8)
+    assert k + 9 <= 22                                         # active before the rushed normal (rush frame ~18 + start-up)
+
+
+def test_a_rush_pulled_back_or_in_a_blockstring_is_not_checked():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead = 4
+    lines = [state(op={"x": 1.5, "action_id": 600}, timer=999)]
+    lines += [state(me={"blockstun": 10, "action_id": 160}, op={"x": 1.5 - 0.05 * k, "action_id": 501}, timer=1000 + k)
+              for k in range(8)]
+    assert not [d for _, d in _run(f, lines) if d.rule == "rush_check"]
+
+
+# ---- Drive Impacts: no button into an incoming one; no wake-up Drive Reversal that lands as a Drive Impact --------------
+
+def test_after_a_blockstring_the_bot_holds_block_through_a_drive_impact():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead = 4
+    lines = [state(me={"blockstun": 6, "action_id": 160}, op={"x": 1.0, "action_id": 600}, timer=999)]
+    lines += [state(me={"blockstun": max(0, 5 - k), "action_id": 160 if k < 5 else 1}, op={"x": 1.0, "action_id": 855},
+                    timer=1000 + k) for k in range(4)]
+    got = _run(f, lines)
+    assert [d.rule for t, d in got if t >= 1000] == ["di_block"] * 4
+
+
+def test_a_wakeup_drive_reversal_that_would_land_after_the_get_up_is_dropped():
+    from sf6bot.fighter import drive_reversal_late
+    wf = FCFG["defense"]["wakeup_frames"]
+    assert drive_reversal_late({"action_id": 340, "action_frame": 20}, 5, wf) is None
+    assert drive_reversal_late({"action_id": 340, "action_frame": 26}, 5, wf) is not None
+    assert drive_reversal_late({"action_id": 320, "action_frame": 26}, 5, wf) is None      # earlier in the knockdown

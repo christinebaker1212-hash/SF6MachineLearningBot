@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08, after step 5 (answers on reaction). Building step 6 next (an open-loop count of the new answers over the 0.36.1 matches was running: rerun scratchpad-style if needed).** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08, step 6 in progress (defence / neutral). Done in step 6 so far: throw range, neutral range caps, cross-cut, rush check, DI guard, wake-up DR. Next in step 6: walking forward into attacks (boxes), grapplers, Drive spent blocking, random neutral jumps, SA1 into block, sweeps into airborne, L SRK reversal reach.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -164,6 +164,21 @@ CA 3.6%; DI performed 0.5 a match.
     Kicks, Honda's Sumo Smash) and 181 Drive Impact answers (slow 1-2 hit specials, no projectiles, no follow-up
     parents). User rules win per move.
   - Tests: test_0370.py (14); test_0250's Dragonlash / Jinrai tests moved to the new rules.
+
+- Step 6 so far (fighter.py, neutral_policy.py, ryu.yaml):
+  - `_throw_out_of_range` (post-filter in decide): no offensive throw beyond `ranges.throw_attempt` 0.85 (techs exempt);
+    neutral `THROW_MAX` 0.85.
+  - `NEUTRAL_MAX_DIST`: 2MK 1.85, 2HP 1.45, 5HP 2.0, 2HK 2.15 (MEASURED per-distance results in the docstring).
+  - `_crosscut` (anti_air.crosscut): the Shoryuken facing the current side when the falling opponent's hurtbox meets its
+    hitbox (catalog boxes) in an active frame; open loop on 0.36.1: fires on 8 of 302 cross-overs, 6 meet the hitbox
+    (before the "falling only" rule it fired 47 times, 9 met). Most cross-overs give no chance before the cross.
+  - `_rush_check` (rush_check): 5MP / 2LP whose active frame meets an incoming Drive Rush in reach (MEASURED rushes:
+    ~0.077 a frame, normal out after 18-23 frames at 1.2-1.6; 486 PDRs: blocked 236, hit 73, thrown 23).
+  - `_di_guard`: in blockstun with the opponent's DI coming, hold block (no pressure option into its armor); rule 3
+    `di_block`: a DI the DI-back skipped is blocked, not walked into. (A generalised super-through-DI was tried and
+    reverted: a blocked DI only stuns in burnout at the wall, which 3a already covers.)
+  - Wake-up Drive Reversal: excluded when it would land < 3 frames before the get-up ends; `drive_reversal_late`
+    covers get-ups (wakeup_frames + action_frame).
 
 ## Next steps (in order; the task list in the session mirrors these)
 2. Finish measuring (scripts were in the scratchpad; rebuild as needed): walking forward into attacks (bot id 9 / dir 6

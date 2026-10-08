@@ -28,7 +28,15 @@ REACH_MARGIN = 0.1        # a move is chosen up to this far beyond its measured 
 # MEASURED (0.26.0 ranked, 33 Diamond matches, the opponent not attacking): 2LP from 1.25-1.75 -247 hp per try (6: 4
 # whiffs), 5LP -112 (9), 5LK from 1.75-2.25 -33 (12: 7 whiffs); within those distances 5LP +552, 5LK +341, 2MK +679
 NEUTRAL_MAX_DIST = {"Crouching Light Punch": 1.25, "Standing Light Punch": 1.25, "Standing Light Kick": 1.75,
-                    "Crouching Light Kick": 1.4}
+                    "Crouching Light Kick": 1.4,
+                    # 0.37.0 MEASURED (0.36.1 ranked, the bot's own starts by distance -> hit / blocked / whiffed):
+                    # 2MK <1.3 59/56/45, 1.6-1.9 146/112/50, 1.9+ 33/17/111 (123 whiffed 2MKs were hit right after:
+                    # the "freeze after 2MK" the user saw is its whiff recovery); 2HP <1.2 35/0/0, 1.2-1.5 12/0/6,
+                    # 1.5-1.8 12/0/23, 1.8+ 2/0/57 (user: "cr.HP at really far ranges"); 5HP 1.5-1.8 92/7/13,
+                    # 1.8-2.2 70/0/42, 2.2+ 4/4/21; 2HK 1.8-2.2 37/2/10, 2.2+ 11/0/24
+                    "Crouching Medium Kick": 1.85, "Crouching Heavy Punch": 1.45, "Standing Heavy Punch": 2.0,
+                    "Crouching Heavy Kick": 2.15}
+THROW_MAX = 0.85
 SUPER_COST = {"SA1": 10000, "SA2": 20000, "SA3": 30000, "CA": 30000}
 # 0.18.0: resource and reaction moves never come from random sampling (MEASURED 0.17.5 ranked: SA1 8 times, 8 whiffs;
 # Drive Impact 11, 6 whiffs; Drive Parry 47, 23 with nothing to parry; OD Hadoken 18). They need a reason:
@@ -272,7 +280,7 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "air_attack" and not air_ok:
                 ok[i] = False
-            elif name == "throw" and dist > 1.0:
+            elif name == "throw" and dist > THROW_MAX:          # 0.37.0: 0.85 (MEASURED, see fighter._throw_out_of_range)
                 ok[i] = False
             elif name in ("drive_impact", "parry") and not can_spend(name if name == "drive_impact" else "drive_parry"):
                 ok[i] = False
