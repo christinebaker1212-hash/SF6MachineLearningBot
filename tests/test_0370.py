@@ -230,16 +230,15 @@ def test_no_reaction_drive_impact_when_the_opponent_can_super_cancel():
         assert bool([d for d in ds if d.rule == "move_answer"]) == want
 
 
-def test_hooligan_is_not_anti_aired_but_cannon_strike_out_of_it_is(tmp_path):
+def test_hooligan_gets_its_hitbox_shoryuken_and_cannon_strike_out_of_it_its_anti_air(tmp_path):
+    """0.38.0 (user): Hooligan is Shoryukened too (it was a no_anti_air bait in 0.37.0)."""
     _framedata(tmp_path, "Cammy", [
         {"section": "Special Moves", "name": "Hooligan Combination", "startup_n": None, "active": "", "notes": ""},
         {"section": "Special Moves", "name": "Cannon Strike", "input": "(During Hooligan Combination) K", "startup_n": 13,
          "active": "13-23", "total_n": 35, "notes": "Recovery changes depending on the height"}])
     moves = {947: {"name": "Hooligan Combination"}, 1009: {"name": "Cannon Strike"}}
     apply_move_answers(moves, "Cammy", tmp_path, FCFG)
-    assert moves[947].get("no_anti_air") and moves[1009]["answer"]["do"] == "anti_air"
-    f = ScriptedFighter(FCFG, moves, seed=1)
-    assert not f._air_move({"action_id": 947, "y": 1.2})
+    assert moves[947]["answer"]["do"] == "anti_air_box" and moves[1009]["answer"]["do"] == "anti_air"
 
 
 def test_the_frame_data_research_finds_slow_airborne_and_slow_specials_but_not_projectiles_or_reversals():

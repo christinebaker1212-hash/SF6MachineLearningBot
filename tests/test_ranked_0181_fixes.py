@@ -40,6 +40,7 @@ def test_a_defence_reversal_is_labelled_with_the_move():
     f = _fighter()
     f.defense.c["temperature"] = 0.05
     f.defense.payoff["reversal"] = {"throw": 9, "strike": 9, "shimmy": 9, "wait": 9}
+    f.c.setdefault("defense", {})["reversal_guess"] = True       # 0.38.0: off by default (only reactive reversals)
     d = f.decide(state(me={"blockstun": 4, "action_id": 155, "drive": 60000, "super": 0},
                        op={"x": 0.9, "action_id": 1}), 0.0, 0)
     assert d.rule == "defense:reversal" and d.name == "defence: reversal (OD Shoryuken)"

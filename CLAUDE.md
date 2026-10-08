@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.38.0 (2026-10-08): from the 0.37.x run (38-11): multi-hit projectile parries held, Hooligan Shoryukened, the 3-lights rule, no reversal guesses, no late super cancels, OD Hadoken clash limits, no Hadoken into Cammy SA3, Luke's charged Flash Knuckle.**
 - **0.37.3 ranked (user, 2026-10-08): 1530 MR and climbing (0.36.1 averaged ~1350); beat a High Master, dropping them to Master. User-reported, not yet measured from the files.**
 - **0.37.3 (2026-10-08): side at "Fight!" from a tap, a backdash and a crouch; the VS-screen name read is off (it always said P2).**
 - **0.37.2 (2026-10-08): the Drive Rush check uses each opponent character's measured rush ids and speed.**
@@ -4681,6 +4682,63 @@ All MOCK / replay-tested (`tests/test_0370.py`, 36 tests); nothing here is verif
   - `fight_summary.side_probe.how` says which.
 - Tests in `tests/test_0370.py` (a simulated game echoing the bot's keys on either player's mask: both sides found, the
   backdash goes away from the opponent, the other player holding LEFT). Not verified in game.
+
+## 0.37.x ranked run analysed and 0.38.0 (user, 2026-10-08): 52 matches, 38-11; the user's nine issues
+MEASURED on the 52 uploaded fights (0.37.0-0.37.3; 3 unfinished Ryu mirrors). By opponent: Akuma 6-1, Cammy 6-0, Yasmine
+6-0, Ryu 6-1, Jamie 6-4, Juri 2-1, Terry 2-0, Guile 2-0, A.K.I. 1-0, Luke 1-2, JP 0-1, Marisa 0-1. All MOCK / replay-tested
+(`tests/test_0380.py`; `decide()` replayed open loop over the recordings); nothing here is verified in game.
+1. **Multi-hit projectiles parried once** (A.K.I.'s OD Nightshade Pulse): hit 1 parried (480 -> 487), MP+MK let go after the
+   parry's 8-frame hold while the projectile's hitbox was still on the bot, hit 2 blocked (176). Now
+   (`zoning._zn_parry_keep`, rule `parry_keep`): while the bot is in its parry (480-499) and an opponent projectile's hitbox
+   touches it (`fireball.parry_keep_gap` 0.35) or arrives within the input delay + 2, the parry stays held; the fight loop
+   keeps MP+MK down between `perfect_parry` / `parry_keep` decisions (`PARRY_HOLD_RULES`) and lets go on the next other one.
+2. **Cammy's Hooligan:** Fatal Leg Twister (970) landed 14 of 18 Hooligans, ~20-28 frames in, the bot standing or walking:
+   0.37.0's rule called Hooligan a bait (`no_anti_air`). Now `do: anti_air_box` (`fighter._answer_box_srk`): L Shoryuken
+   once the measured Shoryuken hitbox frames meet Cammy's hurtbox along her arc (Capcom lists no start-up for Hooligan);
+   airborne from its frame 7, so the throw (needs a standing opponent) cannot take it. Replay: fired on 12 of the 18, at
+   Hooligan frame 6-7; the other 6 came with the bot getting up from a knockdown (busy; not covered).
+3. **The 3-lights rule** (user: up to 3 lights and a special before the turn is over): after a blocked light normal the next
+   light came 1-10 frames after the bot was free in 93% of 141 cases; 34 lights hit the bot there, 30 within 9 frames, while it
+   had let go of block or pressed 2LP / 5LP / 5MP / 5LK. Now (`fighter._light_string`, config `light_string`): until 3 lights
+   are blocked in the string, the bot keeps blocking `window` 10 frames after each (before the punish engine and the
+   pressure moment); a throw start-up still goes to the tech, a blocked special ends the string.
+4. **Akuma's projectiles, parries stopping:** most blocked or hit ones were thrown from 0.9-1.8 away (under the parry
+   minimum distance, 0.31.1 / 0.37.0); in the second set the bot was in burnout (Drive 0) for 11 in a row, then parried again
+   once Drive came back. The bot answered Gou Hadokens with its OD Hadoken 10 times, hit 4 times, 2 Drive bars each (toward
+   that burnout). Now the OD Hadoken clash needs 8 frames to spare (`clash_od_margin`, was 5) and 3 Drive bars left after it
+   (`clash_od_reserve` 30000, was 1).
+5. **No Hadoken into Cammy's SA3** (user rule; in these files only 2 Hadokens were thrown at a Cammy with 3 bars, neither
+   punished): `fireball_respect` (configs) names supers that go through projectiles (Cammy SA3 / CA: the user's; A.K.I. SA1,
+   E. Honda SA1 / SA2, Akuma's SA1 Messatsu Gohado: Capcom "invincible to projectiles"). With the bars for one
+   (`fighter.fireball_beaten`): no projectile from neutral (`NeutralPolicy.no_fireball`) and no fireball clash.
+6. **High Blade Kick > SA3 too late:** 22 M High Blade Kick > SA3 in the files. With 3 bars before the kick the motion went in
+   during its start-up, the button was read 3-6 frames after the hit, SA3 hit 16 of 16. With the third bar gained ON the
+   kick's hit the 236236 motion only started after it, the button came 20-23 frames late and SA3 never connected (6 of 6).
+   Now (`ComboRun._late_cancel`, `CANCEL_LATE` 11, matches only): a cancel whose motion is not in yet is not sent when its
+   button would reach the game more than 11 frames after the hit (after 2MK, 0.36.1: read 10-11 frames after came out 54 of
+   54, 12-14 never); the route ends on the hit (`fail.kind` "late"), and the composer does not count it as a failed
+   transition (it was never tried).
+7. / 8. **Blocked OD Shoryukens and Shin Hadokens:** outside combos 7 of 34 OD Shoryukens and 4 of 19 SA1s were blocked, each
+   started with the opponent walking back (13), dashing, standing or recovering, never into a strike: the defence game's
+   reversal GUESS. `defense.reversal_guess: false`: reversals only reactively (0.23.0's `_reactive_reversal`: a strike,
+   throw or command grab on screen).
+9. **Luke (1-2; damage 43.6k dealt / 54.7k taken):** his best damage was 2MP from 1.4-1.8 (7 openings, 9,760), 5HP (7,480),
+   2HP, and his held H Flash Knuckle: 929 with HP held (Luke drifting back 1.0 -> 2.25), released as the charged version 931
+   18-20 frames in, a lunge 2.26 -> 0.7 in 11 frames, +4 on block, 1,600-1,920 each, the bot letting go of block or walking
+   into it. 931 had no name, so the user's "DI it on reaction" rule never applied. The Flash Knuckle ids, by contact frame from
+   the press = Capcom's start-ups: 920 -> 921 L (13), 920 -> 922 L Charged (26), 924 -> 927 M Charged (29), 929 -> 930 H (22),
+   929 -> 931 H Charged (33). Now:
+   - `id_names` (configs, `fighter.measured_ids`): ids MEASURED from recordings, above the move map, below a catalog (whose
+     names win; the flags are added). `from_parent`: the release counts its frames from the press (the reaction Drive
+     Impact's timing); `hold`: the move's first id.
+   - `hold_wait` (`fighter._hold_wait`): the opponent in a `hold` id with a button still held, within 3.2: block, start
+     nothing.
+   - The reaction Drive Impact's reach check stops a lunging opponent at the bot (`_hitbox_meets(stop_at=0.7)`): a
+     straight-line prediction carried the lunge through the bot and called it out of reach. This applies to every reaction
+     Drive Impact. Replay: the Drive Impact went out on 2 of the 4 charged Flash Knuckles; the other 2 with Luke holding 3
+     bars (the super-cancel rule).
+   - Not changed: Luke's 2MP / 5HP range game (the neutral stance rules apply as for everyone), the bot's forward dashes
+     into pokes (4 openings), throws out of its Drive Parry punished (2, 2,040 each).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

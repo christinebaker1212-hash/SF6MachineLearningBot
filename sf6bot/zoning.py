@@ -326,6 +326,9 @@ class ZoningMixin:
         zc = self.c.get("fireball") or {}
         if not zc.get("enabled", True):
             return None
+        pk = self._zn_parry_keep(raw, me, op)
+        if pk is not None:
+            return pk
         s = self._zn_state(raw, me, op)
         if s is None:
             return self._zn_pre_jump(raw, me, op, t) or self._zn_charge(me, op, dist, block_face)
@@ -380,6 +383,10 @@ class ZoningMixin:
             # Akuma's charged Gou Hadoken, ~9.6 frames a unit, the bot started a Hadoken motion - down, no back - and
             # was hit before it came out, ~35 times in 6 matches)
             fast = s["model"].b < float(zc.get("clash_min_frames_per_unit", 11.0))
+            # 0.38.0: no projectile of the bot's into a super that goes through it (the user's Cammy SA3)
+            beaten = hasattr(self, "fireball_beaten") and self.fireball_beaten(op) is not None
+            if beaten:
+                had = None
             if had and d >= float(zc.get("clash_min_dist", 2.5)) and not fast:
                 spawn = s["k"] + L + seq_prefix(had["seq"]) + int(zc.get("clash_startup", HADOKEN_STARTUP))
                 if spawn <= s["model"].arrival(d) - int(zc.get("clash_margin", 5)):
@@ -391,10 +398,13 @@ class ZoningMixin:
             #     one kept), not against a multi-hit projectile (OD / levelled / charged / super ones: by name)
             od = self.c["moves"].get(zc.get("clash_od_move", "hadoken_od"))
             single = not re.search(r"(^|\b)OD\b|Lv ?[23]|Charged|SA\d|Super|Critical", s["name"] or "")
-            if od and single and not burn and not fast and d >= float(zc.get("clash_min_dist", 2.5)) \
-                    and self.can_spend(me, "od_move", reserve=int(self.c.get("drive_reserve", 10000))):
+            # 0.38.0 MEASURED (0.37.x ranked, Akuma): 10 OD Hadokens into Gou Hadokens, 4 hit by them (they appear ~0.3 from
+            # the bot and arrive fast), each 2 Drive bars toward burnout, where the bot can only block. Now only with more
+            # frames to spare (`clash_od_margin`) and `clash_od_reserve` Drive left after it (3 bars: parries stay possible)
+            if od and single and not burn and not fast and not beaten and d >= float(zc.get("clash_min_dist", 2.5)) \
+                    and self.can_spend(me, "od_move", reserve=int(zc.get("clash_od_reserve", 30000))):
                 spawn = s["k"] + L + seq_prefix(od["seq"]) + int(od.get("startup", HADOKEN_STARTUP))
-                if spawn <= s["model"].arrival(d) - int(zc.get("clash_margin", 5)):
+                if spawn <= s["model"].arrival(d) - int(zc.get("clash_od_margin", 8)):
                     cands.append((self._zn_learned("clash_od", float(zc.get("clash_od_value", 0.5))),
                                   "clash_od", od["name"], None, {}))
             # 4. a neutral jump over it (in burnout, or with too little Drive to parry): no Drive lost, no ground gained
@@ -505,6 +515,32 @@ class ZoningMixin:
                             reason=why0 + ": walking in while it is far")
         return Decision("hold", direction=1, facing=block_face, rule="fireball_block",
                         reason=why0 + ": waiting for it")
+
+    def _zn_parry_keep(self, raw: dict, me: dict, op: dict):
+        """0.38.0 (user: "Against Aki's OD projectile, he only parries the first hit, never the second. This appears to be
+        the case for all kinds of multi hit projectiles"). MEASURED (0.37.3 ranked, A.K.I.'s OD Nightshade Pulse): the
+        first hit parried (480 -> 487), MP+MK let go after the parry's 8-frame hold, the projectile's hitbox still on the
+        bot, the second hit blocked (176). While the bot is in its parry (480-499) and an opponent projectile's hitbox is
+        touching it or about to (`parry_keep_gap`, or arriving within the input delay + 2), the parry stays held (the fight
+        loop does not let go of MP+MK between these decisions); the next other decision releases it."""
+        zc = self.c.get("fireball") or {}
+        a = me.get("action_id")
+        if not zc.get("parry_keep", True) or not (isinstance(a, int) and 480 <= a <= 499) or not self._zn_box_live(raw):
+            return None
+        from .fighter import Decision, Facing
+        b = self.zn_box
+        eta = b.get("eta")
+        near = b.get("gap") is not None and b["gap"] <= float(zc.get("parry_keep_gap", 0.35))
+        if not near and (eta is None or eta > self.lead + self.stale + 2):
+            return None
+        f = self.pt.flight
+        key = f.get("t0") if f is not None else raw.get("stage_timer")
+        if self.zn_stats.get("keep_for") != key:
+            self.zn_stats["keep_for"] = key
+            self.zn_stats["parry_keep"] = self.zn_stats.get("parry_keep", 0) + 1
+        side = Facing.RIGHT if (num(op.get("x")) or 0) > (num(me.get("x")) or 0) else Facing.LEFT
+        return Decision("seq", "Parry (held)", "5+MP+MK@2", rule="parry_keep", facing=side,
+                        reason=f"the projectile is still on me ({b['gap']:.2f} away): parry held for its next hit")
 
     def _zn_jump_fits(self, s: dict, margin: int | None = None) -> dict | None:
         """The forward jump over projectile `s` onto its thrower, when it clears the projectile, lands `jump_land_min` -

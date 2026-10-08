@@ -51,6 +51,7 @@ SUPER_FREEZE = 56
 # a Hashogeki with no window); a blocked super costs the bar and a full punish. Juggles (no hitstun) are not checked.
 LINK_SUPER_MARGIN = 0   # supers need start-up + this many frames of the opponent's stun left at their first frame
 LINK_MARGIN = -1        # other moves: start-up + this (a frame of tolerance: a 1-frame link must still go out)
+CANCEL_LATE = 11       # 0.38.0: a cancel's button must reach the game within this many frames of the hit (MEASURED)
 SWITCH_MOTION_MAX = 3   # 0.26.0: frames of motion a first-hit switch may still add before a cancel's button
 RUSH_AT = 11           # GUESS: frame of a Drive Rush on which the next normal is pressed
 OFFSET_RANGE = (-4, 6)
@@ -1008,7 +1009,7 @@ class ComboRun:
             return None
         land = self._ticks_to_land(p1, tick)
         k_ = self._due(tick, p1, land)
-        if self.confirm and k_ and self._no_window(k_, p2):
+        if self.confirm and k_ and (self._no_window(k_, p2) or self._late_cancel(k_, tick)):
             self._finish("late", k_)
             return None
         if self.confirm and k_ is not None and k_ > 0 and self._too_far(k_, p1, p2):
@@ -1045,6 +1046,25 @@ class ComboRun:
             self.late_skips = getattr(self, "late_skips", 0) + 1
             return True
         return False
+
+    def _late_cancel(self, n: int, tick: int) -> bool:
+        """0.38.0, matches only: True when step n is a cancel (trigger contact) whose motion is not in yet and whose
+        button would reach the game more than CANCEL_LATE frames after the previous move's hit: the cancel window is
+        over, the move would come out on its own (a whiffed Super Art). MEASURED (0.37.x ranked, 22 M High Blade Kick >
+        SA3): with 3 bars before the kick the motion went in during its start-up, the button was read 3-6 frames after
+        the hit and SA3 hit 16 of 16; with the third bar gained ON the kick's hit the 236236 motion only started after it,
+        the button came 20-23 frames late and SA3 never connected (6 of 6). After 2MK (0.36.1): read 10-11 frames after
+        the hit came out 54 of 54, 12-14 never."""
+        st, pr = self.steps[n], self.rt[n - 1]
+        if st.get("trigger") != "contact" or self.rt[n].get("motion_sent") is not None or not st.get("prefix"):
+            return False
+        hit = self._hit_n_contact(n, st.get("cancel_on_hit") or 1)
+        if hit is None:
+            return False
+        if tick + self.lead + int(st.get("prefix") or 0) - hit <= CANCEL_LATE:
+            return False
+        self.late_cancels = getattr(self, "late_cancels", 0) + 1
+        return True
 
     def _too_far(self, n: int, p1: dict, p2: dict) -> bool:
         """0.32.0, matches only: True when step n is a move with a measured farthest start distance (`reach`, the fighter
@@ -1335,6 +1355,7 @@ class ComboRun:
             return None if px is None or qx is None else (qx > px)
         out = {"success": fail is None, "fail": fail, "hits": len(self.hits), "super_connected": self.super_connected,
                "late_skips": getattr(self, "late_skips", 0),
+               "late_cancels": getattr(self, "late_cancels", 0),
                "reach_skips": getattr(self, "reach_skips", 0),
                "damage": (num(d0.get("hp")) - self.min["dummy_hp"]) if num(d0.get("hp")) is not None and "dummy_hp" in self.min else None,
                "drive_spent": (num(b0.get("drive")) - self.min["bot_drive"]) if num(b0.get("drive")) is not None and "bot_drive" in self.min else None,

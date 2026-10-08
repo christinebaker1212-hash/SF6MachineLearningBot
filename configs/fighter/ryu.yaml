@@ -295,6 +295,38 @@ reversal_respect:
 guard_hold:
   enabled: true
   margin: 1
+# 0.38.0 the light string (fighter._light_string; user: SF6's rule, up to 3 lights and a special before the turn is over):
+# after a blocked light normal, keep blocking `window` frames after the bot is free until `max_lights` have been blocked.
+# MEASURED (0.37.x ranked): the next light came within 10 frames in 93% of 141 cases; 30 of the 34 that hit within 9.
+# 0.38.0 supers that go through the bot's projectiles (fighter.opponent_fireball_beaters): with the bars for one, no Hadoken
+# from neutral and no fireball clash. Cammy SA3 / CA: the user's rule. The others: Capcom notes them invincible to
+# projectiles (A.K.I. SA1, E. Honda SA1 / SA2, Akuma's projectile super SA1 Messatsu Gohado).
+fireball_respect:
+  Cammy: "^(SA3|CA) "
+  A.K.I.: "^SA1 "
+  E. Honda: "^SA[12] "
+  Akuma: "^SA1 Messatsu"
+# 0.38.0 ids MEASURED from recordings (fighter.measured_ids): above the inferred move map, below a catalog. Luke (3 ranked
+# matches, 0.37.3): the Flash Knuckle's first id (held or not), then the release; contact frames from the press equal
+# Capcom's start-ups (L 13 / L Charged 26 / M Charged 29 / H 22 / H Charged 33)
+id_names:
+  Luke:
+    920: {name: "L Flash Knuckle", hold: true}
+    921: {name: "L Flash Knuckle", from_parent: 9}
+    922: {name: "L Flash Knuckle(Charged)", from_parent: 18}
+    924: {name: "M Flash Knuckle", hold: true}
+    927: {name: "M Flash Knuckle(Charged)", from_parent: 18}
+    929: {name: "H Flash Knuckle", hold: true}
+    930: {name: "H Flash Knuckle", from_parent: 13}
+    931: {name: "H Flash Knuckle(Charged)", from_parent: 19}
+hold_wait:
+  enabled: true
+  max_dist: 3.2
+light_string:
+  enabled: true
+  window: 10
+  max_lights: 3
+  max_dist: 2.0
 # 0.25.0 the user's answers decided on the move itself, from its first frame (fighter._move_answer, apply_move_answers).
 # `do: anti_air`: the `move` (a Shoryuken) is timed so its first active frame lands once the opponent's move is airborne and
 # no longer invincible (Capcom's notes), before it hits. `do: drive_impact`: a Drive Impact once the move is past its active
@@ -340,8 +372,10 @@ move_answers:
   Cammy:
     - {match: "Cannon Strike|Reverse Edge", do: anti_air, move: punish_l_srk, air: true,
        why: "user: Shoryuken Cannon Strike / Reverse Edge"}
-    - {match: "^(OD )?Hooligan Combination", do: no_anti_air,
-       why: "user: Hooligan baits the Shoryuken and drops early; answer its follow-ups instead"}
+    # 0.38.0 (user: "Ryu is not using Shoryuken on Cammy's Hooligan, OD or otherwise"): replaces 0.37.0's no_anti_air.
+    # MEASURED (0.37.3, 6 Cammy matches): Fatal Leg Twister landed 14 of 18 Hooligans while the bot stood or walked
+    - {match: "^(OD )?Hooligan Combination", do: anti_air_box, move: punish_l_srk, max_dist: 2.8, max_frame: 40,
+       why: "user: Shoryuken every Hooligan (the throw out of it needs a standing opponent)"}
   Luke:
     - {match: "Flash Knuckle\\(Charged\\)$", do: di_react, max_dist: 2.5, why: "user: DI it on reaction"}
   Manon:
@@ -486,6 +520,8 @@ fireball:
   charge_block: true        # 0.25.0: block while the opponent holds a projectile's charge (move_timing lead-in)
   charge_block_dist: 4.5
   clash_value: -0.05        # outside burnout walking in and parrying gains ground and keeps the Drive
+  clash_od_margin: 8        # 0.38.0: frames to spare (was clash_margin 5): 4 of 10 into Akuma's Gou Hadokens were hit
+  clash_od_reserve: 30000   # 0.38.0: Drive left after it (was drive_reserve 10000): the OD Hadokens drove Akuma matches into burnout
   clash_od_value: 0.5       # 0.37.0 (user: "OD Hadoken beats any projectile that only has one hit"): ESTIMATE, learned per opponent
   clash_value_burnout: 0.3
   jump_over_value: -0.1
@@ -610,6 +646,8 @@ defense:
   # moment, its motion goes in during the stun and the button only if a strike, throw or command grab of the opponent is on
   # screen on the last line it can still land on the first free frame (else the game above without the reversal). MEASURED
   # 0.22.5: reversals on wake-up +1,183 hp each over 1.5 s (12, one lost), delay tech -306, block -303.
+  # 0.38.0: no reversal GUESS in the defence game (blocked OD Shoryukens / SA1s, all into no strike); reactive only
+  reversal_guess: false
   reactive_reversal:
     enabled: true
     after_block_min_drive: 30000   # after a block (no knockdown) the OD Shoryuken only with 3+ Drive bars (meter: any)

@@ -733,6 +733,8 @@ class Composer:
             if not worked(k - 1):
                 break
             ok = worked(k)
+            if not ok and fail.get("kind") == "late" and fail.get("step") == k and st[k].get("start") is None:
+                break                                 # 0.38.0: never sent (its window was already over): not a try
             lr = self.learned.setdefault(edges[k - 1], {"n": 0, "ok": 0})
             # 0.24.4: spacing, per body class: the distance when the move before it started; only a WHIFF of this step
             # is a spacing miss (a drop or an eaten input is timing). A spacing miss is not also counted against the

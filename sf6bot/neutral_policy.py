@@ -255,6 +255,7 @@ class NeutralPolicy:
         self.opp_poke_default = float(c.get("opp_poke_default", OPP_POKE_DEFAULT))
         self.range_margin = float(c.get("their_range_margin", THEIR_RANGE_MARGIN))
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
+        self.no_fireball = False              # 0.38.0: the opponent has the bars for a super that goes through it (fighter)
         self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
         self.op_burnout = False               # 0.37.0: the opponent is in burnout (fighter)
         # 0.37.0 (user: "Shinku Hadoken being used often in situations where it would be blocked"): no Super Art from
@@ -387,7 +388,7 @@ class NeutralPolicy:
         if m["intent"] == "special":
             if any(k in m["name"] for k in self.no_special):
                 return False
-            if m.get("projectile") and dist < self.fireball_min:
+            if m.get("projectile") and (dist < self.fireball_min or self.no_fireball):
                 return False
             if not m.get("projectile") and not (isinstance(m.get("block_adv"), int)
                                                 and m["block_adv"] >= NEUTRAL_SPECIAL_MIN_BLOCK):
@@ -604,6 +605,7 @@ class NeutralPolicy:
                 and (intent != "super" or m["super_cost"] <= (num(me.get("super")) or 0))
                 and not (intent == "special" and any(k in m["name"] for k in self.no_special))
                 and not (intent == "special" and m.get("projectile") and dist is not None and dist < self.fireball_min)
+                and not (intent == "special" and m.get("projectile") and self.no_fireball)
                 and not (intent == "special" and not m.get("projectile")
                          and not (isinstance(m.get("block_adv"), int) and m["block_adv"] >= NEUTRAL_SPECIAL_MIN_BLOCK))
                 and not (intent == "super" and op is not None and (m.get("damage") or 0) < (num(op.get("hp")) or 0))]

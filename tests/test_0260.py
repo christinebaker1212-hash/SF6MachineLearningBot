@@ -67,6 +67,7 @@ def test_a_super_ender_is_not_judged_a_whiff_during_its_freeze():
     run.feed(_line(1, NEUTRAL, 0))
     run.sent(0)
     run.feed(_line(4, 640, 0))
+    run.rt[1]["motion_sent"] = 5                                     # the motion pre-input (presend), as in a match
     run.feed(_line(11, 640, 7, d=217, hs=8, stun=25, hp=9500))       # 2MK hits
     run.sent(1)
     run.feed(_line(20, 1200, 0, d=217, stun=22, hp=9500))            # SA1 out
@@ -80,6 +81,7 @@ def test_a_super_ender_is_not_judged_a_whiff_during_its_freeze():
     run2.feed(_line(1, NEUTRAL, 0))
     run2.sent(0)
     run2.feed(_line(4, 640, 0))
+    run2.rt[1]["motion_sent"] = 5
     run2.feed(_line(11, 640, 7, d=217, hs=8, stun=25, hp=9500))
     run2.sent(1)
     for k in range(0, 90):
