@@ -124,6 +124,9 @@ inputs:
   # 0.32.0: a crouching punch within this many frames after down was let go reads as 22 + P (Denjin Charge): keep down
   # held, else wait (MEASURED: the accidental Denjin Charges spanned 3-15 frames; fighter.denjin_guard)
   denjin_guard_frames: 15
+  # 0.38.1: a sequence ends holding down-back (standing back against an airborne opponent) within this distance instead
+  # of letting go of everything (fighter.end_guard). MEASURED (0.37.x): 77 hits landed 0-3 frames after a full release
+  end_guard_dist: 3.0
   dash_frames: 20           # a dash cannot be canceled: busy this long (estimate; Capcom has no dash total)
   unknown_move_frames: 30   # an own move with no catalogued total counts as busy this long
 punish:

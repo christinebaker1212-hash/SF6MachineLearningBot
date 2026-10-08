@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.38.1 (2026-10-08): sequences end on the guard, not on neutral (~10% of the damage taken landed in that gap); the throw tech before the punish engine.**
 - **0.38.0 (2026-10-08): from the 0.37.x run (38-11): multi-hit projectile parries held, Hooligan Shoryukened, the 3-lights rule, no reversal guesses, no late super cancels, OD Hadoken clash limits, no Hadoken into Cammy SA3, Luke's charged Flash Knuckle.**
 - **0.37.3 ranked (user, 2026-10-08): 1530 MR and climbing (0.36.1 averaged ~1350); beat a High Master, dropping them to Master. User-reported, not yet measured from the files.**
 - **0.37.3 (2026-10-08): side at "Fight!" from a tap, a backdash and a crouch; the VS-screen name read is off (it always said P2).**
@@ -4739,6 +4740,26 @@ MEASURED on the 52 uploaded fights (0.37.0-0.37.3; 3 unfinished Ryu mirrors). By
      bars (the super-cancel rule).
    - Not changed: Luke's 2MP / 5HP range game (the neutral stance rules apply as for everyone), the bot's forward dashes
      into pokes (4 openings), throws out of its Drive Parry punished (2, 2,040 each).
+
+## 0.38.1: no full release between sequences; the throw tech first (user: "Any other glaring issues?", 2026-10-08)
+MEASURED on the same 49 finished 0.37.x matches (750k damage taken in 96 fight minutes). MOCK / replay-tested
+(`tests/test_0380.py`); not verified in game.
+- **Damage taken by opener:** normals 65%, specials 12%, throws 6%, projectiles 5%, command grabs 3%, supers 3%. Bot state at
+  the opener's start: standing / crouching free 14%, getting up 13%, walking forward 9%, blockstun 8%, its own move ~25%.
+- **The bot let go of everything between sequences:** 93 openings (95k) hit a free bot holding nothing; 77 of them (~77k,
+  ~10% of all damage taken) landed 0-3 frames after a full release: every sequence (a block option, a poke, a walk, a
+  tech) ended on neutral (`end_neutral`) and the next decision re-pressed a line later. Now a sequence ends on
+  `fighter.end_guard`: down-back (standing back against an airborne opponent) with the opponent within
+  `inputs.end_guard_dist` 3.0, else neutral; a sequence with a jump in it still ends on neutral (no down in its
+  pre-jump). Aborted sequences get the same.
+- **Throw tech first** (`fighter._throw_tech_now`, rule 00'): on a free bot the tech on the opponent's throw start-up comes
+  before the punish engine and the rest (replayed: the engine called a throw start-up "whiffed" when the chain took it for
+  the follow-through of the move before, and sent a punish into it; a throw id now always starts its own chain,
+  `punish._pe_track`). Out of a stun, rule 2 times it as before. Throw defence overall was not broken: 0.37.3 teched ~66
+  of 91 throws that connected (0.31.2: 35 of 50).
+- Seen, not changed: walking forward into pokes still 35 openings / ~31k (Jamie 5MK 29k, Yasmine 5LK 22k); getting hit on
+  the get-up 13% (meaties); Jamie 4-6, the worst record in the set. Drive Impacts outside DI-backs: reaction answers,
+  Drive Reversals from block, 4 on wake-up, 3 at a walking opponent (possibly the user's manual presses).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

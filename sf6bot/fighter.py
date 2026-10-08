@@ -1380,6 +1380,29 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         arrive = int(self.lead + self.stale)
         return 2 if arrive == free_in else 0
 
+    @staticmethod
+    def _free_now(me: dict) -> bool:
+        """Not in hitstun, blockstun or a hit / knockdown reaction: the early throw tech (0.38.1) is only for a free bot;
+        out of a stun rule 2 times it to the first free frame (_tech_wait), after the pressure moment."""
+        a = me.get("action_id")
+        return not ((_num(me.get("hitstun")) or 0) or (_num(me.get("blockstun")) or 0)
+                    or (isinstance(a, int) and 150 <= a < 400))
+
+    def _throw_tech_now(self, raw: dict, me: dict, op: dict, dist: float, me_y: float) -> Decision | None:
+        """Rule 2's tech on the opponent's throw start-up (see there), callable first in _decide (0.38.1)."""
+        op_act = op.get("action_id")
+        if op_act not in self.throw_ids:
+            self.tech_handled = None
+        if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05 and self._ok("throw"):
+            self.tech_handled = op_act
+            d = self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
+            w = self._tech_wait(me, raw.get("stage_timer"))
+            if w:
+                d.seq = f"1@{w} " + d.seq
+                d.reason += f" (held {w}F: not on my first free frame)"
+            return d
+        return None
+
     def _throw_coming(self, op: dict, dist: float) -> bool:
         return op.get("action_id") in self.throw_ids and dist <= self.c["throw_tech"]["max_dist"]
 
@@ -1648,6 +1671,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         tt = self._thrown_tech(me, op)
         if tt is not None:
             return tt
+        # 00'. 0.38.1 the opponent's throw start-up: tech it before anything else. MEASURED (0.37.x ranked, 49 matches): of
+        #      the opponent's throw start-ups with the bot free, 58 landed with no LP+LK pressed at all; replayed, the
+        #      punish engine (rule 0a) took the start-up for a whiffed move ("Back Shaver / Goshoha / Hila-Kamay whiffed":
+        #      Jamie's, Akuma's, Yasmine's throws) and the neutral policy pressed on, both before rule 2 was reached
+        te = self._throw_tech_now(raw, me, op, dist, me_y) if self._free_now(me) else None
+        if te is not None:
+            return te
         # 0'. 0.25.0 the user's answers to specific moves (configs: move_answers): Ken's Dragonlash and Ingrid's Vanishing
         #     Sun (Forward) get a Shoryuken timed from their first frame; a blocked / whiffed Jinrai Kick gets a Drive Impact
         ma = self._move_answer(raw, me, op, dist)
@@ -1729,19 +1759,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         sg = self._slow_grab(me, op, dist)
         if sg is not None:
             return sg
+        te = self._throw_tech_now(raw, me, op, dist, me_y)
+        if te is not None:
+            return te
         # 2. throw tech: the opponent's throw start-up (forward 715 / back 717 measured for Ken) is
         #    visible for ~5 frames before it connects; press throw at once. Before 0.8.0 the bot held
         #    down-back here (rule 5 counted the throw as an attack): throws were 42-62% of its damage.
-        if self._throw_coming(op, dist) and op_act != self.tech_handled and me_y <= 0.05 and self._ok("throw"):
-            self.tech_handled = op_act
-            d = self._move("throw_tech", "throw_tech", f"opponent throw start-up (action {op_act}) at {dist:.2f}")
-            w = self._tech_wait(me, raw.get("stage_timer"))
-            if w:
-                d.seq = f"1@{w} " + d.seq
-                d.reason += f" (held {w}F: not on my first free frame)"
-            return d
-        if op_act not in self.throw_ids:
-            self.tech_handled = None
+        #    (0.38.1: decided in _throw_tech_now, first in _decide and again here)
 
         # 2b. the opponent holding Drive Parry within throw range: throw them (0.19.0, user: "grabs enemies who parry when
         #     close"). MEASURED, 22 ranked matches: 21 parries within 1.2, ~34 frames long; the bot threw 2
@@ -4640,6 +4664,21 @@ def _safe_route(summary: dict, sess, perform, *args, **kw) -> dict:
         return {"success": False, "fail": {"kind": "error"}, "aborted": None, "steps": []}
 
 
+def end_guard(latest, me_i: int | None, fcfg: dict) -> InputState:
+    """0.38.1: what the bot holds when a sequence ends: down-back (standing back against an airborne opponent) with the
+    opponent within `inputs.end_guard_dist`, else neutral. Directions are relative to the facing (the controller
+    mirrors them); the next decision replaces it on the next line."""
+    dist_max = float((fcfg.get("inputs") or {}).get("end_guard_dist", 3.0))
+    if latest is None or me_i is None or dist_max <= 0:
+        return InputState()
+    raw = getattr(latest, "raw", None) or {}
+    me, op = raw.get(f"p{me_i + 1}") or {}, raw.get(f"p{2 - me_i}") or {}
+    dist = player_distance(me, op)
+    if dist is None or dist > dist_max:
+        return InputState()
+    return InputState(4 if (_num(op.get("y")) or 0.0) > 0.3 else 1)
+
+
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, matches: int | None = 1,
               panel=None, first_to: int | None = None, versus: str | None = None,
               opponent_name: str | None = None, human_limits: bool | None = None, blind_ask=None,
@@ -5854,13 +5893,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     dgs_[dg_] = dgs_.get(dg_, 0) + 1
                 held_ = d.rule in PARRY_HOLD_RULES
                 _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
-                                   abort=stop_check, end_neutral=not held_)
+                                   abort=stop_check, end_neutral=False)
                 if held_:
                     parry_held = True    # 0.38.0: MP+MK stay down into the next decision (a projectile's next hit)
                 elif d.rule == "reversal_arm":
                     pass                 # 0.23.0: the reversal's motion stays held into its button (no neutral between)
-                elif not d.intent or d.intent in itn.ATTACK_INTENTS or d.intent.startswith(("jump", "dash")):
-                    c.apply(InputState(), tag="fighter_seq_end")
+                else:
+                    # 0.38.1: a sequence ends on the guard, not on neutral (end_guard): MEASURED (0.37.x ranked, 49
+                    # matches) 77 hits (~77k, ~10% of the damage taken) landed 0-3 frames after the bot had let go of
+                    # everything, between one sequence and the next decision (after a block option, a poke, a walk)
+                    jumped_ = bool(re.search(r"(^|\s)[789][@+]", seq_ or ""))   # a jump: no down-back in its pre-jump
+                    c.apply(InputState() if jumped_ else end_guard(reader.latest(), side["i"], fcfg),
+                            tag="fighter_seq_end")
                 if runner.aborted:
                     summary["interrupted"][runner.aborted] = summary["interrupted"].get(runner.aborted, 0) + 1
                     continue

@@ -261,7 +261,10 @@ class PunishEngine:
         if gap is not None and not 0 <= gap <= 30:
             c = self.chain = None                          # a new round (the clock went back) or a long hole
         if c is not None and a != c["cur"]:
-            if move_id(a) and self._pe_follows(c, a) and not self._pe_release(c, a):
+            # 0.38.1: a throw start-up is always a move of its own (never the follow-through of the move before): taken as
+            # part of the earlier move it read as "whiffed" on its first frame and the engine sent a punish into it
+            if move_id(a) and self._pe_follows(c, a) and not self._pe_release(c, a) \
+                    and a not in (getattr(self, "throw_ids", None) or ()):
                 c["cur"] = a
                 c["ids"].append(a)
             else:

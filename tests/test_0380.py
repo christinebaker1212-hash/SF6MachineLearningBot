@@ -226,3 +226,32 @@ def test_a_lunge_is_stopped_at_the_bot_in_the_hitbox_prediction():
     dib = [[26, 1.0, 1.8, 0.89, 1.41]]
     assert f._hitbox_meets(me, op, 4, dib) is None                       # passes through the bot in a straight line
     assert f._hitbox_meets(me, op, 4, dib, stop_at=0.7) == 26
+
+
+# ---- 0.38.1: no full release between sequences; the throw tech first -----------------------------------------------------
+
+def test_a_sequence_ends_on_the_guard_near_the_opponent():
+    """MEASURED (0.37.x): 77 hits landed 0-3 frames after the bot had let go of everything between two sequences."""
+    from types import SimpleNamespace
+    from sf6bot.fighter import end_guard
+    near = SimpleNamespace(raw=state(op={"x": 1.2}))
+    assert end_guard(near, 0, FCFG).direction == 1
+    air = SimpleNamespace(raw=state(op={"x": 1.2, "y": 1.0}))
+    assert end_guard(air, 0, FCFG).direction == 4                 # an airborne opponent: standing block
+    far = SimpleNamespace(raw=state(op={"x": 4.0}))
+    assert end_guard(far, 0, FCFG).direction == 5
+    assert end_guard(None, 0, FCFG).direction == 5
+
+
+def test_the_throw_tech_comes_before_the_punish_engine_on_a_free_bot():
+    """Replayed 0.37.x: on the throw start-up's first line the punish engine called the throw a whiffed move."""
+    f = ScriptedFighter(FCFG, {**_common_moves(FCFG), 715: {"name": "Shoulder Throw", "startup": 5, "total": 30}}, seed=1)
+    f.lead = 4
+    _line(f, op={"x": 0.8, "action_id": 9}, timer=600)
+    d = _line(f, op={"x": 0.8, "action_id": 715}, timer=601)
+    assert d.rule == "throw_tech" and "LP+LK" in d.seq
+    # in hitstun the early tech does not fire (and does not use up the tech for this throw)
+    g = ScriptedFighter(FCFG, {**_common_moves(FCFG), 715: {"name": "Shoulder Throw", "startup": 5, "total": 30}}, seed=1)
+    _line(g, op={"x": 0.8, "action_id": 9}, timer=600)
+    d2 = _line(g, me={"hitstun": 6, "action_id": 212}, op={"x": 0.8, "action_id": 715}, timer=601)
+    assert d2.rule != "throw_tech" and g.tech_handled is None
