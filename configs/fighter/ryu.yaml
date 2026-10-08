@@ -835,11 +835,25 @@ denjin:
 # act, the opponent ~0.75 away -> a NEUTRAL jump (user's choice). ESTIMATES: stun_frames, jump_hit_frames (pre-jump +
 # fall to a deep hit), vs_super (the route's expected damage must reach this share of SA3's).
 stun_jump_in:
-  enabled: true
+  # 0.37.0 (user, 2026-10-08: "When Ryu counters a DI, he should never begin an attack with a jumping attack. The DI crumple
+  # causes the jumping attack to be the only attack that hits, no further attack can hit"): off; the crumple is cashed out
+  # with the super / ground combo choice (0.30.1)
+  enabled: false
   stun_frames: 140
   jump_hit_frames: 44
   neutral_jump_below: 1.2
   vs_super: 0.8
+# 0.37.0 (user: "The bot still refuses to DI burned-out opponents. When an opponent is in burnout, Ryu should play
+# aggressively to attempt to chip their health down, and get them into the corner for the stun"; "When the enemy is in
+# burnout, pressure should increase, not decrease"). MEASURED (0.36.1 ranked): 18,599 frames with the opponent in burnout,
+# 1 Drive Impact on it. A Drive Impact at a burned-out opponent that is not attacking, when it will reach (its hitbox,
+# drive_impact_hitbox) and the bot keeps a bar after it; against a Super bar only with the opponent's back near its wall
+# (a blocked DI there stuns: the payoff is worth the risk). chance per decision / cooldown are ESTIMATES.
+burnout_di:
+  enabled: true
+  chance: 0.35
+  cooldown_s: 1.5
+  wall_dist: 2.5
 # 0.19.0: Drive Impact against an opponent with its back to the wall: blocked or not it stuns against the wall. ESTIMATES:
 # the wall distance for the stun (max_back), and how often a chance is taken (chance per decision, cooldown).
 di_wall:

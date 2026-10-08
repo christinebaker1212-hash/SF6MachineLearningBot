@@ -411,3 +411,42 @@ def test_a_shoryuken_answer_waits_until_the_hitbox_will_meet_the_ball():
                                 timer=601 + k)))
     sent = [(k, x) for k, x, d in got if d.rule == "move_answer"]
     assert sent and sent[0][0] > 20                            # only once the ball comes close enough
+
+
+def test_no_sweep_at_an_airborne_opponent_and_no_far_reversal_shoryuken():
+    from sf6bot.fighter import Decision
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    air = state(op={"x": 1.2, "y": 0.6, "action_id": 240})
+    d = f._bad_target(Decision("seq", "sweep", "2+HK@3", rule="whiff_punish"), air, 0)
+    assert d is not None and d.rule == "no_sweep_air"
+    assert f._bad_target(Decision("seq", "sweep", "2+HK@3", rule="whiff_punish"), state(op={"x": 1.2}), 0) is None
+    far = state(op={"x": 1.8})
+    srk = Decision("seq", "reversal: OD Shoryuken", "6@3 2@3 3+LP+MP@3", rule="reversal")
+    assert f._bad_target(srk, far, 0).rule == "no_srk_far"
+    assert f._bad_target(srk, state(op={"x": 1.1}), 0) is None
+
+
+# ---- offence ---------------------------------------------------------------------------------------------------------
+
+def test_a_burned_out_opponent_gets_a_drive_impact_when_it_reaches():
+    import copy
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.c = copy.deepcopy(f.c)
+    f.c["burnout_di"]["chance"] = 1.0
+    f.lead = 3
+    d = f._burnout_di(state()["p1"], {**state()["p2"], "x": 2.0, "drive": 0, "super": 0}, 2.0, 10.0)
+    assert d is not None and d.rule == "burnout_di"
+    g = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    g.c = f.c
+    g.lead = 3
+    assert g._burnout_di(state()["p1"], {**state()["p2"], "x": 3.5, "drive": 0}, 3.5, 10.0) is None     # out of reach
+    assert g._burnout_di(state()["p1"], {**state()["p2"], "x": 2.0, "drive": 20000}, 2.0, 20.0) is None  # not in burnout
+    # a Super bar: only with its back to its wall (a blocked DI stuns there)
+    assert g._burnout_di(state()["p1"], {**state()["p2"], "x": 2.0, "drive": 0, "super": 10000}, 2.0, 30.0) is None
+    assert g._burnout_di({**state()["p1"], "x": 4.0}, {**state()["p2"], "x": 6.0, "drive": 0, "super": 10000},
+                         2.0, 40.0) is not None
+
+
+def test_no_jump_in_after_the_bots_drive_impact_crumple():
+    """User: "When Ryu counters a DI, he should never begin an attack with a jumping attack"."""
+    assert FCFG["stun_jump_in"]["enabled"] is False

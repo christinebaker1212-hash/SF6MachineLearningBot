@@ -96,8 +96,15 @@ def _crumple(f, me_x, op_x):
 
 
 def test_a_drive_impact_crumple_gets_a_neutral_jump_in_route_only_in_the_corner():
-    """0.24.2 (user): the jump-in routes are for a Drive Impact stun with the opponent in the corner, nothing else."""
+    """0.24.2 (user): the jump-in routes are for a Drive Impact stun with the opponent in the corner, nothing else.
+    0.37.0 (user: "When Ryu counters a DI, he should never begin an attack with a jumping attack"): off by default; the
+    rule still works when switched on."""
+    import copy
+    f0 = _fighter(book=[_entry("j.HP , 5HP > 236HK , 623MP , 236236K", damage=5000)])
+    assert _crumple(f0, 6.0, 6.75).rule != "stun_jump_in"
     f = _fighter(book=[_entry("j.HP , 5HP > 236HK , 623MP , 236236K", damage=5000)])
+    f.c = copy.deepcopy(f.c)
+    f.c["stun_jump_in"]["enabled"] = True
     d = _crumple(f, 6.0, 6.75)                             # the opponent's back to the wall (7.65)
     assert d.rule == "stun_jump_in" and d.route["plan"]["steps"][0]["sequence"].startswith("8@")
     assert f.stun_stats["jump_in"] == 1

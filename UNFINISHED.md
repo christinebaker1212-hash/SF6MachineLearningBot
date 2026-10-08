@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08. Steps 1-6 done; full suite passes (646 passed, golden updated for the new decisions). Next: step 7 (offence).** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08. Steps 1-6 done; step 7 in progress (29, 31/10 done; next 34, 35, 20, 27). Full suite passed after step 6.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -207,6 +207,11 @@ CA 3.6%; DI performed 0.5 a match.
   catalog boxes: ryu.yaml `drive_impact_hitbox` = frame 26, 1.0-1.8 forward, 0.89-1.41 high; `anti_air.srk_hitbox` =
   L Shoryuken frames 5-14) against the opponent's live hurtboxes moved along its current motion. Used by di_react,
   di_followup, the Shoryuken answers (teleports exempt) and the cross-cut. Tests added.
+
+- Step 7 so far: `stun_jump_in.enabled: false` (item 29; test_0203 updated); `_burnout_di` (rule 6b', config
+  `burnout_di`: a burned-out opponent not attacking, in the DI's hitbox reach, a bar kept; against a Super bar only with its
+  back within 2.5 of its wall; chance 0.35 per decision, cooldown 1.5 s, ESTIMATES) for items 31 / 10. This is an explicit
+  user exception to "no DI in neutral" (0.20.7). Tests in test_0370.py.
 
 ## Next steps (in order; the task list in the session mirrors these)
 2. Finish measuring (scripts were in the scratchpad; rebuild as needed): walking forward into attacks (bot id 9 / dir 6

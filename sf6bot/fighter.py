@@ -711,6 +711,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._rc_for = None                  # 0.37.0 the opponent rush (onset) already checked
         self._dg_for = None
         self._ma_far_for = None
+        self._bdi_next_t = 0.0
         self.bad_target_stats: dict = {}
         self._op_box_poke = None
         self._cur_op_blocked = self._prev_op_blocked = False   # 0.37.0 the current / previous action was blocked by the bot
@@ -1864,6 +1865,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
               or self._oki_walk(me, op, dist))
         if ap is not None:
             return ap
+        # 6b'. 0.37.0 a Drive Impact at a burned-out opponent (user)
+        bd = self._burnout_di(me, op, dist, t)
+        if bd is not None:
+            return bd
         # 6c. Drive Impact against an opponent with its back to the wall (0.19.0)
         dw = self._di_wall(me, op, dist, t)
         if dw is not None:
@@ -2923,6 +2928,36 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             self._safe_t = None
         self.safe = mode
         return mode
+
+    def _burnout_di(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.37.0: see configs `burnout_di`. Blocked, it chips and pushes the opponent toward its wall; at the wall it
+        stuns (SF6 rule for a burned-out defender)."""
+        bc = self.c.get("burnout_di") or {}
+        if not bc.get("enabled", True) or not self.op_in_burnout(op) or t < self._bdi_next_t or self.safe:
+            return None
+        oa = op.get("action_id")
+        if (_num(me.get("y")) or 0.0) > 0.05 or (_num(op.get("y")) or 0.0) > 0.05 or self.busy(me) is not None \
+                or (self._attack(oa) and not (_num(op.get("blockstun")) or 0)) or (_num(op.get("hitstun")) or 0):
+            return None
+        if not self.can_spend(me, "drive_impact", reserve=int(self.c.get("drive_reserve", 10000))):
+            return None
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None:
+            return None
+        from .intents import WALL
+        room = WALL - ox if ox > mx else ox + WALL
+        if (_num(op.get("super")) or 0) >= 10000 and room > float(bc.get("wall_dist", 2.5)):
+            return None
+        dib = (self.c.get("drive_impact_hitbox") or {}).get("frames") or [[26, 1.0, 1.8, 0.89, 1.41]]
+        if self._hitbox_meets(me, op, self.lead + self.stale + 1, dib) is None:
+            return None
+        self._bdi_next_t = t + float(bc.get("cooldown_s", 1.5))
+        if self.rng.random() >= float(bc.get("chance", 0.35)):
+            return None
+        di = (self.c.get("moves") or {}).get("drive_impact") or {"name": "Drive Impact", "seq": "5+HP+HK@3"}
+        self.di_stats["burnout_di"] = self.di_stats.get("burnout_di", 0) + 1
+        return Decision("seq", di["name"], di["seq"], rule="burnout_di",
+                        reason=f"opponent in burnout {dist:.2f} away, {room:.2f} from its wall: Drive Impact")
 
     def _di_wall(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
         """0.19.0 (user: "will not attempt to DI stun enemies who are close in proximity to the corner"). A Drive Impact
