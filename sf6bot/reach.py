@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .game_state import character_name, file_stem, num, read_recording
+from .game_state import character_name, file_stem, num, read_recording, struck
 
 ATTACK_MIN = 450            # opponent attacks: normals 600+, parry 480, DI 855, specials 900+ (measured)
 RUSH_IDS = {500, 501, 739, 740}
@@ -66,10 +66,8 @@ def starts(rows: list[dict]) -> list[dict]:
                                   "air": (num(a.get("y")) or 0.0) > 0.05, "rush": prev_aid[i] in RUSH_IDS,
                                   "contact": False}
             if c is not None and not c["contact"] and prev is not None:
-                hs, hs0 = d.get("hitstop") or 0, pd.get("hitstop") or 0
-                bs, bs0 = d.get("blockstun") or 0, pd.get("blockstun") or 0
-                hp, hp0 = num(d.get("hp")), num(pd.get("hp"))
-                if (hs > 0 and not hs0) or (bs > 0 and not bs0) or (hp is not None and hp0 is not None and hp < hp0):
+                # 0.37.0: not the defender's hitstop alone (it freezes when ITS move hits the attacker too)
+                if struck(pd, d, a):
                     c["contact"] = True
             prev_aid[i] = aid
         prev = r
@@ -103,7 +101,7 @@ def table(all_starts: list[dict]) -> dict:
     return out
 
 
-CACHE_V = 1     # bump when starts() changes
+CACHE_V = 2     # bump when starts() changes (2 = 0.37.0: contact not from the defender's hitstop alone)
 
 
 def build(ds_root: Path, log=print) -> dict:

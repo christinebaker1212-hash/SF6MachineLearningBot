@@ -34,7 +34,7 @@ from .dataset import DatasetBuilder
 from .episodes import FIGHT_START_FRAME, EpisodeTracker
 from .intents import category as intents_category
 from .game_state import (CHARACTERS, ArrivalMeter, character_name, is_unknown_character, unmapped_new_characters, facing_of, file_stem, num, open_state_reader,
-                         player_distance)
+                         player_distance, struck)
 from .sequences import SequenceRunner, parse_sequence
 from .takeover import attack_id as attack_id_
 from .punish import PunishEngine
@@ -3142,9 +3142,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if a is not None and not a["contact"]:
             hs, bs, hp = _num(op.get("hitstop")) or 0, _num(op.get("blockstun")) or 0, _num(op.get("hp"))
             hs0, bs0, hp0 = a["op"]
-            if (hs > 0 and not hs0) or (bs > 0 and not bs0) or (hp is not None and hp0 is not None and hp < hp0):
+            # 0.37.0: the opponent's hitstop rising alone is not a contact (it freezes when ITS move hits the bot too)
+            how = struck({"hitstop": hs0, "blockstun": bs0, "hp": hp0}, op, me)
+            if how is not None:
                 a["contact"] = True
-                if bs > 0 and not bs0:
+                if how == "block":
                     a["blocked"] = True
                 else:
                     a["hit_t"] = self._line_t

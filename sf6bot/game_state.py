@@ -704,6 +704,24 @@ def num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def struck(prev_d: dict | None, d: dict | None, attacker: dict | None = None) -> str | None:
+    """0.37.0: how a defender was touched between two lines: "hit" (its hp dropped, or its hitstop rose while it is in
+    hitstun and the attacker is not), "block" (its blockstun rose), else None. Its hitstop rising alone is not a hit:
+    an attacker freezes too when the DEFENDER's move hits or is blocked (MEASURED, ranked 0.25.0: 1,629 of ~2,500 rises
+    of the opponent's hitstop while the bot's route ran; a real hit drops the hp on the same line, 760 of 760)."""
+    pd, d, a = prev_d or {}, d or {}, attacker or {}
+    hp, hp0 = num(d.get("hp")), num(pd.get("hp"))
+    bs, bs0 = num(d.get("blockstun")) or 0, num(pd.get("blockstun")) or 0
+    if bs > 0 and not bs0:
+        return "block"
+    if hp is not None and hp0 is not None and hp < hp0 and not bs:
+        return "hit"
+    hs, hs0 = num(d.get("hitstop")) or 0, num(pd.get("hitstop")) or 0
+    if hs > 0 and not hs0 and (num(d.get("hitstun")) or 0) > 0 and not (num(a.get("hitstun")) or 0):
+        return "hit"
+    return None
+
+
 def player_distance(p1: dict, p2: dict) -> float | None:
     a, b = num((p1 or {}).get("x")), num((p2 or {}).get("x"))
     return None if a is None or b is None else abs(a - b)

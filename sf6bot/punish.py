@@ -261,7 +261,7 @@ class PunishEngine:
         if gap is not None and not 0 <= gap <= 30:
             c = self.chain = None                          # a new round (the clock went back) or a long hole
         if c is not None and a != c["cur"]:
-            if move_id(a) and self._pe_follows(c, a):
+            if move_id(a) and self._pe_follows(c, a) and not self._pe_release(c, a):
                 c["cur"] = a
                 c["ids"].append(a)
             else:
@@ -308,6 +308,13 @@ class PunishEngine:
         if bs > 0 and c["contact"] == "block":
             from .fighter import stun_left
             c["bot_free_t"] = tmr + stun_left(me)
+
+    def _pe_release(self, c: dict, a) -> bool:
+        """0.37.0: `a` is the projectile a held charge (a lead-in: Akuma's Gou Hadoken held, 903 / 904) is released into:
+        it starts a chain of its own, so its frames and its flight (zoning.py, from the release) match. MEASURED (0.25.0
+        ranked): chained to the charge, the release's flight never matched and the engine sent H Tatsumakis into Gou
+        Hadokens in flight, 36 tries, -16,900 hp."""
+        return bool(self._pe_know(a).get("projectile") and not self._pe_know(c["head"]).get("projectile"))
 
     def _pe_near_end(self, c: dict) -> bool:
         """The move could have ended (its total is near), so an exported frame restarting at 0-1 with a fresh press is a
@@ -392,6 +399,7 @@ class PunishEngine:
         S = k.get("startup")
         if (c["contact"] is None and isinstance(S, int) and not c.get("mid") and el < S - 1 and bot == 0
                 and k.get("interrupt") != "all" and not k.get("lead_in") and c["head"] < 1200 and not k.get("cmd_grab")
+                and not k.get("projectile")                     # 0.37.0: a fireball's start-up is no counter-hit window
                 and not 850 <= c["head"] < 870                  # any Drive Impact id (armor), named or not
                 and c["head"] not in self._pe_no_int and (num(op.get("y")) or 0.0) <= 0.05
                 and (k.get("source") != "learned" or (self.mt_moves.get(c["head"]) or {}).get("n_contact", 0) >= 5)):

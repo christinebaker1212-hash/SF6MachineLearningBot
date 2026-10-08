@@ -31,7 +31,7 @@ from pathlib import Path
 from . import clock
 from . import framebar
 from . import framedata as fd
-from .game_state import ask_new_character, character_name, file_stem, num, open_state_reader
+from .game_state import ask_new_character, character_name, file_stem, num, open_state_reader, struck
 from .hits import classify_hit
 from .sequences import SequenceRunner, parse_sequence
 from .actions import Facing
@@ -932,6 +932,11 @@ class ComboRun:
                 self._finish("first_blocked" if not self.hits else "blocked", act)
             return None
         hit = (hs > 0 and hs0 == 0 and not (p2.get("blockstun") or 0)) or (hp is not None and hp0 is not None and hp < hp0)
+        if self.confirm and hit:
+            # 0.37.0, matches only: the opponent's hitstop also rises when ITS move hits the bot or is blocked by it (the
+            # Training Mode dummy never attacks). MEASURED (ranked 0.25.0): 1,629 of ~2,500 rises while a route ran were
+            # that; hit-confirmed routes then sent their next input (H Shoryuken) into the bot's hitstun, 30 of 139 times.
+            hit = struck(d_prev, p2, p1) == "hit"
         if hit and prev is not None and self.hits and self.escape is None \
                 and not (d_prev.get("hitstun") or 0) and not hs0 and not (200 <= (d_prev.get("action_id") or 0) < 400):
             # a hit on a dummy that was NOT in a hit reaction: the combo had already ended (a late link

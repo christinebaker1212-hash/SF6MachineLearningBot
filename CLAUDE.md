@@ -6,6 +6,8 @@
 Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** That goal is an
 experimental outcome we're working toward, not a promised capability.
 
+> **"There's unfinished business"**: if the user says this, read `UNFINISHED.md` and continue its "Next steps" at once.
+
 ## Status
 - **0.36.2 (2026-10-07): a per-fight `data_weight` in the meta file scales a relabelled match in both networks (custom-room sets).**
 - **0.36.1 (2026-10-07): boxes read at render time (exporter v11): on v10 every hurt / hit box read as zero; G now fails such boxes.**
