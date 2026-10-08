@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.37.3 ranked (user, 2026-10-08): 1530 MR and climbing (0.36.1 averaged ~1350); beat a High Master, dropping them to Master. User-reported, not yet measured from the files.**
 - **0.37.3 (2026-10-08): side at "Fight!" from a tap, a backdash and a crouch; the VS-screen name read is off (it always said P2).**
 - **0.37.2 (2026-10-08): the Drive Rush check uses each opponent character's measured rush ids and speed.**
 - **0.37.1 (2026-10-08): a Drive Rush into 5HK only after 5HP (5HP forces stand on hit).**

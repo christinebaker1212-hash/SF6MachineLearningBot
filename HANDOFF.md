@@ -11,6 +11,8 @@ the project stands, how to work with the user, and what to do next.
 
 ## 0. Right now (handover, 2026-10-08)
 
+**User report (2026-10-08): on 0.37.3 the bot is at 1530 MR and climbing (was ~1350 on 0.36.1) and beat a High Master. Not yet measured from fight files; ask for them and the runs folder when the session ends.**
+
 **State: 0.37.3 is pushed** (CLAUDE.md "0.37.3"): the user's report "the OCR always thinks it's P2": the VS-screen name
 read is off; the side comes from a tap + backdash + crouch probe at "Fight!". 0.37.2 (CLAUDE.md "0.37.2"): 0.37.1: a Drive Rush goes into 5HK only after 5HP (user rule).
 - 0.37.2: the Drive Rush check per opponent character (`configs/rush_profiles.json`, `sf6bot/rush_profiles.py`):
