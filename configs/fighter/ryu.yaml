@@ -274,12 +274,59 @@ guard_hold:
 # shoryukened"; "Ken's Jinrai kicks can be DI'ed, unless Ken starts with Heavy punch and goes into medium Jinrai".
 move_answers:
   Ingrid:
-    - {match: "^Vanishing Sun \\(Forward\\)$", do: anti_air, move: punish_l_srk, why: "user: Shoryuken it"}
+    - {match: "^Vanishing Sun \\(Forward\\)$", do: anti_air, move: punish_l_srk, teleport: true, why: "user: Shoryuken it"}
+  # 0.37.0 (user, 2026-10-08): H Dragonlash Kick is Drive Impacted on reaction; the others stay Shoryukened. Jinrai: a
+  # Drive Impact on the FOLLOW-UP, only after the first Jinrai Kick was BLOCKED (not whiffed), never after HP > M Jinrai
+  # (replaces 0.25.0's Drive Impact once the Jinrai itself was past its active frames)
   Ken:
-    - {match: "^(L|M|H|OD) Dragonlash Kick$|^\\[Quick Dash\\] Dragonlash Kick$", do: anti_air, move: punish_l_srk,
+    - {match: "^H Dragonlash Kick$", do: di_react, max_dist: 2.5, fallback: punish_l_srk, why: "user: DI it on reaction"}
+    - {match: "^(L|M|OD) Dragonlash Kick$|^\\[Quick Dash\\] Dragonlash Kick$", do: anti_air, move: punish_l_srk,
        max_dist: 2.0, why: "user: Dragonlash must be Shoryukened"}
-    - {match: "^(L|M|H|OD) Jinrai Kick$", do: drive_impact, max_dist: 2.5, unless_after: "^Standing Heavy Punch$",
-       unless_match: "^M Jinrai", why: "user: Jinrai can be DI'ed"}
+    - {match: "^Standing Heavy Kick$", do: di_react, normal: true, max_dist: 2.2, why: "user: DI it on reaction"}
+    - {match: "^(OD )?(Kazekama Shin Kick|Gorai Axe Kick|Senka Snap Kick)$", do: di_react, after: "Jinrai Kick$",
+       after_blocked: true, never_after: ["^Standing Heavy Punch$", "^M Jinrai Kick$"], max_dist: 2.2,
+       why: "user: DI the follow-up after a blocked Jinrai Kick"}
+  Ryu:
+    - {match: "^H High Blade Kick$", do: di_react, max_dist: 2.5, why: "user: DI it on reaction (not against SA3)"}
+  Sagat:
+    - {match: "^H Tiger Knee Crush$", do: di_react, max_dist: 2.5, fallback: punish_l_srk, why: "user: DI it on reaction"}
+    - {match: "^(L|M|OD) Tiger Knee Crush$", do: anti_air, move: punish_l_srk, why: "user: Shoryuken it on reaction"}
+  Mai:
+    - {match: "Musasabi no Mai$", do: anti_air, move: punish_l_srk, air: true, why: "user: Shoryuken it on reaction"}
+  Ed:
+    - {match: "^Cobra Punch$", do: anti_air, move: punish_l_srk, max_dist: 2.0, why: "user: Shoryuken it on reaction"}
+  Marisa:
+    - {match: "^(L|M|H|OD) Phalanx$", do: di_react, max_dist: 2.5, fallback: punish_l_srk,
+       why: "user: DI it on reaction, else Shoryuken"}
+  Blanka:
+    - {match: "^(\\[Lightning Beast\\] ?)?(L|M|H|OD) Rolling Attack$", do: anti_air, move: punish_l_srk,
+       why: "user: Shoryuken the ball"}
+  E. Honda:
+    - {match: "^(L|M|H) Sumo Headbutt$", do: anti_air, move: punish_l_srk, why: "user: Shoryuken the headbutt"}
+  Cammy:
+    - {match: "Cannon Strike|Reverse Edge", do: anti_air, move: punish_l_srk, air: true,
+       why: "user: Shoryuken Cannon Strike / Reverse Edge"}
+    - {match: "^(OD )?Hooligan Combination", do: no_anti_air,
+       why: "user: Hooligan baits the Shoryuken and drops early; answer its follow-ups instead"}
+  Luke:
+    - {match: "Flash Knuckle\\(Charged\\)$", do: di_react, max_dist: 2.5, why: "user: DI it on reaction"}
+  Manon:
+    - {match: "^Standing Heavy Kick$", do: di_react, normal: true, max_dist: 2.2, why: "user: DI it on reaction"}
+  Kimberly:
+    - {match: "^(OD )?(Torso Cleaver|Shadow Slide|Neck Hunter)$", do: di_react, max_dist: 2.5,
+       why: "user: DI the Sprint follow-ups other than Emergency Stop"}
+# 0.37.0 answers derived from Capcom's frame data for moves no rule above names (fighter._auto_rules): a Shoryuken against
+# specials airborne in their active frames, a Drive Impact against slow specials (at most 2 hits, not projectiles); both
+# gated by distance, the opponent's Super for a super cancel, and the bot's Drive. `react`: frames seen before deciding
+# (ESTIMATE), `lead`: input delay used for the feasibility check.
+move_answers_auto:
+  enabled: true
+  anti_air: true
+  drive_impact: true
+  react: 8
+  lead: 4
+  anti_air_move: punish_l_srk
+  di_max_dist: 2.2
 moves:
   punish_l_srk: {name: "L Shoryuken (punish)", seq: "6@3 2@3 3+LP@3", startup: 5}
   hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}

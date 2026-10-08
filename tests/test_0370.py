@@ -186,3 +186,73 @@ def test_no_punish_step_in_toward_the_thrower_while_its_projectile_hitbox_is_out
     f.pt.flight = None
     got = _run(f, lines)
     assert not [d for _, d in got if d.rule in ("whiff_punish", "punish") and "dash" in (d.reason or "").lower()]
+
+
+# ---- answers on reaction (the user's lists, and the frame data) -------------------------------------------------------
+
+from sf6bot.fighter import apply_move_answers, _auto_rules                          # noqa: E402
+from tests.test_0250 import _framedata, _line                                       # noqa: E402
+
+
+def test_a_slow_normal_gets_a_drive_impact_only_when_seen_early(tmp_path):
+    """User: "normals absolutely must be reacted to on the first 5 to 8 frames, otherwise not at all"; Ken 5HK (Capcom
+    start-up 12, total 36): the Drive Impact's armor (frames 1-27) must be up before its hit and its hit (26) land before
+    Ken recovers."""
+    _framedata(tmp_path, "Ken", [{"section": "Normal Moves", "name": "Standing Heavy Kick", "startup_n": 12,
+                                  "active": "12-13", "total_n": 36, "cancel": "", "notes": ""}])
+    moves = {615: {"name": "Standing Heavy Kick"}}
+    apply_move_answers(moves, "Ken", tmp_path, FCFG)
+    assert moves[615]["answer"]["do"] == "di_react" and moves[615]["answer"]["normal"]
+
+    def run(first_seen):
+        f = ScriptedFighter(FCFG, moves, seed=1)
+        f.lead = 3
+        _line(f, op={"x": 1.5, "action_id": 1}, timer=600)
+        got = []
+        for k in range(first_seen, 14):                  # the bot first sees the kick on its frame `first_seen`
+            got.append((k, _line(f, op={"x": 1.5, "action_id": 615, "action_frame": k}, timer=601 + k)))
+        return [(k, d) for k, d in got if d.rule == "move_answer"]
+    early = run(0)
+    assert early and early[0][0] <= 6 and "Drive Impact" in early[0][1].name    # armor by frame 11, hit by frame 35
+    assert not run(8)                                                            # seen too late: not at all
+
+
+def test_no_reaction_drive_impact_when_the_opponent_can_super_cancel():
+    """User: H High Blade Kick only when they do not have SA3 (Capcom cancel column: SA3)."""
+    moves = {1029: {"name": "H High Blade Kick", "answer": {
+        "do": "di_react", "name": "H High Blade Kick", "startup": 27, "total": 50, "super_cancel": 3, "hits": 1,
+        "normal": False, "max_dist": 2.5}}}
+    for bars, want in ((20000, True), (30000, False)):
+        f = ScriptedFighter(FCFG, moves, seed=1)
+        f.lead = 3
+        _line(f, op={"x": 1.8, "action_id": 1}, timer=600)
+        ds = [_line(f, op={"x": 1.8, "action_id": 1029, "super": bars}, timer=601 + k) for k in range(10)]
+        assert bool([d for d in ds if d.rule == "move_answer"]) == want
+
+
+def test_hooligan_is_not_anti_aired_but_cannon_strike_out_of_it_is(tmp_path):
+    _framedata(tmp_path, "Cammy", [
+        {"section": "Special Moves", "name": "Hooligan Combination", "startup_n": None, "active": "", "notes": ""},
+        {"section": "Special Moves", "name": "Cannon Strike", "input": "(During Hooligan Combination) K", "startup_n": 13,
+         "active": "13-23", "total_n": 35, "notes": "Recovery changes depending on the height"}])
+    moves = {947: {"name": "Hooligan Combination"}, 1009: {"name": "Cannon Strike"}}
+    apply_move_answers(moves, "Cammy", tmp_path, FCFG)
+    assert moves[947].get("no_anti_air") and moves[1009]["answer"]["do"] == "anti_air"
+    f = ScriptedFighter(FCFG, moves, seed=1)
+    assert not f._air_move({"action_id": 947, "y": 1.2})
+
+
+def test_the_frame_data_research_finds_slow_airborne_and_slow_specials_but_not_projectiles_or_reversals():
+    rows = [
+        {"section": "Special Moves", "name": "H Tiger Knee Crush", "startup_n": 22, "total_n": 58, "active": "22-40",
+         "notes": "Considered airborne from frames 24 - 43", "input": "236+HK"},
+        {"section": "Special Moves", "name": "H Psycho Blitz", "startup_n": 15, "total_n": 60, "active": "15-17",
+         "notes": "", "input": "214+HP"},
+        {"section": "Special Moves", "name": "L Power Wave", "startup_n": 20, "total_n": 50, "active": "20-60",
+         "notes": "", "input": "236+LP"},
+        {"section": "Special Moves", "name": "OD Shoryuken", "startup_n": 6, "total_n": 60, "active": "6-14",
+         "notes": "Completely invincible on frames 1 - 9 / Considered airborne from frames 9 - 40", "input": "623+P+P"},
+        {"section": "Special Moves", "name": "L Jinrai Kick", "startup_n": 12, "total_n": 42, "active": "12-14",
+         "notes": "Can transition to Kazekama Shin Kick", "input": "236+LK"}]
+    got = {m["name"]: r["do"] for m, r in _auto_rules(rows, FCFG)}
+    assert got == {"H Tiger Knee Crush": "anti_air", "H Psycho Blitz": "di_react"}

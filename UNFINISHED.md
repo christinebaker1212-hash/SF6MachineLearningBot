@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08, after step 4 (fireballs from projectile boxes). Building step 5 next.** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08, after step 5 (answers on reaction). Building step 6 next (an open-loop count of the new answers over the 0.36.1 matches was running: rerun scratchpad-style if needed).** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -143,17 +143,35 @@ CA 3.6%; DI performed 0.5 a match.
     fighter.op_in_burnout, fighter._chasing set them.
   - Tests: test_0370.py (10 total so far); test_0230's walk/parry test turns the OD answer off.
 
+- Step 5, answers on reaction (fighter.py `_answer_info`, `_auto_rules`, `apply_move_answers`, `_move_answer`,
+  `_di_react`, `_note_blocked`; ryu.yaml `move_answers`, `move_answers_auto`):
+  - anti_air answers: the Shoryuken's first active frame lands between the move's airborne frame + 2 / invincibility end
+    + 1 and, for moves airborne in their active frames, their last airborne active frame (else before the first hit);
+    for those, only when the closing speed puts the opponent within `anti_air.answer_reach` 1.35 then (teleports exempt).
+    The move's frame comes from action_frame (FrameClock online), else frames since the bot saw it.
+  - di_react: Drive Impact armor (2 hits, frames 1-27, Capcom) up before the first hit and its hit (frame 26) before the
+    move recovers; normals only if seen by frame 8 (user); no DI when the opponent can super-cancel (cancel column SA
+    level) with its bars (user's H High Blade Kick rule, made general); `after` / `after_blocked` / `never_after` for
+    Ken's Jinrai follow-ups; `fallback` (a Shoryuken) when the DI can't go.
+  - User's lists in ryu.yaml (Ken 5HK, H Dragonlash DI / other Dragonlash SRK, Jinrai follow-ups after a BLOCKED Jinrai
+    (replaces 0.25.0's Jinrai DI), H High Blade Kick, H / other Tiger Knee Crush, Musasabi no Mai, Cobra Punch, Phalanx
+    (DI, else SRK), Blanka's Rolling Attack, Sumo Headbutt (not OD: armor), Cammy's Cannon Strike / Reverse Edge,
+    Hooligan `no_anti_air` (bait), Luke's charged Flash Knuckle, Manon 5HK, Kimberly's Sprint follow-ups).
+  - Chun-Li "6HP": Capcom lists no 6+HP. Hakkei is 4+HP (start-up 8, total 27: not DI-able on reaction by the numbers);
+    Water Lotus Fist 3+HP (21) and Yokusen Kick 6+HK (16) are candidates. NOT configured: ASK THE USER which move.
+  - Auto (Capcom data, 31 characters): 72 Shoryuken answers (specials airborne in their active frames, e.g. Akuma's /
+    Ken's / Ryu's Tatsumakis, Chun-Li's Spinning Bird Kicks, Lily's Condor Spires, Rashid's Eagle Spikes, Viper's Burning
+    Kicks, Honda's Sumo Smash) and 181 Drive Impact answers (slow 1-2 hit specials, no projectiles, no follow-up
+    parents). User rules win per move.
+  - Tests: test_0370.py (14); test_0250's Dragonlash / Jinrai tests moved to the new rules.
+
 ## Next steps (in order; the task list in the session mirrors these)
 2. Finish measuring (scripts were in the scratchpad; rebuild as needed): walking forward into attacks (bot id 9 / dir 6
    at the opponent's move start), far cr.HP (630) / sweep (643) / 5HP (608) / SA1 (1200) by start distance and result,
    sweeps on airborne opponents, pauses after 2MK (640) (bot free and idle 20+ frames then hit), drive spent while
    blocking, opponent burnout behaviour, timeouts, cross-ups, corner DIs, Drive Rush responses, combo variety.
 4. DONE (see above).
-5. Move answers (configs/fighter/ryu.yaml `move_answers`, fighter._move_answer / apply_move_answers): add the user's
-   Shoryuken list (anti_air answers; non-airborne ones like Cobra Punch must make the Shoryuken active BEFORE the hit) and
-   a new `do: di_react` (normals only if seen on frames <= 8; specials any time before the hit, if the DI's hit lands
-   before the move ends; `unless_super`: H High Blade Kick only without 3 bars; Jinrai follow-up only after a BLOCKED
-   Jinrai, never after HP > M Jinrai; Kimberly Sprint follow-ups except Emergency Stop). Research more from framedata.
+5. DONE (see above).
 6/7/8. Defence, offence, mirror side (see the list above).
 9. Tests, `__version__` 0.37.0 (sf6bot/__init__.py + pyproject), CLAUDE.md section "0.37.0" before "## Training Mode
    reset", HANDOFF §0, commit with the session trailers, push.

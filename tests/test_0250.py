@@ -76,21 +76,28 @@ def test_a_defence_tech_goes_out_forward_midscreen():
 # ---- the user's move answers --------------------------------------------------------------------------------------------
 
 def _ken(tmp_path):
+    # 0.37.0: M Dragonlash keeps the Shoryuken (the user moved H Dragonlash to a reaction Drive Impact); the numbers are
+    # the old H row's so the timing below is unchanged
     _framedata(tmp_path, "Ken", [
-        {"section": "Special Moves", "name": "H Dragonlash Kick", "startup_n": 28, "active": "28-32",
+        {"section": "Special Moves", "name": "M Dragonlash Kick", "startup_n": 28, "active": "28-32", "total_n": 53,
          "notes": "Does not hit opponents on the ground from frames 28 - 29 / Considered airborne from frames 19 - 37"},
-        {"section": "Special Moves", "name": "L Jinrai Kick", "startup_n": 12, "active": "12-14", "notes": ""},
-        {"section": "Special Moves", "name": "M Jinrai Kick", "startup_n": 16, "active": "16-18", "notes": ""},
-        {"section": "Normal Moves", "name": "Standing Heavy Punch", "startup_n": 10, "active": "10-13", "notes": ""}])
-    moves = {982: {"name": "H Dragonlash Kick"}, 920: {"name": "L Jinrai Kick"}, 921: {"name": "M Jinrai Kick"},
-             608: {"name": "Standing Heavy Punch"}}
+        {"section": "Special Moves", "name": "L Jinrai Kick", "startup_n": 12, "active": "12-14", "total_n": 42,
+         "notes": ""},
+        {"section": "Special Moves", "name": "M Jinrai Kick", "startup_n": 16, "active": "16-18", "total_n": 42,
+         "notes": ""},
+        {"section": "Unique Attacks", "name": "Gorai Axe Kick", "startup_n": 18, "active": "18-20", "total_n": 40,
+         "cancel": "SA3", "notes": ""},
+        {"section": "Normal Moves", "name": "Standing Heavy Punch", "startup_n": 10, "active": "10-13", "total_n": 34,
+         "notes": ""}])
+    moves = {982: {"name": "M Dragonlash Kick"}, 920: {"name": "L Jinrai Kick"}, 921: {"name": "M Jinrai Kick"},
+             925: {"name": "Gorai Axe Kick"}, 608: {"name": "Standing Heavy Punch"}}
     lines = apply_move_answers(moves, "Ken", tmp_path, FCFG)
     return moves, lines
 
 
 def test_dragonlash_gets_a_shoryuken_timed_from_its_first_frame(tmp_path):
     moves, lines = _ken(tmp_path)
-    assert "H Dragonlash Kick -> L Shoryuken (punish)" in lines
+    assert "M Dragonlash Kick -> L Shoryuken (punish)" in lines
     a = moves[982]["answer"]
     assert a["airborne_from"] == 19 and a["startup"] == 28
     f = ScriptedFighter(FCFG, moves, seed=1)
@@ -107,21 +114,31 @@ def test_dragonlash_gets_a_shoryuken_timed_from_its_first_frame(tmp_path):
     assert f.answer_stats["sent"] == 1
 
 
-def test_a_jinrai_gets_a_drive_impact_once_past_its_active_frames_but_not_out_of_heavy_punch(tmp_path):
+def test_a_jinrai_follow_up_after_a_blocked_jinrai_gets_a_drive_impact_but_not_out_of_heavy_punch(tmp_path):
+    """0.37.0 (user): "Ken's jinrai Kick followup (after the initial Jinrai Kick is BLOCKED, not WHIFFED, AFTER a follow up
+    is chosen, but before the followup completes, and NEVER if the sequence is HP>M Jinrai)"."""
     moves, _ = _ken(tmp_path)
-    f = ScriptedFighter(FCFG, moves, seed=1)
-    f.lead = 3
-    _line(f, op={"x": 1.2, "action_id": 1}, timer=800)
-    for k in range(20):
-        d = _line(f, op={"x": 1.2, "action_id": 920, "action_frame": k}, timer=801 + k)
-        if d.rule == "move_answer":
-            break
-    assert d.rule == "move_answer" and "Drive Impact" in d.name and k == 15       # after its last active frame (14)
-    g = ScriptedFighter(FCFG, moves, seed=1)
-    g.lead = 3
-    _line(g, op={"x": 1.2, "action_id": 608}, timer=800)          # Standing Heavy Punch, then M Jinrai: the exception
-    rules = [_line(g, op={"x": 1.2, "action_id": 921, "action_frame": k}, timer=801 + k).rule for k in range(25)]
-    assert "move_answer" not in rules and g.answer_stats["skipped_unless"] == 1
+
+    def play(first, blocked, before=None):
+        f = ScriptedFighter(FCFG, moves, seed=1)
+        f.lead = 3
+        t = 800
+        _line(f, op={"x": 1.2, "action_id": before or 1}, timer=t)
+        for k in range(30):
+            t += 1
+            bs = 12 if blocked and 12 <= k < 24 else 0
+            _line(f, me={"blockstun": bs, "action_id": 160 if bs else 1}, op={"x": 1.2, "action_id": first}, timer=t)
+        out = []
+        for k in range(12):
+            t += 1
+            out.append(_line(f, op={"x": 1.2, "action_id": 925}, timer=t))
+        return f, [d for d in out if d.rule == "move_answer"]
+    f, got = play(920, blocked=True)
+    assert got and "Drive Impact" in got[0].name and f.answer_stats["sent"] == 1
+    _, got = play(920, blocked=False)                         # whiffed Jinrai: no Drive Impact on the follow-up
+    assert not got
+    g, got = play(921, blocked=True, before=608)              # HP > M Jinrai: never
+    assert not got and g.answer_stats["skipped_unless"] == 1
 
 
 def test_ingrid_vanishing_sun_gets_the_shoryuken_after_its_invincibility(tmp_path):
