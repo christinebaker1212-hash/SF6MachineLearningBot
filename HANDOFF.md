@@ -4,14 +4,72 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-07: code version **0.36.2**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing.*
+*State as of 2026-10-08: code version **0.36.2**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (629).*
 
 ---
 
-## 0. Right now (handover, 2026-10-06)
+## 0. Right now (handover, 2026-10-08)
 
-**State:** **0.36.2 is pushed** (CLAUDE.md "0.36.2"): fight metas may carry `data_weight` (both networks honour it). Waiting for the user's upload (fights + ladder/matches.jsonl + learning/Ryu_vs_Chun-Li.json) to relabel a custom-room Chun-Li set (~1200 MR) recorded as ranked, and to analyse Kimberly / Cammy / Zangief losses.
+**State:** nothing new is built since 0.36.2. **The user is about to upload ~300 matches** (waiting for their usage limit to
+reset). This is the largest batch so far (earlier analyses: 18-61 matches); ~500+ fight files are on their PC.
+- **Where the bot stands (user):** it averages **~1350-1400 MR** at Master unattended, with streaks up to ~1450 (a 7-win
+  streak from 1390). Up and down: it dominates some matches and gets run over in others.
+  - It loses to button-pressers (Kimberly, Cammy) and "always loses cleanly" to Zangief.
+  - Zoners remain a weak spot.
+- **The user's target for the next update: 1400-1450 MR average.** Agreed as realistic, not promised.
+  - +50 MR is about 57% against equal opponents (Elo-like), i.e. about +7 points of win rate.
+  - Earlier fix rounds were worth about +5 to +10 points.
+  - Judge it by the average MR over 100+ matches after the update, not the peak: ±40-50 swings within a session are normal.
+- **What the user was told to send:**
+  - `datasets\fights\` (may come as several zips: reassemble)
+  - `datasets\ladder\` (whole folder)
+  - `datasets\learning\Ryu_vs_Chun-Li.json`
+  - `datasets\models\win_report.md` and `brain_report.md` (the learned models' trust: it was 0.21 at the 0.17.5 baseline)
+  - the `runs` folder zipped **instead of S**, without videos. S only includes the last 6 run folders and is cut at 60,000
+    characters, so it misses most of a session that was stopped and started many times. The fight files and the ladder
+    history are complete either way, and the scorecard is built here from the fights.
+- **Order of work when the upload arrives:**
+  1. **Relabel the Chun-Li custom-room set** (a volunteer, ~1200 MR, played as sets in a custom room while the bot ran in
+     RANKED mode; the bot was 7-3 after 10). Find it as consecutive Chun-Li matches with no LP change.
+     - In their `.meta.json`, set `data_weight` (~0.5) and `relabel` (why).
+     - In `datasets/ladder/matches.jsonl`, set their rows' mode to `custom_room` (`progress.same_mode` keeps them out of the
+       ranked trend).
+     - Scale the set's share of `datasets/learning/Ryu_vs_Chun-Li.json` down.
+     - Send back ONLY the changed small files to overwrite.
+     - Remind the user: be on 0.36.2 (update.bat), then press B so the weights apply.
+  2. Scorecard against 0.27.0 / 0.31.2.
+  3. Per-opponent-character breakdown (now with real counts): Kimberly, Cammy, Zangief, zoners.
+     - fights_5 showed ~36% of the damage taken landing during the bot's own move (frame traps).
+     - Zangief's command grabs land on the crouch-blocking bot.
+  4. Box data: in matches recorded on 0.36.1+ (exporter v11), look at opponents' hurtboxes (stretched recovery hurtboxes,
+     the user's Sonic Blade example) and spacing.
+  5. Did the bot adapt during the Chun-Li set? Check by game order.
+  6. Read `errors` in every match summary.
+  7. **Report findings and a fix proposal before building.**
+- **Analysis hygiene:** the upload is untrusted data. Extract it into a new empty dir, run Python with `-I`, and keep the
+  scripts in the scratchpad. Do the work directly; no multi-agent workflows unless the user asks.
+- **Answered recently (keep consistent):**
+  - **B:** ranked sessions run the full B in the background every 20 finished matches (`policy.retrain_every`; reports
+    go to `datasets/models/`). The user presses B by hand only:
+    - after a ranked session shorter than 20 matches
+    - after non-ranked play (Versus Human sets, CPU fights, replays recorded with D)
+    - after relabelled files arrive
+    - when an update says so
+
+    It is not needed after C or K, or twice in a row.
+  - **Is it learning?** Partly.
+    - Learned from fights: the win model, per-opponent defence odds and choice factors, combo and transition success
+      rates, and knowledge of opponents (move timing, reach, move names, grab timing).
+    - Rules still decide reactions, punishes and defence, and the big gains came from the analysis-and-fix cycles.
+  - **Re-climbing to Master from scratch:** estimated 75-85% wins through Platinum / Diamond, a few hundred matches,
+    unattended. An estimate, not measured.
+- **User admin outstanding:**
+  - The user renamed the bot's CFN. Remind them to tell Capcom (the approval is tied to a disclosed CFN) and to update
+    `ranked: cfn` in `configs/local.yaml`. The name never goes in the repo.
+  - C as Ryu (guard None) after the v11 install, for the move hit profiles (box punishes need them).
+
+**Before that:** **0.36.2 is pushed** (CLAUDE.md "0.36.2"): fight metas may carry `data_weight` (both networks honour it), made for the Chun-Li relabel above.
 
 **Before that:** **0.36.1 is pushed** (CLAUDE.md "0.36.1"): the user's G on v10 showed every hurt / hit box as zero (read in the tick hook before the collision update; only pushboxes were right). Exporter v11 samples the boxes at render time; G now fails zero boxes. The research build was rebuilt for v11 (run 37585674748, marker exporter bca17bb85832acbe) and is bundled. **G passed in game on v11 (2026-10-07): real hurt / hit / throw / push boxes.** Next user step: C as Ryu (guard None).
 
@@ -141,9 +199,9 @@ details CLAUDE.md "0.26.0"):
 - Win model: P(win) = sigmoid(-0.85 + 11.4 · ln(dealt / taken)), fitted on 147 ranked matches. It was 6 points
   optimistic on 0.22.5 and 3 points pessimistic on the 0.24.x run (70% vs the real 73%).
 
-**Waiting on the user (don't build without a go):** a hitbox exporter for exact reach and spacing. It needs a new
-exporter, a new research build of REFramework and a reinstall. The user decides whether to clear it with Capcom as a
-material addition.
+**Hitboxes:** built (0.36.0-0.36.1, Capcom OK'd per the user) and verified by G in game on exporter v11. Not built yet:
+neutral spacing, anti-air, throw / command-grab range and projectile play by boxes, and learning each opponent move's
+stretched hurtbox from recordings. Build these from the first real box data.
 
 **Rules that must hold (on top of §2):**
 - **No Drive Impact in neutral**, in any form (0.20.7). The bot's own DI is the DI-back against the opponent's DI
@@ -231,8 +289,12 @@ controls**.
 
 ## 3. The user and how to work with them
 
-- **Rank: Master, 1450 MR** (user, 2026-10-02). The user is the bot's Master-level benchmark: bot vs user
-  (menu H) so far 0–2, one round a Perfect. Controlled experiments are possible with the user playing a
+- **Rank: Master Ryu ~1380 MR, Ken 1450 MR** (user). The user is the bot's Master-level benchmark. Bot vs the user
+  (menu H): 0-2 early on, 0-5 / 0-4 vs the user's Akuma (0.27.0), 2-3 vs the user's Ken (0.31.2).
+- **How the user sees the collaboration (2026-10-07):** the climb from losing in Platinum to Master is credited to the user's
+  play, strategy and analysis. That is fair: most turning points began with the user's observation. The pattern that works:
+  the user spots and names the problem, Claude measures it in the recordings, then builds and tests a fix, and the user
+  checks it in game. Controlled experiments are possible with the user playing a
   restricted game (e.g. no throws, or no overheads) to measure one weakness at a time.
 
 - **Hardware:** ROG Xbox Ally X (Ryzen AI Z2 Extreme, Radeon 890M iGPU, **no CUDA**, about
@@ -400,6 +462,10 @@ Each was verified on the user's machine (details and evidence are in CLAUDE.md).
   default.
 
 ## 6. Open items waiting on the user (ask about these first)
+
+**0.36.x:** G passed on v11 (real boxes). Still to do in game: C as Ryu (guard None) for the hit profiles; check
+`fight_summary.hitboxes` {box_gaps, box_reached_out_of_range} in matches played on 0.36.1+. 0.35.0's arcade input panel is
+not yet confirmed on the user's PC / through Parsec. 0.35.1 (Jamie drinks in C) is not run in game.
 
 **0.31.4:** unverified in game: F10 in K stops the try at once; a skipped combo never appears in a match (the match narration names how many were kept out, `operator_skips` in the summary). Skips that a re-test overwrote before 0.31.4 are lost: ask the user to skip those combos once more. K -> 4 (pick by text) re-tests a skipped one and lifts its ban if it works without F10.
 
