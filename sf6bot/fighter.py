@@ -4428,7 +4428,8 @@ def _safe_route(summary: dict, sess, perform, *args, **kw) -> dict:
 
 def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, matches: int | None = 1,
               panel=None, first_to: int | None = None, versus: str | None = None,
-              opponent_name: str | None = None, human_limits: bool | None = None, blind_ask=None) -> dict:
+              opponent_name: str | None = None, human_limits: bool | None = None, blind_ask=None,
+              my_name: str | None = None) -> dict:
     """Play matches until `matches` are done, someone reaches `first_to` wins, `seconds` pass or F8.
 
     Waits for a battle instead of requiring one at the start, and goes back to waiting after each
@@ -4504,8 +4505,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     # 0.20.1 (user): LP / MR / rank read from the screen (VS screen, result screen, Fighting Ground), never in a fight
     # 0.37.0: the bot's own name(s) as SF6 shows them on the VS screen (configs/local.yaml ranked.cfn, ranked.side_text;
     # never in the repo): a mirror's side is read there before "Fight!", so no crouch probe is needed
+    # 0.37.0 (user): the name comes from the panel's entry box (`--my-name`), else ladder_read.my_name, so a renamed CFN
+    # needs no code change
     rk_ = cfg.get("ranked") or {}
-    side_names = [x for x in [rk_.get("cfn")] + list(rk_.get("side_text") or []) if isinstance(x, str) and x.strip()]
+    side_names = [x.strip() for x in [my_name, (cfg.get("ladder_read") or {}).get("my_name"), rk_.get("cfn")]
+                  + list(rk_.get("side_text") or []) if isinstance(x, str) and x.strip()]
     ladder = None
     if versus == "ranked" and screen_reader is not None and (cfg.get("ladder_read") or {}).get("enabled", True):
         from .ladder_read import LadderReader, read_half_factory

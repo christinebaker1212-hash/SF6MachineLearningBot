@@ -554,3 +554,15 @@ def test_the_bots_name_on_one_half_of_the_vs_screen_gives_its_side():
     texts.update(left="Opponent", right="ExampleBot")
     lr.tick(20.0, "loading")                              # a new VS screen starts over
     assert lr.side_of(["ExampleBot"]) == 1
+
+
+def test_the_bots_cfn_is_an_entry_box_and_a_config_value_not_code():
+    """User: "please add an entry box, just in case the CFN ever changes again. No hard coding. Default to 'Frame Perfect'"."""
+    from sf6bot.config import load_config
+    from sf6bot.gui_actions import BY_ID, build
+    opt = next(o for o in BY_ID["versus"].options if o.key == "my_name")
+    assert opt.kind == "text" and opt.default == "Frame Perfect"
+    assert build("versus", {"mode": "ranked", "my_name": "New Name"})[0]["args"][-2:] == ["--my-name", "New Name"]
+    assert "--my-name" not in build("versus", {"mode": "ranked", "my_name": " "})[0]["args"]
+    assert "--my-name" not in build("versus", {"mode": "offline"})[0]["args"]
+    assert load_config()["ladder_read"]["my_name"] == "Frame Perfect"

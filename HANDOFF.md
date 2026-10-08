@@ -4,12 +4,30 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-08: code version **0.36.2**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (629).*
+*State as of 2026-10-08: code version **0.37.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (657).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State: 0.37.0 is pushed** (CLAUDE.md "0.36.1 ranked run analysed" and "0.37.0"). The ~300-match upload (0.36.1, ~1350 MR)
+was measured and the user's 36-item list built: projectile hitboxes for parries / OD Hadoken / approach, reaction
+Shoryukens and Drive Impacts (the user's lists + 59 / 113 from Capcom data) that check the bot's measured hitbox reaches,
+throw and poke ranges, cross-cuts, Drive Rush checks, a burned-out opponent gets a Drive Impact (user's exception), the
+max-range 5HP > M High Blade Kick spacing trap, Drive Rush links with punish-counter frames, 2MK Drive Rush cancels,
+supers after 2MK reaching the cancel window, and the mirror side read from the VS screen (panel box "Bot's CFN", default
+"Frame Perfect"; config `ladder_read.my_name`). Nothing verified in game.
+- **Waiting on the user:**
+  - Chun-Li's "6HP" for the Drive Impact list (Capcom has no 6+HP; Hakkei is 4+HP).
+  - Confirm or drop doubtful auto answers: Viper's Focus Force, Jamie's Swagger Step, Elena's Moon Glider, Ken's Kasai
+    Thrust Kick, Cammy's Spiral Arrow.
+  - The Chun-Li custom-room relabel (below) was NOT done in the 0.37.0 session.
+- **Judge 0.37.0** by the average MR over 100+ ranked matches (target 1400-1450), and re-run the scorecard on its fights.
+- Not built: grapplers have no rule of their own; Drive spent blocking is only reduced indirectly. Ragequit matches
+  (item 7): their recordings already train the models; the record keeps them as "no result".
+
+**Before that (the upload plan, kept for reference):**
 
 **State:** nothing new is built since 0.36.2. **The user is about to upload ~300 matches** (waiting for their usage limit to
 reset). This is the largest batch so far (earlier analyses: 18-61 matches); ~500+ fight files are on their PC.
@@ -945,7 +963,7 @@ The agreed answer: three in-game checks before the bot fights the CPU, then data
 | M1 tools | `sequences.py` (numpad notation, e.g. `2@3 3@3 6+LP@3`), `acceptance.py`, `latency_probe.py`, `loop.py`, `policy.py` (IDLE/RANDOM/PROBE; none learned) |
 | Game state | `reframework/autorun/sf6bot_state.lua` (exporter v9; online needs the research build, `refw_research.py`), `game_state.py` (StateReader, character table, input decode), `state_check.py` (menu G), `input_map.py` (menu I) |
 | Learning (0.12-0.17) | `human_limits.py`, `brain.py` + `mlp.py` (copy-a-player network + counts), `win_model.py` (what wins), `sample_cache.py`, `retrain.py` (background), `learning.py` (per-opponent bandit + thoughts), `neutral_policy.py`, `defense.py`, `assess.py` (damage / kill / DI punish / perfect parry), `live_moves.py`, `combo_mining.py`, `reach.py`, `progress.py`, `style.py` (Legend style table), `takeover.py` (0.22.0 operator takeover + the user's answers), `grabs.py` (0.22.6 command grabs learned from being grabbed); 0.25.0 in `fighter.py`: `apply_move_answers` / `_move_answer` (the user's per-move answers), `_guard_hold`, `throw_direction`, `opponent_reversal_supers`; 0.27.0: `_aa_cross_guard`, `drive_reversal_late`, `combo_lab.ComboRun._no_window`, `neutral_policy.STANCE` / `NEUTRAL_MAX_DIST` / `CORNER_OUT`, `defense.prior_by_situation`; 0.28.0: `charge.py` (charge timing, opponent charge), `combo_lab.apply_charge`; 0.29.0: `framedata.annotate_holds` / `held`,
-`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for`; 0.30.1: `fighter._crumple_options`, `combo_gen.estimate_after`; 0.31.0: `fighter_profile.py` (rules for other characters), `bot_character.py` (who the bot plays, model dirs), `neutral_policy._own_moves_from_map`; 0.31.1: `throws.py` (throw ids per character), `progress.same_mode`; 0.31.2: `fighter.being_thrown` / `_tech_wait`, `throws.ambiguous_for`; 0.31.4: `route_bans.py` (combos the operator skipped in K: banned in matches), `combo_lab.operator_banned` / `note_operator_skip` / `lift_operator_skips`, `Composer.set_banned` |
+`combos._HOLD_WORDS`, `fighter.opponent_charge_reversals` / `charged_anti_air`, `zoning._zn_pre_jump` / `_zn_lead_seen`, `grabs.PARENT_MAX` / `OWN_PRESS`; 0.30.0: `game_state.NEW_CHARACTERS` / `ask_new_character` / `learned_characters`, `framedata.NEW_SLUGS` / `slug_for`; 0.30.1: `fighter._crumple_options`, `combo_gen.estimate_after`; 0.31.0: `fighter_profile.py` (rules for other characters), `bot_character.py` (who the bot plays, model dirs), `neutral_policy._own_moves_from_map`; 0.31.1: `throws.py` (throw ids per character), `progress.same_mode`; 0.31.2: `fighter.being_thrown` / `_tech_wait`, `throws.ambiguous_for`; 0.31.4: `route_bans.py` (combos the operator skipped in K: banned in matches), `combo_lab.operator_banned` / `note_operator_skip` / `lift_operator_skips`, `Composer.set_banned`; 0.37.0: `game_state.struck`, `zoning._zn_box_track` (projectile hitboxes), `fighter._auto_rules` / `_di_react` / `_di_followup` / `_hitbox_meets` / `_crosscut` / `_rush_check` / `_di_guard` / `_bad_target` / `_burnout_di`, `combo_lab.ComboRun._tighten` / `block_ok`, `Composer.rush_as_pc`, `LadderReader.side_of` |
 | Combos (0.24.0) | `combo_compose.py` (the combo composer: verified transitions joined by resources; live re-planning; 0.26.0: `bar_value` set by `fighter._bar_value`, follow-up reach `reach_miss` from config `combo_reach`, `involves_super` / `load_learned` drop pre-0.26.0 super results); `combo_lab.ComboRun.switch` keeps a pre-input motion (0.26.0) |
 | Fighting (0.23.0) | `punish.py` (the punish engine: every window, timed to the frame; start-up interrupts), `zoning.py` (fireball play), `move_timing.py` (per-id totals / on-block / active / follow-through / projectile speed from recordings; shipped in `configs/move_timing/`) |
 | Episodes and data | `fighter.py` (menu V/N: scripted Ryu, rules in `configs/fighter/ryu.yaml`), `move_map.py` (menu X: action id → move name inferred from recorded inputs + Capcom move lists), `training_data.py` (menu Y: merge recordings, perspectives), `pad_teach.py` (menus P/L/U: overlay pad + routines), `episodes.py` (round/fight/KO/match + finish classification), `watch.py` (menu W), `dataset.py` (menu D), `catalog.py` (menus C/B, frame-meter parsing), `combo_lab.py` (menu K: perform routes, timing from the game clock, keep what works), `combo_gen.py` (routes from Capcom data), `combos.py` (community routes, menu T → A), `hits.py` (normal/counter/punish counter), `framedata.py` (menu F: import browser-saved Capcom pages + cross-check) |

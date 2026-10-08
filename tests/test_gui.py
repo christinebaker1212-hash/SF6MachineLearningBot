@@ -10,7 +10,8 @@ MENU = {
     "N": ("vs_cpu", {"side": "p2"}, [["fight", "--player", "p2"]]),
     "H 1": ("versus", {"mode": "offline", "first_to": "20"}, [["fight", "--versus-human", "offline", "--first-to", "20"]]),
     "H 2": ("versus", {"mode": "online"}, [["fight", "--versus-human", "online", "--first-to", "2"]]),
-    "H 3": ("versus", {"mode": "ranked"}, [["fight", "--versus-human", "ranked"]]),
+    # 0.37.0: the panel passes the "Bot's CFN" box (default "Frame Perfect" = ladder_read.my_name, what menu H 3 reads)
+    "H 3": ("versus", {"mode": "ranked"}, [["fight", "--versus-human", "ranked", "--my-name", "Frame Perfect"]]),
     "B": ("train", {}, [["train"]]),
     "T NC": ("character_id", {}, [["character-id"]]),
     "PA": ("play_as", {"name": "Ken"}, [["play-as", "Ken"]]),

@@ -6,9 +6,8 @@
 Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** That goal is an
 experimental outcome we're working toward, not a promised capability.
 
-> **"There's unfinished business"**: if the user says this, read `UNFINISHED.md` and continue its "Next steps" at once.
-
 ## Status
+- **0.37.0 (2026-10-08): fixes from ~300 Master matches: projectile hitboxes, reaction Shoryukens / Drive Impacts that check reach, spacing, 2MK supers and Drive Rush cancels, mirror side from the VS screen.**
 - **0.36.2 (2026-10-07): a per-fight `data_weight` in the meta file scales a relabelled match in both networks (custom-room sets).**
 - **0.36.1 (2026-10-07): boxes read at render time (exporter v11): on v10 every hurt / hit box read as zero; G now fails such boxes.**
 - **0.36.0 (2026-10-07): collision boxes from REFramework (exporter v10): the bot sees hitboxes and hurtboxes; punish reach is judged box to box.**
@@ -4526,6 +4525,107 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   - scales the set's share of the Chun-Li learning file
   - sends the files back to overwrite
 - Tests `tests/test_0362.py`.
+
+## 0.36.1 ranked run analysed (user, 2026-10-08): ~300 matches at ~1350 MR
+The user's upload: all of `datasets/` (610 fight recordings, ladder, catalogs, move maps, lab, learning) and the runs
+folders (190 match summaries), plus a 36-item list of weaknesses and two lists of moves to answer on reaction. MEASURED
+on the 0.36.1 recordings (171 matches, bot side from the metas). Some Drive Impacts in these recordings were the USER's
+manual inputs (pressed to help the bot): they are not evidence of the bot's choices.
+- **Scorecard:** 84-87 (49%), damage dealt / taken 1.05, openings a minute 6.0 mine / 7.3 theirs, damage per opening
+  1,408 / 1,097, back to the wall 17% (the opponent 7%), thrown 3.4 a match, jump-ins near: anti-aired 3%, hit the bot 12%.
+- **By opponent (0.35-0.36.1):** Ryu 21-8, Chun-Li 17-3, Ken 10-8; Alex 1-11, Manon 0-8, Zangief 0-6, Cammy 4-8,
+  Kimberly 2-5.
+- **Damage taken by opener:** normals 56%, specials 15%, projectiles 7%, throws 7%, command grabs 4.5% (grapplers: 21%).
+  48.8% landed while the bot was in its own move (its throw whiffing 164, 2MK 142, Drive Impact 107, 2LP 57). Walking
+  forward when the opponent's move started: 15.3%.
+- **Range:** the bot's throws within 0.8 landed 55 of 59, 0.8-1.0 52 of 119; 2MK from 1.9+ whiffed 111 of 161 (each
+  whiff then punished ~3 times in 4); cr.HP from 1.8+ whiffed 57 of 59; 5HP from 2.2+ 21 of 25.
+- **Fireballs:** 2,162 thrown at the bot: blocked 51%, hit 14%; 94 hits while walking and 58 while dashing forward into
+  them. Parries timed from the old speed model: on the contact frame 29% (open loop).
+- **Drive:** 44% spent blocking, OD 32%; the opponents spent 18,599 frames in burnout and the bot started 1 Drive Impact
+  on them; corner Drive Impacts hit the bot 27 of 76 (17 out of blockstun). Opponent Drive Rushes 509: 202 hit the bot,
+  the bot hit them out of it 2 times.
+- **Combos:** 2,463 started, 522 completed in the summaries. "2MK > SA1: not_out" 113: after a 2MK hit the super came out
+  when its button was read 10-11 frames after the hit (54 of 54) and never at 12-14 (46): the 15-frame 236236 motion.
+  Most other "not_out" counts for cancels are an artefact (a cancelled special's id shows once hitstop ends).
+- **Cross-overs:** 295; Ryu's Shoryuken hitboxes (catalog boxes, frames 5-14) are always in front, so a cross-cut must be
+  active while the opponent is still on the original side; 8 chances in the open-loop replay.
+- **Reversals:** L Shoryuken at a grounded opponent from 1.4+ whiffed 32 of 37. SA1 from neutral: 22 hit, 11 blocked.
+
+## 0.37.0: the user's list (user, 2026-10-08)
+All MOCK / replay-tested (`tests/test_0370.py`, 36 tests); nothing here is verified in game. ESTIMATE = a config guess.
+### Two bugs from 0.25.0's findings
+- `game_state.struck(prev, now, attacker)`: the defender counts as hit only when its hp drops, its blockstun rises
+  (block), or its hitstop rises while it is in hitstun and the attacker is not. Before, the OPPONENT's hitstop rising
+  because its own move hit counted as the bot's hit (combo executor in matches, the bot's own-attack tracking, reach.py:
+  `reach.CACHE_V` 2).
+- The punish engine opens no start-up interrupt window into a projectile, and a projectile out of a held lead-in starts
+  its own chain.
+### Fireballs from the projectile's hitbox (items 3, 10, 11, 15, 16, 28; zoning.py)
+- Every line the projectile's own hitbox (exporter v11 `projectiles`, team 1 = P1's, 2 = P2's, MEASURED) gives its gap to
+  the bot's hurtbox and its own world speed: the arrival for parry / block / jump timing (`zn_box`). Parries from the box:
+  `parry_min_dist_box` 1.5, `parry_early_box` 1, `parry_hold_box` 8 (ESTIMATES); open loop on 40 fireball-heavy matches:
+  on the contact frame 64% (old 29%).
+- OD Hadoken (`moves.hadoken_od`) through a single-hit projectile (not OD / levelled / charged / super), not in burnout,
+  not against a fast one, a Drive bar kept (user: "OD Hadoken beats any single-hit projectile").
+- No punish-engine step-in while the thrower's projectile is out; no forward dash with a projectile out.
+- Neutral: ADVANCE (out of range by 0.6+ with the opponent's room > 2.5: walk forward x1.3, back x0.7), CHASE (behind with
+  <= 30 s left), BURNOUT_PRESS (the opponent in burnout): approaching slowly to corner them and not getting timed out.
+### Answers on reaction (the user's lists + Capcom data for all characters; fighter.py, ryu.yaml)
+- `move_answers` (the user's): Ken 5HK / H Dragonlash (Drive Impact; other Dragonlash Shoryuken), Ken's Jinrai follow-ups
+  (Drive Impact on Ken's forward + kick press during a BLOCKED Jinrai, `do: di_followup`; never after 5HP > M Jinrai), H
+  High Blade Kick (DI unless the opponent can super-cancel it with its bars), Tiger Knee Crush, Musasabi no Mai, Cobra
+  Punch, Phalanx, Blanka's ball, Sumo Headbutt (not OD: armor), Cammy's Cannon Strike / Reverse Edge (Hooligan:
+  `no_anti_air`, the bait), Luke's charged Flash Knuckle, Manon 5HK, Kimberly's Sprint follow-ups, Ingrid's teleport.
+- `move_answers_auto` from Capcom's rows: 59 Shoryuken answers (specials airborne in their active frames) and 113 Drive
+  Impact answers (slow specials of 1-2 hits; multi-hit moves break the armor, e.g. H Hundred Lightning Kicks, Hundred Hand
+  Slaps: user correction). The user's rules win per move.
+- Timing: a Drive Impact only when its armor is up before the move's first hit and its hit (frame 26) lands before the
+  move recovers; normals only if seen by their frame 8 (user). **Reach (user: "OD Seismic Hammer can be performed at any
+  screen position"):** `fighter._hitbox_meets` moves the opponent's live hurtboxes along its current motion and checks
+  them against the bot's own measured hitbox frames (`drive_impact_hitbox`: frame 26, 1.0-1.8 forward, 0.89-1.41 high;
+  `anti_air.srk_hitbox`: L Shoryuken frames 5-14, from the catalog boxes). No answer that would not reach.
+### Defence and neutral (items 4-9, 13, 14, 17-19, 24, 25, 32, 33, 36)
+- Throws only within `ranges.throw_attempt` 0.85; neutral reach caps 2MK 1.85, 2HP 1.45, 5HP 2.0, 2HK 2.15.
+- Cross-cut Shoryuken (`anti_air.crosscut`): a falling opponent about to cross whose hurtbox meets the Shoryuken's hitbox
+  on the current side.
+- Drive Rush check (`rush_check`): 5MP / 2LP whose active frame meets an incoming rush in reach (rush ~0.077 a frame,
+  MEASURED); no Shoryuken into it.
+- `_di_guard` / `di_block`: in blockstun with the opponent's Drive Impact coming, hold block (no option into its armor).
+- A wake-up Drive Reversal that would land after the get-up is not chosen (it came out as a forward Drive Impact: item 36).
+- STANCE re-measured at Master: walking forward is the worst choice inside 2.0 (x0.5 / 0.3 / 0.4 / 0.6 by band).
+- The opponent's real poke reach from its hitboxes (`_track_op_hitbox`).
+- No neutral / back jumps from the policy; no Super Art from neutral (`policy.neutral_super`, off); no sweep at an
+  airborne or juggled opponent and no reversal Shoryuken at a grounded opponent beyond 1.45 (`_bad_target`).
+### Offence (items 10, 20, 27, 29, 31, 34, 35)
+- **Drive Impact on a burned-out opponent** (`burnout_di`, rule 6b'): the user's exception to "no Drive Impact in
+  neutral": in the DI's hitbox reach, the opponent not attacking, a bar kept; against a Super bar only with its back
+  within 2.5 of its wall; 35% per decision, 1.5 s cooldown (ESTIMATES).
+- No jump-in after the bot's Drive Impact crumple (`stun_jump_in.enabled: false`; item 29).
+- **Spacing trap** (`moves.spacing_trap`): a neutral 5HP from 1.7+ cancels into M High Blade Kick on hit OR block
+  (`perform_route(block_ok=True)`: the first move's block counts as its contact); a whiff sends nothing more.
+- **A Drive Rush 5HP has a punish-counter 5HP's frames** (user): `Composer.rush_as_pc` uses links the lab verified only
+  after a CH / PC opener after the same move out of a Drive Rush (x0.85, ESTIMATE).
+- **2MK Drive Rush cancels** (user: "2MK can also be used as a cancel window for more damaging offensive opportunities
+  using Drive rush cancel"): the verified Drive Rush cancel joins every special-cancelable normal the bot performs in a
+  verified route (P_CAPCOM 0.75). Never into burnout (unchanged).
+- **Supers after 2MK reach the cancel window** (`ComboRun._tighten`, matches only): a cancelled motion starting with '2'
+  after a crouching move leaves out that '2' and the crouching move ends still holding down: the button arrives 3 frames
+  sooner (11-14 -> 8-11 after the hit).
+### Mirror side without the crouch probe (item 12)
+- Ranked already reads the VS screen in two halves (ladder_read). `LadderReader.side_of(names)`: the bot's name read on one
+  half only gives its side before "Fight!". Without a read, the crouch probe as before; `SideCheck` still swaps a wrong side.
+- The name (user: "please add an entry box, just in case the CFN ever changes again. No hard coding. Default to 'Frame
+  Perfect'"): the panel's Versus Human tile has a "Bot's CFN" box (default "Frame Perfect", remembered by the panel),
+  passed as `fight --my-name`; ranked.bat / menu H 3 use `ladder_read.my_name` (configs/default.yaml "Frame Perfect";
+  configs/local.yaml can change it). `ranked.cfn` / `ranked.side_text` in local.yaml are read too.
+### Not changed
+- Grapplers (item 5) have no rule of their own: their damage came from pokes walked into and command grabs (covered by
+  STANCE and the throw range). The Drive spent blocking (item 6) is only reduced indirectly (fewer openings, reaction
+  DIs, rush checks).
+- Chun-Li's "6HP" for the DI list: Capcom lists no 6+HP (Hakkei is 4+HP, too fast for a reaction DI by the numbers):
+  waiting for the user. Doubtful auto answers to confirm: Viper's Focus Force, Jamie's Swagger Step, Elena's Moon Glider,
+  Ken's Kasai Thrust Kick, Cammy's Spiral Arrow.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

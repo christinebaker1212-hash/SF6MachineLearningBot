@@ -96,6 +96,9 @@ menu_watch:
 # progress.md "LP and MR". Needs the same screen reading as menu_watch.
 ladder_read:
   enabled: true
+  # 0.37.0 (user): the bot's name as the VS screen shows it; read on one half there = its side (a mirror needs no crouch
+  # probe). The panel's "Bot's CFN" box (Versus Human, Ranked) overrides it for that run; change either if the CFN changes.
+  my_name: "Frame Perfect"
 
 # 0.22.0 operator takeover in fights (takeover.py): a real controller input (any XInput pad: the Ally's own, or yours
 # through Parsec) or safety.takeover_key hands the match to you; rounds you WIN teach the bot your answers, lost rounds

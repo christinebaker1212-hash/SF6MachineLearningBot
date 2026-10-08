@@ -409,7 +409,7 @@ def cmd_fight(args, cfg):
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
                   first_to=first_to or None, versus=vh, opponent_name=args.opponent, human_limits=hl,
-                  blind_ask=blind_ask)
+                  blind_ask=blind_ask, my_name=args.my_name)
     _print_report(s)
 
 
@@ -930,6 +930,8 @@ def main(argv=None):
                         "PC's player (start once, queue as often as you like); side found automatically, no "
                         "countdown")
     p.add_argument("--opponent", default=None, help="optional nickname for the opponent (stored with the matches)")
+    p.add_argument("--my-name", default=None, help="ranked: the bot's name as the VS screen shows it (its CFN); read "
+                   "there to find its side in a mirror match (default: ladder_read.my_name in the config)")
     p.add_argument("--human-limits", action="store_true", help="human reaction times and uneven button holds "
                    "(configs/fighter/ryu.yaml human_limits; recorded in every match summary)")
     p.add_argument("--blind", action="store_true", help="blind evaluation (offline / online sets, participants who "

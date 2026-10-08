@@ -49,6 +49,8 @@ ACTIONS: list[Action] = [
                                             ("Ranked", "ranked")], default="offline"),
             Option("first_to", "First to", kind="int", default=2, hint="0 = no limit (ranked: none)"),
             Option("opponent", "Nickname", kind="text", default="", hint="optional"),
+            Option("my_name", "Bot's CFN", kind="text", default="Frame Perfect",
+                   hint="ranked: as the VS screen shows it (finds the side in mirrors)"),
             Option("limits", "Human limits", choices=[("Off", "off"), ("On", "on"), ("Blind test", "blind")],
                    default="off")], menu="H"),
     # ---- RECORD ------------------------------------------------------------------------------------------
@@ -163,6 +165,8 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             args += ["--first-to", str(_int(v["first_to"], "First to"))]
         if str(v.get("opponent") or "").strip():
             args += ["--opponent", str(v["opponent"]).strip()]
+        if v["mode"] == "ranked" and str(v.get("my_name") or "").strip():
+            args += ["--my-name", str(v["my_name"]).strip()]
         lim = v.get("limits") or "off"
         if lim == "blind":
             # 0.18.10 (user): in ranked, "Blind test" = the human-like inputs only (Capcom's 2026-10-03 letter approved
