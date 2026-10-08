@@ -3218,6 +3218,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 d_ = player_distance(me, op)
                 if d_ is not None and isinstance(tmr, int) and (_num(op.get("y")) or 0.0) <= 0.05:
                     self.pt.thrown(oa, tmr, d_, _num(op.get("x")))
+        self._zn_box_track(raw, me, op, me_i)          # 0.37.0: the opponent's projectile from its own hitbox
         bs_ = _num(me.get("blockstun")) or 0
         if bs_ > 0 and self._prev_me_bs <= 0:
             self._blocked_rush = bool(self.op_move.get("rushed"))
@@ -3581,6 +3582,22 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return Decision("seq", "air-to-air j.MP", a2.get("seq", "9@3 5@4 5+MP@3"), rule="anti_air_a2a",
                         reason=f"opponent coming down {abs(pdx):.2f} away (out of Shoryuken range): air-to-air")
 
+    def op_in_burnout(self, op: dict) -> bool:
+        """0.37.0: the opponent's Drive gauge is empty (burnout until it refills; the exported drive reads 0 or below)."""
+        d = _num(op.get("drive"))
+        return d is not None and d <= 0 and (_num(op.get("hp")) or 0) > 0
+
+    def _chasing(self, raw: dict, me: dict, op: dict) -> bool:
+        """0.37.0: behind on health with `CHASE_SECONDS` or less left of the 99-second round (the round clock starts at
+        "Fight!", stage_timer 190, MEASURED)."""
+        from .neutral_policy import CHASE_SECONDS
+        tmr = raw.get("stage_timer")
+        mh, oh = _num(me.get("hp")), _num(op.get("hp"))
+        if not isinstance(tmr, int) or mh is None or oh is None:
+            return False
+        left = 99.0 - (tmr - 190) / 60.0
+        return left <= CHASE_SECONDS and mh < oh
+
     def _policy_neutral(self, raw: dict, me: dict, op: dict, t: float, me_i: int, block_dir: int) -> Decision:
         """The learned neutral game (neutral_policy): network + counts, re-weighted by this opponent's
         results, turned into a move; a move that starts a TRUE combo is performed as that route."""
@@ -3595,7 +3612,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.policy.safe = self._safe_mode(raw, me, op, t)
         self.policy.opp_poke = self.opp_poke_reach()
         self.policy.denjin = self.denjin_stock
-        self.policy.op_projectile = bool((self.opp.get(op.get("action_id")) or {}).get("projectile")) or self.pt.flight is not None
+        self.policy.op_projectile = bool((self.opp.get(op.get("action_id")) or {}).get("projectile")) or self.pt.flight is not None \
+            or self._zn_box_live(raw)
+        self.policy.op_burnout = self.op_in_burnout(op)
+        self.policy.chasing = self._chasing(raw, me, op)
         ch = self.policy.choose(me, op, prev.get(mk), prev.get(ok), t1, lambda a: self.can_spend(me, a), dt=dt)
         intent = ch["intent"]
         probs = " · ".join(f"{k.replace('_', ' ')} {v:.0%}" for k, v in ch["top"])

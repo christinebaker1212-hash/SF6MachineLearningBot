@@ -284,6 +284,7 @@ moves:
   punish_l_srk: {name: "L Shoryuken (punish)", seq: "6@3 2@3 3+LP@3", startup: 5}
   hadoken_lp: {name: "L Hadoken", seq: "2@3 3@3 6+LP@3"}
   hadoken_hp: {name: "H Hadoken", seq: "2@3 3@3 6+HP@3"}
+  hadoken_od: {name: "OD Hadoken", seq: "2@3 3@3 6+LP+MP@3", startup: 12}   # 0.37.0 (Capcom: 2 hits, start-up 12, -1)
   low_forward_fireball: {name: "2MK > 236MP", route: "2MK > 236MP", seq: "2+MK@3 2@6 3@3 6+MP@3"}   # SuperCombo: true blockstring, DI-safe
   light_chain: {name: "2LK ~ 2LP ~ 5LP", route: "2LK ~ 2LP ~ 5LP", seq: "2+LK@3 2@7 2+LP@3 5@7 5+LP@3"}
   standing_hp: {name: "5HP", seq: "5+HP@3"}
@@ -393,6 +394,7 @@ fireball:
   charge_block: true        # 0.25.0: block while the opponent holds a projectile's charge (move_timing lead-in)
   charge_block_dist: 4.5
   clash_value: -0.05        # outside burnout walking in and parrying gains ground and keeps the Drive
+  clash_od_value: 0.5       # 0.37.0 (user: "OD Hadoken beats any projectile that only has one hit"): ESTIMATE, learned per opponent
   clash_value_burnout: 0.3
   jump_over_value: -0.1
   jump_over_value_burnout: 0.25
@@ -400,6 +402,11 @@ fireball:
   act_floor: 0.0
   parry_min_drive: 10000    # a parried projectile gives the Drive back; one bar kept for a parry that misses
   parry_min_dist: 2.5       # 0.31.1: block, not parry, with the thrower nearer (MEASURED: thrown out of the parry 24-30%)
+  # 0.37.0: timed from the projectile's own hitbox (exporter v11; the contact frame within 1 frame 70% of the time,
+  # MEASURED) the parry is a perfect parry: parried nearer the thrower, tapped short. ESTIMATES.
+  parry_min_dist_box: 1.5
+  parry_early_box: 1
+  parry_hold_box: 8
   block_pad: 6              # block from this many frames (+ input delay) before it arrives
   walk_stop: 0              # extra frames kept between the last walking line and the parry / block
   walk_min_dist: 1.6

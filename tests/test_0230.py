@@ -228,7 +228,10 @@ def test_a_fireball_from_jump_range_is_jumped_onto_the_thrower_on_its_first_fram
 
 
 def test_a_far_fireball_is_walked_into_then_parried_never_blocked_early():
+    import copy
     f = _zoner()
+    f.c = copy.deepcopy(f.c)
+    f.c["fireball"]["clash_od_value"] = -1.0       # 0.37.0: the OD Hadoken answer (test_0370) would win here
     _throw_at(f, 4.0, 1000)
     rules = []
     for k in range(1, 40):

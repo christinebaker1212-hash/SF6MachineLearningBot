@@ -30,6 +30,8 @@ next 1.5 s, situation "fireball"), so against a zoner who anti-airs, the jump lo
 """
 from __future__ import annotations
 
+import re
+
 from .game_state import num
 
 PREJUMP = 5            # MEASURED (Ryu, 222 forward jumps): frames from the jump's id to the first airborne frame
@@ -86,6 +88,35 @@ def _fit(samples: list) -> tuple[float, float] | None:
     return a, b
 
 
+BOX_SPEED_LINES = 3    # 0.37.0: the projectile's speed from its hitbox over this many lines
+
+
+def opp_team(me_i: int) -> int:
+    """0.37.0: the exporter's team number of the OPPONENT's projectiles. MEASURED (0.36.1 recordings, 7,225 lines with a
+    projectile out and one player in a projectile move): team 1 = P1's (2,517 of 2,521), team 2 = P2's (4,704 of 4,704)."""
+    return 2 if me_i == 0 else 1
+
+
+def proj_gap(me: dict, pj_boxes) -> tuple | None:
+    """(gap, hitbox y0, y1, front x): how far the projectile's hitbox is from the bot's nearest hurtbox edge (0 = touching).
+    The bot's hurtboxes from its boxes, else x +- 0.4 (its measured standing hurtbox half-width)."""
+    hs = [b for b in pj_boxes if b.kind == "h"]
+    if not hs:
+        return None
+    h0, h1 = min(b.x0 for b in hs), max(b.x1 for b in hs)
+    hb = [b for b in (me.get("boxes") or []) if b.kind == "b"]
+    x = num(me.get("x"))
+    if hb:
+        u0, u1 = min(b.x0 for b in hb), max(b.x1 for b in hb)
+    elif x is not None:
+        u0, u1 = x - 0.4, x + 0.4
+    else:
+        return None
+    gap = (u0 - h1) if h1 < u0 else (h0 - u1) if h0 > u1 else 0.0
+    front = h1 if h1 < u0 else h0
+    return gap, min(b.y0 for b in hs), max(b.y1 for b in hs), front
+
+
 class ZoningMixin:
     """Mixin for ScriptedFighter (rule 4z, `_zn_decide`): needs pt (assess.ProjectileTimer), lead, stale, c, exp,
     busy, can_spend, in_burnout, _pe_know, mt_moves, opp, own, book, _ok."""
@@ -96,9 +127,69 @@ class ZoningMixin:
         self._zn_blocked = None
         self._zn_walk_t = None
         self.zn_stats: dict = {"thrown": 0, "seen_for": None, "jump_punish": 0, "jump_over": 0, "sa1": 0, "clash": 0,
+                               "clash_od": 0,
                                "parry": 0, "block": 0, "walk_lines": 0, "too_close": 0, "busy": 0, "jump_on_lead_in": 0}
         self._zn_leads: dict = {}      # 0.28.0: lead-in id -> {"proj": projectile id, "len": [frames]} seen this match
+        self.zn_box: dict | None = None    # 0.37.0: the opponent's projectile from its own hitbox (exporter v11 boxes)
+        self._zn_bh: list = []             # (clock, gap) of that hitbox, newest last
+        self._zn_box_flight = None         # the flight (t0) the box was seen for
         self._zn_lead_on = None        # the opponent's current lead-in: (id, clock, distance)
+
+    # ---- the projectile's own hitbox (0.37.0) -------------------------------------------------------------------------
+    def _zn_box_track(self, raw: dict, me: dict, op: dict, me_i: int) -> None:
+        """Every line: the opponent's projectile hitbox (raw["projectiles"], exporter v11) -> self.zn_box = {gap, v (units a
+        frame, toward the bot), eta (frames until it touches the bot's hurtbox), y0, y1, clock} or None. MEASURED (0.36.1,
+        5,302 sightings 3-30 frames before a contact): gap / speed predicts the contact frame within 1 frame 70% of the
+        time, for every projectile (known ids or not). A projectile seen with no flight known starts one (an id nobody
+        named); a flight whose hitbox was seen and is now gone is over (cancelled, parried, passed under a jump)."""
+        tmr = raw.get("stage_timer")
+        if "projectiles" not in raw or not isinstance(tmr, int):
+            return                                      # no box data (older exporter): the id-based model only
+        team = opp_team(me_i)
+        best = None
+        for p in raw.get("projectiles") or []:
+            if not isinstance(p, (list, tuple)) or len(p) < 4 or p[0] != team:
+                continue
+            g = proj_gap(me, p[3])
+            if g is not None and (best is None or g[0] < best[0]):
+                best = g
+        f = self.pt.flight
+        if best is None:
+            if self._zn_bh and f is not None and self._zn_box_flight == f.get("t0") and not f.get("parried"):
+                self.pt.flight = None                   # its hitbox is gone: nothing is coming any more
+                self.zn_stats["box_gone"] = self.zn_stats.get("box_gone", 0) + 1
+            self._zn_bh, self.zn_box = [], None
+            return
+        gap, y0, y1, front = best
+        if self._zn_bh and (gap > self._zn_bh[-1][1] + 0.3 or tmr < self._zn_bh[-1][0]):
+            self._zn_bh = []                            # a new projectile (or the clock went back)
+        if not self._zn_bh or self._zn_bh[-1][0] != tmr:
+            self._zn_bh = (self._zn_bh + [(tmr, gap, front)])[-(BOX_SPEED_LINES + 1):]
+        v = None
+        if len(self._zn_bh) >= 2:
+            # the projectile's OWN speed (its hitbox front in the world), not the gap's: the gap also closes while the bot
+            # walks, and the bot stops walking to parry (MEASURED open loop on 0.36.1: from the gap, parries came 2-6
+            # frames early half the time). Walking is added back by the caller (zoning: bv)
+            (t0_, _g0, f0), (t1_, _g1, f1) = self._zn_bh[0], self._zn_bh[-1]
+            if t1_ > t0_:
+                v = abs(f1 - f0) / (t1_ - t0_)
+        eta = gap / v if v is not None and v > 0.01 else (0.0 if gap <= 0 else None)
+        self.zn_box = {"gap": gap, "v": v, "eta": eta, "y0": y0, "y1": y1, "clock": tmr}
+        if f is None and eta is not None and (num(op.get("y")) or 0.0) <= 0.05:
+            # a projectile the ids did not show: follow it from its box
+            oa = op.get("action_id")
+            pid = oa if (self.opp.get(oa) or {}).get("projectile") or self._pe_know(oa).get("projectile") else -1
+            from .game_state import player_distance
+            self.pt.thrown(pid, tmr, player_distance(me, op) or 0.0, num(op.get("x")))
+            self.zn_stats["box_flights"] = self.zn_stats.get("box_flights", 0) + 1
+            f = self.pt.flight
+        if f is not None:
+            self._zn_box_flight = f.get("t0")
+
+    def _zn_box_live(self, raw: dict) -> bool:
+        """An opponent projectile's hitbox is out on this line."""
+        b = self.zn_box
+        return b is not None and b.get("clock") == raw.get("stage_timer")
 
     # ---- lead-ins (0.28.0) --------------------------------------------------------------------------------------------
     def _zn_lead_seen(self, prev_oa, oa, tmr, dist) -> None:
@@ -167,7 +258,14 @@ class ZoningMixin:
             return None
         m = self._zn_model(f["id"])
         k = tmr - f["t0"]
+        b = self.zn_box if self._zn_box_live(raw) else None
+        if b is not None and b.get("eta") is not None and b.get("v"):
+            # 0.37.0: from the projectile's own hitbox: it reaches the bot in eta frames, at v units a frame
+            bb = 1.0 / float(b["v"])
+            m = Flight(0, k + float(b["eta"]) - bb * d, bb, "its hitbox")
         left = m.arrival(d) - k
+        if b is not None and b.get("eta") is not None:
+            left = float(b["eta"])
         if left < -PASS_FRAMES:
             self.pt.flight = None              # it should have arrived: passed under a jump, cancelled, or lost
             return None
@@ -288,6 +386,17 @@ class ZoningMixin:
                     cands.append((self._zn_learned("clash", float(zc.get("clash_value_burnout" if burn else "clash_value",
                                                                          0.3 if burn else -0.05))),
                                   "clash", had["name"], None, {}))
+            # 3b. 0.37.0 (user: "OD Hadoken beats any projectile that only has one hit"): the bot's OD Hadoken (2 hits, Capcom
+            #     start-up 12, -1 on block) through a single-hit projectile, on to the thrower. Not in burnout (2 bars, and
+            #     one kept), not against a multi-hit projectile (OD / levelled / charged / super ones: by name)
+            od = self.c["moves"].get(zc.get("clash_od_move", "hadoken_od"))
+            single = not re.search(r"(^|\b)OD\b|Lv ?[23]|Charged|SA\d|Super|Critical", s["name"] or "")
+            if od and single and not burn and not fast and d >= float(zc.get("clash_min_dist", 2.5)) \
+                    and self.can_spend(me, "od_move", reserve=int(self.c.get("drive_reserve", 10000))):
+                spawn = s["k"] + L + seq_prefix(od["seq"]) + int(od.get("startup", HADOKEN_STARTUP))
+                if spawn <= s["model"].arrival(d) - int(zc.get("clash_margin", 5)):
+                    cands.append((self._zn_learned("clash_od", float(zc.get("clash_od_value", 0.5))),
+                                  "clash_od", od["name"], None, {}))
             # 4. a neutral jump over it (in burnout, or with too little Drive to parry): no Drive lost, no ground gained
             jn = self._zn_jump(s, False)
             # 0.29.0: not over a projectile into a charged [2]8 anti-air (Sonic Boom, then Flash Kick)
@@ -324,6 +433,9 @@ class ZoningMixin:
                 if opt == "clash":
                     return Decision("seq", nm, had["seq"], rule="fireball_clash", facing=side,
                                     reason=why0 + ": my Hadoken cancels it" + (" (burnout: no chip)" if burn else ""))
+                if opt == "clash_od":
+                    return Decision("seq", nm, od["seq"], rule="fireball_clash", facing=side,
+                                    reason=why0 + ": my OD Hadoken beats a one-hit projectile and goes on to the thrower")
                 return Decision("seq", "neutral jump", "8@4", rule="fireball_jump_over", facing=side,
                                 reason=why0 + ": jumping over it" + (" (burnout: blocking would chip)" if burn else ""))
         # 5. meet it: a parry timed to its arrival (the Drive comes back), else a block; walk forward while it is far
@@ -334,13 +446,19 @@ class ZoningMixin:
         # 0.31.1: no parry with the thrower near. MEASURED (344 ranked recordings): a Drive Parry lasts 30-60 frames
         # and a throw on it is a punish counter; parries started with the thrower under 2.5 away were thrown 24-30% of
         # the time (Guile 7 of 25: Sonic Boom, Sonic Blade, walk in, throw for 2,040), from 2.5+ about 1%
-        if can_parry and dist < float(zc.get("parry_min_dist", 0.0)):
+        boxed = s["model"].src == "its hitbox"
+        # 0.37.0: with the projectile's own hitbox the arrival is known to a frame (70% within 1, MEASURED): parry nearer
+        # the thrower too (user: "with hitboxes he should never be mistiming parries or not parrying"); a perfect parry
+        # leaves no parry animation to throw. `parry_min_dist_box` is an ESTIMATE.
+        min_d = float(zc.get("parry_min_dist_box", zc.get("parry_min_dist", 0.0))) if boxed \
+            else float(zc.get("parry_min_dist", 0.0))
+        if can_parry and dist < min_d:
             can_parry = False
             if getattr(self, "_zn_near_for", None) != s["t0"]:
                 self._zn_near_for = s["t0"]
                 self.zn_stats["parry_too_near"] = self.zn_stats.get("parry_too_near", 0) + 1
-        live = bool(self.pt.samples.get(s["id"]))
-        early = int(zc.get("parry_early") or (1 if live else 4))
+        live = bool(self.pt.samples.get(s["id"])) or boxed
+        early = int(zc.get("parry_early_box", 1)) if boxed else int(zc.get("parry_early") or (1 if live else 4))
         # walking into it brings it sooner: each frame walked takes b x 0.047 frames off its arrival. A bot that is
         # walking now (its last decision) keeps walking for the input delay, then stands for whatever it sends next
         mdl = s["model"]
@@ -360,11 +478,15 @@ class ZoningMixin:
                 self._pp_watch = {"t0": raw.get("stage_timer"), "seen": set()}
                 if self.exp is not None and self._zn_for != s["t0"]:
                     self.exp.defended(t, "fireball", "parry", me.get("hp"), op.get("hp"))
-                hold = int(zc.get("parry_hold") or (12 if live else 18))
+                hold = int(zc.get("parry_hold_box", 8)) if boxed else int(zc.get("parry_hold") or (12 if live else 18))
+                if boxed:
+                    self.zn_stats["parry_box"] = self.zn_stats.get("parry_box", 0) + 1
                 return Decision("seq", "Parry (projectile)", f"5+MP+MK@{hold}", rule="perfect_parry", facing=side,
                                 reason=why0 + f": parry timed to it ({'learned' if live else 'predicted'} arrival; "
                                               "the Drive comes back)")
-        if eta <= L + int(zc.get("block_pad", 6)):
+        # 0.37.0: while a parry is still to come it decides when to stop (the block margin cut the walk short)
+        pad = early if (can_parry and self._zn_parried != s["t0"] and boxed) else int(zc.get("block_pad", 6))
+        if eta <= L + pad:
             if self._zn_blocked != s["t0"]:
                 self._zn_blocked = s["t0"]
                 self.zn_stats["block"] += 1

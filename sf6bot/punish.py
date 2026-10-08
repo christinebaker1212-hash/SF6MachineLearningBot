@@ -434,6 +434,10 @@ class PunishEngine:
         elif k.get("projectile"):
             # 0.23.0: once the projectile is gone (parried, jumped over, cancelled, passed), what is left of the thrower's
             # recovery is a window (zoning.py follows the projectile itself)
+            # 0.37.0: not while its hitbox is still out (MEASURED 0.36.1: 58 projectile hits on the bot mid forward dash,
+            # 94 mid walk: the id-based flight had been lost, so the engine stepped in on the thrower)
+            if hasattr(self, "_zn_box_live") and self._zn_box_live(raw):
+                return None
             f = self.pt.flight if hasattr(self, "pt") else None
             if (f is not None and f.get("t0") == c["t0"]) or el < (k.get("startup") or 99) or c.get("mid") \
                     or not isinstance(k.get("total"), int):

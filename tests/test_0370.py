@@ -66,3 +66,123 @@ def test_no_startup_interrupt_into_a_projectile_and_a_released_charge_starts_its
     got = _run(f, lines)
     assert not [d for _, d in got if d.rule == "interrupt"]
     assert f.chain is not None and f.chain["head"] == 906 and f.chain["t0"] == 1020
+
+
+# ---- fireballs from the projectile's own hitbox (exporter v11) ---------------------------------------------------------
+
+from sf6bot.boxes import Box                                    # noqa: E402
+from sf6bot import zoning as zn                                 # noqa: E402
+from sf6bot import neutral_policy as npol                      # noqa: E402
+
+
+def _pj(front_x, team=2, width=0.25, y=(0.8, 1.2)):
+    """An opponent projectile whose hitbox front edge (toward the bot at x 0) is at front_x."""
+    return [(team, front_x + 0.3, 1.0, [Box("h", front_x, front_x + width, y[0], y[1]),
+                                        Box("u", front_x - 0.2, front_x + 0.5, 0.8, 1.4)])]
+
+
+def _fb_lines(start=3.0, v=0.1, thrower_x=3.6, aid=1, n_lines=40, drive=60000, timer=1000, team=2):
+    out = []
+    for k in range(n_lines):
+        raw = state(me={"drive": drive}, op={"x": thrower_x, "action_id": aid}, timer=timer + k)
+        raw["projectiles"] = _pj(start - v * k, team=team)
+        out.append(raw)
+    return out
+
+
+def test_the_projectile_team_is_the_owner_player_number():
+    assert zn.opp_team(0) == 2 and zn.opp_team(1) == 1
+    g = zn.proj_gap({"x": 0.0}, [Box("h", 1.0, 1.25, 0.8, 1.2)])
+    assert abs(g[0] - 0.6) < 1e-9 and g[1:3] == (0.8, 1.2)                      # hurtbox x +- 0.4 without boxes
+
+
+def test_an_unknown_projectile_is_followed_from_its_hitbox_and_perfect_parried_on_time():
+    """No id says projectile (an unnamed move): the box alone starts the flight; the parry lands on the contact frame."""
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead = 4
+    got = _run(f, _fb_lines(start=3.0, v=0.1))
+    parry = [(t, d) for t, d in got if d.rule == "perfect_parry"]
+    assert parry and f.zn_stats.get("box_flights") == 1 and f.zn_stats.get("parry_box") == 1
+    t, d = parry[0]
+    # gap = 3.0 - 0.1 k - 0.4 (hurtbox edge): contact on k = 26. Pressed with eta <= input delay + 1: on k = 21 or 22
+    assert 1021 <= t <= 1022 and "hitbox" in d.reason
+    before = [d for tt, d in got if tt < t and d.rule.startswith("fireball")]
+    assert not [d for d in before if "blocking it" in d.reason]                      # never blocked early
+    assert len([d for d in before if d.rule == "fireball_walk"]) >= 15              # walked in until just before
+
+
+def test_a_projectile_whose_hitbox_vanished_is_no_longer_waited_for():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f.lead = 4
+    lines = _fb_lines(start=4.0, v=0.1, n_lines=6)
+    _run(f, lines)
+    assert f.pt.flight is not None
+    gone = state(op={"x": 3.6, "action_id": 1}, timer=1006)
+    gone["projectiles"] = []
+    f.observe_line(gone, 0)
+    assert f.pt.flight is None and f.zn_stats.get("box_gone") == 1
+
+
+def test_od_hadoken_answers_a_one_hit_projectile_but_not_in_burnout_or_a_fast_one():
+    opp = {**_common_moves(FCFG), 904: {"name": "H Hadoken", "projectile": True, "startup": 12, "total": 47}}
+    f = ScriptedFighter(FCFG, opp, seed=1)
+    f.set_move_timing({"moves": {904: {"n": 300, "total": 47, "n_total": 50, "startup": 12,
+                                       "proj": {"a": 2.4, "b": 13.0}}}, "follow": {}})
+    f.lead = 4
+    f.observe_line(state(op={"x": 3.5}, timer=999), 0)
+    raw = state(op={"x": 3.5, "action_id": 904}, timer=1000)
+    f.observe_line(raw, 0)
+    d = f.decide(raw, 1000 / 60.0, 0)
+    assert d.rule == "fireball_clash" and d.name == "OD Hadoken" and "+LP+MP" in d.seq
+    g = ScriptedFighter(FCFG, opp, seed=1)
+    g.set_move_timing({"moves": {904: {"n": 300, "total": 47, "n_total": 50, "startup": 12,
+                                       "proj": {"a": 2.4, "b": 13.0}}}, "follow": {}})
+    g.lead = 4
+    g.in_burnout = True
+    g.observe_line(state(me={"drive": 0}, op={"x": 3.5}, timer=999), 0)
+    raw = state(me={"drive": 0}, op={"x": 3.5, "action_id": 904}, timer=1000)
+    g.observe_line(raw, 0)
+    assert g.decide(raw, 1000 / 60.0, 0).name != "OD Hadoken"
+
+
+def test_no_forward_dash_while_a_projectile_is_out_and_approach_biases():
+    from tests.test_0200 import _Brain
+    pol = npol.NeutralPolicy(_Brain(), [], cfg={}, seed=1)
+    df, wf, wb = (npol.it.INTENTS.index(n) for n in ("dash_fwd", "walk_fwd", "walk_back"))
+    base = pol.style({"x": 0.0}, {"x": 3.0})
+    pol.op_projectile = True
+    assert pol.style({"x": 0.0}, {"x": 3.0})[df] == 0.0
+    pol.op_projectile = False
+    pol.chasing = True
+    ch = pol.style({"x": 0.0}, {"x": 3.0})
+    pol.chasing = False
+    pol.op_burnout = True
+    bo = pol.style({"x": 0.0}, {"x": 3.0})
+    assert ch[wf] > base[wf] and ch[wb] < base[wb] and bo[wf] > base[wf] and bo[wb] < base[wb]
+    # far outside the opponent's poke with room behind it: walk in more than when it is already near its wall
+    pol.op_burnout = False
+    assert base[wf] > pol.style({"x": 3.5}, {"x": 6.5})[wf]
+
+
+def test_chasing_late_in_a_round_when_behind():
+    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    late = 190 + 60 * 75                                  # 24 s left
+    assert f._chasing({"stage_timer": late}, {"hp": 4000}, {"hp": 6000})
+    assert not f._chasing({"stage_timer": late}, {"hp": 6000}, {"hp": 4000})
+    assert not f._chasing({"stage_timer": 190 + 60 * 30}, {"hp": 4000}, {"hp": 6000})
+
+
+def test_no_punish_step_in_toward_the_thrower_while_its_projectile_hitbox_is_out():
+    opp = {**_common_moves(FCFG), 904: {"name": "H Hadoken", "projectile": True, "startup": 12, "total": 47}}
+    f = ScriptedFighter(FCFG, opp, seed=1)
+    f.set_move_timing({"moves": {904: {"n": 300, "total": 47, "n_total": 50, "startup": 12, "active_end": 14,
+                                       "proj": {"a": 2.4, "b": 13.0}}}, "follow": {}})
+    f.lead = 4
+    lines = [state(op={"x": 3.0}, timer=999)]
+    for k in range(40):
+        raw = state(op={"x": 3.0, "action_id": 904}, timer=1000 + k)
+        raw["projectiles"] = _pj(2.6 - 0.04 * k) if k >= 12 else []
+        lines.append(raw)
+    f.pt.flight = None
+    got = _run(f, lines)
+    assert not [d for _, d in got if d.rule in ("whiff_punish", "punish") and "dash" in (d.reason or "").lower()]

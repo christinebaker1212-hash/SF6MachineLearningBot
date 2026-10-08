@@ -1,6 +1,6 @@
 # Unfinished business (work in progress; read this when the user says "There's unfinished business")
 
-**Last updated: 2026-10-08, after step 2 (measuring) and step 3 (bug fixes a + b). Building step 4 next.** The session building 0.37.0 may run out of usage. When the user
+**Last updated: 2026-10-08, after step 4 (fireballs from projectile boxes). Building step 5 next.** The session building 0.37.0 may run out of usage. When the user
 says **"There's unfinished business"**, continue from "Next steps" below straight away, without asking the user to
 re-explain. Keep updating this file (and push it) after every step. Delete it (and its line in CLAUDE.md) once 0.37.0 is
 pushed and documented.
@@ -128,15 +128,27 @@ CA 3.6%; DI performed 0.5 a match.
     (held charge) starts its own chain.
   - Tests: `tests/test_0370.py` (3 tests; the interrupt test fails on 0.36.2).
 
+- Step 4, fireball play from the projectile's own hitbox (zoning.py, punish.py, neutral_policy.py, ryu.yaml):
+  - `zoning.opp_team`, `proj_gap`, `ZoningMixin._zn_box_track` (every line, from observe_line): `zn_box` = {gap, v (the
+    projectile's own world speed), eta, y0, y1}; a projectile box with no flight known starts one (`box_flights`); a
+    flight whose box vanished ends (`box_gone`). `_zn_state` uses the box (`Flight(0, ...)`, src "its hitbox").
+  - Parry from the box: `parry_min_dist_box` 1.5, `parry_early_box` 1, `parry_hold_box` 8 (ESTIMATES); the block margin
+    no longer cuts the walk short while a parry is due. Open-loop check on 40 fireball-heavy matches: parries on the
+    contact frame (perfect window 0-1) 64% (old model 29%), hit before the parry 8% (old 14%); 266 parries vs 82.
+  - OD Hadoken (`moves.hadoken_od`, `fireball.clash_od_value` 0.5) through a single-hit projectile (by name: not OD /
+    Lv2-3 / Charged / super), not in burnout, not against a fast one, keeps a Drive bar.
+  - punish engine: no window on a thrower while its projectile box is out (dash step-ins into fireballs).
+  - neutral_policy.style: no forward dash while a projectile is out; ADVANCE (out of range by 0.6+, the opponent's room
+    > 2.5: walk_fwd x1.3, walk_back x0.7), CHASE (behind with <= 30 s left), BURNOUT_PRESS (the opponent in burnout);
+    fighter.op_in_burnout, fighter._chasing set them.
+  - Tests: test_0370.py (10 total so far); test_0230's walk/parry test turns the OD answer off.
+
 ## Next steps (in order; the task list in the session mirrors these)
 2. Finish measuring (scripts were in the scratchpad; rebuild as needed): walking forward into attacks (bot id 9 / dir 6
    at the opponent's move start), far cr.HP (630) / sweep (643) / 5HP (608) / SA1 (1200) by start distance and result,
    sweeps on airborne opponents, pauses after 2MK (640) (bot free and idle 20+ frames then hit), drive spent while
    blocking, opponent burnout behaviour, timeouts, cross-ups, corner DIs, Drive Rush responses, combo variety.
-4. Fireball play from projectile boxes (zoning.py): exact arrival from the hitbox gap / speed; parry timed by it (no
-   "too near" refusal when the timing is exact? keep the throw risk in mind: 0.31.1 measured parries near the thrower
-   thrown 24-30%); never walk or dash into a projectile in flight; jump decided on the real projectile; OD Hadoken vs
-   single-hit projectiles; approach vs zoners (no timeouts).
+4. DONE (see above).
 5. Move answers (configs/fighter/ryu.yaml `move_answers`, fighter._move_answer / apply_move_answers): add the user's
    Shoryuken list (anti_air answers; non-airborne ones like Cobra Punch must make the Shoryuken active BEFORE the hit) and
    a new `do: di_react` (normals only if seen on frames <= 8; specials any time before the hit, if the DI's hit lands

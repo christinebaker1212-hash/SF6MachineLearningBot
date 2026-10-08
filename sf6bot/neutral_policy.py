@@ -100,6 +100,17 @@ STYLE_IN_RANGE_MAX_STARTUP = 8
 # ZONER_DIST, retreating is rarer and walking in more common between projectiles. ESTIMATES.
 ZONER_DIST = 2.5
 ZONER_FACTOR = {"walk_back": 0.3, "dash_back": 0.3, "jump_back": 0.3, "walk_fwd": 1.8, "idle": 0.6}
+# 0.37.0 (user: "Ryu needs to stay out of range, but also slowly approach his opponents to corner them"; "Several times an
+# opponent has learned that they can time Ryu out by zoning because he does not approach"; "When the enemy is in burnout,
+# pressure should increase"). MEASURED (0.36.1, 171 ranked matches): cornered 17% of the time vs the opponent 7% (in-game
+# stats: 8.3 s vs 2.9 s a match), 11 rounds lost or won on time, 18,599 frames with the opponent in burnout and 1 Drive
+# Impact on it. Factors are ESTIMATES.
+ADVANCE = {"walk_fwd": 1.3, "walk_back": 0.7}           # out of the opponent's range, its back not yet near its wall
+ADVANCE_ROOM = 2.5                                       # ... the opponent's room behind it above this
+ADVANCE_MARGIN = 0.6                                     # ... and this far outside its poke (0.20.0 hovers just outside)
+CHASE = {"walk_fwd": 2.0, "walk_back": 0.3, "dash_back": 0.3, "jump_back": 0.3, "idle": 0.6}   # behind, late in the round
+CHASE_SECONDS = 30.0
+BURNOUT_PRESS = {"walk_fwd": 1.8, "walk_back": 0.4, "dash_back": 0.4, "poke": 1.3, "idle": 0.6}
 OPP_POKE_DEFAULT = 1.5        # ESTIMATE: an opponent without a measured poke (most characters' longest normals ~1.3-1.6)
 THEIR_RANGE_MARGIN = 0.25     # they can step in as they press
 
@@ -226,6 +237,8 @@ class NeutralPolicy:
         self.range_margin = float(c.get("their_range_margin", THEIR_RANGE_MARGIN))
         self.denjin = False                   # the bot holds a Denjin stock (0.20.3): Denjin routes are usable
         self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
+        self.op_burnout = False               # 0.37.0: the opponent is in burnout (fighter)
+        self.chasing = False                  # 0.37.0: behind on health late in the round (fighter)
         # 0.20.7 (user: "It's using DI in fucking neutral"): the neutral policy never chooses a Drive Impact unless the
         # config turns it back on (policy.neutral_drive_impact)
         self.allow_di = bool(c.get("neutral_drive_impact", False))
@@ -308,6 +321,19 @@ class NeutralPolicy:
                     for n, k in facs.items():
                         f[it.INTENTS.index(n)] *= k
                     break
+        if self.op_projectile:
+            f[it.INTENTS.index("dash_fwd")] = 0.0        # 0.37.0: 58 projectile hits mid forward dash (0.36.1)
+        if self.chasing:
+            for n, k in CHASE.items():
+                f[it.INTENTS.index(n)] *= k
+        if self.op_burnout:
+            for n, k in BURNOUT_PRESS.items():
+                f[it.INTENTS.index(n)] *= k
+        if mx is not None and ox is not None and not self.safe:
+            room = it.WALL - ox if ox > mx else ox + it.WALL     # the opponent's room behind it
+            if room > ADVANCE_ROOM and abs(ox - mx) > self.their_reach() + ADVANCE_MARGIN:
+                for n, k in ADVANCE.items():
+                    f[it.INTENTS.index(n)] *= k
         if self.zoner and mx is not None and ox is not None and abs(ox - mx) > ZONER_DIST:
             # 0.25.0: against a projectile-heavy opponent, close the distance between its projectiles. MEASURED (61 ranked
             # matches on 0.24.x): 5-8 against opponents throwing > 8 projectiles a minute (36-7 against the rest); there
