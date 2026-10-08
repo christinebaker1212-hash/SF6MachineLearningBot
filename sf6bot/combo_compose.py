@@ -71,6 +71,13 @@ def body_class(character: str | None) -> str:
     return "big" if character in BIG_BODIES else "standard"
 
 
+# 0.41.0 (user: "proximity to the corner for the OD KK move left the followup whiffing extremely often because the opponent
+# would be on the wrong side"). MEASURED (fights_2, 170 OD High Blade Kicks): with the opponent's back within 2.87 of its
+# wall when the kick started, the Axe Kick after it hit 0 of 18 (the sides switched from 1.6 in), from 2.91 on 140 of 141.
+# Nothing is continued from these moves with the opponent's back closer than this.
+WALL_FOLLOW = {"OD High Blade Kick": 2.9}
+VARIETY_SHARE = 0.9    # 0.41.0: combos within this share of the best one take turns (vary)
+VARIETY_REPEAT = 0.85  # 0.41.0: each earlier use of a combo this match counts this much against it (up to 4)
 MIN_EV = 150           # a continuation of a move already out must be worth this much (expected hp, score) to start
 LINK_TRIGGERS = ("own_frame", "prev_free", "prev_neutral", "landing")
 
@@ -133,6 +140,12 @@ class Composer:
         self.cl = cl
         self.capcom, self.catalog = capcom, catalog
         self.rows = cl._rows_by_name(capcom)
+        import random
+        self.rng = random.Random()
+        self.used: Counter = Counter()                  # 0.41.0: transitions-path -> uses this match (vary)
+        self.variety = False                            # 0.41.0: on in matches (the fight session sets it)
+        self.wall_room: float | None = None             # 0.41.0: the opponent's back to its wall now (set by the fighter)
+        self.wall_follow: dict[str, float] = dict(WALL_FOLLOW)
         self.trans: dict[str, dict] = {}              # key -> transition
         self.by_prev: dict[str, list[dict]] = {}
         self.calib = 1.0
@@ -370,8 +383,14 @@ class Composer:
         d = dist - (0.0 if travel_done else float(self.travel.get(t["prev"] or "", 0.0)))
         return d > r
 
+    def wall_blocked(self, t: dict) -> bool:
+        """0.41.0: t continues a move that switches sides / carries past the opponent near its wall (WALL_FOLLOW)."""
+        lim = getattr(self, "wall_follow", WALL_FOLLOW).get(t.get("prev") or "")
+        room = getattr(self, "wall_room", None)
+        return lim is not None and room is not None and room < lim
+
     def out_of_reach(self, t: dict, dist: float | None, travel_done: bool = False) -> bool:
-        return self.too_far(t, dist) or self.reach_miss(t, dist, travel_done)
+        return self.too_far(t, dist) or self.reach_miss(t, dist, travel_done) or self.wall_blocked(t)
 
     def p(self, t: dict) -> float:
         lr = self.learned.get(t["key"]) or {}
@@ -420,7 +439,7 @@ class Composer:
                         continue
                     if s["uses"][t["key"]] >= MAX_REUSE:
                         continue
-                    if depth == 0 and self.out_of_reach(t, dist, travel_done):
+                    if (depth == 0 and self.out_of_reach(t, dist, travel_done)) or self.wall_blocked(t):
                         continue                  # the next step whiffs from this spacing (learned per body class /
                                                   # measured follow-up reach, 0.26.0)
                     if not self.rush_follow_ok(s["names"], t):
@@ -487,7 +506,7 @@ class Composer:
             if t is None:
                 return None
             pt = self.p(t)
-            if k == path[0] and self.out_of_reach(t, dist, travel_done):
+            if (k == path[0] and self.out_of_reach(t, dist, travel_done)) or self.wall_blocked(t):
                 pt *= OUT_OF_RANGE_P
             if last is not None:
                 pv = self.trans.get(last)
@@ -705,7 +724,7 @@ class Composer:
         cands = self.search(steps0, None, drive=max(0.0, (num(me.get("drive")) or 0) - reserve - 1),
                             sup=num(me.get("super")) or 0, corner=cornered(op, me), hit_ok=hit_ok,
                             opp_hp=num(op.get("hp")), beam=60, dist=player_distance(me, op), travel_done=travel_done)
-        for c in cands[:4]:
+        for c in self.vary(cands)[:4]:
             if c["ev"] < min_ev:
                 return None
             e = self.entry(res0, steps0, c)
@@ -713,11 +732,29 @@ class Composer:
                 return e
         return None
 
+    def vary(self, cands: list[dict]) -> list[dict]:
+        """0.41.0 (user: "combo variety also needs work ... same route every time"): among the candidates worth at least
+        VARIETY_SHARE of the best (expected value), one drawn by value x VARIETY_REPEAT per earlier use this match goes
+        first. A kill keeps its large bonus in the value, so it still wins."""
+        if not getattr(self, "variety", False) or len(cands) < 2 or (cands[0].get("ev") or 0) <= 0 \
+                or getattr(self, "rng", None) is None:
+            return cands
+        top = cands[0]["ev"]
+        pool = [c for c in cands[:6] if (c.get("ev") or 0) >= VARIETY_SHARE * top]
+        if len(pool) < 2:
+            return cands
+        used = getattr(self, "used", None) or {}
+        w = [c["ev"] * VARIETY_REPEAT ** min(used.get(tuple(c.get("path") or ()), 0), 4) for c in pool]
+        pick = self.rng.choices(pool, w)[0]
+        return [pick] + [c for c in cands if c is not pick]
+
     # ---- outcomes ----------------------------------------------------------------------------------------------
     def record(self, e: dict, res: dict) -> None:
         """Per-transition results of a performed route: a transition was tried once the move before it worked (hit, or
         came out for a Drive Rush), and worked when its own move did."""
         edges, st = e.get("edges"), res.get("steps") or []
+        if edges and getattr(self, "used", None) is not None:
+            self.used[tuple(edges)] += 1
         psteps = (e.get("plan") or {}).get("steps") or []
         if not edges or len(psteps) != len(st) or len(edges) != len(psteps) - 1 \
                 or [s.get("name") for s in psteps] != [s.get("name") for s in st]:

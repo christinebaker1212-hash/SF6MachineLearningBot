@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.41.0 (2026-10-08): corner Drive Impacts answered out of blockstun (a 0.25.0 guard-hold bug held block through them); the DI crumple cash-out no longer loses its timing; whiffed DIs punished; combos and punishes vary; no OD High Blade Kick follow-up near the wall; the rush check is an adaptive mix; buttons beaten by a poke from a distance are dropped there.**
 - **0.40.0 (2026-10-08): the bot remembers what each opponent beat this match (losing buttons per distance, walk-ins into pokes, the fireball jump-in, the rush check) and stops doing it, through rematches; no parry guesses.**
 - **0.39.0 (2026-10-08): the DI-back waits a human reaction time (default 15-21 frames of the opponent's DI, never past 22); a setting on the panel and `fight --di-delay`.**
 - **0.38.2 (2026-10-08): fixes 0.38.1's regression: every sequence's last input was cut short (walks lasted 1-3 frames; he stood in place).**
@@ -4857,6 +4858,65 @@ from the metas; scripts in the session scratchpad, not kept). `human_limits` was
 - Summary `adapt` {burned, walk_danger, jump_burns, rush_burns, learned}; thoughts: "What X beat this match, and what I
   stopped doing: ...".
 - Tests `tests/test_0400.py`. Not verified in game.
+
+## 0.41.0: corner Drive Impacts, punishes after Drive Impacts, combo variety, the rush mix (user, 2026-10-08)
+User (before custom rooms): "recursively look for potential bugs introduced, and look for answers to attacks that consistently
+hit it"; "Checking Drive Rush will always be useful, so it shouldn't completely stop doing it, it should be less predictable
+with it ... program adaptation into it"; "Drive Impacts are NOT being reacted to in the corner, very consistently. I need to
+step in or else it won't. Additionally, after a DI, a proper punish is not being performed" (asked: the bot's DI landing, the
+opponent's DI blocked and whiffed); "Combo variety also needs work" (asked: the same route every time, the wrong route for the
+situation); "proximity to the corner for the OD KK move left the followup whiffing extremely often because the opponent would
+be on the wrong side". MEASURED on fights_2 (59 finished matches, 0.38.0-0.39.0) and `decide()` replayed over them (open
+loop). All MOCK / replay-tested (`tests/test_0410.py`); nothing verified in game.
+### Corner Drive Impacts (a bug since 0.25.0)
+- 35 opponent DIs with the bot's back within 2.5 of the wall: 3 DI-backs (midscreen 12 of 23). 14 started while the bot was in
+  blockstun from the move before (a DI after a blockstring); the bot was free on the DI's frame 3-24, the DI connected on 27.
+- Cause: the guard hold (0.25.0, "keep blocking a move that can still hit") took the blockstun of the PREVIOUS move as the
+  DI's and held block through the whole DI ("Drive Impact still active until its frame 27"), before the DI-back rule ran.
+- Now: the guard hold only keeps blocking the move whose hit put the bot in blockstun (`_bs_rise_onset`, or a move continuing
+  under another id), never a Drive Impact. In blockstun, the DI-back (buttons only) is sent so it reaches the game on the
+  bot's first free frame (`_di_back_buffered`, timed, no busy gate), when that frame is the DI's frame 25 or earlier
+  (`di_reaction.buffer_max`) and the 0.39.0 reaction delay allows it.
+- In burnout (6 of the 9 blockstun cases): the burnout Super Art (0.20.0) now goes in during the blockstun too, its motion
+  timed so the button lands on the first free frame, SA1 only when its invincibility (1-8) still covers the DI's hit, else
+  SA3 (1-16). Before, its 236236 motion started after the bot was free and the button came after the hit.
+- The lethal skip (block when losing the exchange would kill, 0.20.0) is off with the bot's back within
+  `di_rules.splat_wall_dist` 2.0: a blocked DI wall-splats there (2 corner DIs at 465 / 2,975 hp were blocked and splatted).
+- `can_spend` refuses any Drive spend while in burnout (the gauge refilling): a DI-back there never comes out.
+- Replay: all 14 blockstun corner DIs now get a DI-back on the first free frame or the burnout super.
+### After Drive Impacts
+- The bot's DI crumple (69 in fights_2): the follow-up returned nothing while it waited for its frame, so the neutral policy
+  walked, dashed, crouch-jabbed or parried during the bot's own DI animation and the timing was lost (0 damage with 3 bars;
+  opponents left at 100 / 380 / 760 hp). Crumples beyond 1.1 (1.3-1.8: a DI from range) got no follow-up at all. Now:
+  `crumple_wait` holds everything until the follow-up's frame; beyond 1.1 (up to `supers.crumple_walk_max` 2.3) the bot walks
+  in (`crumple_walk`), or throws SA1 from there when it kills (0.8 of its listed damage, scaled after the DI).
+- The opponent's Drive Impact whiffing near the bot: the punish engine never opened a window for any Drive Impact (it was
+  "the DI-back's rule"); a DI jumped in burnout whiffed next to the bot, which walked and dashed. Now a DI past its active
+  frames without touching the bot is a whiff window (Capcom: start-up 26, active 26-27, total ~62 when nothing better is
+  known). A blocked DI is not: the bot is in a long blockstun (MEASURED, the opponent free first).
+### Combo variety and fit
+- 41 of 69 crumples were cashed out with the same 5HP > OD High Blade Kick > Axe Kick route. In matches (the session sets
+  `variety`): punish-engine options get one log-normal factor per option per window (`punish.variety.sigma` 0.12) and lose
+  x0.9 per earlier use this match; the combo composer's best combo is drawn among those within 90% of the best, x0.85 per
+  earlier use (`combo_compose.VARIETY_*`). Kills keep their value. Off in tests (deterministic).
+- OD High Blade Kick near the wall (MEASURED, 170 in fights_2): with the opponent's back within 2.87 of its wall when it
+  started, the Axe Kick after it hit 0 of 18 (the sides switched from 1.6 in); from 2.91 on, 140 of 141. Nothing is continued
+  from it there (`combo_compose.WALL_FOLLOW` 2.9): composer searches, re-plans and book routes in the punish engine.
+### The Drive Rush check mixes and adapts (`adapt.MatchMemory.rush_answer`)
+- 0.40.0 stopped checking after one loss. Now each rush is answered with a check or a block, drawn from what this opponent
+  does out of its rushes this match (strike / throw / stop short; prior from 0.36.1: a rushed normal ~93%, a throw ~7%) times
+  a payoff table (ESTIMATES), blended with what each answer actually scored here. p(check) = logistic, always 15-85%.
+  The check also meets the rush up to `rush_check.vary_dist` 0.12 closer (drawn per rush), with either button when both fit.
+  Summary `adapt.rush_seen`, `rush_check_p`.
+### Attacks that consistently hit (fights_2, openings by an opponent normal)
+- 241 (325k hp, ~half) came with the bot's own button out in their start-up (2MK 42, 2LP 29, L Shoryuken 22, 5LK 22, 5MP 18);
+  134 (145k) during a block / hit reaction; 53 walking forward. Top moves: Manon 5MP 23 (24.6k), Cammy 2MP / 2MK, Ryu 2MK,
+  A.K.I. 5MP, E. Honda 984, Viper 2MK, Ryu 5LK (the light-kick match).
+- New in the match memory: an opponent normal that beat a button of the bot's from about the same distance twice
+  (`adapt.poke_after`, band 0.2): no slow buttons (start-up over 5) or walks in from there (x0.3), crouch-blocking and walking
+  back more, so its poke whiffs into the punish engine. Kept for a rematch.
+### Not changed
+- E. Honda's 984 (14 hits), Juri's Senkai Kick, Lily's specials: no move answers yet.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

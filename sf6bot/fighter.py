@@ -752,6 +752,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         # 0.40.0: what this opponent has beaten this match (adapt.py); the fight loop hands a rematch the same memory
         from .adapt import MatchMemory
         self.memory = MatchMemory(self.c.get("adapt"))
+        self.memory.rush_ids = set(RUSH_IDS)              # set_opponent_rush narrows them per character
         self.memory.names = {m["id"]: m.get("name") for m in self.own if isinstance(m.get("id"), int)}
         if self.policy is not None:
             self.policy.memory = self.memory
@@ -800,6 +801,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.human = None
         self.op_onset = None                 # game frame the opponent's current action began
         self._op_char, self.op_rush, self.op_rush_ids = None, None, set(RUSH_IDS)   # 0.37.1: set_opponent_rush
+        self._rc_ans = (None, None, 0.0)                 # 0.41.0: (rush onset, check / block, meeting-point offset)
         self._rc_seen, self._rc_x0 = None, None
         self._onset_act = None
         self._prev_op_act = None             # 0.25.0 the opponent's action before its current one
@@ -812,6 +814,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._op_box_poke = None
         self._cur_op_blocked = self._prev_op_blocked = False   # 0.37.0 the current / previous action was blocked by the bot
         self._me_bs_prev = 0
+        self._bs_rise_onset = None
         self.op_charge_revs: list = []       # 0.29.0 opponent_charge_reversals
         self.op_fb_beaters: list = []        # 0.38.0 opponent_fireball_beaters
         self.op_rev_supers: list = []        # 0.25.0 opponent_reversal_supers: invincible Super Arts / Critical Arts
@@ -911,6 +914,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return True
         if drive is None:
             return False
+        if self.in_burnout:
+            return False          # 0.41.0: the gauge refilling after a burnout is not spendable (no DI-back, OD or rush)
         res = self.c.get("drive_reserve", 0) if reserve is None else reserve
         return drive - cost > res or lethal
 
@@ -962,6 +967,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if self._now - self.op_onset >= 28 or (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("hitstun")) or 0):
             return None
         if (_num(me.get("blockstun")) or 0) > 0:
+            db = self._di_back_buffered(me, op)
+            if db is None:
+                dist_ = player_distance(me, op)
+                db = self._di_burnout_super(me, op, dist_, info) if dist_ is not None else None
+            if db is not None:
+                return db
             self.di_stats["guarded"] = self.di_stats.get("guarded", 0) + (1 if self._dg_for != self.op_onset else 0)
             self._dg_for = self.op_onset
             return Decision("hold", direction=1, rule="di_block",
@@ -982,9 +993,6 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         a = op.get("action_id")
         if not rc.get("enabled", True) or a not in self.op_rush_ids or self._rc_for == self.op_onset:
             return None
-        if not self.memory.rush_check_ok():
-            # 0.40.0: this opponent beat the check (a rush into a throw, or the jab punished): block the rush instead
-            return None
         mx, ox = _num(me.get("x")), _num(op.get("x"))
         if mx is None or ox is None:
             return None
@@ -994,6 +1002,18 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if (_num(me.get("y")) or 0.0) > 0.05 or (_num(me.get("blockstun")) or 0) or (_num(me.get("hitstun")) or 0) \
                 or self.busy(me) is not None or not self.vel_ok:
             return None
+        if self._rc_ans[0] != self.op_onset:
+            # 0.41.0 (user: "it shouldn't completely stop doing it, it should be less predictable with it ... program
+            # adaptation into it"): once per rush, check or block, drawn from what this opponent does out of its rushes
+            # and how each answer scored this match (adapt.MatchMemory.rush_answer); the check's meeting point varies too
+            ans_ = self.memory.rush_answer(self.rng)
+            self._rc_ans = (self.op_onset, ans_, self.rng.uniform(0.0, float(rc.get("vary_dist", 0.12))))
+            self.memory.note_rush(self._line_t, ans_, me, op)
+            k_ = "checks_drawn" if ans_ == "check" else "blocks_drawn"
+            self.rush_stats[k_] = self.rush_stats.get(k_, 0) + 1
+        if self._rc_ans[1] != "check":
+            return None
+        vary = self._rc_ans[2]
         now = self._op_hist[-1][0] if self._op_hist else None
         t = now - self.op_onset if isinstance(now, int) and isinstance(self.op_onset, int) else None
         travel = (self.op_rush or {}).get("travel") or []
@@ -1017,20 +1037,24 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             move = lambda k: ahead(travel, t, k)            # noqa: E731
             how = f"{self._op_char or 'its'} rush curve, frame {t}"
         L = self.lead + self.stale
+        fits = []
         for o in rc.get("moves") or []:
             su = int(o.get("startup", 6))
             reach = self._pe_reach(o.get("id"), (self.c.get("punish", {}).get("reach_fallback") or {}).get(o["name"], 1.2))
             if o.get("max_reach") is not None:
                 reach = min(reach, float(o["max_reach"]))
             d_hit = dist - move(L + seq_prefix(o["seq"]) + su - 1)
-            if d_hit <= reach and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
-                self._rc_for = self.op_onset
-                self.rush_stats["checked"] = self.rush_stats.get("checked", 0) + 1
-                self.memory.note_rush_check(self._line_t)
-                return Decision("seq", o["name"], o["seq"], rule="rush_check", timed=True,
-                                reason=f"Drive Rush coming in ({how}, {dist:.2f} away): {o['name']} meets it at "
-                                       f"{max(0.0, d_hit):.2f}")
-        return None
+            if d_hit <= reach - vary and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
+                fits.append((o, d_hit))
+        if not fits:
+            return None
+        o, d_hit = self.rng.choice(fits)                   # 0.41.0: either button when both meet it
+        self._rc_for = self.op_onset
+        self.rush_stats["checked"] = self.rush_stats.get("checked", 0) + 1
+        self.memory.note_rush_check(self._line_t)
+        return Decision("seq", o["name"], o["seq"], rule="rush_check", timed=True,
+                        reason=f"Drive Rush coming in ({how}, {dist:.2f} away): {o['name']} meets it at "
+                               f"{max(0.0, d_hit):.2f} (check chance now {self.memory.rush_check_p():.0%})")
 
     def _hitbox_meets(self, me: dict, op: dict, start: int, frames: list, side: float | None = None,
                       stop_at: float | None = None) -> int | None:
@@ -1141,12 +1165,17 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         oa = op.get("action_id")
         if not self._attack(oa) or not isinstance(self._now, int) or self.op_onset is None:
             return None
-        if (_num(me.get("blockstun")) or 0) > 0:
+        if (isinstance(oa, int) and 850 <= oa < 870) or self.opp.get(oa, {}).get("di"):
+            return None           # 0.41.0: a Drive Impact is rule 0d / 3's (DI-back), never a block to keep
+        c = self.chain
+        cont = c is not None and c.get("cur") == oa and c.get("head") != oa and not c.get("mid")
+        if (_num(me.get("blockstun")) or 0) > 0 and (getattr(self, "_bs_rise_onset", None) == self.op_onset or cont):
+            # 0.41.0: only the move that put the bot in blockstun (MEASURED fights_2: a DI started during the blockstun of
+            # the previous move took that blockstun as its own and held block through it: 0 DI-backs in 32 corner DIs)
             self._gh_onset = self.op_onset
         if getattr(self, "_gh_onset", None) != self.op_onset:
             return None
-        c = self.chain
-        if c is not None and c.get("cur") == oa and c.get("head") != oa and not c.get("mid"):
+        if cont:
             # 0.34.0: a move that went on under another id (Ken's blocked SA2: 1210 -> 1211): the first id's numbers and
             # frames counted across both; the exported frame restarts at the new id and held the block through the whole
             # recovery (the user's staged fight: no punish after a blocked SA2)
@@ -1388,6 +1417,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._op_char = opponent
         self.op_rush = profile(opponent)
         self.op_rush_ids = rush_ids(opponent)
+        if getattr(self, "memory", None) is not None:
+            self.memory.rush_ids = set(RUSH_IDS)              # set_opponent_rush narrows them per character
 
     def set_opponent_throws(self, opponent: str | None) -> None:
         """0.31.1: the opponent character's own throw ids (throws.py, MEASURED; Guile's are 700 / 701, victim 706 / 710).
@@ -1681,11 +1712,43 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         bs = _num(me.get("blockstun")) or 0
         if bs > 0 and self._me_bs_prev <= 0:
             self._cur_op_blocked = True
+        if bs > self._me_bs_prev:
+            self._bs_rise_onset = self.op_onset           # 0.41.0: the move whose hit put the bot in (more) blockstun
         self._me_bs_prev = bs
 
     def _ok(self, kind: str) -> bool:
         """Human limits: has a human reaction time passed since the opponent's current action began?"""
         return self.human is None or self.human.ready(kind, self.op_onset, self._now, self.lead)
+
+    def _di_back_buffered(self, me: dict, op: dict) -> Decision | None:
+        """0.41.0 (user: "Drive Impacts are NOT being reacted to in the corner, very consistently"). MEASURED (fights_2, 59
+        matches): 35 opponent Drive Impacts with the bot's back within 2.5 of the wall, 3 DI-backs; 14 of them started while
+        the bot was in blockstun from the move before (a DI after a blockstring), the bot free on the DI's frame 3-24 and
+        the DI connecting on its frame 27. A Drive Impact is buttons only (HP+HK, no motion): pressed so it reaches the game
+        on the bot's first free frame, its armor is up before their hit (frame 26, Capcom), like the DI-back from neutral.
+        The human reaction delay (0.39.0) still applies; the latest free frame it is tried on is `di_reaction.buffer_max`."""
+        a = op.get("action_id")
+        if a == self.di_handled_id or not isinstance(self._now, int) or not isinstance(self.op_onset, int):
+            return None
+        dist = player_distance(me, op)
+        if dist is None or dist >= 3.0 or not self.can_spend(me, "drive_impact", reserve=0):
+            return None
+        free_at = self._now - self.op_onset + 1 + stun_left(me)          # their DI frame on the bot's first free frame
+        if free_at > int((self.c.get("di_reaction") or {}).get("buffer_max", 25)):
+            return None
+        land = self._di_since()
+        if land is None or land < free_at - 1:
+            return None                                                 # not yet: it must come out on the free frame
+        if ((_num(me.get("hp")) or 0) <= self._di_back_risk(op) and not self._di_splat_risk(me, op)) \
+                or not self._di_react_ready():
+            return None
+        self.di_handled_id = a
+        self.di_stats["di_back"] += 1
+        self.di_stats["di_back_buffered"] = self.di_stats.get("di_back_buffered", 0) + 1
+        d = self._move("drive_impact", "di_reaction", f"opponent Drive Impact during my blockstun: DI-back on my first "
+                                                       f"free frame (their frame {free_at})")
+        d.timed = True
+        return d
 
     def _di_since(self) -> int | None:
         """0.39.0: the game frame of the opponent's Drive Impact the bot's DI would reach the game on (1 = its first frame),
@@ -1869,7 +1932,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 and self.can_spend(me, "drive_impact", reserve=0)):
             # 0.20.0 (user: "Always DI back unless the amount of health on a counter DI would kill it")
             risk = self._di_back_risk(op)
-            if (_num(me.get("hp")) or 0) <= risk:
+            if (_num(me.get("hp")) or 0) <= risk and not self._di_splat_risk(me, op):
                 self.di_handled_id = op_act
                 self.di_stats["di_back_skipped_lethal"] += 1
                 return Decision("hold", direction=4, rule="di_back_skipped",
@@ -2619,9 +2682,25 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         """Bars are cheap now (a match-point round or low health): use them rather than keep them."""
         return self._bar_value(me) < 0.5 * float((self.c.get("meter") or {}).get("bar_value", 250))
 
-    def _price_bars(self, me: dict) -> None:
+    def _price_bars(self, me: dict, op: dict | None = None) -> None:
         if self.composer is not None:
             self.composer.bar_value = self._bar_value(me)
+            self._wall_room(me, op)
+
+    def _wall_room(self, me: dict, op: dict | None = None) -> None:
+        """0.41.0: the opponent's back to its wall, for the composer's WALL_FOLLOW (no OD High Blade Kick follow-up there)."""
+        if self.composer is None:
+            return
+        if op is None:
+            cur = getattr(self, "_cur", None)
+            raw = cur[0] if cur else {}
+            op = raw.get("p2") if raw.get("p1") is me else raw.get("p1")
+        mx, ox = _num(me.get("x")), _num((op or {}).get("x"))
+        if mx is None or ox is None:
+            self.composer.wall_room = None
+            return
+        from .intents import WALL
+        self.composer.wall_room = (WALL - ox) if ox > mx else (ox + WALL)
 
     def _super_confirm(self, me: dict, op: dict, ch: dict) -> dict | None:
         """0.18.1: a 2MK chosen in neutral (alone or as a route starter) is confirmed into SA3 with a full meter, or into
@@ -2661,10 +2740,36 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if self._crumple_t0 is None:
             self._crumple_t0, self._crumple_done = tmr, False
             self.super_stats["stuns_seen"] = self.super_stats.get("stuns_seen", 0) + 1
-        if self._crumple_done or dist > float(sc.get("crumple_max_dist", 1.1)):
+        if self._crumple_done:
             return None
         aid = me.get("action_id")
-        if isinstance(aid, int) and 850 <= aid < 870:    # still in the bot's own Drive Impact
+        in_di = isinstance(aid, int) and 850 <= aid < 870
+        # 0.41.0 (user: "after a DI, a proper punish is not being performed"). MEASURED (fights_2, 69 crumples): the
+        # follow-up returned nothing while it waited for its frame, so the neutral policy walked, dashed, crouch-jabbed or
+        # parried during the bot's own DI animation and the timing was lost (0 damage with 3 bars, an opponent at 100 /
+        # 380 / 760 hp left alive); crumples farther than 1.1 (1.3-1.8: a DI from range) got no follow-up at all.
+        wait = Decision("release", rule="crumple_wait", reason="opponent crumpled: waiting for the follow-up's frame")
+        if dist > float(sc.get("crumple_max_dist", 1.1)):
+            if dist > float(sc.get("crumple_walk_max", 2.3)):
+                return None
+            sa1, meter_, hp_ = self._super("sa1"), _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+            if sa1 and meter_ >= int(sa1.get("super", 10000)) and 0.8 * float(sa1.get("damage") or 0) >= hp_ > 0:
+                # a projectile super reaches from here and kills (scaled after the DI: 0.8 of its listed damage)
+                rem_ = int(sc.get("di_recovery_frames", 85)) - (tmr - self._crumple_t0) if in_di else 0
+                if not in_di and self.busy(me) is not None:
+                    return None
+                if rem_ > seq_prefix(sa1["seq"]) + self.lead + self.stale:
+                    return wait
+                self._crumple_done = True
+                self.super_stats["crumple"][sa1["name"]] = self.super_stats["crumple"].get(sa1["name"], 0) + 1
+                return Decision("seq", sa1["name"], sa1["seq"], rule="crumple_followup", timed=True,
+                                reason=f"opponent crumpled at {dist:.2f} with {int(hp_)} hp: {sa1['name']} kills from here")
+            if in_di or self.busy(me) is not None:
+                return wait if in_di else None
+            self.super_stats["crumple_walk"] = self.super_stats.get("crumple_walk", 0) + 1
+            return Decision("hold", direction=6, rule="crumple_walk",
+                            reason=f"opponent crumpled at {dist:.2f}: walking in for the follow-up")
+        if in_di:                                # still in the bot's own Drive Impact
             rem0 = int(sc.get("di_recovery_frames", 85)) - (tmr - self._crumple_t0)
         elif self.busy(me) is None:
             rem0 = 0
@@ -2672,7 +2777,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         jr = self._stun_jump_in(me, op, dist, tmr, rem0, sc)
         if jr == "wait":
-            return None                          # a jump-in route will go out once the bot is free: no super now
+            return wait                          # a jump-in route will go out once the bot is free: no super now
         if jr is not None:
             return jr
         meter, hp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
@@ -2685,10 +2790,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if self._crumple_opts is None or self._crumple_opts[0] != self._crumple_t0:
                 self._crumple_opts = (self._crumple_t0, self._crumple_options(me, op, w))
             opts = self._crumple_opts[1]
+            w["vkey"] = ("crumple", self._crumple_t0)
             plan = self._pe_plan(me, op, dist, w, options=opts) if opts else None
             if plan is not None:
                 if plan["send_in"] > 0:
-                    return None
+                    return wait
                 o = plan["opt"]
                 self._crumple_done = True
                 self.stun_stats["super"] += 1
@@ -2698,12 +2804,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 bars = int(meter) // 10000
                 why = (f"crumple after my Drive Impact at {dist:.2f}, Super {bars}: "
                        f"{o['name']} (about {o.get('est')} damage if it all hits; best of {len(opts)} I can afford)")
+                self._pe_note_use(o["name"])
                 if o.get("entry") is not None:
                     return Decision("route", o["entry"]["route"], route=o["entry"], rule="crumple_followup", reason=why,
                                     timed=True)
                 return Decision("seq", o["name"], o["seq"], rule="crumple_followup", reason=why, timed=True)
             if opts:
-                return None                              # nothing fits yet: decide again on the next line
+                return wait if in_di else None           # nothing fits yet: decide again on the next line
         pick = None
         for key in ("sa3", "sa1"):
             m = self._super(key)
@@ -2719,7 +2826,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             plan = self._pe_plan(me, op, dist, w, kinds=("route",))
             if plan is not None:
                 if plan["send_in"] > 0:
-                    return None
+                    return wait
                 o = plan["opt"]
                 self._crumple_done = True
                 self.stun_stats["super"] += 1
@@ -2733,7 +2840,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if pick is None:
             return None
         if rem0 > seq_prefix(pick["seq"]) + self.lead + self.stale:
-            return None
+            return wait if in_di else None
         self._crumple_done = True
         self.stun_stats["super"] += 1
         self.super_stats["crumple"][pick["name"]] = self.super_stats["crumple"].get(pick["name"], 0) + 1
@@ -2749,6 +2856,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         from .punish import ROUTE_DELAY
         from .route_book import value as route_value
         comp = self.composer
+        self._wall_room(me, op)
         learned = self.exp.routes() if self.exp else None
         meter, hp = _num(me.get("super")) or 0, _num(op.get("hp"))
         out, seen = [], set()
@@ -3286,6 +3394,17 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         Impact on reaction. (The DI-back answer to the opponent's own Drive Impact is not affected.)"""
         return (_num(op.get("super")) or 0) >= float((self.c.get("di_rules") or {}).get("opp_super_min", 10000))
 
+    def _di_splat_risk(self, me: dict, op: dict) -> bool:
+        """0.41.0: the bot's back near its wall, where a BLOCKED Drive Impact wall-splats it (a stun and the opponent's full
+        combo, the same as losing the exchange): blocking is no safer there, so the lethal skip does not apply. MEASURED
+        (fights_2): 2 corner DIs with the bot at 465 / 2,975 hp were blocked by the lethal skip and wall-splatted."""
+        mx, ox = _num(me.get("x")), _num(op.get("x"))
+        if mx is None or ox is None:
+            return False
+        from .intents import WALL
+        behind = WALL - mx if mx > ox else mx + WALL
+        return behind <= float((self.c.get("di_rules") or {}).get("splat_wall_dist", 2.0))
+
     def _di_back_risk(self, op: dict) -> int:
         """What losing a Drive Impact exchange costs: the Drive Impact's hit plus the opponent's best follow-up with its
         meter now (assess.threat: combos seen from that character / Capcom supers); a default when nothing is known."""
@@ -3310,11 +3429,31 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         meter = _num(me.get("super")) or 0
         pick = next((m for m in (self._super("sa1"), self._super("sa3"))
                      if m and meter >= int(m.get("super", 30000))), None)
-        if pick is None or self.busy(me) is not None or not self._ok("di"):
+        if pick is None or not self._ok("di"):
+            return None
+        timed = False
+        sl = stun_left(me)
+        if sl > 0:
+            # 0.41.0: in blockstun (the corner DI after a blockstring, MEASURED fights_2: 6 of 9 such DIs came with the bot in
+            # burnout): the super's motion goes in during the stun so its button lands on the first free frame. Sent
+            # after the bot was free (before), the 236236 motion put the button past the DI's hit on its frame 27.
+            if (_num(me.get("hitstun")) or 0) > 0 or not isinstance(self._now, int) or not isinstance(self.op_onset, int):
+                return None
+            free_at = self._now - self.op_onset + 1 + sl
+            inv = {"sa1": 8, "sa3": 16}               # Capcom: invincible frames 1-8 (SA1), 1-16 (SA3)
+            ok = [m for k, m in (("sa1", self._super("sa1")), ("sa3", self._super("sa3")))
+                  if m and meter >= int(m.get("super", 30000)) and free_at + inv[k] - 1 >= 27]
+            pick = ok[0] if ok else None
+            if pick is None:
+                return None
+            if seq_prefix(pick["seq"]) + self.lead + self.stale + 1 < sl:
+                return None                              # not yet: the button must land on the first free frame
+            timed = True
+        elif self.busy(me) is not None:
             return None
         self._burnout_super_for = self.op_onset
         self.di_stats["burnout_super"] += 1
-        return Decision("seq", pick["name"], pick["seq"], rule="di_burnout_super",
+        return Decision("seq", pick["name"], pick["seq"], rule="di_burnout_super", timed=timed,
                         reason=f"opponent Drive Impact with me in burnout and the wall {behind:.2f} behind: {pick['name']}")
 
     def _di_burnout_jump(self, me: dict, op: dict, dist: float, info: dict) -> Decision | None:
@@ -4302,7 +4441,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if e is None or self.composer is None:
             return None
         from .combo_compose import REF_LEAD, shift_fixed
-        self._price_bars(raw.get(me_key) or {})
+        self._price_bars(raw.get(me_key) or {}, raw.get(op_key) or {})
         new = self.composer.best_tail(e, k, raw.get(me_key) or {}, raw.get(op_key) or {},
                                       reserve=self.c.get("drive_reserve", 0))
         if new is None:
@@ -5716,7 +5855,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.own_hit = load_own_hit_profiles(ds_root, summary["character"])
                 summary["hitbox_profiles"] = len(fighter.own_hit)
                 fighter.composer = composer
+                fighter.variety = bool(((fcfg.get("punish") or {}).get("variety") or {}).get("enabled", True))
                 if composer is not None:
+                    composer.variety = fighter.variety
                     cr_ = fcfg.get("combo_reach") or {}
                     composer.follow_reach = {k: float(v) for k, v in (cr_.get("follow") or {}).items()}
                     composer.travel = {k: float(v) for k, v in (cr_.get("travel") or {}).items()}

@@ -34,6 +34,8 @@ punishes by a sampled reaction time; blocked punishes are predictions and are no
 """
 from __future__ import annotations
 
+import math
+
 import re
 
 from .game_state import num
@@ -389,8 +391,16 @@ class PunishEngine:
         if c["contact"] == "hit":
             return None                                    # the bot was hit: a combo, not a punish
         k = self._pe_know(c["head"])
-        if k.get("di"):
-            return None                                    # its own rule (the DI-back)
+        if k.get("di") or (isinstance(c["head"], int) and 850 <= c["head"] < 870 and c["head"] != 852):
+            # its own rule (the DI-back) while it can still hit; 0.41.0 (user: "after a DI, a proper punish is not being
+            # performed"; MEASURED fights_2: a Drive Impact jumped in burnout whiffed next to the bot, and it walked,
+            # dashed and threw instead): once past its active frames without touching the bot, a whiff to punish
+            # Capcom (every character's Drive Impact): start-up 26, active 26-27, total ~62 when nothing better is known
+            k = dict(k, startup=k.get("startup") if isinstance(k.get("startup"), int) else 26,
+                     active_end=k.get("active_end") if isinstance(k.get("active_end"), int) else 27,
+                     total=k.get("total") if isinstance(k.get("total"), int) else 62)
+            if c["contact"] is not None or c.get("mid") or c["el"] < k["active_end"]:
+                return None
         if k.get("cmd_grab") and c["contact"] is not None:
             return None                                    # a grab that connected (rule 1d / 00 had their turn)
         tmr = raw.get("stage_timer")
@@ -627,7 +637,7 @@ class PunishEngine:
         if c.get("comp_opts") is not None:
             return c["comp_opts"]
         if hasattr(self, "_price_bars"):
-            self._price_bars(me)
+            self._price_bars(me, op)
         out = []
         for name in list(comp.starters):
             if not name.startswith(("Standing ", "Crouching ")):
@@ -665,9 +675,12 @@ class PunishEngine:
         else:
             walk_v = 0.047
         startup = w["kind"] == "startup"
+        room = self._pe_wall_room(me, op)
         for o in opts:
             if startup and (o.get("travel") or o.get("override")):
                 continue                                    # a projectile can't arrive in a start-up
+            if o["kind"] == "route" and not self._pe_wall_ok(o.get("entry"), room):
+                continue                                    # 0.41.0: OD High Blade Kick's follow-up near the wall
             gap0 = self._pe_gap(o, me, op, dist)
             for how, pre_f, pre_d, _ in steps:
                 gap = gap0
@@ -723,6 +736,7 @@ class PunishEngine:
                     else pr * o["value"] - (1.0 - pr) * o["risk"]
                 if ev <= 0:
                     continue
+                ev *= self._pe_variety(o, w)
                 cand = {"opt": o, "how": how, "add": add, "pre": pre, "land": land, "margin": margin, "ev": ev,
                         "send_in": land - delay - p, "prob": pr}
                 if how == "rush":
@@ -738,6 +752,44 @@ class PunishEngine:
             self.pe_stats["raw_super_skipped"] = self.pe_stats.get("raw_super_skipped", 0) + 1
             return best_route
         return best
+
+    def _pe_variety(self, o: dict, w: dict) -> float:
+        """0.41.0 (user: combo variety, "same route every time"). MEASURED (fights_2): 41 of 69 crumples cashed out with
+        the same 5HP > OD High Blade Kick > Axe Kick route. Each window draws one factor per option (log-normal, sigma
+        `punish.variety.sigma`), and an option already used this match is worth `repeat` per use (up to 4): options of
+        about the same value take turns, a much better one (or a kill, valued 1e6) still wins."""
+        vc = (self.c.get("punish") or {}).get("variety") or {}
+        if not getattr(self, "variety", False) or not vc.get("enabled", True) or (o.get("value") or 0) >= 1e6:
+            return 1.0                            # (on in matches: the fight session sets `variety`)
+        key = w.get("vkey") or id(w.get("chain"))
+        if getattr(self, "_pe_vkey", None) != key:
+            self._pe_vkey, self._pe_noise = key, {}
+        nz = self._pe_noise.get(o["name"])
+        if nz is None:
+            nz = self._pe_noise[o["name"]] = math.exp(self.rng.gauss(0.0, float(vc.get("sigma", 0.12))))
+        used = (getattr(self, "pe_used", None) or {}).get(o["name"], 0)
+        return nz * float(vc.get("repeat", 0.9)) ** min(used, 4)
+
+    def _pe_wall_room(self, me: dict, op: dict) -> float | None:
+        mx, ox = num(me.get("x")), num(op.get("x"))
+        if mx is None or ox is None:
+            return None
+        from .intents import WALL
+        return (WALL - ox) if ox > mx else (ox + WALL)
+
+    def _pe_wall_ok(self, entry: dict | None, room: float | None) -> bool:
+        """0.41.0: a route that goes on after a move in combo_compose.WALL_FOLLOW (OD High Blade Kick) is not used with the
+        opponent's back closer to its wall than the limit (the follow-up whiffs on the other side)."""
+        if not entry or room is None:
+            return True
+        from .combo_compose import WALL_FOLLOW
+        steps = (entry.get("plan") or {}).get("steps") or []
+        return not any(room < WALL_FOLLOW.get(st.get("name") or "", -1.0) for st in steps[:-1])
+
+    def _pe_note_use(self, name: str) -> None:
+        if not hasattr(self, "pe_used"):
+            self.pe_used = {}
+        self.pe_used[name] = self.pe_used.get(name, 0) + 1
 
     def _pe_travel(self, dist: float) -> int:
         """Frames a projectile punish needs to reach the opponent after its start-up: the MEASURED Hadoken arrival (~27
@@ -812,6 +864,7 @@ class PunishEngine:
             self.pe_stats["late"] += 1
         st["taken"] += 1
         self.pe_stats["options"][o["name"]] = self.pe_stats["options"].get(o["name"], 0) + 1
+        self._pe_note_use(o["name"])
         rule = "punish" if w["kind"] == "block" else "whiff_punish"
         if w["kind"] == "block":
             self.punish_stats["taken"] += 1

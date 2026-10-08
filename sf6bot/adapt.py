@@ -19,13 +19,27 @@ keeps doing it. This keeps, per match, what the opponent beat, and takes it out:
   counter hits instead would have stopped presses that still came out +35 each: it was not used)
 - a walk forward caught by a poke: no walking in from that distance (+`walk_margin`) or closer
 - a fireball jump-in anti-aired or punished on landing: no more fireball jump-ins
-- the rush check beaten (thrown or hit out of it): no more rush checks; the bot blocks the rush
+- the rush check beaten (thrown or hit out of it): no more rush checks; the bot blocks the rush (0.40.0; replaced in 0.41.0
+  by a mix that adapts: see `rush_answer`)
 
 A rematch against the same character within `carry_s` keeps the memory (the same human remembers too).
 """
 from __future__ import annotations
 
+import math
+
 from .game_state import num
+
+# 0.41.0 (user: "Checking Drive Rush will always be useful, so it shouldn't completely stop doing it, it should be less
+# predictable with it ... program adaptation into it"). What the opponent does out of its Drive Rushes this match (strike /
+# throw / stop short), from a prior (MEASURED 0.36.1 ranked, 486 rushes: a rushed normal ~93%, a throw ~7%; stopping short not
+# measured), and the payoff of each answer against each (ESTIMATES, 1000s of hp), blended with what each answer actually
+# scored here. The check goes out with p = logistic((EV check - EV block) / RUSH_T), never under RUSH_P_MIN or over RUSH_P_MAX:
+# always a mix, so its timing can't be read.
+RUSH_PRIOR = {"strike": 3.2, "throw": 0.4, "stop": 0.4}
+RUSH_PAYOFF = {"check": {"strike": 1.0, "throw": 0.6, "stop": -1.0},
+               "block": {"strike": -0.2, "throw": -0.8, "stop": 0.0}}
+RUSH_T, RUSH_P_MIN, RUSH_P_MAX, RUSH_SHRINK = 0.35, 0.15, 0.85, 3.0
 
 HIT_IDS = range(150, 400)       # block / hit / knockdown reactions
 NORMAL_IDS = range(600, 715)
@@ -45,6 +59,15 @@ class MatchMemory:
         self.jump_burn_after = int(c.get("jump_burn_after", 1))
         self.rush_burn_after = int(c.get("rush_burn_after", 1))
         self.burns: dict = {}          # own action id -> [(distance, net hp)] of its uses this match
+        self.poke_hits: list = []       # 0.41.0: distances where an opponent normal beat a button of the bot's
+        self.poke_after = int(c.get("poke_after", 2))
+        self.poke_band = float(c.get("poke_band", 0.2))
+        self.poke_factor = float(c.get("poke_factor", 0.3))
+        self.poke_fast = int(c.get("poke_fast", 5))       # buttons this fast (a jab) still go
+        self.rush_ids: set = set()      # the opponent's Drive Rush ids (set by the fighter)
+        self.rush_seen = {k: 0 for k in RUSH_PRIOR}       # what the opponent did out of its rushes this match
+        self.rush_results = {"check": [], "block": []}     # net hp (dealt - taken) 40 frames after each rush, by answer
+        self._rush: dict | None = None  # the rush being followed: {t, answer, me, op, kind}
         self._pending: list = []        # presses waiting for their outcome
         self.walk_danger: float | None = None
         self.jump_burns = 0
@@ -102,6 +125,16 @@ class MatchMemory:
                 if self.walk_danger is None or od > self.walk_danger:
                     self.walk_danger = od
                     self.log.append(f"stop walking in from {od + self.walk_margin:.2f} (a poke caught me walking in)")
+            # 0.41.0: an opponent normal that beat a button of the bot's (the bot's own normal / special was out when it
+            # hit). MEASURED (fights_2, 59 matches): 241 of the openings by an opponent normal (325k hp, about half of
+            # that damage) came with the bot's own button out in their start-up: 2MK 42, 2LP 29, 5LK 22, 5MP 18 ...
+            pa_ = pm.get("action_id")
+            if isinstance(oid, int) and oid in NORMAL_IDS and od is not None and isinstance(pa_, int) \
+                    and 600 <= pa_ < 1200 and not 850 <= pa_ < 870:
+                self.poke_hits.append(round(od, 2))
+                if self.poke_danger(od) and len(self._near_pokes(od)) == self.poke_after:
+                    self.log.append(f"stop pressing slow buttons from ~{od:.2f} (their poke beat mine "
+                                    f"{self.poke_after}x there)")
         # jumps the fighter asked to have judged (the fireball jump-in)
         y, py = num(me.get("y")) or 0.0, num(pm.get("y")) or 0.0
         if y > 0.05 and py <= 0.05 and self.jump_src:
@@ -117,14 +150,23 @@ class MatchMemory:
                 self._jump = None
             elif j["landed"] is not None and tmr - j["landed"] > 15:
                 self._jump = None
-        # the rush check
-        if self._rush_t is not None:
-            if hit or a in range(715, 730):
-                self.rush_burns += 1
-                self.log.append("stop checking Drive Rushes with a jab (it was beaten)")
-                self._rush_t = None
-            elif tmr - self._rush_t > 40:
-                self._rush_t = None
+        # 0.41.0: the opponent's Drive Rush: what it did out of it, and how the bot's answer scored
+        r = self._rush
+        if r is not None:
+            if r["kind"] is None and oa not in self.rush_ids:
+                r["kind"] = rush_kind(oa)
+            if tmr - r["t"] >= self.window:
+                kind = r["kind"] or "stop"
+                self.rush_seen[kind] += 1
+                hm, ho = num(me.get("hp")), num(op.get("hp"))
+                if None not in (hm, ho, r["me"], r["op"]) and hm <= r["me"] and ho <= r["op"]:
+                    net = (r["op"] - ho) - (r["me"] - hm)
+                    self.rush_results[r["answer"]].append(net)
+                    if r["answer"] == "check" and net < 0:
+                        self.rush_burns += 1
+                        if self.rush_burns == 1:
+                            self.log.append(f"Drive Rush check beaten ({kind} out of the rush): checking less often")
+                self._rush = None
 
     def _near(self, aid, dist) -> list:
         return [x for x in self.burns.get(aid, ()) if abs(x[0] - dist) <= self.band]
@@ -140,6 +182,37 @@ class MatchMemory:
     def note_rush_check(self, tmr) -> None:
         self._rush_t = tmr if isinstance(tmr, int) else None
 
+    def note_rush(self, tmr, answer: str, me: dict, op: dict) -> None:
+        """0.41.0: an opponent Drive Rush the bot answered with `answer` ("check" / "block"): followed `window` frames."""
+        if isinstance(tmr, int):
+            self._rush = {"t": tmr, "answer": answer, "me": num(me.get("hp")), "op": num(op.get("hp")), "kind": None}
+
+    def rush_odds(self) -> dict:
+        tot = sum(RUSH_PRIOR.values()) + sum(self.rush_seen.values())
+        return {k: (RUSH_PRIOR[k] + self.rush_seen[k]) / tot for k in RUSH_PRIOR}
+
+    def rush_values(self) -> dict:
+        odds = self.rush_odds()
+        out = {}
+        for ans, pay in RUSH_PAYOFF.items():
+            ev = sum(odds[k] * pay[k] for k in odds)
+            res = self.rush_results[ans]
+            if res:                                   # what it actually scored here, shrunk toward the estimate
+                ev = (ev * RUSH_SHRINK + sum(res) / 1000.0) / (RUSH_SHRINK + len(res))
+            out[ans] = ev
+        return out
+
+    def rush_check_p(self) -> float:
+        if not self.enabled:
+            return RUSH_P_MAX
+        v = self.rush_values()
+        x = (v["check"] - v["block"]) / RUSH_T
+        p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, x))))
+        return max(RUSH_P_MIN, min(RUSH_P_MAX, p))
+
+    def rush_answer(self, rng) -> str:
+        return "check" if rng.random() < self.rush_check_p() else "block"
+
     # ------------------------------------------------------------------ queries
     def move_factor(self, aid, dist) -> float:
         if not self.enabled or aid is None or dist is None:
@@ -154,13 +227,23 @@ class MatchMemory:
     def jump_in_ok(self) -> bool:
         return not self.enabled or self.jump_burns < self.jump_burn_after
 
+    def _near_pokes(self, dist) -> list:
+        return [d for d in self.poke_hits if abs(d - dist) <= self.poke_band]
+
+    def poke_danger(self, dist) -> bool:
+        """0.41.0: the opponent's poke has beaten the bot's buttons `poke_after`+ times from about this distance."""
+        return self.enabled and dist is not None and len(self._near_pokes(dist)) >= self.poke_after
+
     def rush_check_ok(self) -> bool:
-        return not self.enabled or self.rush_burns < self.rush_burn_after
+        """0.40.0's switch (kept for callers): 0.41.0 never turns the check off, `rush_answer` mixes it."""
+        return True
 
     def summary(self) -> dict:
         return {"burned": {self.names.get(k, str(k)): v for k, v in self.burns.items()
                            if any(self.move_factor(k, d) < 1.0 for d, _ in v)},
-                "walk_danger": self.walk_danger, "jump_burns": self.jump_burns, "rush_burns": self.rush_burns,
+                "walk_danger": self.walk_danger, "jump_burns": self.jump_burns, "poke_hits": list(self.poke_hits), "rush_burns": self.rush_burns,
+                "rush_seen": dict(self.rush_seen), "rush_check_p": round(self.rush_check_p(), 2),
+                "rush_results": {k: len(v) for k, v in self.rush_results.items()},
                 "learned": list(self.log)}
 
     def new_match(self) -> None:
@@ -168,5 +251,18 @@ class MatchMemory:
         self._prev = self._jump = None
         self._pending = []
         self._walk_t = self._rush_t = None
+        self._rush = None
         self._op_start = (None, None, None)
         self.jump_src = None
+
+
+def rush_kind(a) -> str | None:
+    """What an opponent action out of a Drive Rush is: a throw (700-729), a strike (a normal, special or super), or a stop
+    (anything else: walking, blocking, a parry, standing)."""
+    if not isinstance(a, int):
+        return None
+    if 700 <= a < 730:
+        return "throw"
+    if 600 <= a < 700 or 900 <= a < 1300:
+        return "strike"
+    return "stop"

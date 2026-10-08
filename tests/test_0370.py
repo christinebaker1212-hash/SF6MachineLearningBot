@@ -259,8 +259,16 @@ def test_the_frame_data_research_finds_slow_airborne_and_slow_specials_but_not_p
 
 # ---- checking an incoming Drive Rush ----------------------------------------------------------------------------------
 
+def _always_check(f):
+    """0.41.0: the check is drawn per rush (adapt.MatchMemory.rush_answer) and its meeting point varies; these tests time
+    the check itself, so it always goes out, on the earliest frame that meets the rush."""
+    f.memory.rush_answer = lambda rng: "check"
+    f.c = dict(f.c, rush_check=dict(f.c["rush_check"], vary_dist=0.0))
+    return f
+
+
 def test_an_incoming_drive_rush_is_checked_with_5mp_as_it_arrives_never_a_shoryuken():
-    f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
+    f = _always_check(ScriptedFighter(FCFG, _common_moves(FCFG), seed=1))
     f.lead = 4
     lines = [state(op={"x": 2.9, "action_id": 480}, timer=999)]
     # MEASURED: a parry Drive Rush closes ~0.077 a frame (Ken 2.82 -> 1.28 in 20 frames), its normal out at ~1.3
@@ -605,6 +613,7 @@ def _first_check(char, **kw):
     f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
     f.lead = 4
     f.set_opponent_rush(char)
+    _always_check(f)
     got = [(t - 1000, d) for t, d in _run(f, _rush_lines(char, **kw)) if d.rule == "rush_check"]
     return f, got
 

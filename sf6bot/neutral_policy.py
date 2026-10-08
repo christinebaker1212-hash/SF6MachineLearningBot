@@ -575,6 +575,17 @@ class NeutralPolicy:
             f *= mem.move_factor(m["id"], dist)
         if intent == "walk_fwd" and not mem.walk_in_ok(dist):
             f *= mem.walk_factor
+        if mem.poke_danger(dist):
+            # 0.41.0: their poke keeps beating my buttons from here: no slow button, no walk in; block or back off so it
+            # whiffs (the punish engine takes its recovery)
+            su = (m or {}).get("startup")
+            if intent in ("poke", "special") and not (isinstance(su, int) and su <= mem.poke_fast) \
+                    and not (m or {}).get("projectile"):
+                f *= mem.poke_factor
+            elif intent == "walk_fwd":
+                f *= mem.poke_factor
+            elif intent in ("crouch", "walk_back"):
+                f *= 1.0 / max(mem.poke_factor, 0.5)
         return f
 
     def win_push(self) -> dict:

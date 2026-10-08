@@ -87,15 +87,55 @@ def test_the_fireball_jump_in_stops_once_anti_aired():
     assert not mem.jump_in_ok()
 
 
-def test_the_rush_check_stops_once_a_rush_beats_it():
+def _rush(mem, f, answer, follow, lose=0, win=0):
+    """One opponent Drive Rush answered with `answer`; the opponent then does `follow` (an action id)."""
+    mem.note_rush(f.t, answer, _p(0.0, hp=f.hp), _p(2.5, hp=f.ohp))
+    f(_p(0.0, f.hp), _p(2.5, f.ohp, aid=740), 2)
+    f.hp -= lose
+    f.ohp -= win
+    f(_p(0.0, f.hp), _p(1.2, f.ohp, aid=follow), 45)
+
+
+def test_the_rush_check_is_a_mix_that_adapts_and_never_stops():
+    """0.41.0 (user: "it shouldn't completely stop doing it, it should be less predictable with it")."""
+    import random
     mem = MatchMemory(FCFG["adapt"])
+    mem.rush_ids = {740}
     f = Feed(mem)
-    f(_p(0.0), _p(2.5, aid=740), 2)
-    mem.note_rush_check(f.t)
-    f(_p(0.0, aid=622), _p(1.2, aid=740), 4)
-    assert mem.rush_check_ok()
-    f(_p(0.0, aid=721), _p(0.8, aid=720), 2)               # thrown out of the jab
-    assert not mem.rush_check_ok()
+    f.hp = f.ohp = 10000
+    f(_p(0.0), _p(2.5), 2)
+    p0 = mem.rush_check_p()
+    assert 0.15 <= p0 <= 0.85 and p0 > 0.5                   # rushed normals are the usual follow-up: check more often
+    for _ in range(4):                                       # this opponent stops short and punishes the check
+        _rush(mem, f, "check", 13, lose=900)
+    p1 = mem.rush_check_p()
+    assert p1 < p0 and p1 >= 0.15                            # less often, never never
+    assert mem.rush_check_ok()                               # the 0.40.0 switch is gone
+    rng = random.Random(3)
+    draws = [mem.rush_answer(rng) for _ in range(400)]
+    assert 0 < draws.count("check") < 400                    # a mix either way
+    for _ in range(8):                                       # now it rushes into normals that the check beats
+        _rush(mem, f, "check", 605, win=1200)
+    assert mem.rush_check_p() > p1
+    s = mem.summary()
+    assert s["rush_seen"]["stop"] == 4 and s["rush_seen"]["strike"] == 8 and s["rush_results"]["check"] == 12
+
+
+def test_the_fighter_draws_the_rush_answer_once_per_rush():
+    from sf6bot.fighter import ScriptedFighter
+    f = ScriptedFighter(FCFG, {855: {"name": "Drive Impact", "di": True}}, seed=2)
+    f.lead = 4
+    f.memory.rush_answer = lambda rng: "block"
+    me = {"x": 0.0, "y": 0.0, "hp": 10000, "drive": 60000, "action_id": 1}
+    lines = [(1000 + k, {"x": 2.9 - 0.077 * k, "action_id": 740, "hp": 10000}) for k in range(22)]
+    f._op_hist = []
+    out = []
+    for t, op in lines:
+        raw = {"p1": dict(me), "p2": dict(op, y=0.0), "stage_timer": t, "fight": True}
+        f.observe_line(raw, 0)
+        out.append(f.decide(raw, t / 60.0, 0))
+    assert not [d for d in out if d.rule == "rush_check"]
+    assert f.rush_stats.get("blocks_drawn") == 1
 
 
 def test_a_new_round_keeps_what_was_learned():
@@ -115,7 +155,7 @@ def test_the_fighter_wires_the_memory():
     from sf6bot import fighter, zoning
     src = inspect.getsource(fighter)
     assert "self.memory.observe(me, op, tmr)" in src
-    assert "self.memory.rush_check_ok()" in src
+    assert "self.memory.rush_answer(self.rng)" in src
     assert "walk_out_" in src                              # a walk forward out of their reach ends on neutral
     assert 'cur["memory"]' in src                          # a rematch keeps it
     assert "_zn_jump_allowed" in inspect.getsource(zoning)

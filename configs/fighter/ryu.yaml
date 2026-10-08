@@ -130,6 +130,10 @@ inputs:
   dash_frames: 20           # a dash cannot be canceled: busy this long (estimate; Capcom has no dash total)
   unknown_move_frames: 30   # an own move with no catalogued total counts as busy this long
 punish:
+  # 0.41.0 (user: combo variety): punishes / crumple cash-outs of about the same value take turns: one log-normal factor
+  # (sigma) per option per window, x repeat per earlier use this match (up to 4). The combo composer mixes its near-best
+  # combos the same way in matches (combo_compose.VARIETY_*). A kill is never traded away.
+  variety: {enabled: true, sigma: 0.12, repeat: 0.9}
   max_dist: 1.6        # 0.18.1 MEASURED: punishes after blocking connected up to ~1.7; 5MP was thrown from up to 3.65
   latency_frames: 4    # measured: input -> game sees it, 3-5 frames (usually 4)
   # on-block advantage (attacker) at or below the threshold -> that punish. Needs a catalog of the
@@ -215,6 +219,7 @@ punish:
 rush_check:
   enabled: true
   min_closing: 0.015
+  vary_dist: 0.12        # 0.41.0: the check meets the rush up to this much closer (drawn per rush): its timing varies
   moves:
     - {name: "Standing Medium Punch", seq: "5+MP@3", startup: 6, id: 605, min_dist: 0.9}
     - {name: "Crouching Light Punch", seq: "2+LP@3", startup: 4, id: 622}
@@ -841,11 +846,12 @@ parry_throw:
 # margin (input-delay jitter, a DI first seen a line late): safe_max 22 is the most it allows, min is at least 4 (the
 # old instant reaction). min / max are ESTIMATES of a human's reaction to a DI (~0.25-0.35 s); `fight --di-delay`, the
 # panel's "DI reaction" box, or off.
-di_reaction: {enabled: true, min: 15, max: 21, safe_max: 22}
+di_reaction: {enabled: true, min: 15, max: 21, safe_max: 22, buffer_max: 25}   # 0.41.0 buffer_max: the latest free frame a DI-back out of blockstun is tried on
 di_rules:
   opp_super_min: 10000
   di_hit: 1000
   follow_up_default: 2000
+  splat_wall_dist: 2.0   # 0.41.0: back this close to the wall, a blocked DI wall-splats: the lethal skip does not apply
   wall_dist: 2.0   # 0.32.0 (was 1.5): Ken's Drive Impacts stunned the burned-out bot with its back 1.71 from the wall
   # 0.33.0 (user, 2026-10-07): in burnout (no DI-back), no Super Art for the wall rule, and FREE (not in blockstun): a
   # neutral jump on reading the Drive Impact, while it can still leave the ground (prejump) and rise `clear` frames before
@@ -954,6 +960,10 @@ adapt:
   walk_margin: 0.15      # walking in from where a poke caught the bot walking in (+ this) or closer ...
   walk_factor: 0.2       # ... is chosen this much as often
   jump_burn_after: 1     # the fireball jump-in, once anti-aired / punished on landing
-  rush_burn_after: 1     # the rush check, once beaten
+  rush_burn_after: 1     # (0.40.0; unused since 0.41.0: the rush check is a mix, adapt.RUSH_*)
+  poke_after: 2          # 0.41.0: an opponent normal that beat the bot's button this often from about here (poke_band) ...
+  poke_band: 0.2
+  poke_factor: 0.3       # ... slow buttons (start-up over poke_fast) and walks in are chosen this much as often there
+  poke_fast: 5
   carry_s: 180           # a rematch against the same character within this keeps the memory
 
