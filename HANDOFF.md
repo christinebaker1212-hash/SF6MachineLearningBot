@@ -13,6 +13,12 @@ the project stands, how to work with the user, and what to do next.
 
 **User report (2026-10-08): Ryu is HIGH MASTER, peak 1630 MR** (screenshot earlier: 1601 MR, 47,280 LP). Not yet measured from fight files; ask for them (and which version played) when the session ends.
 
+**Coming with the next upload (user, 2026-10-08): a ranked match where the opponent spammed light kicks in the second half of
+round 2, and they were landing on the bot.** Find why: walking forward into them, pressing between them, the 3-lights rule
+(`light_string`) or the stance letting go of block, and missed punishes on the light's recovery. Then propose an answer
+before building. Beating repeated cheap pokes matters at High Master. That opponent accused the bot of cheating and was
+abusive; the user reported them. The user asked for no changes because of that incident.
+
 **0.38.2 is pushed** (CLAUDE.md "0.38.2"): FIXES A REGRESSION OF 0.38.1. 0.38.1 ran fight sequences without the final
 neutral step, and the runner then did not wait out the last step: every sequence's last input (an 8-frame walk, a block, a
 button) was replaced by end_guard's down-back within a line. The user's 0.38.1 Cammy match: forward walks 1-3 frames
