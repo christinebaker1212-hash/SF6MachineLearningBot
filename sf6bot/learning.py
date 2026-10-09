@@ -483,6 +483,13 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                     else "on the planned spot")
             parts_.append(f"{b_} {', '.join(f'{k} {v}' for k, v in res_.items())} -> {how_} ({sh_:+.2f})")
         out.append(("learned", f"Drive Rush checks vs {rl_.get('opponent')}: " + "; ".join(parts_) + "."))
+    al_ = summary.get("aa_learn") or {}
+    if al_.get("this_match"):                         # 0.47.0: option anti-airs learned by range (not Ryu)
+        parts_ = [f"{k_} {', '.join(f'{o_} {v_}' for o_, v_ in r_.items())}" for k_, r_ in al_["this_match"].items()]
+        rates_ = al_.get("rate_vs_opponent") or {}
+        low_ = [k_ for k_, v_ in rates_.items() if v_ < 0.3]
+        out.append(("learned", f"Anti-airs vs {al_.get('opponent')} by range: " + "; ".join(parts_)
+                    + (f" -> losing from: {', '.join(low_)}" if low_ else "") + "."))
     # 0.44.0 turns after blocks, gap checks, and where the Drive went
     mt_ = ((summary.get("defense") or {}).get("my_turn") or {}).get("options") or {}
     if mt_:

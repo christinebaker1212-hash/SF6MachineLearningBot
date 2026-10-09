@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.47.0 (2026-10-09): the 17 characters' anti-air options learn by range what worked and what didn't (per opponent, pooled by body class); one that keeps losing from a range is dropped there (block if none is left), and each option's timing moves earlier / later. Ryu unchanged.**
 - **0.46.0 (2026-10-09): the user's anti-airs for the 17 characters with no invincible 623 special (normals, specials, charge moves, supers), chosen by the landing's timing, distance, charge and resources.**
 - **0.45.1 (2026-10-09): characters with no combo lab results use the combos found in recordings (B) until K verifies theirs.**
 - **0.45.0 (2026-10-09): Random Select (`play-as Random`): the bot reads which character it got at each match start, finds its side with the input probe and plays that character's rules and data.**
@@ -5149,6 +5150,29 @@ is verified in game. ESTIMATE = a config guess.
 - Tests `tests/test_0460.py` (Guile / Zangief from the real Capcom pages; Flash Kick when charged, 2HP when not, waiting
   in down-back, block when nothing fits, supers by bars); `tests/test_0310.py` updated (Guile has anti-airs now). Not run
   in game.
+
+## 0.47.0: the option anti-airs learn by range (user, 2026-10-09)
+- User: "As the bot uses different anti air options at different ranges for different characters, will it adjust based
+  on what worked at certain ranges, and what didn't?"; "Ryu works already, so no. But yes to the rest - ONLY if you feel
+  it would be an improvement." Before: the choice was fixed (config distances, Capcom timing windows, damage /
+  invincibility / cost); only the number of uses was counted. The distances for normals are Ryu's measured reach (an
+  ESTIMATE for others), so learning from results replaces guesses with this character's own outcomes.
+- `sf6bot/aa_learn.py` (`AntiAirLearner`), only for profiles with an option table (fighter_profile.anti_air_options; never
+  Ryu, never characters with their own 623 anti-air). Each option anti-air sent by `_aa_options` is followed until it
+  resolves: hit / trade / beaten (the jumper hit the bot first) / blocked (an empty jump landed first) / early (it ended
+  touching nothing with the jumper still airborne) / whiff (ended after the jumper landed: range) / stopped (not counted).
+- Per option and distance band (<0.8, 0.8-1.2, 1.2-1.6, 1.6+ of the predicted landing): a success rate (hits + half the
+  trades) shrunk toward the same band against every opponent of the same body class (Marisa / E. Honda / Zangief apart),
+  then the option at every range, then 0.6. The option's value in the rule is multiplied by rate / 0.6; an option shown to
+  lose there (rate < 0.25 over 4+ tries) is left out, and when every option that fits is left out the bot blocks the jump
+  toward the landing side (`block_aa_learned`). A better option still to come is waited for only if it has not lost there.
+- Per option a timing shift (frames, +-4): beaten / blocked -> sent 1 frame earlier, early -> 1 later; pooled per body
+  class like the rush check's.
+- Saved after every match: `datasets/learning/<Bot>_antiair.json` (erased with "fights"). Summary `aa_learn` {opponent,
+  body, this_match, rate_vs_opponent, shift}; `anti_air.learned_block`; a `[learned]` thoughts line.
+- This also decides A.K.I.'s Serpent Lash split from her results. All values are ESTIMATES (PRIOR 0.6, K 3, bands,
+  thresholds). Tests `tests/test_0470.py` (outcomes from lines, pooling, a Flash Kick that loses giving way to 2HP,
+  blocking when all lost, a MOCK match as Guile saving the file). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

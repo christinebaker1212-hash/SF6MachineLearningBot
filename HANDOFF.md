@@ -5,11 +5,13 @@ evidence, measurements, every verified/unverified claim. This file is the short 
 the project stands, how to work with the user, and what to do next.
 
 *State as of 2026-10-09: code version **0.44.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (756).*
+`claude/admiring-mccarthy-uyyay4`, all tests passing (762).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.47.0 is pushed** (CLAUDE.md "0.47.0"): the option anti-airs of the 17 characters with no 623 anti-air special learn by range what works (hit / trade / beaten / blocked / early / whiff), per opponent, pooled by body class; Ryu unchanged (user: "Ryu works already").
 
 **State:** **0.46.0 is pushed** (CLAUDE.md "0.46.0"): the user's anti-airs for the 17 characters with no invincible 623 special (configs/fighter/anti_air.yaml). Open: which Serpent Lash (M / H) is the close one for A.K.I.
 

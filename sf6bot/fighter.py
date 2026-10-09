@@ -756,6 +756,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         from .adapt import MatchMemory
         self.memory = MatchMemory(self.c.get("adapt"))
         self.rush_learn = None                          # 0.43.0: rush_learn.RushLearner (generated profiles only)
+        self.aa_learn = None                            # 0.47.0: aa_learn.AntiAirLearner (option-table profiles only)
         self.memory.rush_ids = set(RUSH_IDS)              # set_opponent_rush narrows them per character
         self.memory.names = {m["id"]: m.get("name") for m in self.own if isinstance(m.get("id"), int)}
         if self.policy is not None:
@@ -2865,6 +2866,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if o.get("drive") and not self.can_spend(me, "od_move", reserve=self.c.get("drive_reserve", 10000)):
             return None
         need = seq_prefix(o["seq"]) + self.lead + self.stale + int(o["startup"])
+        if self.aa_learn is not None:                   # 0.47.0: learned timing, + = sent earlier
+            need += self.aa_learn.shift(o["name"])
         if o.get("timing") == "late":
             lo = need - int(aa.get("late_frames", 4))
             if not air_attack:
@@ -2903,6 +2906,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             self._op_side_t, int) else 99
         if in_front and since_cross < int(aa.get("cross_settle", 1)):
             in_front = False
+        al = self.aa_learn
         now = [o for o in aa["options"] if st[o["name"]] == "now"]
         if not in_front:
             if not now:
@@ -2913,13 +2917,27 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                                    f"{pdx:+.2f}): blocking toward the landing side")
         if not now:
             return None
+        if al is not None:
+            # 0.47.0: an option shown to lose at this range against this opponent (aa_learn) is left out; none left ->
+            # block the jump toward the landing side
+            good = [o for o in now if not al.shown_bad(o["name"], abs(pdx))]
+            if not good:
+                self.aa_done_for_jump = True
+                self.aa_stats["learned_block"] = self.aa_stats.get("learned_block", 0) + 1
+                return Decision("hold", direction=4, facing=land_side, rule="block_aa_learned",
+                                reason=f"jump landing {abs(pdx):.2f} away: every anti-air that fits has lost from here "
+                                       f"against {al.opponent} ({', '.join(o['name'] for o in now)}): blocking")
+            now = good
         bar = self._bar_value(me)
 
         def value(o):
             v = float(o.get("damage") or 800) * (1.25 if o.get("timing") == "late" else 1.0)
+            if al is not None:
+                v *= al.factor(o["name"], abs(pdx))      # 0.47.0: what has worked from this range
             return v - bar * (o.get("super") or 0) / 10000 - self._drive_price(o.get("drive") or 0, me, op)
         o = max(now, key=value)
-        later = [x for x in aa["options"] if st[x["name"]] == "later"]
+        later = [x for x in aa["options"] if st[x["name"]] == "later"
+                 and not (al is not None and al.shown_bad(x["name"], abs(pdx)))]
         if later and max(value(x) for x in later) > value(o):
             # a better option's window is still to come (a charged Flash Kick after the crouching heavy punch's window):
             # wait for it (rule 4c holds the charge direction meanwhile)
@@ -2928,6 +2946,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._aa_kind = "anti_air" if not air_move else "air_moves"
         k_ = f"option:{o['name']}"
         self.aa_stats[k_] = self.aa_stats.get(k_, 0) + 1
+        if al is not None:
+            al.sent(o["name"], abs(pdx), self._line_t)
         why = (f"opponent {'airborne in a move (action ' + str(op_act) + ')' if air_move else 'jumping in'} "
                f"(height {op_y:.2f}, lands in {t_land:.0f}f {abs(pdx):.2f} away): {o['name']}")
         return Decision("seq", o["name"], o["seq"], reason=why, rule="anti_air",
@@ -4483,6 +4503,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if out_:
                 self.rush_stats.setdefault("learn", {})
                 self.rush_stats["learn"][out_] = self.rush_stats["learn"].get(out_, 0) + 1
+        if self.aa_learn is not None:                  # 0.47.0: how the last option anti-air turned out
+            self.aa_learn.observe(me, op, tmr)
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
         if ev_:
             st_ = self.cmd_grab_stats
@@ -5712,6 +5734,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                             summary["command_grabs"]["saved"] = str(saved_)
                     except OSError as e:
                         summary["command_grabs"]["saved"] = f"not saved: {e}"
+                if fighter.aa_learn is not None:        # 0.47.0
+                    summary["aa_learn"] = fighter.aa_learn.summary()
+                    try:
+                        summary["aa_learn"]["saved"] = str(fighter.aa_learn.save())
+                    except OSError as e:
+                        summary["aa_learn"]["saved"] = f"not saved: {e}"
                 if fighter.rush_learn is not None:      # 0.43.0
                     summary["rush_learn"] = fighter.rush_learn.summary()
                     try:
@@ -6319,6 +6347,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if (((fcfg.get("rush_check") or {}).get("learn") or {}).get("enabled")):
                     from .rush_learn import RushLearner
                     fighter.rush_learn = RushLearner(ds_root, summary["character"], summary["opponent"])
+                # 0.47.0: the option anti-airs (characters with no 623 anti-air special; never Ryu) learn what works by range
+                fighter.aa_learn = None
+                if (fcfg.get("anti_air") or {}).get("options"):
+                    from .aa_learn import AntiAirLearner
+                    fighter.aa_learn = AntiAirLearner(ds_root, summary["character"], summary["opponent"])
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():
