@@ -752,6 +752,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         # 0.40.0: what this opponent has beaten this match (adapt.py); the fight loop hands a rematch the same memory
         from .adapt import MatchMemory
         self.memory = MatchMemory(self.c.get("adapt"))
+        self.rush_learn = None                          # 0.43.0: rush_learn.RushLearner (generated profiles only)
         self.memory.rush_ids = set(RUSH_IDS)              # set_opponent_rush narrows them per character
         self.memory.names = {m["id"]: m.get("name") for m in self.own if isinstance(m.get("id"), int)}
         if self.policy is not None:
@@ -1043,6 +1044,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             move = lambda k: ahead(travel, t, k)            # noqa: E731
             how = f"{self._op_char or 'its'} rush curve, frame {t}"
         L = self.lead + self.stale
+        rl = self.rush_learn                               # 0.43.0: other characters only (rush_learn.py)
         fits = []
         for o in rc.get("moves") or []:
             su = int(o.get("startup", 6))
@@ -1050,11 +1052,19 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if o.get("max_reach") is not None:
                 reach = min(reach, float(o["max_reach"]))
             d_hit = dist - move(L + seq_prefix(o["seq"]) + su - 1)
-            if d_hit <= reach - vary and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
+            shift = rl.shift(o["name"]) if rl is not None else 0.0     # learned: + meets closer (later), - farther
+            if d_hit <= reach - vary - shift and (o.get("min_dist") is None or d_hit >= float(o["min_dist"])):
                 fits.append((o, d_hit))
         if not fits:
             return None
-        o, d_hit = self.rng.choice(fits)                   # 0.41.0: either button when both meet it
+        if rl is not None and len(fits) > 1:
+            # 0.43.0: the button that has worked better against this opponent is picked more often
+            w_ = [max(0.05, rl.weight(o["name"])) for o, _ in fits]
+            o, d_hit = fits[self.rng.choices(range(len(fits)), weights=w_)[0]]
+        else:
+            o, d_hit = self.rng.choice(fits)               # 0.41.0: either button when both meet it
+        if rl is not None:
+            rl.sent(o["name"], d_hit, self._line_t)
         self._rc_for = self.op_onset
         self.rush_stats["checked"] = self.rush_stats.get("checked", 0) + 1
         self.memory.note_rush_check(self._line_t)
@@ -4214,6 +4224,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._track_air_attack(me, op, tmr)
         self._track_damage_taken(me, op)
         self.memory.observe(me, op, tmr)               # 0.40.0
+        if self.rush_learn is not None:                # 0.43.0: how the last Drive Rush check turned out
+            out_ = self.rush_learn.observe(me, op, tmr, thrown=self.being_thrown(me))
+            if out_:
+                self.rush_stats.setdefault("learn", {})
+                self.rush_stats["learn"][out_] = self.rush_stats["learn"].get(out_, 0) + 1
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
         if ev_:
             st_ = self.cmd_grab_stats
@@ -5397,6 +5412,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                             summary["command_grabs"]["saved"] = str(saved_)
                     except OSError as e:
                         summary["command_grabs"]["saved"] = f"not saved: {e}"
+                if fighter.rush_learn is not None:      # 0.43.0
+                    summary["rush_learn"] = fighter.rush_learn.summary()
+                    try:
+                        summary["rush_learn"]["saved"] = str(fighter.rush_learn.save())
+                    except OSError as e:
+                        summary["rush_learn"]["saved"] = f"not saved: {e}"
                 summary["input_delay_used"] = fighter.lead
                 # 0.20.0
                 summary["drive_impact_rules"] = dict(fighter.di_stats)
@@ -5973,6 +5994,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.op_fb_beaters = opponent_fireball_beaters(summary["opponent"], ds_root, fcfg)
                 fighter.set_opponent_throws(summary["opponent"])
                 fighter.set_opponent_rush(summary["opponent"])
+                # 0.43.0: the Drive Rush check learns its timing by trial and error, for characters other than Ryu (the
+                # generated profiles set rush_check.learn; Ryu's check is left as it is)
+                if (((fcfg.get("rush_check") or {}).get("learn") or {}).get("enabled")):
+                    from .rush_learn import RushLearner
+                    fighter.rush_learn = RushLearner(ds_root, summary["character"], summary["opponent"])
                 fighter.human = human
                 cur["answers"] = AnswerBook(ds_root, summary["character"], summary["opponent"])
                 if cur["answers"].usable():

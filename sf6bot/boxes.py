@@ -195,6 +195,8 @@ def move_boxes(states: list[dict], t_sent: float, neutral_a: set) -> dict | None
         return None
     right = (ox0 > x0) if isinstance(ox0, (int, float)) and ox0 != x0 else bool(sp1.get("facing_right", True))
     frames, last, hurt_front = [], None, None
+    own_at: list = []          # 0.43.0: the move's OWN frame (1 = its first) for each entry of `frames`
+    own, last_t, prev_stop = 1, t0, bool((start.get("p1") or {}).get("hitstop"))
     for s in after[after.index(start):]:
         p1 = s.get("p1") or {}
         if p1.get("action_id") in neutral_a:
@@ -202,6 +204,14 @@ def move_boxes(states: list[dict], t_sent: float, neutral_a: set) -> dict | None
         f = (s.get("stage_timer") - t0) if isinstance(s.get("stage_timer"), int) and isinstance(t0, int) else None
         if f is None or f > MOVE_BOX_FRAMES:
             break
+        # 0.43.0: own frames stand still in hitstop: a tick out of a line still showing hitstop is frozen (hitstop N on the
+        # hit's line = N frozen ticks after it). ASSUMPTION: the exact exporter timing around a hit is not measured; the
+        # first hitbox is anchored on Capcom's start-up by own_hitbox_frames
+        if isinstance(s.get("stage_timer"), int) and s["stage_timer"] != last_t:
+            if not prev_stop:
+                own += s["stage_timer"] - last_t
+            last_t = s["stage_timer"]
+        prev_stop = bool(p1.get("hitstop"))
         # relative to where the move STARTED (facing then), so a move's forward travel counts in its reach
         rel = relative([b for b in (p1.get("boxes") or []) if b.kind in "hbxt"], x0, right)
         for r in rel:
@@ -209,11 +219,41 @@ def move_boxes(states: list[dict], t_sent: float, neutral_a: set) -> dict | None
                 hurt_front = r[2] if hurt_front is None else max(hurt_front, r[2])
         if rel != last:
             frames.append([f, [list(r) for r in rel]])
+            own_at.append(own)
             last = rel
     if not frames:
         return None
-    return {"frames": frames, "hit": hit_profile([(f, rel) for f, rel in frames]),
+    return {"frames": frames, "own_at": own_at, "hit": hit_profile([(f, rel) for f, rel in frames]),
             "hurt_front": None if hurt_front is None else round(hurt_front, 3)}
+
+
+def own_hitbox_frames(boxes: dict | None, first: int | None = None, last: int | None = None) -> list | None:
+    """0.43.0: a catalogued move's hitbox per OWN frame (hitstop left out), in the config's format
+    [[own frame, forward from, forward to, height from, height to], ...]: the union of its hitbox rects on each frame from
+    `first` to `last` (else every frame with a hitbox). Needs a catalog recorded on 0.43.0+ (`own_at`); older entries only
+    have frames counted with hitstop, so None (the caller keeps its estimate)."""
+    if not boxes or not boxes.get("own_at") or len(boxes["own_at"]) != len(boxes.get("frames") or []):
+        return None
+    ents = list(zip(boxes["own_at"], (rel for _, rel in boxes["frames"])))
+    if first is not None:
+        # the first frame with a hitbox IS the first active frame (Capcom): any offset in the own-frame count goes
+        h0 = next((o for o, rel in ents if any(r[0] == "h" for r in rel)), None)
+        if h0 is None:
+            return None
+        ents = [(o + first - h0, rel) for o, rel in ents]
+    out = []
+    end = max(o for o, _ in ents) if last is None else last
+    for of_ in range(1, end + 1):
+        cur = None
+        for o, rel in ents:                     # the state current on this own frame (the last change at or before it)
+            if o <= of_:
+                cur = rel
+        hs = [r for r in (cur or []) if r[0] == "h"]
+        if not hs or (first is not None and of_ < first):
+            continue
+        out.append([of_, round(min(r[1] for r in hs), 3), round(max(r[2] for r in hs), 3),
+                    round(min(r[3] for r in hs), 3), round(max(r[4] for r in hs), 3)])
+    return out or None
 
 
 def load_own_hit_profiles(ds_root, character: str) -> dict:

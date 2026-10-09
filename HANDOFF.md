@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-08: code version **0.42.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (711).*
+*State as of 2026-10-09: code version **0.43.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (727).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.43.0 is pushed** (CLAUDE.md "0.43.0"): for characters other than Ryu, the Drive Rush check is built from the character's own 5MP / 2LP (start-ups, ids, so its measured reach is used; Ken's profile had Ryu's 6F / ids 605, 622), the Shoryuken / Drive Impact hitboxes come from its own catalog boxes (C on 0.43.0+, else Ryu's as an estimate, noted), and its rush check learns its meeting point and button per opponent (`rush_learn.py`, `datasets/learning/<Bot>_rushcheck.json`). **Ryu is unchanged** (user: "his Drive Rush check is already perfect"). A guard test fails when a ryu.yaml section naming Ryu's moves is not rebuilt for other characters. When C is next run as Ryu, compare the generated L Shoryuken box with ryu.yaml's hand-measured `srk_hitbox` (verifies the own-frame counting). Check `rush_learn` in summaries when the bot plays another character.
 
 **State:** **0.42.0 is pushed** (CLAUDE.md "0.42.0"): with human limits ON, reactions still happen but at a timing drawn per event: the throw tech lands 2-6 frames after the connect (a delay tech; it was instant, and human limits' 16-frame gate made it miss), reaction DIs on the move's frame 10..latest, answer Shoryukens across their window, the Hooligan Shoryuken 0-3 frames late, and no reaction DI on the same move twice in a row. Human limits OFF is unchanged. Check `human_limits.varied`, `throw_tech_after_connect.delayed`, `answer_stats.repeat_skipped`.
 

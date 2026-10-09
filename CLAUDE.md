@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.43.0 (2026-10-09): other characters get their own Drive Rush check (start-ups, ids, measured reach) and Shoryuken / Drive Impact hitboxes from their own catalog boxes; their rush check learns its timing by trial and error. Ryu unchanged.**
 - **0.42.0 (2026-10-08): human limits vary the reactions instead of making them instant: delay tech 2-6 frames after the connect, reaction DIs and answer Shoryukens on drawn frames, no reaction DI twice in a row on the same move.**
 - **0.41.0 (2026-10-08): corner Drive Impacts answered out of blockstun (a 0.25.0 guard-hold bug held block through them); the DI crumple cash-out no longer loses its timing; whiffed DIs punished; combos and punishes vary; no OD High Blade Kick follow-up near the wall; the rush check is an adaptive mix; buttons beaten by a poke from a distance are dropped there.**
 - **0.40.0 (2026-10-08): the bot remembers what each opponent beat this match (losing buttons per distance, walk-ins into pokes, the fireball jump-in, the rush check) and stops doing it, through rematches; no parry guesses.**
@@ -4948,6 +4949,50 @@ loop). All MOCK / replay-tested (`tests/test_0410.py`); nothing verified in game
   mode, as the user asked then); the jump anti-air keeps human limits' reaction gate (median 15 from take-off).
 - Summary `human_limits.varied` (per kind: n / min / median / max), a thoughts line "Varied timing: ...".
 - The windows are ESTIMATES inside measured / Capcom limits. Tests `tests/test_0420.py`. Not verified in game.
+
+## 0.43.0: every character's own Drive Rush check and hitboxes; the check learns its timing (user, 2026-10-09)
+- User: "If Ryu is playing another character, say, Ken, will he eventually learn the proper anti-Drive rush timing of the new
+  character's buttons by trial and error?"; then "Let's build number 1. Let's make this for all characters. Let's also build
+  number 2, but leave Ryu alone - his Drive Rush check is already perfect."
+- **What was wrong (checked on a Ken profile generated from the real Capcom page):** the 0.37.0 rush check was added after
+  the 0.31.0 profile generator and was never rebuilt for other characters. Ken's profile kept Ryu's 5MP start-up (6; Ken's is
+  5) and Ryu's ids 605 / 622 (Ken's 604 / 618), so Ken's own measured reach was never looked up: Ryu's fallback reach was
+  used. The check's adaptation (0.41.0) only mixed check vs block per match; nothing learned its timing.
+  - Same audit: the anti-air special's and Drive Impact's hitbox frames (`anti_air.srk_hitbox`, `drive_impact_hitbox`) were
+    Ryu's measured ones for everyone; Denjin's charge id was left over (harmless: Denjin is off for others). Ken's L / H
+    Shoryuken frame numbers happen to equal Ryu's.
+### Part 1: the profile generator (`fighter_profile.py`), every character but Ryu
+- `rush_check.moves` from the character's own Standing Medium Punch and Crouching Light Punch (`RUSH_CHECK_BUTTONS`: the
+  user's buttons for Ryu): Capcom start-ups, catalog / move-map ids (so its measured reach is used), plain `5+MP@3` /
+  `2+LP@3`; 5MP's `min_dist` 0.9 kept. Neither button known -> no rush check (the rush is blocked), noted.
+- Hitboxes per own frame from the character's own catalog boxes (`own_hitboxes`, `boxes.own_hitbox_frames`): the anti-air
+  special over its Capcom active frames, Drive Impact over 26-27. Without them Ryu's MEASURED boxes stay as an ESTIMATE and
+  the profile notes say so (`profile.hitboxes`: "own" / "Ryu (estimate)").
+  - The catalog (C) now records each box change's OWN frame (`move_boxes` -> `own_at`): a tick out of a line still showing
+    hitstop counts as frozen (ASSUMPTION: the exporter's timing around a hit is not measured); the first hitbox is anchored
+    on Capcom's start-up. Catalogs from before 0.43.0 have no `own_at`: their boxes are not used for this (C again).
+  - **Check when C is next run as Ryu:** generate Ryu's L Shoryuken box from his catalog this way and compare it with the
+    hand-measured `anti_air.srk_hitbox` in ryu.yaml (frames 5-14).
+- `denjin.charge_id` / `consume_ids` cleared for other characters.
+- The summary line shows the rush check's buttons and start-ups.
+- **Guard test** (`tests/test_0430.py`): profiles generated for Ken, Guile and Zangief from the real Capcom pages may not
+  keep any of Ryu's own move ids or Ryu-only move names outside the opponent-keyed sections. A new ryu.yaml section that
+  names Ryu's moves without being rebuilt now fails it.
+### Part 2: the Drive Rush check learns its timing (`sf6bot/rush_learn.py`), other characters only
+- On only when the profile sets `rush_check.learn` (the generator does; configs/fighter/ryu.yaml does not: Ryu's check is
+  exactly as before).
+- Each check is followed until it resolves (`RushLearner.observe`, every line): hit, trade, blocked (the rusher blocked it),
+  whiff (it came out and ended touching nothing while the rusher attacked: too early), beaten (the rushed normal hit first:
+  too late), thrown (the rush throw landed: too late), stopped (the rusher never attacked: no timing information).
+- Per button: `shift`, how much closer (+) / farther (-) than planned to meet the rush: whiff +0.03, beaten / thrown -0.03
+  (ESTIMATES), bounded +-0.3; a matchup with few checks leans on the bot character's checks against everyone (`POOL_K` 4).
+  The check fits a button when its meeting point is within its reach - vary - shift.
+- Per button: `weight` = (hits + half the trades and blocks + 1) / (checks + 2): when both buttons fit, the one that works
+  better against this opponent is picked more often.
+- Saved after every match: `datasets/learning/<Bot>_rushcheck.json` (all opponents pooled + per opponent; erased with
+  "fights"). Summary `rush_learn` {opponent, this_match, shift, weight, checks_vs_opponent}; a `[learned]` thoughts line.
+- Tests `tests/test_0430.py` (synthetic outcomes, saving and pooling, a later check after whiffs, Ryu without a learner).
+  Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

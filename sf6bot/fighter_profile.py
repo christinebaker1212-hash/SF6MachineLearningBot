@@ -107,6 +107,68 @@ def _catalog_ids(character: str, ds_root: Path) -> dict:
     return out
 
 
+def _catalog_boxes(character: str, ds_root: Path) -> dict:
+    """0.43.0: Capcom move name -> its catalogued boxes (guard none first), from the character's move catalog (menu C)."""
+    p = ds_root / "catalog" / f"{file_stem(character)}_movelist.json"
+    try:
+        cat = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict = {}
+    for name, m in (cat.get("moves") or {}).items():
+        for g in ("guard_none", "guard_all"):
+            b = (m.get(g) or {}).get("boxes")
+            if b and not (m.get(g) or {}).get("same_as"):
+                out.setdefault(name, b)
+    return out
+
+
+def _active(row: dict | None) -> tuple:
+    """Capcom's active column '5-14' / '7-8,9-10,11-16' -> (first, last) active frame, or (None, None)."""
+    nums = [int(x) for x in re.findall(r"\d+", str((row or {}).get("active") or ""))]
+    return (nums[0], nums[-1]) if nums else (None, None)
+
+
+def own_hitboxes(character: str, ds_root: Path, rows_by: dict, light: dict | None, base: dict) -> tuple:
+    """0.43.0: the anti-air special's and Drive Impact's hitbox per own frame from the character's own catalog boxes
+    (C on 0.43.0+); without them Ryu's MEASURED boxes stay, as an ESTIMATE, and a note says so. Returns
+    (srk frames, DI frames, notes)."""
+    from .boxes import own_hitbox_frames
+    boxes = _catalog_boxes(character, ds_root)
+    notes = []
+    srk = None
+    if light is not None:
+        a0, a1 = _active(light)
+        srk = own_hitbox_frames(boxes.get(light["name"]), a0, a1)
+        if srk is None:
+            notes.append(f"{light['name']} hitbox: Ryu's L Shoryuken's (estimate) until C records {character}'s boxes")
+    di_row = rows_by.get("Drive Impact")
+    d0, d1 = _active(di_row) if di_row else (26, 27)
+    di = own_hitbox_frames(boxes.get("Drive Impact"), d0, d1)
+    if di is None:
+        notes.append(f"Drive Impact hitbox: Ryu's (estimate) until C records {character}'s boxes")
+    return srk, di, notes
+
+
+# 0.43.0 the Drive Rush check's buttons (the user's for Ryu, 0.37.0: Standing Medium Punch and Crouching Light Punch),
+# rebuilt from each character's own start-ups and move ids; `min_dist` (5MP only while the rusher is still that far) kept
+RUSH_CHECK_BUTTONS = (("5MP", {"min_dist": 0.9}), ("2LP", {}))
+
+
+def rush_check_moves(rows_by: dict, ids: dict) -> list:
+    out = []
+    for short, extra in RUSH_CHECK_BUTTONS:
+        r = rows_by.get(_NORMALS[short])
+        st = _int((r or {}).get("startup_n"))
+        if r is None or not st:
+            continue
+        e = {"name": r["name"], "seq": f"{short[0]}+{short[1:]}@3", "startup": st, **extra}   # a plain normal, no lead-in
+        if ids.get(r["name"]) is not None:
+            e["id"] = ids[r["name"]]
+        out.append(e)
+    return out
+
+
 def _seq(row: dict) -> str | None:
     from . import framedata as fd
     seq, _ = fd.to_sequence(row)
@@ -349,8 +411,27 @@ def generate(character: str, base: dict, ds_root: Path) -> dict:
     # no invincible reversal special from the neutral policy (Ryu's rule for his Shoryukens)
     inv_specials = [r["name"] for r in rows if r.get("section") == "Special Moves" and _INV.search(r.get("notes") or "")]
     c.setdefault("policy", {})["no_neutral_special"] = sorted(set(inv_specials) | {r["name"] for r in dps.values()})
+    # 0.43.0 the Drive Rush check from the character's own buttons (it kept Ryu's 5MP start-up 6 and Ryu's ids, so the
+    # character's own measured reach was never looked up), learning its timing per opponent (rush_learn.py; Ryu's own
+    # check is left as it is: configs/fighter/ryu.yaml has no `learn`)
+    rc = c.setdefault("rush_check", {})
+    rc["moves"] = rush_check_moves(by, ids)
+    rc["learn"] = {"enabled": True}
+    if not rc["moves"]:
+        rc["enabled"] = False
+        notes.append("no Standing Medium Punch / Crouching Light Punch start-up: no Drive Rush check (blocked)")
+    # 0.43.0 the anti-air special's and Drive Impact's hitboxes (the Shoryuken answers, cross-cuts, the hitbox-timed
+    # Shoryuken, the reaction Drive Impacts' reach) from the character's own catalog boxes
+    srk_b, di_b, box_notes = own_hitboxes(character, ds_root, by, light, base)
+    notes.extend(box_notes)
+    if srk_b:
+        aa["srk_hitbox"] = srk_b
+    c["profile"]["hitboxes"] = {"anti_air": "own" if srk_b else ("Ryu (estimate)" if light is not None else None),
+                                "drive_impact": "own" if di_b else "Ryu (estimate)"}
+    if di_b:
+        c["drive_impact_hitbox"] = dict(c.get("drive_impact_hitbox") or {}, frames=di_b)
     # Ryu only
-    c["denjin"] = dict(c.get("denjin") or {}, enabled=False)
+    c["denjin"] = dict(c.get("denjin") or {}, enabled=False, charge_id=None, consume_ids=[])
     c["moves"] = moves
     return c
 
@@ -368,6 +449,8 @@ def summary_line(c: dict) -> str:
              f"reversals {', '.join(rev) or 'none'}",
              f"fireball {m['hadoken_hp']['name'] if 'hadoken_hp' in m else 'none'}",
              f"{len((c.get('punish') or {}).get('engine') or [])} punish options",
+             "rush check " + (" / ".join(f"{o['name']} ({o['startup']}F)" for o in (c.get("rush_check") or {}).get("moves")
+                                         or []) or "off"),
              f"{p.get('ids_known', 0)} move ids known"]
     return f"{c['character']} (generated from Capcom data): " + "; ".join(parts) + (
         f". Notes: {'; '.join(p['notes'])}" if p.get("notes") else "")

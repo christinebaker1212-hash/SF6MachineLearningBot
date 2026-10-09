@@ -470,6 +470,15 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{fr_.get('min')}-{fr_.get('max')} (median {fr_.get('median')}; setting {st_['min']}-"
                                 f"{st_['max']}, safe limit {st_['safe_max']})"
                                 + (f"; seen too late to wait {rx_['seen_late']}" if rx_.get("seen_late") else "") + "."))
+    rl_ = summary.get("rush_learn") or {}
+    if rl_.get("this_match"):                         # 0.43.0: the Drive Rush check's timing, learned (not Ryu)
+        parts_ = []
+        for b_, res_ in rl_["this_match"].items():
+            sh_ = (rl_.get("shift") or {}).get(b_, 0.0)
+            how_ = ("meeting rushes closer" if sh_ > 0.005 else "meeting rushes farther out" if sh_ < -0.005
+                    else "on the planned spot")
+            parts_.append(f"{b_} {', '.join(f'{k} {v}' for k, v in res_.items())} -> {how_} ({sh_:+.2f})")
+        out.append(("learned", f"Drive Rush checks vs {rl_.get('opponent')}: " + "; ".join(parts_) + "."))
     jc_ = summary.get("jump_attack_combos") or {}
     if jc_.get("hit") or jc_.get("continued"):
         top_ = sorted((jc_.get("routes") or {}).items(), key=lambda kv: -kv[1])[:2]
