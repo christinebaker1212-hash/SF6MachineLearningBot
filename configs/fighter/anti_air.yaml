@@ -1,0 +1,86 @@
+# 0.46.0: the user's anti-airs for the characters with no invincible 623 special (user, 2026-10-09: "Tell me the characters
+# without an anti air special, and I will tell you their best anti air"). Read by fighter_profile.anti_air_options for every
+# character but Ryu (Ryu keeps configs/fighter/ryu.yaml). Characters with a 623 anti-air special keep it (not listed here).
+#
+# `move`: a Capcom row name or part of one ("Somersault Kick" = Guile's Flash Kick). With no strength in it, the version
+# invincible to air attacks from the earliest frame is used (else the fastest L / M / H); OD and CA rows only when named.
+# `min_dist` / `max_dist`: where the move is used (the predicted landing's distance from the bot). Not given: a normal's
+# measured reach (reach.py, else ryu.yaml punish.reach_fallback by name: Ryu's, an ESTIMATE for others), a special 1.3.
+# Not usable here (the bot has no way into the state first): Chun-Li's Tenku Kick (Serenity Stream), Dee Jay's Maximum
+# Strike (Jus Cool), Manon's Allongé (the second hit after 2HP).
+A.K.I.:
+  - {move: Standing Heavy Kick}
+  # user: "MP and HP Serpent Lash (distance dependent)". Which is the close one is not in the data: H (invincible to air
+  # attacks, 11F) close, M (14F, the longer active window) farther: TO CONFIRM with the user
+  - {move: H Serpent Lash, max_dist: 1.3}
+  - {move: M Serpent Lash, min_dist: 1.3, max_dist: 2.2}
+Blanka:
+  - {move: Standing Heavy Kick}
+  - {move: Wild Edge}
+  - {move: Vertical Rolling Attack}
+Chun-Li:
+  - {move: Standing Medium Kick}
+  - {move: Standing Heavy Kick}
+  - {move: Tensho Kicks}
+Dee Jay:
+  - {move: Face Breaker}
+  - {move: Sunrise Heel}
+  - {move: Jackknife Maximum}
+  - {move: SA3 Weekend Pleasure}
+Dhalsim:
+  - {move: Yoga Uppercut}
+  - {move: Yoga Mountain}
+  - {move: Standing Heavy Kick}
+  - {move: Yoga Blast}
+  - {move: SA2 Yoga Sunburst}
+  - {move: SA3 Merciless Yoga}
+E. Honda:
+  - {move: Standing Heavy Punch}
+  - {move: Sumo Headbutt}
+  - {move: Sumo Smash}
+  - {move: Neko Damashi}
+  - {move: SA2 Ultimate Killer Head Ram}
+Ed:
+  - {move: Psycho Uppercut}
+  - {move: Standing Heavy Kick}
+Guile:
+  - {move: Crouching Heavy Punch}
+  - {move: Somersault Kick}
+Ingrid:
+  - {move: Luminous Uppercut(1)}
+  - {move: Sun Rise}
+  - {move: SA1 Shining Sun}
+JP:
+  - {move: Crouching Heavy Punch}
+  - {move: Bylina}
+  - {move: Standing Heavy Kick}
+  - {move: SA1 Chornobog}
+  - {move: Triglav}
+Kimberly:
+  - {move: Crouching Heavy Punch}
+  - {move: Standing Heavy Kick}
+  - {move: Bushin Senpukyaku}
+M. Bison:
+  - {move: Crouching Heavy Punch}
+  - {move: Standing Heavy Kick}
+  - {move: Psycho Crusher Attack}
+Manon:
+  - {move: Crouching Heavy Punch}
+  - {move: En Haut(1)}
+  - {move: Tomoe Derrière}
+Marisa:
+  - {move: Crouching Heavy Punch}
+  - {move: Gladius}
+  - {move: Dimachaerus(1)}
+Rashid:
+  - {move: Standing Heavy Kick}
+  - {move: Crouching Medium Punch}
+  - {move: Spinning Mixer}
+Viper:
+  - {move: Standing Heavy Kick}
+  - {move: H Thunder Dash}
+Zangief:
+  - {move: Double Lariat}
+  - {move: OD Double Lariat}
+  - {move: Crouching Heavy Punch}
+  - {move: SA2 Cyclone Lariat(Charged)}

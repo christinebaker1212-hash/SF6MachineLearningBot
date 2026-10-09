@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.46.0 (2026-10-09): the user's anti-airs for the 17 characters with no invincible 623 special (normals, specials, charge moves, supers), chosen by the landing's timing, distance, charge and resources.**
 - **0.45.1 (2026-10-09): characters with no combo lab results use the combos found in recordings (B) until K verifies theirs.**
 - **0.45.0 (2026-10-09): Random Select (`play-as Random`): the bot reads which character it got at each match start, finds its side with the input probe and plays that character's rules and data.**
 - **0.44.0 (2026-10-09): less passive defence after the full-dataset analysis (612 recordings): the bot takes its turn when it is plus after a block (press / throw / step / shimmy, learned per opponent), checks gaps valued by each opponent's own gaps, prices Drive by what is left (no OD High Blade Kick route from 4 bars down), escapes the corner (Drive Reversal, walk out), and stops full-screen / losing parries.**
@@ -5111,6 +5112,43 @@ is verified in game. ESTIMATE = a config guess.
   first hit); their match results show it.
 - Matches narrate it ("No combo lab results for X yet: using N combos found in recordings"); summary `combo_source`.
 - Tests `tests/test_0450.py`. Not run in game.
+
+## 0.46.0: the user's anti-airs for characters with no invincible 623 special (user, 2026-10-09)
+- User: "Tell me the characters without an anti air special, and I will tell you their best anti air." The 17 (0.31.0's
+  generator found no 623 special with start-up <= 8 noted invincible to air attacks): A.K.I., Blanka, Chun-Li, Dee Jay,
+  Dhalsim, E. Honda, Ed, Guile, Ingrid, JP, Kimberly, M. Bison, Manon, Marisa, Rashid, Viper, Zangief. Before, their
+  profiles had `anti_air.enabled: false`: every jump-in was blocked.
+- The user's list is `configs/fighter/anti_air.yaml` (Ryu untouched; characters with their own 623 anti-air special
+  unchanged). Every name was checked against Capcom's rows (the user's imported pages): Guile's Flash Kick = L Somersault
+  Kick, Viper's = H Thunder Dash. Left out (a state first): Chun-Li's Tenku Kick (Serenity Stream), Dee Jay's Maximum
+  Strike (Jus Cool), Manon's Allongé (after 2HP).
+- `fighter_profile.anti_air_options`: one option per entry. A name with no strength takes the version invincible to air
+  attacks from the earliest frame, else the fastest L / M / H; OD and CA only when named; no Lv2 / Lv3, no state variants.
+  Per option: the input (charge moves only their release, e.g. `8+LK@3`: the charge is held from blocking), start-up,
+  `inv_from` (Capcom's notes), `timing`, charge, Super / Drive cost, damage, distances (`min_dist` / `max_dist`; normals
+  default to ryu.yaml `punish.reach_fallback` by name = Ryu's MEASURED reach, an ESTIMATE for others; specials 1.3).
+  Zangief's Cyclone Lariat "shifts to throw when the button is not held down": its button is held through its start-up.
+  A super with no Capcom damage number gets 1,500 + 1,000 per level (ESTIMATE, only for the kill check).
+- `fighter._aa_options` (rule 4 for these profiles) / `_aa_opt_status`, on every line of a jump:
+  - "late" options (invincible to air attacks from frame <= 3: Somersault Kick, Psycho Uppercut, Tensho Kicks,
+    Jackknife Maximum, Sun Rise, Thunder Dash, the supers) are timed like Ryu's Shoryuken (0.21.1 / 0.32.0: may start up
+    to the landing, earlier against an empty jump)
+  - "early" options (normals, and moves invincible only later: Blanka's L Vertical Rolling Attack from 8, E. Honda's
+    Headbutt from 4, Serpent Lash, Bushin Senpukyaku ...) must hit `anti_air.early_window` (3, 9) frames before the
+    landing (ESTIMATE: before the jump attack connects)
+  - charge moves only with the charge ready by then (`own_charge`); supers only when bars are cheap (match point / low)
+    or it kills; OD only with a Drive bar kept and not in burnout
+  - the same landing-side rule as the Shoryuken: in front -> the best option that fits now (invincible x1.25, damage,
+    minus the bar / Drive price); crossing or on top -> block toward the landing side. A better option whose window is
+    still coming (a charged Flash Kick after the 2HP's window) is waited for.
+  - rule 4c while the jump is high: waits holding down-back for a [2]8 option's charge, back for a [4]6 one; nothing
+    left that fits -> block toward the landing side. The cross-cut stays Ryu's (Shoryuken hitbox data).
+- A.K.I.'s "MP and HP Serpent Lash (distance dependent)": set as H close (<= 1.3), M farther (1.3-2.2); which is which
+  is TO CONFIRM with the user.
+- Summary `anti_air` counts `option:<name>`; a thoughts line "Anti-air moves used: ...".
+- Tests `tests/test_0460.py` (Guile / Zangief from the real Capcom pages; Flash Kick when charged, 2HP when not, waiting
+  in down-back, block when nothing fits, supers by bars); `tests/test_0310.py` updated (Guile has anti-airs now). Not run
+  in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

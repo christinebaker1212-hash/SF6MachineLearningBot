@@ -50,9 +50,10 @@ def test_guile_without_motion_supers_or_anti_air_special(tmp_path):
     c = fp.profile("Guile", CFG, _ds(tmp_path, "guile"))
     m = c["moves"]
     assert "sa1" not in m and "sa3" not in m and "sa2" in m           # Sonic Hurricane / Crossfire need a charge
-    assert c["anti_air"]["enabled"] is False and "anti_air_srk" not in m
+    # 0.46.0: no invincible 623 special: the user's anti-airs (configs/fighter/anti_air.yaml) instead
+    assert "anti_air_srk" not in m and c["anti_air"]["enabled"] and c["anti_air"]["options"]
     assert c["fireball"]["clash_move"] is None
-    assert any("no invincible 623" in n for n in c["profile"]["notes"])
+    assert any("anti-air options" in n for n in c["profile"]["notes"])
 
 
 def test_zangief_command_grab_super_left_out(tmp_path):
@@ -62,7 +63,10 @@ def test_zangief_command_grab_super_left_out(tmp_path):
 
 def test_a_character_without_anti_air_blocks_jump_ins(tmp_path):
     from sf6bot.fighter import ScriptedFighter
-    c = fp.profile("Guile", CFG, _ds(tmp_path, "guile"))
+    cfg_dir = tmp_path / "cfg"                     # 0.46.0: no anti-air list (configs/fighter/anti_air.yaml) for it
+    cfg_dir.mkdir()
+    (cfg_dir / "ryu.yaml").write_text((CFG / "ryu.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    c = fp.profile("Guile", cfg_dir, _ds(tmp_path, "guile"))
     f = ScriptedFighter(c, {})
     assert not f._aa_on() and f._aa_move()["startup"] == 5
     ryu = ScriptedFighter(yaml.safe_load((CFG / "ryu.yaml").read_text(encoding="utf-8")), {})

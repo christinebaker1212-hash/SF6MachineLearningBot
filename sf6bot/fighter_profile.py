@@ -57,7 +57,7 @@ def profile(character: str | None, root: Path | str = "configs/fighter", ds_root
     base = yaml.safe_load((root / f"{BASE}.yaml").read_text(encoding="utf-8"))
     if is_ryu(character):
         return base
-    out = generate(character, base, Path(ds_root))
+    out = generate(character, base, Path(ds_root), root)
     own = root / f"{file_stem(character).lower()}.yaml"
     if own.exists():
         _merge(out, yaml.safe_load(own.read_text(encoding="utf-8")) or {})
@@ -225,6 +225,97 @@ def dragon_punches(rows: list[dict]) -> dict:
     return out
 
 
+# 0.46.0: an invincibility clause and the frame it starts on ("Invincible against mid-air ... from frames 8 - 26",
+# "Completely invincible from frames 1 - 13"; no frame given = from frame 1)
+_INV_CLAUSE = re.compile(r"(completely invincible|invincible to strikes|invincible against mid-air[^/]*strikes)([^/]*)", re.I)
+_FRAME = re.compile(r"frames?\s*(\d+)", re.I)
+AA_LATE_INV_FROM = 3       # invincible from this frame or earlier: started late like a Shoryuken (the jump attack can't beat it)
+
+
+def inv_from(notes: str | None) -> int | None:
+    """The first frame of a move's invincibility to (air) strikes, None when it has none."""
+    m = _INV_CLAUSE.search(notes or "")
+    if not m:
+        return None
+    f = _FRAME.search(m.group(0))
+    return int(f.group(1)) if f else 1
+
+
+def _aa_rows(rows: list[dict], move: str) -> list[dict]:
+    """Capcom rows for one anti-air entry: a strength named = that row; a generic name = the L / M / H rows (OD and CA
+    only when named; no state variants '[X] ...' / '(Perfect timing) ...', no Lv2 / Lv3)."""
+    want = move.lower()
+    named = bool(re.match(r"(L|M|H|OD|SA\d|CA) ", move))
+    out = []
+    for r in rows:
+        n = r.get("name") or ""
+        if want not in n.lower() or n.startswith(("[", "(")) or re.search(r"Lv[23]", n) or not _seq(r):
+            continue
+        if not named and re.match(r"(OD|CA) ", n):
+            continue
+        if named and not n.lower().startswith(want):
+            continue
+        out.append(r)
+    return out
+
+
+def anti_air_options(character: str, rows: list[dict], root, ids: dict, reach_fb: dict) -> list[dict]:
+    """0.46.0 (user's list, configs/fighter/anti_air.yaml): each named anti-air as an option the fighter times from the
+    landing. `timing` "late" = invincible to air attacks from frame <= AA_LATE_INV_FROM (sent like a Shoryuken, may start
+    up to the landing); "early" = the rest (normals, moves invincible only later): its hit must come before the jump attack.
+    Charge moves send only their release (the charge is held from blocking); a button "not held down" changes the move
+    (Zangief's Cyclone Lariat) -> held through its start-up."""
+    if root is None:
+        return []
+    try:
+        cfg = yaml.safe_load((Path(root) / "anti_air.yaml").read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return []
+    out: list = []
+    for ent in cfg.get(character) or []:
+        cands = _aa_rows(rows, str(ent.get("move") or ""))
+        if not cands:
+            continue
+
+        def key(r):
+            f = inv_from(r.get("notes"))
+            st = _int(r.get("startup_n")) or 99
+            return (0 if f is not None and f <= AA_LATE_INV_FROM else 1 if f is not None and f <= st else 2, st)
+        r = min(cands, key=key)
+        seq = _seq(r)
+        st = _int(r.get("startup_n"))
+        if not seq or st is None:
+            continue
+        inp = r.get("input") or ""
+        steps = seq.split()
+        charge = "2" if inp.startswith("[2]") else "4" if inp.startswith("[4]") else None
+        if charge and len(steps) > 1:
+            steps = steps[1:]                                   # the release only (the charge is held already)
+        if re.search(r"button is not held", r.get("notes") or "", re.I):
+            last = steps[-1].split("@")[0]
+            steps[-1] = f"{last}@{st + 2}"                       # ESTIMATE: held through its start-up
+        f = inv_from(r.get("notes"))
+        act = re.match(r"\s*\*?(\d+)-(\d+)", str(r.get("active") or ""))
+        name = r["name"]
+        sa = re.match(r"(SA|CA)(\d)?", name)
+        o = {"name": name, "seq": " ".join(steps), "startup": st,
+             "active_last": int(act.group(2)) if act else st + 3,
+             "inv_from": f, "timing": "late" if f is not None and f <= AA_LATE_INV_FROM else "early",
+             "charge": charge, "super": (int(sa.group(2) or 3) * 10000) if sa else 0,
+             "drive": 20000 if name.startswith("OD ") else 0,
+             # a super with no damage number in Capcom's table (Cyclone Lariat): ESTIMATE by level, for the kill check
+             "damage": _int(r.get("damage_n")) or ((1500 + 1000 * int(sa.group(2) or 3)) if sa else 0),
+             "normal": r.get("section") == "Normal Moves", "id": ids.get(name)}
+        if ent.get("min_dist") is not None:
+            o["min_dist"] = float(ent["min_dist"])
+        md = ent.get("max_dist")
+        if md is None:
+            md = reach_fb.get(name) if o["normal"] else None
+        o["max_dist"] = float(md) if md is not None else 1.3
+        out.append(o)
+    return out
+
+
 def fireballs(rows: list[dict]) -> dict:
     """{'L'|'H': row}: plain 236 projectile specials."""
     out: dict = {}
@@ -239,7 +330,7 @@ def fireballs(rows: list[dict]) -> dict:
     return out
 
 
-def generate(character: str, base: dict, ds_root: Path) -> dict:
+def generate(character: str, base: dict, ds_root: Path, root: Path | str | None = None) -> dict:
     """Ryu's rule set with every Ryu-specific part rebuilt for `character` (module docstring)."""
     c = copy.deepcopy(base)
     rows = _rows(character, ds_root)
@@ -286,7 +377,16 @@ def generate(character: str, base: dict, ds_root: Path) -> dict:
             names_map[_short(r["input"])] = r["name"]
     else:
         aa.update(enabled=False, wakeup_reversal=False, dp_names=[])
-        notes.append("no invincible 623 anti-air special: jump-ins are blocked toward the landing side")
+        # 0.46.0 (user): the anti-airs the user named for this character (configs/fighter/anti_air.yaml)
+        opts = anti_air_options(character, rows, root, ids, (c.get("punish") or {}).get("reach_fallback") or {})
+        if opts:
+            moves["anti_air_opt"] = dict(max(opts, key=lambda o: o["startup"]), name="anti-air (slowest option)")
+            aa.update(enabled=True, move="anti_air_opt", options=opts,
+                      max_dist=max(float(o.get("max_dist") or 1.3) for o in opts))
+            aa.setdefault("crosscut", {})["enabled"] = False      # the cross-cut is a Shoryuken's (its hitbox data)
+            notes.append("anti-air options (yours): " + ", ".join(o["name"] for o in opts))
+        else:
+            notes.append("no invincible 623 anti-air special: jump-ins are blocked toward the landing side")
     c["route_names"] = names_map
     # reversals: the OD anti-air special and the invincible Super Arts (Ryu's order: a killing SA3 first)
     pick: list = []
@@ -456,7 +556,7 @@ def summary_line(c: dict) -> str:
     aa = c.get("anti_air") or {}
     rev = [x["name"] for x in ((c.get("defense") or {}).get("options") or {}).get("reversal", {}).get("pick") or []]
     parts = [f"supers {', '.join(m[k]['name'] for k in ('sa1', 'sa2', 'sa3') if k in m) or 'none'}",
-             f"anti-air {m['anti_air_srk']['name'] if aa.get('enabled', True) and 'anti_air_srk' in m else 'block only'}",
+             f"anti-air {m['anti_air_srk']['name'] if aa.get('enabled', True) and 'anti_air_srk' in m else ('/'.join(o['name'] for o in aa['options']) if aa.get('options') else 'block only')}",
              f"reversals {', '.join(rev) or 'none'}",
              f"fireball {m['hadoken_hp']['name'] if 'hadoken_hp' in m else 'none'}",
              f"{len((c.get('punish') or {}).get('engine') or [])} punish options",

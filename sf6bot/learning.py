@@ -444,6 +444,10 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                                 f"{aa.get('wakeup_reversal', 0)}, out of blockstun {aa.get('blockstun_reversal', 0)}"
                                 + (f"; air-to-air out of Shoryuken range {aa['air_to_air']}" if aa.get("air_to_air") else "")
                                 + "."))
+    aopt = {k.split(":", 1)[1]: v for k, v in aa.items() if isinstance(k, str) and k.startswith("option:")}
+    if aopt:                       # 0.46.0: the user's anti-airs (characters with no invincible 623 special)
+        out.append(("scripted", "Anti-air moves used: " + ", ".join(f"{n} {v}" for n, v in
+                                                                     sorted(aopt.items(), key=lambda kv: -kv[1])) + "."))
     pt = summary.get("parry_throws") or {}
     if pt.get("chances"):
         out.append(("scripted", f"{opp} held Drive Parry within throw range {pt['chances']} times; I threw {pt.get('taken', 0)}."))

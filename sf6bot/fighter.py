@@ -2084,7 +2084,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if cc is not None:
             return cc
         air_move = not self._jumping(op) and self._air_move(op)
-        if ((self._jumping(op) or air_move) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
+        if aa.get("options"):
+            ao = self._aa_options(me, op, op_y, op_act, air_move)
+            if ao is not None:
+                return ao
+        elif ((self._jumping(op) or air_move) and self.vel_ok and not self.aa_done_for_jump and me_y <= 0.05
                 and not (_num(me.get("blockstun")) or 0) and self._ok("anti_air")):
             t_land = landing_frames(op_y, self.op_vy, float(aa.get("gravity", 0.0123)))
             mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
@@ -2175,9 +2179,25 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 if self._aa_ready_for != self.op_onset:
                     self._aa_ready_for = self.op_onset
                     self.aa_stats["ready"] = self.aa_stats.get("ready", 0) + 1
+                why = f"opponent in the air, lands in {t_land:.0f}f {abs(pdx):.2f} away"
+                if aa.get("options"):
+                    # 0.46.0: an option that can still come out later: wait for it, holding the direction its charge
+                    # needs (down-back for a [2]8 move, back for a [4]6 one); none left: block toward the landing side
+                    land_side = (Facing.RIGHT if pdx > 0 else Facing.LEFT) if abs(pdx) > 0.05 else self.side
+                    later = [o for o in aa["options"] if self._aa_opt_status(o, me, op, t_land, pdx) == "later"]
+                    if not later:
+                        return Decision("hold", direction=4, facing=land_side, rule="aa_ready",
+                                        reason=why + ": no anti-air fits any more, blocking toward the landing side")
+                    ch = {o.get("charge") for o in later}
+                    if "2" in ch:
+                        return Decision("hold", direction=1, facing=self.side, rule="aa_ready",
+                                        reason=why + ": holding down-back for the charge, anti-air ready")
+                    if "4" in ch:
+                        return Decision("hold", direction=4, facing=self.side, rule="aa_ready",
+                                        reason=why + ": holding back for the charge, anti-air ready")
+                    return Decision("release", rule="aa_ready", reason=why + ": starting nothing, anti-air ready")
                 srk = self._aa_move()
                 need = seq_prefix(srk["seq"]) + self.lead + self.stale + int(srk.get("startup", 5))
-                why = f"opponent in the air, lands in {t_land:.0f}f {abs(pdx):.2f} away"
                 if t_land <= need + int(aa.get("early_frames", 6)):
                     land_side = (Facing.RIGHT if pdx > 0 else Facing.LEFT) if abs(pdx) > 0.05 else self.side
                     return Decision("hold", direction=4, facing=land_side, rule="aa_ready",
@@ -2826,6 +2846,92 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
     # 0.31.0: a character without an anti-air special (fighter_profile: no invincible 623 move) blocks jump-ins toward
     # the landing side; its timing still uses a 623 motion with a 5-frame start-up (Ryu's L Shoryuken)
     _NO_AA = {"name": "no anti-air special", "seq": "6@3 2@3 3+LP@3", "startup": 5}
+
+    def _aa_opt_status(self, o: dict, me: dict, op: dict, t_land: float, pdx: float,
+                       air_attack: bool = True) -> str | None:
+        """0.46.0: one of the user's anti-air options (fighter_profile.anti_air_options) against a jump landing in `t_land`
+        frames `pdx` away: "now" (send it on this line), "later" (its window is still to come and it can be paid for),
+        or None. "late" moves (invincible to air attacks from their first frames) may start up to the landing like a
+        Shoryuken (and against an empty jump hit before it); "early" moves (normals, later invincibility) must hit
+        `anti_air.early_window` frames before the landing (ESTIMATE: before the jump attack connects)."""
+        aa = self.c["anti_air"]
+        d = abs(pdx)
+        if d < float(o.get("min_dist") or 0) or d > float(o.get("max_dist") or aa.get("max_dist", 1.3)):
+            return None
+        if o.get("super") and (_num(me.get("super")) or 0) < o["super"]:
+            return None
+        if o.get("super") and not (self._spending(me) or (o.get("damage") and o["damage"] >= (_num(op.get("hp")) or 1e9))):
+            return None           # bars only when they are cheap (match point / low) or the super kills
+        if o.get("drive") and not self.can_spend(me, "od_move", reserve=self.c.get("drive_reserve", 10000)):
+            return None
+        need = seq_prefix(o["seq"]) + self.lead + self.stale + int(o["startup"])
+        if o.get("timing") == "late":
+            lo = need - int(aa.get("late_frames", 4))
+            if not air_attack:
+                lo = need + int(aa.get("empty_jump_margin", 2))
+            hi = need + int(aa.get("early_frames", 6)) + self.aa_extra
+        else:
+            ew = aa.get("early_window") or (3, 9)
+            lo, hi = need + int(ew[0]), need + int(ew[1]) + self.aa_extra
+        ahead = max(0, int(t_land - hi))
+        if o.get("charge") and not self.own_charge.ready(o["charge"], self._now, ahead=ahead):
+            return None
+        if lo <= t_land <= hi:
+            return "now"
+        return "later" if t_land > hi else None
+
+    def _aa_options(self, me: dict, op: dict, op_y: float, op_act, air_move: bool) -> Decision | None:
+        """0.46.0 (user's anti-airs for characters with no invincible 623 special): rule 4 with the option table. The side
+        logic is the Shoryuken's (0.21.1): predicted to land in front -> the best option that fits now (invincible ones
+        first, then damage, minus what the Super / Drive is worth); crossing or on top -> block toward the landing side."""
+        aa = self.c["anti_air"]
+        if not ((self._jumping(op) or air_move) and self.vel_ok and not self.aa_done_for_jump
+                and (_num(me.get("y")) or 0.0) <= 0.05 and not (_num(me.get("blockstun")) or 0) and self._ok("anti_air")):
+            return None
+        t_land = landing_frames(op_y, self.op_vy, float(aa.get("gravity", 0.0123)))
+        mx, ox = _num(me.get("x")) or 0.0, _num(op.get("x")) or 0.0
+        pdx, dx = ox + self.op_vx * t_land - mx, ox - mx
+        if abs(pdx) > float(aa.get("max_dist", 1.3)) + 0.6:
+            return None
+        air_attack = bool(self._op_air_attack or air_move)
+        st = {o["name"]: self._aa_opt_status(o, me, op, t_land, pdx, air_attack) for o in aa["options"]}
+        if not any(st.values()):
+            return None
+        land_side = (Facing.RIGHT if pdx > 0 else Facing.LEFT) if abs(pdx) > 0.05 else self.side
+        in_front = abs(dx) >= float(aa.get("side_dead", 0.05)) and dx * pdx > 0
+        since_cross = (self._now - self._op_side_t) if isinstance(self._now, int) and isinstance(
+            self._op_side_t, int) else 99
+        if in_front and since_cross < int(aa.get("cross_settle", 1)):
+            in_front = False
+        now = [o for o in aa["options"] if st[o["name"]] == "now"]
+        if not in_front:
+            if not now:
+                return None
+            crossing = dx * pdx < 0 and abs(pdx) >= float(aa.get("crossup_past", 0.3))
+            return Decision("hold", direction=4, facing=land_side, rule="block_crossup" if crossing else "block_overhead",
+                            reason=f"opponent {'crossing over' if crossing else 'landing on top'} ({dx:+.2f} now, lands "
+                                   f"{pdx:+.2f}): blocking toward the landing side")
+        if not now:
+            return None
+        bar = self._bar_value(me)
+
+        def value(o):
+            v = float(o.get("damage") or 800) * (1.25 if o.get("timing") == "late" else 1.0)
+            return v - bar * (o.get("super") or 0) / 10000 - self._drive_price(o.get("drive") or 0, me, op)
+        o = max(now, key=value)
+        later = [x for x in aa["options"] if st[x["name"]] == "later"]
+        if later and max(value(x) for x in later) > value(o):
+            # a better option's window is still to come (a charged Flash Kick after the crouching heavy punch's window):
+            # wait for it (rule 4c holds the charge direction meanwhile)
+            return None
+        self.aa_done_for_jump = True
+        self._aa_kind = "anti_air" if not air_move else "air_moves"
+        k_ = f"option:{o['name']}"
+        self.aa_stats[k_] = self.aa_stats.get(k_, 0) + 1
+        why = (f"opponent {'airborne in a move (action ' + str(op_act) + ')' if air_move else 'jumping in'} "
+               f"(height {op_y:.2f}, lands in {t_land:.0f}f {abs(pdx):.2f} away): {o['name']}")
+        return Decision("seq", o["name"], o["seq"], reason=why, rule="anti_air",
+                        facing=Facing.RIGHT if dx > 0 else Facing.LEFT)
 
     def _aa_move(self) -> dict:
         aa = self.c.get("anti_air") or {}
