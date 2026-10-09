@@ -4,12 +4,22 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.43.1**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (727).*
+*State as of 2026-10-09: code version **0.44.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (744).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.44.0 is pushed** (CLAUDE.md "Full dataset analysed" and "0.44.0"): **Ryu reached GRAND MASTER (1704 MR) on
+0.41.0 / 0.42.0.** The user's full dataset showed the bot gives its turn back after blocks (plus by 2+: blocked again 45-56%,
+pressed 12-17%, pressing measured +270-347 hp vs blocking ~0 and -0.4 Drive), spends 4.55 Drive bars a match on OD High
+Blade Kick in combos, and sits cornered 24-30 s a match. 0.44.0: the `my_turn` pressure moment (press / throw / step / shimmy
+/ block, learned per opponent), gap checks valued by the opponent's own gaps (`adapt.MatchMemory.check_value`), Drive priced
+by bars left (`combo_compose.drive_cost`), a corner Drive Reversal and walk-out, no parries from 3.5+ or once they lose
+Drive. Next ranked run: compare the scorecard's new rows (Drive lost by cause, burnouts both ways, turns taken %) and
+`fight_summary.turns` / `drive_meter`; watch whether frame-trap players punish the checks (`adapt.gaps`). The goal set by
+the user: **Ultimate Master** (an aim, not a promise).
 
 **State:** **0.43.1** (CLAUDE.md "0.43.1"): the research build also runs the SF6 Mod Editor's live costume-colour preview
 (`refw_research/allowed/sf6editor_live.lua`, pinned to its exact bytes; online included, approved by Capcom as cosmetic per

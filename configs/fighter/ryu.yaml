@@ -118,6 +118,12 @@ meter:
   low_hp: 0.35              # the bot at or below this share of its health...
   low_hp_factor: 0.5        # ...x this (it may not live to spend them)
   confirm_sa1_when_spending: true   # a 2MK confirm into SA1 whenever bars are cheap (else only when SA1 kills)
+  # 0.44.0: a Drive bar spent in a combo costs this many hp at 3+ bars left after the spend; x2.5 at 2 left, x4 at 1, x6
+  # under 1 (combo_compose.DRIVE_LEFT_STEPS), x1.5 with the bot's back within drive_wall_dist of its wall. MEASURED (101
+  # ranked matches, 0.39-0.43): OD moves 6.3 bars a match, 4.55 of them OD High Blade Kick in combos; burnouts 0.71-0.77
+  # a match (opponents 0.15-0.18), blocking set off 21 of 24 in the GM run. ESTIMATES: the steps and the factor.
+  drive_bar_value: 200
+  drive_wall_dist: 2.0
 inputs:
   motion_clear_frames: 10   # MEASURED 0.19.0 ranked: neutral frames between letting go of forward and the motion's
                             # down: 4-5 -> Shoryuken 55 of 56; 8+ -> Hadoken 368 of 368. Counted from the release.
@@ -545,6 +551,8 @@ fireball:
   act_floor: 0.0
   parry_min_drive: 10000    # a parried projectile gives the Drive back; one bar kept for a parry that misses
   parry_min_dist: 2.5       # 0.31.1: block, not parry, with the thrower nearer (MEASURED: thrown out of the parry 24-30%)
+  parry_max_dist: 3.5       # 0.44.0: block, not parry, with the thrower farther (MEASURED: from 3.5+ 57 of 104 parries
+                            # caught nothing, -0.52 Drive bars each; a blocked special ~0.08 bar)
   # 0.37.0: timed from the projectile's own hitbox (exporter v11; the contact frame within 1 frame 70% of the time,
   # MEASURED) the parry is a perfect parry: parried nearer the thrower, tapped short. ESTIMATES.
   parry_min_dist_box: 1.5
@@ -590,6 +598,8 @@ defense:
     after_hit:        {strike: 4.6, throw: 0.3, shimmy: 0.06, wait: 0.04, cmd_grab: 1.0}
     wakeup:           {strike: 3.6, throw: 0.45, shimmy: 0.6, wait: 0.35, cmd_grab: 1.0}
     approach:         {strike: 2.1, throw: 1.5, shimmy: 0.15, wait: 1.25, cmd_grab: 1.0}
+    # 0.44.0 the opponent 2+ frames behind after the bot's block (HM / GM: they pressed again ~50%, waited / backed off ~25%)
+    my_turn:          {strike: 3.0, throw: 0.3, shimmy: 0.4, wait: 1.3, cmd_grab: 1.0}
   options:
     block:      {seq: "1@12"}
     # 0.25.0: the throw's direction is set when the option goes out (fighter.throw_direction): forward, back only with the
@@ -621,6 +631,19 @@ defense:
     # during guard or a knockdown, so it is input `early` frames before the stun ends (it must come out IN the stun)
     drive_reversal: {seq: "6+HP+HK@3", early: 8, drive: drive_reversal,
                      situations: [after_block, after_rush_block, wakeup]}
+    # 0.44.0 a gap check after a block: a fast button that reaches, pressed to come out on the first free frame. Its value
+    # is not a table: it is this opponent's own gaps after the bot's blocks this match (adapt.MatchMemory.check_value: a
+    # strike connecting after the button's start-up is a counter hit, one connecting first is a frame trap), from a prior
+    # MEASURED on 101 HM / GM matches. Only when the frames are about even or unknown (`turns.check_max_minus`).
+    check:
+      situations: [after_block]
+      pick: &turn_buttons
+        - {name: "2LP", starter: "Crouching Light Punch", seq: "2+LP@3", startup: 4, turn: true}
+        - {name: "5LP", starter: "Standing Light Punch", seq: "5+LP@3", startup: 4, turn: true}
+        - {name: "5LK", starter: "Standing Light Kick", seq: "5+LK@3", startup: 5, turn: true}
+        - {name: "2MP", starter: "Crouching Medium Punch", seq: "2+MP@3", startup: 6, turn: true}
+        - {name: "5MP", starter: "Standing Medium Punch", seq: "5+MP@3", startup: 6, turn: true}
+        - {name: "2MK", starter: "Crouching Medium Kick", seq: "2+MK@3", startup: 8, turn: true}
   # ESTIMATES from game knowledge (NOT measured), thousands of hp for the bot when the opponent answers with
   # each option. What each option actually scores against an opponent replaces these as tries accumulate.
   payoff:
@@ -644,6 +667,7 @@ defense:
     # opponent blocks) is bad. A minority option: a replay of the 0.19.0 session through decide() picked it at 102 of
     # ~550 moments with the first estimates (0.3 / 0.4 / 0.1)
     drive_reversal: {throw: -0.3, strike: -0.1, shimmy: -0.6, wait: -1.8, cmd_grab: 0.0}
+    check:      {}       # 0.44.0: valued by this opponent's gaps (turns.check_weight), not by the table
   # 0.21.0 turn-taking by frame data (fighter._turn): whose turn it is decides which options a moment may use.
   #  - the bot minus (or the frames unknown) after a block, a hit, or on its own wake-up: no jab, no instant tech; the
   #    delay tech gets `bonus`; parry / Drive Reversal / reversal / jump lose `guess_penalty`
@@ -660,6 +684,18 @@ defense:
     no_retreat_wall: 2.0     # 0.27.0: no back dash / shimmy option with the bot's back this close to its wall
     guess_penalty: 0.3       # parry / Drive Reversal / reversal / jump on the opponent's turn
     parry_min_drive: 30000
+    # 0.44.0 the gap check (options.check): offered when the bot is at most this many frames minus (or the frames are
+    # unknown), never after a Drive Rush normal (+4 for them); its value = check_weight x adapt.MatchMemory.check_value
+    check_max_minus: 1
+    check_weight: 1.0
+    # 0.44.0 the corner: with the bot's back within corner_back of its wall, `corner_drive` Drive and corner_string blocked
+    # hits in this string, the Drive Reversal (2 bars, pushes the opponent out) loses its guess penalty and gains
+    # corner_dr_bonus. MEASURED (GM run): cornered 24 s a match (the opponent 6), 30% of blocked hits there, Drive
+    # Reversals 0.1 a match (the user's CFN stats). ESTIMATES: the bonus and the limits.
+    corner_back: 1.5
+    corner_drive: 40000
+    corner_string: 2
+    corner_dr_bonus: 0.6
   # 0.23.0 the reactive reversal (fighter._reactive_reversal): with a reversal affordable at a wake-up / after-block / after-hit
   # moment, its motion goes in during the stun and the button only if a strike, throw or command grab of the opponent is on
   # screen on the last line it can still land on the first free frame (else the game above without the reversal). MEASURED
@@ -749,6 +785,34 @@ defense:
       throw:      {throw: 0.0, strike: -0.8, shimmy: -0.4, wait: 1.3, cmd_grab: -0.5}
       shimmy:     {throw: 1.3, strike: -0.4, shimmy: 0.0, wait: -0.2, cmd_grab: 1.3}
       block:      {throw: -1.2, strike: 0.1, shimmy: 0.0, wait: -0.3, cmd_grab: -2.5}
+  # 0.44.0 (user: "it's far too defensive ... blocking still accounts for the majority of its Drive Gauge loss"): MY TURN
+  # after a block. The bot's blockstun ends `min_adv`+ frames before the opponent can act (the punish engine's frames:
+  # catalog / Capcom / learned move timing; else the blocked move's on-block), within `max_dist`. MEASURED (101 ranked
+  # matches, 0.39-0.43, HM / GM; what the bot did when it was 2+ frames ahead after a block, and the hp net over the next
+  # 1.5 s): it blocked the next attack 45-56% (-44 / +34 hp, -0.33 / -0.41 Drive bars, ~2 more blocked hits), did nothing
+  # 18-27% (+41), pressed a normal 12-17% (+270 / +347); on 0.24-0.27 it had blocked again only 28% at +4. So the turn is
+  # taken: `press` = the first button that reaches and starts no later than the bot's advantage + the opponent's fastest
+  # button that reaches - 1 (it beats any button they press: a counter hit), a throw (within throw range), a step forward,
+  # a shimmy or block. The opponent's answers here are learned per opponent like every pressure moment. Payoffs: ESTIMATES.
+  my_turn:
+    enabled: true
+    min_adv: 2
+    max_dist: 2.2
+    situations: [my_turn]
+    options:
+      press:  {pick: *turn_buttons}
+      throw:  {seq: "5+LP+LK@3"}
+      step:   {seq: "6@10"}
+      shimmy: {seq: "4@12"}
+      block:  {seq: "1@12"}
+    payoff:
+      press:  {throw: 0.5, strike: 0.7, shimmy: -0.4, wait: 0.1, cmd_grab: 0.5}
+      throw:  {throw: 0.0, strike: 0.2, shimmy: -0.8, wait: 1.2, cmd_grab: -0.5}
+      step:   {throw: -0.6, strike: -0.3, shimmy: 0.2, wait: 0.3, cmd_grab: -1.0}
+      shimmy: {throw: 1.3, strike: -0.4, shimmy: 0.0, wait: -0.2, cmd_grab: 1.3}
+      block:  {throw: -1.2, strike: -0.15, shimmy: 0.0, wait: -0.2, cmd_grab: -2.5}
+    # with the bot's back within turns.corner_back of its wall: walk out / press more (ESTIMATES)
+    corner_bonus: {step: 0.3, press: 0.15, block: -0.2}
 # 0.20.0 (user's pick "Drive Rush approach"): from mid range now and then a Parry Drive Rush (the combo lab's verified
 # PDR input) into a normal or a throw. ESTIMATES: the range, the chance, the press frame of the normal in the rush (the
 # combo lab's RUSH_AT is a guess too). A blocked rushed normal is +4: the bot's own rush pressure takes over from there.

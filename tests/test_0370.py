@@ -100,7 +100,8 @@ def test_an_unknown_projectile_is_followed_from_its_hitbox_and_perfect_parried_o
     """No id says projectile (an unnamed move): the box alone starts the flight; the parry lands on the contact frame."""
     f = ScriptedFighter(FCFG, _common_moves(FCFG), seed=1)
     f.lead = 4
-    got = _run(f, _fb_lines(start=3.0, v=0.1))
+    # 0.44.0: the thrower within fireball.parry_max_dist (3.5): no parry from farther
+    got = _run(f, _fb_lines(start=3.0, v=0.1, thrower_x=3.4))
     parry = [(t, d) for t, d in got if d.rule == "perfect_parry"]
     assert parry and f.zn_stats.get("box_flights") == 1 and f.zn_stats.get("parry_box") == 1
     t, d = parry[0]

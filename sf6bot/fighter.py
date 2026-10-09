@@ -53,6 +53,9 @@ RUSH_IDS = {500, 501, 739, 740, 741}     # Drive Rush (Ken 500/501, Ryu 739-741)
 # combo_gen.RUSH_BONUS). 0.18.1 ranked: Ken's rushed normals landed 5 of 8; after blocking one the bot was hit within
 # 45 frames 3 times of 8; the bot never used the +4 itself.
 RUSH_BONUS = 4
+# 0.44.0: the start-up of the opponent's fastest button that reaches this far, until 5+ of its normals have a measured
+# reach (reach.py): (distance up to, start-up). ESTIMATES (jabs ~4F reach ~1.0; 5F lights / 6F mediums farther).
+THEIR_FASTEST = ((1.0, 4), (1.35, 5), (1.7, 6), (99.0, 8))
 LIGHT_RX = re.compile(r"^(Standing|Crouching) Light (Punch|Kick)\b")   # 0.38.0: the opponent's light normals
 PARRY_HOLD_RULES = ("perfect_parry", "parry_keep")   # 0.38.0: MP+MK stay held between these decisions (fight loop)
 def denjin_ids(character: str | None, ds_root: Path, fcfg: dict) -> dict:
@@ -832,6 +835,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._cur: tuple = ({}, {})
         self._rrv: dict | None = None          # 0.23.0 the reactive reversal in progress
         self.reversal_stats = {"moments": 0, "reversal": 0, "held": 0}
+        # 0.44.0 my turn after a block / gap checks / the corner Drive Reversal
+        self.turn_stats = {"moments": 0, "checks_offered": 0, "corner_dr": 0}
+        self._turn_mine: int | None = None
+        self._turn_gap = 3
         self._thrown_for = None
         self.tech_stats: dict = {}
         # 0.42.0 human limits: delay tech, varied answers, no reaction DI twice in a row on the same move
@@ -2373,6 +2380,18 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if wa is not None:
                 self._pressure_fired = True
                 return wa
+        # 0.44.0 my turn: the bot's blockstun ends `my_turn.min_adv`+ frames before the opponent can act
+        mt = dc.get("my_turn") or {}
+        self._turn_mine = None
+        if sit in ("after_block", "after_rush_block"):
+            self._turn_mine = self._turn_adv(raw, me, op)
+            if (mt.get("enabled", True) and "my_turn" in self.defense.sets and self._turn_mine is not None
+                    and self._turn_mine >= int(mt.get("min_adv", 2)) and dist <= float(mt.get("max_dist", 2.2))
+                    and (_num(op.get("y")) or 0.0) <= 0.3):
+                self._pressure_fired = True
+                self._rrv = None
+                self.turn_stats["moments"] += 1
+                return self._commit_defense("my_turn", raw, me, op, dist, t, rem=rem)
         if dist > float(dc.get("max_dist", 1.4)) or (_num(op.get("y")) or 0.0) > 0.3:
             return None
         if sit in ("after_block", "after_rush_block"):
@@ -2391,6 +2410,47 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return self._commit_defense(sit, raw, me, op, dist, t, rem=rem)
 
     # ---- 0.23.0 the reactive reversal ----------------------------------------------------------------------------------
+    def _turn_adv(self, raw: dict, me: dict, op: dict) -> int | None:
+        """0.44.0: how many frames before the opponent the bot can act after this block (positive = the bot first), or None
+        when not known. The punish engine's window when it has one (its frames: catalog / Capcom / learned move timing,
+        slack already taken off, so it errs toward the opponent), else the blocked move's on-block value."""
+        if (self.c.get("punish") or {}).get("engine"):
+            w = self._pe_window(raw, me, op)
+            if w is not None and w.get("kind") == "block" and isinstance(w.get("free"), (int, float)) \
+                    and isinstance(w.get("bot"), (int, float)):
+                return int(w["free"] - w["bot"])
+        adv = self._block_adv(op.get("action_id"))
+        return -int(adv) if isinstance(adv, (int, float)) else None
+
+    def _their_fastest(self, dist: float) -> int:
+        """0.44.0: the start-up of the opponent's fastest normal that reaches `dist` (its measured reach, reach.py, + 0.1;
+        Capcom start-ups). With fewer than 5 of its normals measured, THEIR_FASTEST by distance (ESTIMATES); with enough
+        measured and none reaching, 12 (it has to walk in first)."""
+        best, n = None, 0
+        for aid, info in (self.opp or {}).items():
+            if not (isinstance(aid, int) and 600 <= aid < 715):
+                continue
+            su, r = info.get("startup"), (self.opp_reach or {}).get(aid)
+            if not isinstance(su, int) or su <= 0 or not isinstance(r, (int, float)):
+                continue
+            n += 1
+            if r + 0.1 >= dist and (best is None or su < best):
+                best = su
+        if n < 5:
+            return next(s for lim, s in THEIR_FASTEST if dist <= lim)
+        return best if best is not None else 12
+
+    def _button_reach(self, c: dict):
+        """0.44.0: how far a turn / check button (a `pick` candidate with a Capcom `starter` name) reaches: its measured
+        reach by the bot's own id (reach.py), else the punish config's fallback by name."""
+        sid = c.get("id")
+        if sid is None and c.get("starter"):
+            sid = next((m.get("id") for m in self.own or () if m.get("name") == c["starter"]), None)
+            if sid is None:
+                sid = next((o.get("id") for o in (self.c.get("punish") or {}).get("engine") or ()
+                            if o.get("starter") == c["starter"] and o.get("id") is not None), None)
+        return self._pe_reach(sid, self._reach_fb(c.get("starter")))
+
     def _reactive_reversal(self, sit: str, raw: dict, me: dict, op: dict, dist: float, t: float, rem: int):
         """0.23.0 (user: "Prioritize non-human levels of ... reactions"). MEASURED 0.22.5 (111 wake-ups with the opponent
         within 1.6): reversals came out ahead (+1,183 hp over 1.5 s, one lost), delay tech -306, block -303; the defence
@@ -2800,6 +2860,36 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if self.composer is not None:
             self.composer.bar_value = self._bar_value(me)
             self._wall_room(me, op)
+            # 0.44.0: a Drive bar's price follows the bars left and the wall behind the bot (combo_compose.drive_cost)
+            self.composer.drive_now = _num(me.get("drive"))
+            back = self._my_back(me, op)
+            from .combo_compose import DRIVE_WALL_DIST
+            self.composer.drive_wall = back is not None and back <= float(
+                (self.c.get("meter") or {}).get("drive_wall_dist", DRIVE_WALL_DIST))
+            self.composer.drive_bar_value = float((self.c.get("meter") or {}).get("drive_bar_value", 200))
+
+    def _my_back(self, me: dict, op: dict | None = None) -> float | None:
+        """0.44.0: the room between the bot and the wall behind it (game units), or None."""
+        if op is None:
+            cur = getattr(self, "_cur", None)
+            raw = cur[0] if cur else {}
+            op = raw.get("p2") if raw.get("p1") is me else raw.get("p1")
+        mx, ox = _num(me.get("x")), _num((op or {}).get("x"))
+        if mx is None or ox is None:
+            return None
+        from .intents import WALL
+        return (WALL - mx) if mx > ox else (mx + WALL)
+
+    def _drive_price(self, spent, me: dict, op: dict | None = None) -> float:
+        """0.44.0: what spending `spent` Drive costs now in hp (combo_compose.drive_cost): more the fewer bars are left
+        after it, and with the bot's back near its wall. Used where combo routes are valued outside the composer (the
+        punish engine's routes, the Drive Impact crumple cash-out)."""
+        from .combo_compose import DRIVE_WALL_DIST, drive_cost
+        mc = self.c.get("meter") or {}
+        back = self._my_back(me, op)
+        return drive_cost(spent or 0, _num(me.get("drive")),
+                          back is not None and back <= float(mc.get("drive_wall_dist", DRIVE_WALL_DIST)),
+                          float(mc.get("drive_bar_value", 200)))
 
     def _wall_room(self, me: dict, op: dict | None = None) -> None:
         """0.41.0: the opponent's back to its wall, for the composer's WALL_FOLLOW (no OD High Blade Kick follow-up there)."""
@@ -2981,7 +3071,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             seen.add(o["key"])
             est = estimate_after(rows, before=1)
             p = max(0.05, min(1.0, p))
-            v = est * p
+            # 0.44.0: the Drive the cash-out spends has a price (MEASURED: 41 of 69 crumples in fights_2 went out as 5HP >
+            # OD High Blade Kick > Axe Kick, 2 bars each; OD High Blade Kick was 4.55 of the 6.3 OD bars a match)
+            spent = (o.get("entry") or {}).get("drive")
+            v = est * p - self._drive_price(spent if isinstance(spent, (int, float)) else 0, me, op)
             if hp is not None and est >= hp:
                 # it kills: the surest kill first, then the one that spends the fewest Super bars
                 ent = o.get("entry") or {}
@@ -3679,7 +3772,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             # Impact. MEASURED (0.36.1 ranked): 54 wake-up Drive Reversals and 14 forward Drive Impacts out of get-ups
             exclude.add("drive_reversal")
         ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
-                                 lambda name, oc: self._resolve_option(me, op, oc), wait=wait,
+                                 lambda name, oc: self._resolve_option(me, op, oc, name), wait=wait,
                                  exclude=exclude, bonus=bonus)
         opt = ch["option"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
@@ -3734,9 +3827,40 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 ex |= {"back_dash", "shimmy"}
         if (_num(me.get("drive")) or 0) < int(tc.get("parry_min_drive", 30000)):
             ex.add("parry")
+        back_ = self._my_back(me, op)
+        if sit == "my_turn":
+            # 0.44.0: the bot acts first after this block: press (a button that beats theirs), throw, step, shimmy, block
+            mine = int(self._turn_mine or 0)
+            their = self._their_fastest(dist)
+            self._frame_trap_adv, self._turn_gap = mine, their - 1
+            if dist > float((self.c.get("ranges") or {}).get("throw_attempt", 0.85)):
+                ex.add("throw")
+            if back_ is not None and back_ <= float(tc.get("corner_back", 1.5)):
+                mtc = (self.c.get("defense") or {}).get("my_turn") or {}
+                for k_, v_ in (mtc.get("corner_bonus") or {}).items():
+                    bonus[k_] = bonus.get(k_, 0.0) + float(v_)
+            return ex, bonus, f"my turn ({mine:+d}; their fastest button here {their}F)"
         if sit in ("after_block", "after_rush_block", "after_hit", "wakeup"):
             adv = self._block_adv(op.get("action_id")) if sit in ("after_block", "after_rush_block") else None
             mine = -adv if isinstance(adv, int) else None
+            if sit in ("after_block", "after_rush_block") and self._turn_mine is not None:
+                mine = int(self._turn_mine)          # 0.44.0: the punish engine's frames when it has them
+            # 0.44.0 the gap check (options.check): valued by this opponent's gaps after the bot's blocks this match
+            cm = int(tc.get("check_max_minus", 1))
+            oc_ = self.defense.options.get("check") if self.defense is not None else None
+            cand_ = self._resolve_option(me, op, oc_, "check") if (oc_ and sit == "after_block"
+                                                                   and (mine is None or mine >= -cm)) else None
+            if cand_ is not None:
+                bonus["check"] = float(tc.get("check_weight", 1.0)) * self.memory.check_value(int(cand_.get("startup", 4)))
+                self.turn_stats["checks_offered"] += 1
+            else:
+                ex.add("check")
+            # 0.44.0 the corner: a Drive Reversal out of a long blockstring with Drive to spare pushes the opponent out
+            dm_ = self.memory.drive._s
+            corner_dr = (sit in ("after_block", "after_rush_block") and back_ is not None
+                         and back_ <= float(tc.get("corner_back", 1.5))
+                         and (_num(me.get("drive")) or 0) >= int(tc.get("corner_drive", 40000))
+                         and (dm_ or {}).get("n", 0) >= int(tc.get("corner_string", 2)))
             if mine is not None and mine >= 1:
                 bonus["jab"] = float(tc.get("jab_bonus", 0.35))
                 turn = f"my turn ({mine:+d})"
@@ -3749,6 +3873,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 for g in ("parry", "drive_reversal", "reversal", "jump"):
                     bonus[g] = -float(tc.get("guess_penalty", 0.3))
                 turn = "their turn" + (f" ({mine:+d})" if mine is not None else "")
+            if corner_dr:
+                bonus["drive_reversal"] = float(tc.get("corner_dr_bonus", 0.6))
+                self.turn_stats["corner_dr"] += 1
+                turn = (turn + "; " if turn else "") + "cornered: a Drive Reversal pushes them out"
         elif sit == "approach":
             ex |= {"block", "parry", "reversal"}
             bonus["jab"] = float(tc.get("jab_bonus", 0.35))
@@ -3793,12 +3921,23 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             turn = (turn + "; " if turn else "") + f"{gs['name']} possible"
         return ex, bonus, turn
 
-    def _resolve_option(self, me: dict, op: dict, oc: dict) -> dict | None:
+    def _resolve_option(self, me: dict, op: dict, oc: dict, name: str | None = None) -> dict | None:
         """The first candidate of an option the bot can afford now (0.18.3: the reversal = SA3 when it kills, else OD
-        Shoryuken with 2 Drive bars to spare, else SA1, else SA3), or None."""
+        Shoryuken with 2 Drive bars to spare, else SA1, else SA3), or None. 0.44.0: a `turn` candidate (my turn's press,
+        the gap check) must reach (`_button_reach`); my turn's press must also start no later than the bot's advantage +
+        the opponent's fastest reaching button - 1 (`_frame_trap_adv`, `_turn_gap`); the gap check has no frame limit (its
+        value is the opponent's gaps)."""
         meter, ophp = _num(me.get("super")) or 0, _num(op.get("hp")) or 0
+        dist = player_distance(me, op)
         for c in oc.get("pick") or []:
-            if isinstance(c.get("startup"), int) and c["startup"] > self._frame_trap_adv + int(c.get("gap", 3)):
+            if c.get("turn"):
+                r = self._button_reach(c)
+                if r is None or dist is None or dist > float(r):
+                    continue
+                if name != "check" and isinstance(c.get("startup"), int) \
+                        and c["startup"] > self._frame_trap_adv + self._turn_gap:
+                    continue
+            elif isinstance(c.get("startup"), int) and c["startup"] > self._frame_trap_adv + int(c.get("gap", 3)):
                 continue                  # 0.18.5 frame trap: must be active before the opponent's 4-frame jab
             if c.get("super") and meter < int(c["super"]):
                 continue
@@ -4191,6 +4330,15 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         oa = op.get("action_id")
         if oa in self.throw_ids or oa in self.cmd_grab_ids():
             return None
+        # 0.44.0: not when the bot gets free 2+ frames before the opponent (my turn): a light that follows then is pressed
+        # into the bot's button (MEASURED: the bot gave such turns back 73% of the time in the HM / GM matches)
+        mt = (self.c.get("defense") or {}).get("my_turn") or {}
+        cur = getattr(self, "_cur", None)
+        if mt.get("enabled", True) and cur and (_num(me.get("blockstun")) or 0) > 0:
+            m_ = self._turn_adv(cur[0], me, op)
+            if m_ is not None and m_ >= int(mt.get("min_adv", 2)):
+                self.light_stats["plus_released"] = self.light_stats.get("plus_released", 0) + 1
+                return None
         key = (self.light_stats["strings"], self._ls_n)
         if self._lsh_for != key:
             self._lsh_for = key
@@ -5380,6 +5528,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                      "crumple_estimates": dict(fighter.super_stats.get("crumple_estimates") or {})}
                 summary["drive_rush"] = dict(fighter.rush_stats)
                 summary["adapt"] = fighter.memory.summary()           # 0.40.0: what this opponent beat
+                summary["drive_meter"] = fighter.memory.drive.summary()  # 0.44.0: where the Drive went
+                summary["turns"] = dict(fighter.turn_stats)                # 0.44.0: my turns, gap checks, corner DR
                 cur["memory"] = (summary.get("opponent"), clock.now(), fighter.memory)
                 summary["anti_air"] = dict(fighter.aa_stats)
                 summary["parry_throws"] = dict(fighter.parry_throw_stats)
@@ -5966,7 +6116,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 carry_ = float((fcfg.get("adapt") or {}).get("carry_s", 180))
                 if mem_ is not None and mem_[0] == summary.get("opponent") and clock.now() - mem_[1] <= carry_:
                     fighter.memory = mem_[2]
-                    fighter.memory.new_match()
+                    fighter.memory.new_match(match=True)
                     if policy is not None:
                         policy.memory = fighter.memory
                     if fighter.memory.log:

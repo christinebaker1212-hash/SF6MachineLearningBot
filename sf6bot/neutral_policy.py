@@ -84,11 +84,16 @@ STANCE = (((0.0, 1.0), {"walk_fwd": 0.5, "walk_back": 0.6, "idle": 0.5, "crouch"
 # 0.20.0: when the opponent's next combo would kill, or late in a round with a lead, play safe (ESTIMATES)
 SAFE_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.2, "drive_impact": 0.0, "drive_rush": 0.0,
                "dash_fwd": 0.3, "poke": 0.6, "crouch": 1.8, "walk_back": 1.4}
-WALL_STEPS = ((1.5, 0.15), (2.5, 0.4))       # (room behind the bot <= this, factor for retreating)
+WALL_STEPS = ((1.5, 0.05), (2.5, 0.25))      # (room behind the bot <= this, factor for retreating; 0.44.0: was 0.15 / 0.4)
 # 0.27.0: with the wall this close behind, walk OUT (forward) more. MEASURED (0.26.0 ranked, 33 Diamond matches): the bot's
 # back within 1.5 of its wall 20% of the time (0.24.x: 7-12%), taking 188 hp a second there and dealing 103 (midscreen
 # 118 / 186); it walked back into the corner itself 28 times
 CORNER_OUT = (1.5, {"walk_fwd": 1.8, "idle": 0.7})   # 0.37.0: 1.6 -> 1.8 (the Master STANCE factors walk in less)
+# 0.44.0 (user: "cornering opponents 2.7 s vs being cornered 14 s" a match, CFN). MEASURED (101 ranked matches, 0.39-0.43):
+# the bot's back within 1.5 of its wall 24-30 s a match (the opponent 6-8); entries mostly by blocking pushback (65), being
+# hit (40) and its own walk back (24, GM run). In the corner, crouch-blocking (the STANCE default at 1.0-2.0) keeps it
+# there: walking out and pressing more, crouching less. Back within 2.5 after pushback: retreating even rarer. ESTIMATES.
+CORNER_OUT = (1.5, {"walk_fwd": 2.2, "idle": 0.6, "crouch": 0.75, "poke": 1.2})
 PARRY_WHEN = {"normal", "special", "air_attack", "drive_rush", "super"}   # the opponent's action, within PARRY_DIST
 PARRY_DIST = 2.5
 # 0.21.0: MEASURED 7 ranked matches on 0.20.5 / 0.20.6: ~2.3 parries a minute, many mid-blockstring, and 3 burnouts. A
@@ -308,6 +313,8 @@ class NeutralPolicy:
                 ok[i] = False
             elif name == "parry" and (num(me.get("drive")) or 0) < self.parry_min_drive:
                 ok[i] = False                  # 0.21.0: a parry is a Drive spend: only with 3 bars
+            elif name == "parry" and self.memory is not None and not self.memory.parry_ok():
+                ok[i] = False                  # 0.44.0: this match's parries are losing Drive (adapt.MatchMemory)
             elif name == "drive_impact" and not self.allow_di:
                 ok[i] = False                  # 0.20.7 (user): never a Drive Impact from neutral
             elif name == "drive_impact" and not (op is not None and it.category(op) in DI_WHEN and dist >= DI_MIN_DIST

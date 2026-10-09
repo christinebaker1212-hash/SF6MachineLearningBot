@@ -322,6 +322,17 @@ def generate(character: str, base: dict, ds_root: Path) -> dict:
                 if r is not None and _int(r.get("startup_n")):
                     new.append(dict(p, startup=r["startup_n"]))
             ft["pick"] = new
+    # 0.44.0 my turn's press and the gap check: the same buttons by name, with this character's own start-ups
+    turn_opts = [((d.get("options") or {}).get("check") or {}),
+                 (((d.get("my_turn") or {}).get("options") or {}).get("press") or {})]
+    for oc_ in turn_opts:
+        if oc_.get("pick"):
+            new = []
+            for p in oc_["pick"]:
+                r = by.get(p.get("starter", ""))
+                if r is not None and _int(r.get("startup_n")):
+                    new.append(dict(p, startup=_int(r["startup_n"])))
+            oc_["pick"] = new
     # the punish engine: normals, normals cancelled into the heavy anti-air special, the supers
     eng: list = []
     for short, cname in _NORMALS.items():

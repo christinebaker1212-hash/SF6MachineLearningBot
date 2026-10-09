@@ -551,7 +551,7 @@ class PunishEngine:
             s0 = steps[0].get("sequence") or ""
             out.append({"key": "route:" + e["route"], "name": e["route"], "kind": "route", "entry": dict(e, lethal=lethal),
                         "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach, "hit_id": sid,
-                        "value": punish_value(e, learned) + (1e6 if lethal else 0.0),
+                        "value": punish_value(e, learned) + (1e6 if lethal else -self._pe_drive_price(e, me, op)),
                         "risk": risk((own_by_name.get(e.get("starter")) or {}).get("block_adv"))})
         # 1b. 0.34.0 the combo composer's most damaging combo from each ground normal for the Super / Drive the bot has
         #     NOW (a punish is a punish counter: every hit type), once per window (user: "highest recorded damage combo
@@ -571,7 +571,7 @@ class PunishEngine:
             s0 = ((e.get("plan") or {}).get("steps") or [{}])[0].get("sequence") or ""
             out.append({"key": "comp:" + e["route"], "name": e["route"], "kind": "route", "entry": dict(e, lethal=lethal),
                         "startup": e["startup"], "prefix": seq_prefix(s0) + ROUTE_DELAY, "reach": reach, "hit_id": sid,
-                        "value": punish_value(e, learned) + (1e6 if lethal else 0.0),
+                        "value": punish_value(e, learned) + (1e6 if lethal else -self._pe_drive_price(e, me, op)),
                         "risk": risk((own_by_name.get(e.get("starter")) or {}).get("block_adv"))})
         # 2. the config's punish options (routes on the game clock with hit confirm, single moves, supers): unverified,
         #    so a verified route from the same starter replaces them and they count 0.8
@@ -623,6 +623,13 @@ class PunishEngine:
                         "startup": m["startup"], "prefix": seq_prefix(m["seq"]), "reach": reach, "hit_id": m["id"],
                         "value": 0.9 * float(m.get("damage") or 0), "risk": risk(m.get("block_adv"))})
         return out
+
+    def _pe_drive_price(self, e: dict, me: dict, op: dict) -> float:
+        """0.44.0: the price of the Drive a route spends (fighter._drive_price), 0 without it."""
+        spent = e.get("drive")
+        if not isinstance(spent, (int, float)) or spent <= 0 or not hasattr(self, "_drive_price"):
+            return 0.0
+        return self._drive_price(spent, me, op)
 
     def _pe_composed(self, me: dict, op: dict, w: dict) -> list[dict]:
         """0.34.0: the composer's best combo from every ground normal it can start one from (any hit type: a punish is a

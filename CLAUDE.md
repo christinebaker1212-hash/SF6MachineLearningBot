@@ -7,6 +7,8 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.44.0 (2026-10-09): less passive defence after the full-dataset analysis (612 recordings): the bot takes its turn when it is plus after a block (press / throw / step / shimmy, learned per opponent), checks gaps valued by each opponent's own gaps, prices Drive by what is left (no OD High Blade Kick route from 4 bars down), escapes the corner (Drive Reversal, walk out), and stops full-screen / losing parries.**
+- **GRAND MASTER (user, 2026-10-09): Ryu reached 1704 MR on 0.41.0 / 0.42.0 (ladder history; 1606 -> 1704 MR in one evening).**
 - **0.43.1 (2026-10-09): the research build also runs the SF6 Mod Editor's live costume-colour preview (`refw_research/allowed/sf6editor_live.lua`, pinned to its exact bytes like the exporter; online included). Capcom approved this change as purely cosmetic, per the user (2026-10-09). Bot behaviour unchanged.**
 - **0.43.0 (2026-10-09): other characters get their own Drive Rush check (start-ups, ids, measured reach) and Shoryuken / Drive Impact hitboxes from their own catalog boxes; their rush check learns its timing by trial and error. Ryu unchanged.**
 - **0.42.0 (2026-10-08): human limits vary the reactions instead of making them instant: delay tech 2-6 frames after the connect, reaction DIs and answer Shoryukens on drawn frames, no reaction DI twice in a row on the same move.**
@@ -4997,6 +4999,75 @@ loop). All MOCK / replay-tested (`tests/test_0410.py`); nothing verified in game
   "fights"). Summary `rush_learn` {opponent, this_match, shift, weight, checks_vs_opponent}; a `[learned]` thoughts line.
 - Tests `tests/test_0430.py` (synthetic outcomes, saving and pooling, a later check after whiffs, Ryu without a learner).
   Not verified in game.
+
+## Full dataset analysed (user, 2026-10-09): Grand Master; where the Drive goes
+User: "it's far too defensive - blocking still accounts for the majority of its Drive Gauge loss. This extreme defensiveness
+causes it to do nothing but block ambiguous attacks until its drive gauge is depleted, then the enemy can easily stun them
+... Ultimate Master ... must be the next goal"; CFN (last 100 matches, all characters): Drive gauge use Damage 52%, Overdrive
+22%, Drive Parry 12%; cornering opponents 2.7 s vs cornered 14 s a match; hit by throws 4.1 a match; stunned 0.2.
+The upload: all of `datasets/` (826 fight recordings, 808 ladder rows, models retrained on 2026-10-08 on 888 recordings) and
+160 run folders. MEASURED on the 612 recordings since 0.24 (bot side from the metas; scripts kept outside the repo):
+- **Ladder:** Ryu 1606 -> 1704 MR on 0.41.0 / 0.42.0 (Grand Master). Files 0.41-0.43: 23-9. Ken 0.42-0.43 14-3, Akuma 0.43.1
+  8-2.
+- **Drive** (0.24-0.27 Plat -> Master / 0.36.1 ~1350 / 0.37-0.38 / 0.39-0.40 / 0.41-0.43 GM): lost a match 18.9 / 20.2 / 21.4
+  / 26.0 / 21.4 bars; to blocking 37 / 44 / 41 / 49 / 42%, to OD moves 21 / 29 / 35 / 25 / 30%. Blocking set off 21 of 24
+  burnouts in the GM run. Bot burnouts a match (scorecard, Drive reaching 0 or below; an OD move from under 2 bars goes
+  negative) 0.39.0 0.88, 0.40.0 1.27, 0.41.0 0.92 (opponents 1.18 / 0.27 / 0.60). Stuns (action 353 after a 293 wall
+  splat): 17 in 65 matches on 0.39-0.40, 3 in 34 on 0.41-0.43. 12% of all damage taken lands in burnout.
+- **OD:** 6.3 bars a match, 4.55 of them OD High Blade Kick (1031) inside combos (5HP > OD High Blade > Axe Kick >
+  Shoryuken), 0.9 OD Shoryuken, 0.7 OD Hadoken; 4.7 of the 6.3 inside combos.
+- **Blocking:** blockstun 12% of the time (0.24-0.27) -> 18-19% (0.39-0.43); blocked hits 30 -> 45-49 a match; normals 58% of
+  blocked hits and 72% of the Drive lost blocking (0.2 bar each).
+- **Corner:** the bot's back within 1.5 of its wall 13.7 s a match (opponent 9.3) on 0.24-0.27, 24-30 s (opponent 6-8) on
+  0.39-0.43; entries: blocking pushback, being hit, its own walk back; 30% of blocked hits there.
+- **The turn after a block** (who can act first, from both players' first free frames): the bot was 2+ frames ahead ~23 times
+  a match; it blocked the next attack 45-56% (-44 / +34 hp over 1.5 s, -0.33 / -0.41 Drive bars, ~2 more blocked hits),
+  did nothing 18-27% (+41), pressed a normal 12-17% (+270 / +347). On 0.24-0.27 it had blocked again 28% at +4. Even frames:
+  blocked again 38%, pressed 14% (+229). Blocked hits came after the bot had been free 0-3 frames 14%, 4-15 23%, 16+ 42%, in
+  a string 21%.
+- **Parries:** -1 bar a match on average; one that catches nothing ~-0.5 bar; from 3.5+ away 57 of 104 caught nothing; two Luke
+  matches parrying full-screen Sand Blasts every 47 frames lost 14 / 18 bars.
+- **The bot's own rules (GM run, 35 match summaries):** the generic block rule decided 45,487 state lines, the 3-lights hold
+  8,648; after a block the defence game picked block 141 of ~210. Its payoff table scored "jab vs their strike" -0.9 whatever
+  the frames, so with the opponents' measured ~91% strike after a block, block always won, even when the bot was plus.
+- **Models:** the brain (copy-a-player) held-out top-1 0.534, the win model trust 0.69 (was 0.21); it rates pokes / specials
+  above walking / crouching, but neutral comes from the style table first and the rule chain decides blocking before neutral.
+
+## 0.44.0: take the turn, check gaps, price Drive, leave the corner (user, 2026-10-09: "All of them.")
+All MOCK / replay-tested (`tests/test_0440.py`; `decide()` replayed open loop over 40 recordings of 0.40-0.42); nothing here
+is verified in game. ESTIMATE = a config guess.
+- **My turn after a block** (`defense.my_turn`, situation `my_turn`): the bot's blockstun ends `min_adv` 2+ frames before the
+  opponent can act (`fighter._turn_adv`: the punish engine's window, its frames from the catalog / Capcom / learned move
+  timing with slack taken off; else the blocked move's on-block), within `max_dist` 2.2. Options: `press` = the first of 2LP /
+  5LP / 5LK / 2MP / 5MP / 2MK that reaches (`_button_reach`: measured reach, else `punish.reach_fallback`) and starts no later
+  than the bot's advantage + the opponent's fastest reaching button (`_their_fastest`: Capcom start-ups and measured reach,
+  else THEIR_FASTEST by distance) - 1; `throw` (within 0.85), `step` (walk forward), `shimmy`, `block`. Prior: strike 3.0,
+  throw 0.3, shimmy 0.4, wait 1.3; payoffs ESTIMATES (press vs strike +0.7: a counter hit); with the back near the wall step /
+  press up, block down. Learned per opponent like every pressure moment. The 3-lights hold steps aside when the bot is plus.
+  Replay (40 matches): 662 my-turn moments, press 369, step 145, shimmy 83, block 49, throw 16 (0.43.1 on the same lines:
+  after-block moments 275, block 187).
+- **Gap checks** (`defense.options.check`, after a block with the frames even or unknown, `turns.check_max_minus` 1; never after
+  a Drive Rush normal): the same buttons by reach, valued by this opponent's gaps after the bot's blocks this match
+  (`adapt.MatchMemory.gap_probs / check_value`: a strike connecting after the button's start-up = win +0.8, before it = lose
+  -1.0, later / none -0.1; prior = the measured split above, 4 pseudo-observations; a check that gets hit counts as the
+  tightest gap). About level with blocking on the prior; a frame trapper turns it off, a gappy presser on. Replay: 38 of 131
+  even / minus moments.
+- **Drive priced by what is left** (`combo_compose.drive_cost`, `meter.drive_bar_value` 200, `DRIVE_LEFT_STEPS`): a bar
+  spent in a combo costs x1 with 3+ bars left after it, x2.5 with 2, x4 with 1, x6 with none, x1.5 with the bot's back within
+  2.0 of its wall. Used by the composer's search, the punish engine's routes and the Drive Impact crumple cash-out. From 4
+  bars down an OD move (2 left) costs 2.5x: the meterless route wins; a full gauge still rushes.
+- **The corner:** a Drive Reversal after a block with the bot's back within 1.5, 4+ Drive bars and 2+ blocked hits in the
+  string loses its guess penalty and gains 0.6 (`turns.corner_*`; replay: 4+ bars in only 13 of 56 corner moments, so rare
+  until Drive is kept). Neutral with the back within 1.5: walk forward x2.2, idle x0.6, crouch x0.75, poke x1.2; retreating
+  x0.05 within 1.5 (was 0.15), x0.25 within 2.5 (was 0.4).
+- **Parries:** none at a projectile whose thrower is more than `fireball.parry_max_dist` 3.5 away (block / walk in); after 3
+  parries this match netting under -0.2 bar each, no more projectile or neutral parries (`MatchMemory.parry_ok`).
+- **Measures:** `fight_summary.drive_meter` (Drive lost by cause, burnouts and what led into each, blocked strings and their
+  Drive), `turns` (my-turn moments, checks offered, corner Drive Reversals), `adapt.gaps` / `adapt.parries`; thoughts lines;
+  scorecard rows "Drive lost / match (bars): blocking / OD / parry", "burnouts / match (mine / theirs)", "turns after blocks /
+  match, taken %" (0.41.0: 21.4: 9.0 / 6.6 / 2.7; 0.92 / 0.60; 14.5, 25%).
+- Other characters' generated profiles rebuild the turn buttons with their own start-ups.
+- `tests/test_refw_research.py`: a backslash inside an f-string (the 0.43.1 session's) moved out so it parses on Python < 3.12.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

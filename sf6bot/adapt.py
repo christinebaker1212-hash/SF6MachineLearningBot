@@ -44,6 +44,27 @@ RUSH_T, RUSH_P_MIN, RUSH_P_MAX, RUSH_SHRINK = 0.35, 0.15, 0.85, 3.0
 HIT_IDS = range(150, 400)       # block / hit / knockdown reactions
 NORMAL_IDS = range(600, 715)
 
+# 0.44.0 (user: "it's far too defensive ... it [does] nothing but block ambiguous attacks until its drive gauge is
+# depleted"). After the bot's blockstun ends, how many frames until the opponent's next strike connects (blocked or hit):
+# a gap. A fast button pressed on the bot's first free frame beats a strike that connects after its start-up (a gap: a
+# counter hit) and loses to one that connects first (a frame trap). MEASURED (101 ranked matches, 0.39-0.43, HM / GM;
+# blocked hits by how long the bot had been free before them): 0-3 frames 14%, 4-7 13%, 8-15 10%, 16-40 20%, 40+ 22%,
+# still in a string 21%. The prior below is that split (strikes 16+ frames later / none = the button would not meet them);
+# each opponent's own gaps this match take over (GAP_PRIOR_W pseudo-observations).
+GAP_PRIOR = ((2, 14.0), (5, 13.0), (11, 10.0), (25, 20.0), (None, 22.0))
+GAP_PRIOR_W = 4.0
+GAP_WINDOW = 40                 # frames after the bot is free: no strike by then = none
+GAP_SPAN = 10                   # a strike connecting up to this many frames after the button's start-up still meets it
+GAP_PAY = {"win": 0.8, "lose": -1.0, "other": -0.1}     # thousands of hp (ESTIMATES): counter hit / frame trap / whiff
+GAP_KEEP = 40
+GAP_ACT_HIT = 12                # the bot pressed and was hit within this many frames: the strike connected first (tight)
+PARRY_IDS = range(480, 500)
+# 0.44.0: parries that cost Drive this match stop the projectile parry (MEASURED: two Luke matches parrying full-screen
+# Sand Blasts lost 14 and 18 bars; a parry that catches nothing costs ~0.5 bar): after PARRY_STOP_AFTER parries whose
+# net Drive averages below PARRY_STOP_NET, the bot blocks projectiles for the rest of the match
+PARRY_STOP_AFTER = 3
+PARRY_STOP_NET = -2000
+
 
 class MatchMemory:
     def __init__(self, cfg: dict | None = None):
@@ -80,6 +101,13 @@ class MatchMemory:
         self._rush_t = None
         self.jump_src: str | None = None      # set by the fighter when it starts a jump it wants judged
         self.names: dict = {}                 # own action id -> move name (the fighter's catalog), for the thoughts
+        # 0.44.0 this opponent's gaps after the bot's blocks, the bot's parries' Drive, and where the Drive went
+        self.gaps: list = []            # frames from the bot's first free frame to the next strike (None: none)
+        self._gap: dict | None = None
+        self.parries: list = []         # net Drive of each of the bot's parries this match
+        self._parry: dict | None = None
+        self.parry_stopped = False
+        self.drive = DriveMeter()
 
     # ------------------------------------------------------------------ observing
     def observe(self, me: dict, op: dict, tmr) -> None:
@@ -104,6 +132,9 @@ class MatchMemory:
         lost = (num(pm.get("hp")) or 0) - (num(me.get("hp")) or 0)
         hit = lost > 0 and not (num(me.get("blockstun")) or 0) and not (num(pm.get("hitstun")) or 0) \
             and pm.get("action_id") not in HIT_IDS
+        self._observe_gap(me, pm, tmr, lost)
+        self._observe_parry(me, pm)
+        self.drive.observe(me, pm, op, po, tmr)
         # the bot's ground buttons: the net result `window` frames after each press
         if a != pm.get("action_id") and isinstance(a, int) and a in NORMAL_IDS and (num(me.get("y")) or 0.0) <= 0.05 \
                 and dist is not None:
@@ -167,6 +198,85 @@ class MatchMemory:
                         if self.rush_burns == 1:
                             self.log.append(f"Drive Rush check beaten ({kind} out of the rush): checking less often")
                 self._rush = None
+
+    # ------------------------------------------------------------------ 0.44.0 gaps and parries
+    def _observe_gap(self, me: dict, pm: dict, tmr: int, lost: float) -> None:
+        """The opponent's gap after each of the bot's blocks: from the bot's first free frame to the next strike that
+        connects (blocked or hit), None when none comes within GAP_WINDOW. Not counted when the bot acts first (its own
+        button, jump or parry: the gap is then unknown)."""
+        bs, pbs = num(me.get("blockstun")) or 0, num(pm.get("blockstun")) or 0
+        a = me.get("action_id")
+        g = self._gap
+        if pbs > 0 and bs == 0:
+            self._gap = {"t": tmr}
+            return
+        if g is None:
+            return
+        if g.get("acted") is not None:
+            # the bot pressed: a strike that hits it within GAP_ACT_HIT frames was a frame trap (a tight gap); otherwise
+            # the gap is unknown (the bot's own button decided the exchange)
+            if lost > 0 or (num(me.get("hitstun")) or 0) > (num(pm.get("hitstun")) or 0):
+                self._add_gap(0)                  # their strike beat the bot's button: counted as the tightest gap
+            elif tmr - g["acted"] > GAP_ACT_HIT:
+                self._gap = None
+            return
+        if bs > pbs or lost > 0:
+            self._add_gap(tmr - g["t"])
+        elif isinstance(a, int) and a != pm.get("action_id") and (33 <= a <= 40 or (a >= 450 and not 505 <= a < 530)):
+            g["acted"] = tmr
+        elif tmr - g["t"] > GAP_WINDOW:
+            self._add_gap(None)
+
+    def _add_gap(self, g) -> None:
+        self.gaps.append(g)
+        del self.gaps[:-GAP_KEEP]
+        self._gap = None
+
+    def gap_probs(self, startup: int) -> dict:
+        """P(the opponent's next strike after a block connects before a button of `startup` frames pressed on the bot's
+        first free frame: "lose"), P(it connects within GAP_SPAN after that: "win"), P(later / none: "other"); the prior
+        (GAP_PRIOR, GAP_PRIOR_W pseudo-observations) and this match's gaps."""
+        w = {"win": 0.0, "lose": 0.0, "other": 0.0}
+
+        def put(g, wt):
+            if g is None or g > startup + GAP_SPAN:
+                w["other"] += wt
+            elif g <= startup:
+                w["lose"] += wt
+            else:
+                w["win"] += wt
+        tot_p = sum(x[1] for x in GAP_PRIOR)
+        for g, wt in GAP_PRIOR:
+            put(g, GAP_PRIOR_W * wt / tot_p)
+        for g in (self.gaps if self.enabled else ()):
+            put(g, 1.0)
+        s = sum(w.values()) or 1.0
+        return {k: v / s for k, v in w.items()}
+
+    def check_value(self, startup: int) -> float:
+        """0.44.0: the expected result (thousands of hp) of a button of `startup` frames pressed on the bot's first free
+        frame after a block, against this opponent's gaps (GAP_PAY: ESTIMATES)."""
+        p = self.gap_probs(startup)
+        return sum(p[k] * GAP_PAY[k] for k in p)
+
+    def _observe_parry(self, me: dict, pm: dict) -> None:
+        a, pa = me.get("action_id"), pm.get("action_id")
+        if a in PARRY_IDS and pa not in PARRY_IDS:
+            self._parry = {"d0": num(pm.get("drive"))}
+        elif self._parry is not None and a not in PARRY_IDS:
+            d0, d1 = self._parry["d0"], num(me.get("drive"))
+            self._parry = None
+            if d0 is not None and d1 is not None:
+                self.parries.append(d1 - d0)
+                if not self.parry_stopped and not self.parry_ok():
+                    self.parry_stopped = True
+                    self.log.append(f"stop parrying projectiles ({len(self.parries)} parries, "
+                                    f"{sum(self.parries) / 10000:+.1f} Drive bars net)")
+
+    def parry_ok(self) -> bool:
+        """Parries still pay their Drive this match (0.44.0)."""
+        p = self.parries
+        return not (self.enabled and len(p) >= PARRY_STOP_AFTER and sum(p) / len(p) < PARRY_STOP_NET)
 
     def _near(self, aid, dist) -> list:
         return [x for x in self.burns.get(aid, ()) if abs(x[0] - dist) <= self.band]
@@ -244,16 +354,118 @@ class MatchMemory:
                 "walk_danger": self.walk_danger, "jump_burns": self.jump_burns, "poke_hits": list(self.poke_hits), "rush_burns": self.rush_burns,
                 "rush_seen": dict(self.rush_seen), "rush_check_p": round(self.rush_check_p(), 2),
                 "rush_results": {k: len(v) for k, v in self.rush_results.items()},
+                "gaps": {"seen": len(self.gaps), "none": sum(1 for g in self.gaps if g is None),
+                         "frames": [g for g in self.gaps if g is not None][-20:],
+                         "check_value_4f": round(self.check_value(4), 3)},
+                "parries": {"n": len(self.parries), "drive_net": sum(self.parries), "stopped": not self.parry_ok()},
                 "learned": list(self.log)}
 
-    def new_match(self) -> None:
-        """A rematch: what was learned is kept, the line-by-line tracking restarts."""
+    def new_match(self, match: bool = False) -> None:
+        """A rematch (`match`) or a new round: what was learned is kept, the line-by-line tracking restarts; 0.44.0: a
+        rematch starts a new Drive meter (its numbers are per match)."""
         self._prev = self._jump = None
         self._pending = []
         self._walk_t = self._rush_t = None
         self._rush = None
         self._op_start = (None, None, None)
         self.jump_src = None
+        self._gap = self._parry = None
+        if match:
+            self.drive = DriveMeter()
+        else:
+            self.drive.reset_line()
+
+
+class DriveMeter:
+    """0.44.0: where the bot's Drive went this match (the user: "blocking still accounts for the majority of its Drive
+    Gauge loss"): drops by cause (blocking, being hit, parry, OD move, Drive Rush, Drive Impact / Reversal, other),
+    burnouts and what led into each (the 240 frames before), blocked hits and blocked strings (blocked hits until the bot
+    has been free 30 frames or acted) with the Drive each string cost. Read from the state lines only."""
+    STRING_GAP = 30
+
+    def __init__(self):
+        self.lost: dict = {}
+        self.blocked = 0
+        self.strings: list = []         # (blocked hits, Drive lost blocking) per string
+        self._s: dict | None = None
+        self.burnouts = 0
+        self.burn_causes: dict = {}
+        self._recent: list = []         # (tick, cause, amount)
+        self._free_t = None
+
+    def reset_line(self) -> None:
+        self._s = None
+        self._recent = []
+        self._free_t = None
+
+    @staticmethod
+    def cause(me: dict, pm: dict, d: float) -> str:
+        a = me.get("action_id")
+        bs, pbs = num(me.get("blockstun")) or 0, num(pm.get("blockstun")) or 0
+        if bs > pbs or bs > 0:
+            return "block"
+        if (num(pm.get("hp")) or 0) > (num(me.get("hp")) or 0) or (num(me.get("hitstun")) or 0) > 0 \
+                or (isinstance(a, int) and 200 <= a < 400):
+            return "hit"
+        if isinstance(a, int):
+            if 480 <= a < 500:
+                return "parry"
+            if a in (500, 501, 502, 731, 739, 740, 741, 760, 761):
+                return "rush"
+            if 850 <= a < 870:
+                return "drive_impact"
+            if 900 <= a < 1200 and -d >= 15000:
+                return "od"
+            if 600 <= a < 715 and -d >= 25000:
+                return "rush"                  # a Drive Rush cancel out of a normal
+        return "other"
+
+    def observe(self, me: dict, pm: dict, op: dict, po: dict, tmr: int) -> None:
+        dv, pdv = num(me.get("drive")), num(pm.get("drive"))
+        bs, pbs = num(me.get("blockstun")) or 0, num(pm.get("blockstun")) or 0
+        a = me.get("action_id")
+        s = self._s
+        if bs > pbs:
+            self.blocked += 1
+            if s is None:
+                s = self._s = {"n": 0, "drive": 0.0}
+            s["n"] += 1
+            self._free_t = None
+        elif s is not None:
+            acted = isinstance(a, int) and a != pm.get("action_id") and (33 <= a <= 40 or (a >= 450 and not 505 <= a < 530))
+            if bs == 0 and self._free_t is None:
+                self._free_t = tmr
+            if acted or (self._free_t is not None and tmr - self._free_t > self.STRING_GAP):
+                self.strings.append((s["n"], s["drive"]))
+                self._s = None
+        if dv is None or pdv is None or dv == pdv:
+            return
+        d = dv - pdv
+        if d < 0:
+            c = self.cause(me, pm, d)
+            self.lost[c] = self.lost.get(c, 0.0) - d
+            if c == "block" and self._s is not None:
+                self._s["drive"] -= d
+            self._recent.append((tmr, c, -d))
+        self._recent = [x for x in self._recent if tmr - x[0] <= 240]
+        if pdv > 0 and dv <= 0:
+            self.burnouts += 1
+            by: dict = {}
+            for _, c, amt in self._recent:
+                by[c] = by.get(c, 0.0) + amt
+            if by:
+                main = max(by, key=by.get)
+                self.burn_causes[main] = self.burn_causes.get(main, 0) + 1
+
+    def summary(self) -> dict:
+        tot = sum(self.lost.values()) or 0.0
+        st = self.strings + ([(self._s["n"], self._s["drive"])] if self._s else [])
+        return {"lost_bars": round(tot / 10000, 1),
+                "lost_by_cause_bars": {k: round(v / 10000, 1) for k, v in sorted(self.lost.items(), key=lambda kv: -kv[1])},
+                "blocked_hits": self.blocked, "strings": len(st),
+                "drive_per_string_bars": round(sum(x[1] for x in st) / len(st) / 10000, 2) if st else 0.0,
+                "longest_string": max((x[0] for x in st), default=0),
+                "burnouts": self.burnouts, "burnout_causes": dict(self.burn_causes)}
 
 
 def rush_kind(a) -> str | None:

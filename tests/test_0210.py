@@ -226,7 +226,10 @@ def test_a_minus_bot_never_jabs_or_techs_out_of_blockstun():
     assert picks and not ({"defense:jab", "defense:tech"} & set(picks))
     # 0.27.0: MEASURED at Diamond, the opponent strikes after a block 92% of the time: blocking and the invincible guesses
     # replace the delay tech as the usual answers (the delay tech averaged -540 hp there)
-    safe = sum(picks.count(f"defense:{o}") for o in ("block", "reversal", "parry", "delay_tech", "drive_reversal"))
+    # 0.44.0: the gap check (a fast button valued by this opponent's gaps after the bot's blocks; about level with blocking
+    # on the measured prior) joins them; a plain jab / tech guess still never goes out
+    safe = sum(picks.count(f"defense:{o}") for o in ("block", "reversal", "parry", "delay_tech", "drive_reversal",
+                                                     "check"))
     assert safe >= 0.8 * len(picks)
 
 

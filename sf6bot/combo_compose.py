@@ -51,7 +51,34 @@ MAX_REUSE = 2           # the same transition at most twice (5HP > DRC 5HK , 5HP
 BEAM = 120
 SUPER_BAR_VALUE = 250   # ESTIMATE: hp a Super bar is worth when not spent (the user wants it spent for damage)
 DRIVE_BAR_VALUE = 200   # ESTIMATE: hp a Drive bar is worth (defence, burnout risk)
-DROP_COST = 400         # ESTIMATE: what a dropped combo costs (the bot left open)
+# 0.44.0 (user: "blocking still accounts for the majority of its Drive Gauge loss ... until its drive gauge is depleted,
+# then the enemy can easily stun them"). MEASURED (101 ranked matches on 0.39-0.43, HM / GM): burnouts 0.71-0.77 a match
+# (the opponents' 0.15-0.18; 0.17 / 0.17 on 0.24-0.27); OD moves 6.3 Drive bars a match, 4.55 of them OD High Blade Kick
+# inside combos (5HP > OD High Blade > Axe Kick > Shoryuken), ~21% of all Drive lost; the bot then blocked its way into
+# burnout. A Drive bar spent in a combo costs more the fewer bars are left after it, and more with the bot's back to its
+# wall (pressure is coming): (bars left after the spend >= this, factor). ESTIMATES. With 6 bars a Drive Rush cancel (3)
+# or an OD move (2) keeps its old price; from 4 bars down an OD move (2 left) costs 2.5x: the meterless route wins.
+DRIVE_LEFT_STEPS = ((3.0, 1.0), (2.0, 2.5), (1.0, 4.0), (-99.0, 6.0))
+DRIVE_WALL_FACTOR = 1.5
+DRIVE_WALL_DIST = 2.0
+
+
+def drive_cost(spent: float, drive_now: float | None = None, wall: bool = False,
+               base: float = DRIVE_BAR_VALUE) -> float:
+    """What spending `spent` Drive (10000 = a bar) costs in hp now (0.44.0): the flat `base` per bar when the gauge is
+    unknown, else scaled by the bars left after the spend (DRIVE_LEFT_STEPS) and the wall behind the bot."""
+    if not spent or spent <= 0:
+        return 0.0
+    f = 1.0
+    if drive_now is not None:
+        left = (float(drive_now) - float(spent)) / 10000.0
+        f = next(k for lim, k in DRIVE_LEFT_STEPS if left >= lim)
+    if wall:
+        f *= DRIVE_WALL_FACTOR
+    return float(spent) / 10000.0 * base * f
+
+
+DROP_COST = 400        # ESTIMATE: what a dropped combo costs (the bot left open)
 KILL_BONUS = 2500       # ESTIMATE: a combo that would end the round
 LEARN_K = 4             # match results per transition shrink toward the prior with this weight
 COST_DRC, COST_PDR, COST_OD, COST_DI = 30000, 10000, 20000, 10000   # Drive (community values; 10000 = a bar)
@@ -157,6 +184,10 @@ class Composer:
         # 0.26.0: what a Super bar kept is worth now (hp); the fighter lowers it when bars would be lost unspent (a round
         # that can end the match, low health: fighter._bar_value)
         self.bar_value = SUPER_BAR_VALUE
+        # 0.44.0: the bot's Drive now and its back to its wall (fighter._price_bars): a Drive bar's price (drive_cost)
+        self.drive_now: float | None = None
+        self.drive_wall = False
+        self.drive_bar_value = DRIVE_BAR_VALUE
         # 0.26.0 (user: "it should know that it can drive rush cancel to make some moves that might whiff on followup from
         # long range hit up close ... For example, a max range 5HP"): how far a cancel's follow-up reaches (distance at its
         # start) and how far the move before it carries the bot forward before its hit (fighter config `combo_reach`,
@@ -487,8 +518,8 @@ class Composer:
                  "expected": round(s["E"], 1)} for s in out]
 
     def _score(self, s: dict, opp_hp: float | None) -> float:
-        v = s["E"] - s["super"] / 10000 * self.bar_value - s["drive"] / 10000 * DRIVE_BAR_VALUE \
-            - (1.0 - s["P"]) * DROP_COST
+        v = s["E"] - s["super"] / 10000 * self.bar_value \
+            - drive_cost(s["drive"], self.drive_now, self.drive_wall, self.drive_bar_value) - (1.0 - s["P"]) * DROP_COST
         if opp_hp is not None and s["D"] >= opp_hp:
             v += KILL_BONUS * s["P"]
         return v

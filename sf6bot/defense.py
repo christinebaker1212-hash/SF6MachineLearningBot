@@ -52,10 +52,13 @@ SITUATIONS = {"after_block": "after blocking", "after_hit": "after being hit", "
               # 0.18.5: the bot's own Drive Rush normal was blocked: the bot is plus, its pressure
               "own_rush_block": "with my Drive Rush normal blocked",
               # 0.20.0: the opponent cornered and its blockstun ending with the bot not minus: the bot's turn
-              "corner": "with the opponent cornered in front of me"}
+              "corner": "with the opponent cornered in front of me",
+              # 0.44.0: the bot's blockstun ends 2+ frames before the opponent can act: the bot's turn
+              "my_turn": "with my turn after blocking (I am plus)"}
 NICE = {"block": "block", "delay_tech": "delay tech", "tech": "tech", "jab": "jab", "back_dash": "back dash",
         "jump": "jump", "reversal": "reversal", "parry": "Drive Parry", "meaty": "meaty", "throw": "throw",
-        "shimmy": "shimmy", "frame_trap": "frame trap", "drive_reversal": "Drive Reversal"}
+        "shimmy": "shimmy", "frame_trap": "frame trap", "drive_reversal": "Drive Reversal", "press": "press",
+        "step": "step forward", "check": "gap check"}
 RESP_NICE = {"throw": "threw", "strike": "attacked", "shimmy": "backed off (shimmy)", "wait": "waited",
              "cmd_grab": "command-grabbed"}
 
@@ -83,7 +86,7 @@ class Defense:
         # option sets of their own for some situations (0.18.3 offense = the opponent's wake-up; 0.18.5 rush_pressure =
         # the bot's own blocked Drive Rush normal): {situation: (options, payoff)}
         self.sets: dict = {}
-        for key in ("offense", "rush_pressure", "corner_pressure"):
+        for key in ("offense", "rush_pressure", "corner_pressure", "my_turn"):
             st = dcfg.get(key) or {}
             for sit in st.get("situations") or []:
                 self.sets[sit] = (st.get("options") or {}, st.get("payoff") or {})

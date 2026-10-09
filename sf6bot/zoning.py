@@ -469,6 +469,20 @@ class ZoningMixin:
             if getattr(self, "_zn_near_for", None) != s["t0"]:
                 self._zn_near_for = s["t0"]
                 self.zn_stats["parry_too_near"] = self.zn_stats.get("parry_too_near", 0) + 1
+        # 0.44.0 no parry with the thrower far away, nor once this match's parries are losing Drive. MEASURED (101 ranked
+        # matches, 0.39-0.43): projectile parries from 3.5+ caught the projectile 47 times and nothing 57 times (-0.52 Drive
+        # bars each), a blocked special cost ~0.08 bar; two Luke matches parrying full-screen Sand Blasts lost 14 / 18 bars
+        if can_parry and dist > float(zc.get("parry_max_dist", 3.5)):
+            can_parry = False
+            if getattr(self, "_zn_far_for", None) != s["t0"]:
+                self._zn_far_for = s["t0"]
+                self.zn_stats["parry_too_far"] = self.zn_stats.get("parry_too_far", 0) + 1
+        mem_ = getattr(self, "memory", None)
+        if can_parry and mem_ is not None and not mem_.parry_ok():
+            can_parry = False
+            if getattr(self, "_zn_stop_for", None) != s["t0"]:
+                self._zn_stop_for = s["t0"]
+                self.zn_stats["parry_stopped"] = self.zn_stats.get("parry_stopped", 0) + 1
         live = bool(self.pt.samples.get(s["id"])) or boxed
         early = int(zc.get("parry_early_box", 1)) if boxed else int(zc.get("parry_early") or (1 if live else 4))
         # walking into it brings it sooner: each frame walked takes b x 0.047 frames off its arrival. A bot that is

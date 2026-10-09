@@ -28,7 +28,7 @@ JUMP = set(range(33, 41))
 DP = set(range(930, 938))
 HADO = set(range(900, 912))
 RUSH = {500, 501, 739, 740, 741}
-CACHE_VERSION = 3
+CACHE_VERSION = 4          # 0.44.0: Drive by cause, burnouts, turns after blocks
 
 
 def _bot_doing(b: dict) -> str:
@@ -173,6 +173,22 @@ def measure(rows: list[dict], me: str, op: str) -> Counter:
                 c["dp_inputs"] += 1
                 if not any(rows[t][me].get("action_id") in DP for t in range(i, min(len(rows), i + 12))):
                     c["dp_inputs_lost"] += 1
+    # 0.44.0 where the Drive went (adapt.DriveMeter on both sides) and the turns after blocks
+    from .adapt import DriveMeter
+    dm_me, dm_op = DriveMeter(), DriveMeter()
+    for i in range(1, len(rows)):
+        if rows[i].get("round") != rows[i - 1].get("round"):
+            dm_me.reset_line()
+            dm_op.reset_line()
+            continue
+        dm_me.observe(rows[i][me], rows[i - 1][me], rows[i][op], rows[i - 1][op], i)
+        dm_op.observe(rows[i][op], rows[i - 1][op], rows[i][me], rows[i - 1][me], i)
+    for k_, v_ in dm_me.lost.items():
+        c["drive_lost:" + k_] += int(v_)
+    c["burnouts"] += dm_me.burnouts
+    c["opp_burnouts"] += dm_op.burnouts
+    c["blocked_strings"] += len(dm_me.strings)
+    c.update(turn_events(rows, me, op))
     # jump-ins landing near the bot
     k = 1
     while k < len(rows):
@@ -193,6 +209,40 @@ def measure(rows: list[dict], me: str, op: str) -> Counter:
                     c["jumpins_anti_aired"] += 1
             k = land
         k += 1
+    return c
+
+
+def _free(a) -> bool:
+    return isinstance(a, int) and (a < 33 or 110 <= a < 200 or 505 <= a < 530)
+
+
+def turn_events(rows: list[dict], me: str, op: str) -> Counter:
+    """0.44.0: after each of the bot's blocks, whether it could act 2+ frames before the opponent (its turn), and what
+    it did with it: blocked again before acting / did nothing for 40 frames (given back) or acted (taken)."""
+    c: Counter = Counter()
+    i, n = 1, len(rows)
+    while i < n:
+        if (rows[i - 1][me].get("blockstun") or 0) > 0 and not (rows[i][me].get("blockstun") or 0):
+            fm = next((t for t in range(i, min(n, i + 30)) if _free(rows[t][me].get("action_id"))
+                       and not rows[t][me].get("hitstop")), None)
+            fo = next((t for t in range(max(1, i - 1), min(n, i + 30)) if _free(rows[t][op].get("action_id"))
+                       or (rows[t][op].get("action_id") != rows[t - 1][op].get("action_id")
+                           and isinstance(rows[t][op].get("action_id"), int) and rows[t][op]["action_id"] >= 600)),
+                      None)
+            if fm is not None and fo is not None and fo - fm >= 2:
+                c["turns"] += 1
+                res = "turn_given"
+                for t in range(fm + 1, min(n, fm + 41)):
+                    a, pa = rows[t][me].get("action_id"), rows[t - 1][me].get("action_id")
+                    if (rows[t][me].get("blockstun") or 0) > (rows[t - 1][me].get("blockstun") or 0) \
+                            or (rows[t - 1][me].get("hp") or 0) > (rows[t][me].get("hp") or 0):
+                        break
+                    if isinstance(a, int) and a != pa and not _free(a) and not 200 <= a < 400:
+                        res = "turn_taken"
+                        break
+                c[res] += 1
+            i = fm or i
+        i += 1
     return c
 
 
@@ -295,6 +345,14 @@ def row(v: dict) -> dict:
                                                 f" / {round(100 * c['thrown_after_block_40'] / max(1, c['blocks_ended']))}",
         "Drive Rush / parries / own DI per min": f"{c['drive_rush'] / mins:.1f} / {c['parries'] / mins:.1f}"
                                                  f" / {c['own_di'] / mins:.2f}",
+        # 0.44.0 (user: "blocking still accounts for the majority of its Drive Gauge loss"): Drive lost a match and its
+        # biggest causes, burnouts both ways, and the turns the bot had after blocks (2+ frames ahead) that it took
+        "Drive lost / match (bars): blocking / OD / parry": (
+            f"{sum(c[k] for k in c if k.startswith('drive_lost:')) / n / 10000:.1f}: "
+            + " / ".join(f"{c['drive_lost:' + k] / n / 10000:.1f}" for k in ("block", "od", "parry"))),
+        "burnouts / match (mine / theirs)": f"{c['burnouts'] / n:.2f} / {c['opp_burnouts'] / n:.2f}",
+        "turns after blocks / match, taken %": f"{c['turns'] / n:.1f}, "
+                                               f"{round(100 * c['turn_taken'] / max(1, c['turns']))}",
     }
 
 

@@ -479,6 +479,35 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                     else "on the planned spot")
             parts_.append(f"{b_} {', '.join(f'{k} {v}' for k, v in res_.items())} -> {how_} ({sh_:+.2f})")
         out.append(("learned", f"Drive Rush checks vs {rl_.get('opponent')}: " + "; ".join(parts_) + "."))
+    # 0.44.0 turns after blocks, gap checks, and where the Drive went
+    mt_ = ((summary.get("defense") or {}).get("my_turn") or {}).get("options") or {}
+    if mt_:
+        tot_ = sum(mt_.values())
+        took_ = sum(v for k, v in mt_.items() if k != "block")
+        out.append(("scripted", f"My turn after blocking (I was 2+ frames ahead) {tot_} times: took it {took_} ("
+                                + ", ".join(f"{k} {v}" for k, v in sorted(mt_.items(), key=lambda kv: -kv[1]))
+                                + ")."))
+    ab_ = ((summary.get("defense") or {}).get("after_block") or {}).get("options") or {}
+    gp_ = (summary.get("adapt") or {}).get("gaps") or {}
+    if ab_.get("check") or gp_.get("seen"):
+        fr_ = gp_.get("frames") or []
+        out.append(("learned", f"Gap checks after blocks: {ab_.get('check', 0)}; {opp}'s next strike after my blocks: "
+                               f"{gp_.get('seen', 0)} seen, {gp_.get('none', 0)} none within 40F"
+                               + (f", gaps {', '.join(str(x) for x in fr_[-8:])}F" if fr_ else "")
+                               + f" (a 4F check is worth {gp_.get('check_value_4f', 0):+.2f}k against them)."))
+    dm_ = summary.get("drive_meter") or {}
+    if dm_.get("lost_bars"):
+        by_ = dm_.get("lost_by_cause_bars") or {}
+        out.append(("measured", f"Drive spent / lost: {dm_['lost_bars']} bars ("
+                                + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in by_.items() if v) + "); "
+                                f"burnouts {dm_.get('burnouts', 0)}"
+                                + (f" (mostly {', '.join(dm_['burnout_causes'])})" if dm_.get("burnout_causes") else "")
+                                + f"; blocked strings {dm_.get('strings', 0)}, {dm_.get('drive_per_string_bars', 0)} bars "
+                                  f"each, longest {dm_.get('longest_string', 0)} hits."))
+    pr_ = (summary.get("adapt") or {}).get("parries") or {}
+    if pr_.get("stopped"):
+        out.append(("learned", f"Parries this match lost Drive ({pr_.get('n')} parries, "
+                               f"{(pr_.get('drive_net') or 0) / 10000:+.1f} bars): I stopped parrying projectiles."))
     jc_ = summary.get("jump_attack_combos") or {}
     if jc_.get("hit") or jc_.get("continued"):
         top_ = sorted((jc_.get("routes") or {}).items(), key=lambda kv: -kv[1])[:2]
