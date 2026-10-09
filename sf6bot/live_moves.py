@@ -177,8 +177,8 @@ class LiveMoveLearner:
     def _entry(self, name: str, votes: Counter) -> dict:
         row = self.rows.get(name) or {}
         ob = row.get("on_block_n")
-        from .fighter import cmd_grab_kind, guard_of
-        return {"name": name, "source": "live", "votes": sum(votes.values()), "cmd_grab": cmd_grab_kind(row),
+        from .fighter import cmd_grab_kind, guard_of, guards_of, hit_starts
+        return {"guards": guards_of(row.get("properties")), "hit_starts": hit_starts(row.get("active")),"name": name, "source": "live", "votes": sum(votes.values()), "cmd_grab": cmd_grab_kind(row),
                 "block_adv": ob + self.margin if isinstance(ob, int) else None,
                 "block_adv_source": "capcom + live margin", "di": name.startswith("Drive Impact"),
                 "guard": guard_of(row.get("properties")),

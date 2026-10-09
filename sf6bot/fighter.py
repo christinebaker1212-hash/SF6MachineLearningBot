@@ -256,6 +256,26 @@ def guard_of(properties: str | None) -> str | None:
     return None
 
 
+def guards_of(properties: str | None) -> list[str]:
+    """0.49.1: Capcom lists a multi-hit move's block type PER HIT ("High Mid" = hit 1 either way, hit 2 an overhead:
+    Terry's Quick Burn, E. Honda's Sumo Smash; "Mid High": Chun-Li's Lotus Fist). guard_of reads only the first word.
+    [] when there is no per-hit list."""
+    p = (properties or "").lower().lstrip("*").strip()
+    if "throw" in p:
+        return []
+    words = [{"mid": "overhead", "low": "low", "high": "high"}[w] for w in p.split() if w in ("mid", "low", "high")]
+    return words if len(words) > 1 and len(set(words)) > 1 else []
+
+
+def hit_starts(active: str | None) -> list[int]:
+    """First active frame of each hit from Capcom's active column: '10-23 10-11, 22-23' -> [10, 22]; '20, 22-24' too."""
+    a = active or ""
+    m = re.match(r"\s*(\d+)-(\d+)\s+(.+)$", a)
+    body = m.group(3) if m and ("," in m.group(3)) else a
+    starts = [int(x) for x in re.findall(r"(\d+)(?:-\d+)?", body)] if "," in body else []
+    return starts if len(starts) > 1 and starts == sorted(starts) else []
+
+
 def cmd_grab_kind(row: dict | None) -> str | None:
     """0.18.4: a COMMAND GRAB = a special or super whose Capcom property is "Throw" (ordinary throws are in the Throws
     section). "ground" grabs a standing / crouching bot (Screw Piledriver, Russian Suplex, Bolshoi Storm Buster): a neutral
@@ -311,6 +331,9 @@ def enrich_with_capcom(moves: dict, chara_name: str, datasets_root: Path, fcfg: 
         if not row:
             continue
         info.setdefault("guard", guard_of(row.get("properties")))
+        if guards_of(row.get("properties")):
+            info.setdefault("guards", guards_of(row.get("properties")))
+            info.setdefault("hit_starts", hit_starts(row.get("active")))
         info.setdefault("cmd_grab", cmd_grab_kind(row))
         info.setdefault("projectile", "projectile" in (row.get("properties") or "").lower())
         info.setdefault("startup", row.get("startup_n"))
@@ -1179,6 +1202,43 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         return Decision("hold", direction=block_dir, facing=block_face, rule="dp_wait",
                         reason=f"{info.get('name') or op.get('action_id')} in the air: blocking, punishing its landing")
 
+    def _guard_now(self, op: dict) -> str | None:
+        """0.49.1 the block height for the opponent's NEXT hit (user: "The bot always seems to get hit by Terry's Quick
+        Burn - it never blocks the second part, the overhead"). Capcom: Quick Burn 'High Mid', hits on frames 10 and 22.
+        MEASURED (15 recordings vs Terry): hit 2 landed 9 times (7 on a crouch-blocking bot), blocked 2; the bot read only
+        'High' and crouch-blocked the whole move. Now the hit whose first frame the bot's input can still reach (the
+        move's own frame + input delay + stale state + 1) decides; with no per-hit frames, an overhead (or a low) anywhere
+        in the move decides when the other height is not in it. Also E. Honda's Sumo Smash, Chun-Li's Lotus Fist."""
+        info = self.opp.get(op.get("action_id"), {})
+        g, gs = info.get("guard"), info.get("guards") or []
+        if not gs:
+            return g
+        hs = info.get("hit_starts") or []
+        fr = self._op_move_frame(op)
+        if not hs or fr is None:
+            if "overhead" in gs and "low" not in gs:
+                return "overhead"
+            if "low" in gs and "overhead" not in gs:
+                return "low"
+            return g
+        ahead = fr + int(self.lead or 0) + int(self.stale or 0) + 1
+        i = max([k for k, s0 in enumerate(hs) if s0 <= ahead], default=0)
+        return gs[min(i, len(gs) - 1)]
+
+    def _op_move_frame(self, op: dict) -> int | None:
+        fr = _num(op.get("action_frame"))
+        if fr is not None and fr < 900:
+            return int(fr)
+        if isinstance(self._now, int) and self.op_onset is not None:
+            return self._now - self.op_onset
+        return None
+
+    def _hits_left(self, op: dict) -> int:
+        """0.49.1: hits of the opponent's current move still to come (Capcom's per-hit active frames)."""
+        hs = self.opp.get(op.get("action_id"), {}).get("hit_starts") or []
+        fr = self._op_move_frame(op) if hs else None
+        return 0 if fr is None else sum(1 for s0 in hs if s0 > fr)
+
     def _guard_hold(self, me: dict, op: dict, block_dir: int, block_face) -> Decision | None:
         """0.25.0: the opponent's move the bot is blocking (or just blocked) will still be active when the bot is free:
         hold the block until past its last active frame (Capcom's active column, else measured in recordings). MEASURED
@@ -1951,7 +2011,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         block_dir, block_face = (4, self._landing_side(me, op)) if op_y > 0.3 else (1, None)
         # Capcom's block type of the move the opponent is doing NOW: overheads (Gorai Axe Kick 925,
         # Thunder Kick 682 - 58% of the damage the user did to the bot, 0.9.0) need a standing block
-        guard = info.get("guard")
+        guard = self._guard_now(op)
         if guard == "overhead" and self._ok("guard"):
             block_dir = 4
         elif guard == "low":
@@ -2408,6 +2468,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         # 0.18.0: + stale, how old the newest state probably is (0.17.5 ranked: state arrived in bursts ~53 ms apart and
         # defences chosen after a block - Shoryuken, jab, delay tech - were thrown: their input came too late)
         if self._pressure_fired or rem is None:
+            return None
+        if sit != "wakeup" and self._hits_left(op):
+            # 0.49.1: the move the bot is blocking has another hit coming (Terry's Quick Burn: the blocked first hit is
+            # followed by an overhead on frame 22). Its on-block value is the WHOLE move's: read after hit 1 the bot took
+            # itself to be plus and committed a press, crouch-blocking while it waited, into the overhead
             return None
         rr = self._rrv
         if rr is not None and (rem > rr.get("rem", rem) + 2 or rr.get("sit") != sit):
@@ -3930,7 +3995,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         opt = ch["option"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
         # did 58% of the user's damage against a crouch block)
-        g = self.opp.get(op.get("action_id"), {}).get("guard")
+        g = self._guard_now(op)
         if g == "overhead" or (_num(op.get("y")) or 0.0) > 0.3:
             ch["seq"] = " ".join(("4" + tok[1:]) if tok.startswith("1@") else tok for tok in ch["seq"].split())
         ch["seq"] = throw_direction(ch["seq"], me, op, self.c)
@@ -4674,6 +4739,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         su, fr = info.get("startup"), op.get("action_frame")
         if not isinstance(su, (int, float)) or not isinstance(fr, (int, float)):
             return None
+        ae = info.get("active_end")
+        if isinstance(ae, int) and ae >= su:
+            # 0.49.1: Capcom's last active frame when known. The 4-frame guess called Terry's Quick Burn (hits on 10 and
+            # 22) "recovering" from frame 13: the bot let go of block and pressed into the overhead second hit
+            return "recovery" if fr > ae else "early"
         active = int((self.c.get("whiff_punish") or {}).get("active_frames_guess", 4))
         return "recovery" if fr >= su - 1 + active else "early"
 

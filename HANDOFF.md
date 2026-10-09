@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.49.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (780).*
+*State as of 2026-10-09: code version **0.49.1**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (784).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.49.1 is pushed** (CLAUDE.md "0.49.1"): multi-hit moves blocked hit by hit (Terry's Quick Burn overhead, E. Honda's Sumo Smash); no pressure moment while another hit is coming; attack phase from Capcom's last active frame.
 
 **State:** **0.49.0 is pushed** (CLAUDE.md "0.49.0"): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card) and the control panel cleaned up and fitted to the 1024 x 176 strip under the game (START RANKED card, status lights, ranked dashboard, Advanced drawer); the arcade panel is the optional clickable pad (lever, buttons, a menu row; Controls On / Off); video removed. Not seen on the user's PC yet.
 

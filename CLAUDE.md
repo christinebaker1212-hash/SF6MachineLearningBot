@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.49.1 (2026-10-09): multi-hit moves blocked hit by hit (Terry's Quick Burn: the overhead second hit is stood for); no "my turn" after a hit with another hit coming.**
 - **0.49.0 (2026-10-09): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card; the arcade panel is the optional clickable pad) and the control panel cleaned up and fitted to 1024 x 176 (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed.**
 - **0.48.0 (2026-10-09): every grappler's command-grab reach measured from its throw boxes (Zangief's L SPD ~1.95 centre to centre); the bot keeps out of it in neutral, learns new reach live, and the walk-in moment uses it.**
 - **0.47.0 (2026-10-09): the 17 characters' anti-air options learn by range what worked and what didn't (per opponent, pooled by body class); one that keeps losing from a range is dropped there (block if none is left), and each option's timing moves earlier / later. Ryu unchanged.**
@@ -5283,6 +5284,29 @@ offline matches. Perhaps merge them with the controller overlay?")
   the overlay frame, the panel's ranked card / advanced flags / dashboard / lights, capture only for measuring tools); the
   0.12.6 video test now checks video is gone. Rendered here (headless, the overlay with DejaVu fonts, the panel in Chromium at
   1024 x 208 and 1280 x 300 CSS px); not seen on the user's PC yet.
+
+## 0.49.1: block height per hit (user, 2026-10-09)
+- User: "The bot always seems to get hit by Terry's Quick Burn - it never blocks the second part, the overhead."
+- **Capcom:** Quick Burn (214+LP) property "High Mid", active "10-23 10-11, 22-23": hit 1 on frame 10 blocks either way,
+  hit 2 on frame 22 is an overhead. `guard_of` read only the first word ("High"), so the bot crouch-blocked the whole move.
+- **MEASURED** (15 recordings vs Terry): hit 2 landed 9 times (7 on a crouch-blocking bot), blocked 2.
+- **Replay of a blocked Quick Burn through `decide()` showed two more causes:**
+  - in hit 1's hitstop the pressure moment ("my turn", 0.44.0) read the move's -5 on block (the WHOLE move's) as the bot
+    being plus and committed a press, crouch-blocking while it waited, into the overhead
+  - without blockstun (hit 1 whiffed), `_op_phase` called the move "recovering" from frame 13 (start-up - 1 + a 4-frame
+    guess): the bot let go of block, pressed, and went for a whiff punish into hit 2
+- **Now:**
+  - `guards_of(properties)` (per-hit heights, "High Mid" -> high, overhead) and `hit_starts(active)` ([10, 22]) are
+    stored on every opponent move with mixed heights (`enrich_with_capcom`, live move names)
+  - `fighter._guard_now`: the hit the bot's input can still reach (the move's own frame + input delay + stale + 1)
+    decides the block height; without per-hit frames an overhead (or a low) anywhere in the move decides when the other
+    height is not in it. Used by the block rules and the pressure options' held block
+  - `_pressure` opens no after-block / after-hit moment while the move has another hit coming (`_hits_left`)
+  - `_op_phase`: recovering only past Capcom's last active frame when known (else the old guess)
+- Cast-wide (Capcom pages): 17 rows with mixed per-hit heights, e.g. E. Honda's L / M / H / OD Sumo Smash (High Mid,
+  the second hit an overhead: 9,400 damage in the 0.26.0 run), Chun-Li's Lotus Fist, Akuma's Skull Splitter, Elena's
+  j.HK, Terry's OD Quick Burn.
+- Tests `tests/test_0491.py`. Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
