@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.45.1 (2026-10-09): characters with no combo lab results use the combos found in recordings (B) until K verifies theirs.**
 - **0.45.0 (2026-10-09): Random Select (`play-as Random`): the bot reads which character it got at each match start, finds its side with the input probe and plays that character's rules and data.**
 - **0.44.0 (2026-10-09): less passive defence after the full-dataset analysis (612 recordings): the bot takes its turn when it is plus after a block (press / throw / step / shimmy, learned per opponent), checks gaps valued by each opponent's own gaps, prices Drive by what is left (no OD High Blade Kick route from 4 bars down), escapes the corner (Drive Reversal, walk out), and stops full-screen / losing parries.**
 - **GRAND MASTER (user, 2026-10-09): Ryu reached 1704 MR on 0.41.0 / 0.42.0 (ladder history; 1606 -> 1704 MR in one evening).**
@@ -5091,6 +5092,25 @@ is verified in game. ESTIMATE = a config guess.
 - Characters without a catalog (C) use the move ids learned from recordings (X); their hitboxes are Ryu's estimates
   (0.43.0).
 - Tests `tests/test_0450.py` (MOCK sessions over the real CPU fight, the probe saying either side). Not run in game.
+
+## 0.45.1: combos found in recordings until the lab has run (user, 2026-10-09)
+- User: "For anyone who does not have a combo lab tested ... let's let their combo list pull from the mined combos, so they
+  at least have something to work with. Then, once K is run on them, it's replaced by the tried and true".
+- `route_book.build`: a character with no TRUE combo from the lab (`verified_routes` empty) gets the combos found in
+  recordings (`datasets/combos_mined/<Character>.json`, built by B) instead, marked `mined`. Once K has verified any route
+  for that character, the lab's routes are used and the mined ones are not.
+- Which: landed at least twice (`MINED_MIN_SEEN`), the 60 most seen, every move named and plannable. Chip damage on a
+  blocked string reads as hp lost, so a mined "combo" can be a blocked string (MEASURED on the user's data: Luke's Flash
+  Knuckle strings 200-680, Juri's 5MP > 5HP 102-520): a route needs a sighting of 600+ damage and none under 300.
+- Success rate ESTIMATE 0.3 + 0.05 per sighting, at most 0.6 (the lab's rate stands in a verified route), then each route's
+  results in matches as for every route. Performed with hit confirm (a whiff or a block sends nothing more; the stun
+  window check drops a link that can't connect). Never spent into burnout: not a verified kill (`affordable`).
+- On the user's dataset (2026-10-09): Ryu, Ken, Akuma, Marisa have lab results (unchanged); the other 27 get 1-33 mined
+  combos (332 in all), e.g. Juri 2MK > M Fuhajin (11x), Chun-Li 2MK > 5MP , 2HP > 5LK > MK Spinning Bird Kick (23x),
+  Zangief 5MP > Machine Gun Chops(2) > 5MK (10x). Some carry mining artefacts (a target combo written after its own
+  first hit); their match results show it.
+- Matches narrate it ("No combo lab results for X yet: using N combos found in recordings"); summary `combo_source`.
+- Tests `tests/test_0450.py`. Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

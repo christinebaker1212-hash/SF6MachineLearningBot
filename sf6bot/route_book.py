@@ -42,9 +42,32 @@ def rush_follows_ok(names) -> bool:
     return True
 
 
-def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | None = None) -> list[dict]:
+# 0.45.1 (user: "For anyone who does not have a combo lab tested ... let's let their combo list pull from the mined
+# combos, so they at least have something to work with. Then, once K is run on them, it's replaced by the tried and
+# true"): a character with no TRUE combo from the lab gets the combos found in recordings (combo_mining, built by B).
+# They are candidates, not proven: the lab's success rate is replaced by an ESTIMATE that grows with how often players
+# landed the route, performed hit-confirmed like any route (a whiff or a block sends nothing more; a link the opponent's
+# stun can't cover is not sent), never spent into burnout, and judged by their results in matches like every route.
+MINED_MIN_SEEN = 2            # landed at least twice in the recordings
+MINED_RATE_BASE = 0.3         # ESTIMATES: a route seen twice ~0.4, seen 6+ times 0.6
+MINED_RATE_STEP = 0.05
+MINED_RATE_MAX = 0.6
+MINED_MAX = 60                # the most-seen routes only
+# chip damage on a blocked string also reads as hp lost, so a blocked string can be mined as a "combo" (MEASURED on the
+# user's recordings: Luke's Flash Knuckle strings 200-680, Juri's 5MP > 5HP 102-520): a route counts only when it once
+# did real combo damage and never next to nothing (ESTIMATES)
+MINED_MIN_DAMAGE_MAX = 600
+MINED_MIN_DAMAGE = 300
+
+
+def mined_rate(seen: int) -> float:
+    return min(MINED_RATE_MAX, MINED_RATE_BASE + MINED_RATE_STEP * max(0, seen))
+
+
+def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | None = None,
+          mined_fallback: bool = True) -> list[dict]:
     """The book. 0.31.4: no route that performs a combo the operator skipped in the lab (F10, route_bans); `stats`
-    gets the number left out (`banned`)."""
+    gets the number left out (`banned`). 0.45.1: no TRUE combo from the lab -> the mined combos (`stats["mined"]`)."""
     from . import framedata as fd
     from . import route_bans
     from .combo_lab import plan_route, verified_routes
@@ -62,7 +85,12 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | No
         except ValueError:
             catalog = None
     book = []
-    for v in verified_routes(ds_root, character, min_rate=min_rate):
+    verified = verified_routes(ds_root, character, min_rate=min_rate)
+    if not verified and mined_fallback:
+        verified = _mined_candidates(ds_root, character, capcom)
+        if stats is not None:
+            stats["mined"] = len(verified)
+    for v in verified:
         route = v.get("route") or ""
         r = resolve(route, capcom["moves"])
         if r.get("unresolved"):
@@ -93,7 +121,33 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | No
                      "starter": s0.get("name"), "starter_id": s0.get("expect_id"),
                      "startup": s0.get("startup"), "kind": _starter_kind(plan),
                      "needs_denjin": bool(plan.get("setup")), "jump_in": bool(plan.get("jump_in"))})
+        if v.get("mined"):
+            book[-1].update(mined=True, seen=v.get("seen"))
     return book
+
+
+def _mined_candidates(ds_root: Path, character: str, capcom: dict) -> list[dict]:
+    """The combos found in recordings for `character`, shaped like the lab's verified routes (0.45.1)."""
+    from .combo_mining import lab_candidates
+    try:
+        cands = lab_candidates(ds_root, character, capcom, min_seen=MINED_MIN_SEEN)
+    except Exception:                           # noqa: BLE001 - optional data
+        return []
+    out, keys = [], set()
+    for c in cands:
+        if (c["route"], c["position"]) in keys:
+            continue
+        keys.add((c["route"], c["position"]))
+        n = int(c.get("seen") or 0)
+        if (c.get("damage") or 0) < MINED_MIN_DAMAGE or (c.get("damage_max") or c.get("damage") or 0) < MINED_MIN_DAMAGE_MAX:
+            continue
+        out.append({"route": c["route"], "position": "corner" if c["position"] == "Corner" else "midscreen",
+                    "hit_type": "normal", "damage": c.get("damage"), "drive_spent": (c.get("drive_bars") or 0) * 10000,
+                    "super_spent": (c.get("super_bars") or 0) * 10000, "success_rate_final_timing": mined_rate(n),
+                    "mined": True, "seen": n})
+        if len(out) >= MINED_MAX:
+            break
+    return out
 
 
 def cornered(op: dict, me: dict) -> bool:
@@ -108,7 +162,8 @@ def cornered(op: dict, me: dict) -> bool:
 def affordable(e: dict, me: dict, opp_hp: float | None, reserve: float = 0) -> tuple[bool, bool]:
     """(can pay for it, it kills). Drive into burnout only when it kills."""
     drive, sup = num(me.get("drive")) or 0, num(me.get("super")) or 0
-    lethal = bool(e.get("damage") and opp_hp is not None and e["damage"] >= opp_hp)
+    # 0.45.1: a combo found in recordings is not a verified kill: never into burnout for it (user rule, 0.10.0)
+    lethal = bool(e.get("damage") and opp_hp is not None and e["damage"] >= opp_hp and not e.get("mined"))
     if e["super"] > sup:
         return False, lethal
     if e["drive"] and (drive - e["drive"] <= reserve and not lethal) or e["drive"] > drive:

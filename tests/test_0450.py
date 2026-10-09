@@ -62,3 +62,51 @@ def test_a_random_select_session_plays_the_character_on_its_side(cfg, tmp_path, 
     assert not list((ds / "learning").glob("Random*"))
     rows = [json.loads(x) for x in (ds / "ladder" / "matches.jsonl").read_text().splitlines()]
     assert rows[-1]["character"] == me
+
+
+# ---- 0.45.1: combos found in recordings until the combo lab has proven this character's routes ----------------------
+
+def _mined_ds(tmp_path, lab_routes=None):
+    ds = _ds(tmp_path, "ken")
+    names = ["Crouching Medium Kick", "H Shoryuken"]
+    combos = [
+        {"route": "Crouching Medium Kick > H Shoryuken", "ids": [640, 957], "conn": ["", ">"], "moves": names,
+         "corner": False, "seen": 7, "damage": 1500, "damage_max": 1700, "drive": 0, "super": 0},
+        # a blocked string: chip damage only
+        {"route": "Standing Light Punch > Standing Light Punch", "ids": [600, 600], "conn": ["", ">"],
+         "moves": ["Standing Light Punch", "Standing Light Punch"], "corner": False, "seen": 9, "damage": 60,
+         "damage_max": 120, "drive": 0, "super": 0},
+        # seen once: not enough
+        {"route": "Crouching Medium Kick > H Shoryuken", "ids": [640, 957], "conn": ["", ">"], "moves": names,
+         "corner": True, "seen": 1, "damage": 1600, "damage_max": 1600, "drive": 0, "super": 0}]
+    (ds / "combos_mined").mkdir(parents=True, exist_ok=True)
+    (ds / "combos_mined" / "Ken.json").write_text(json.dumps({"character": "Ken", "combos": combos}))
+    if lab_routes is not None:
+        (ds / "combo_lab").mkdir(parents=True, exist_ok=True)
+        (ds / "combo_lab" / "Ken.json").write_text(json.dumps({"character": "Ken", "routes": lab_routes}))
+    return ds
+
+
+def test_without_lab_results_the_book_uses_combos_found_in_recordings(tmp_path):
+    from sf6bot import route_book as rb
+    st = {}
+    book = rb.build("Ken", _mined_ds(tmp_path), stats=st)
+    assert st["mined"] == 1 and len(book) == 1
+    e = book[0]
+    assert e["mined"] and e["seen"] == 7 and e["starter"] == "Crouching Medium Kick" and e["damage"] == 1500
+    assert e["rate"] == rb.mined_rate(7) <= rb.MINED_RATE_MAX
+    assert [s["name"] for s in e["plan"]["steps"]] == ["Crouching Medium Kick", "H Shoryuken"]
+    # never spent into burnout: a mined combo is not a verified kill
+    me = {"drive": 10000, "super": 0}
+    ok, lethal = rb.affordable(dict(e, drive=10000), me, opp_hp=500)
+    assert not ok and not lethal
+    assert rb.build("Ken", _mined_ds(tmp_path / "b"), mined_fallback=False) == []
+
+
+def test_once_the_lab_has_verified_routes_they_replace_the_mined_ones(tmp_path):
+    from sf6bot import route_book as rb
+    lab = {"2LP~2LP": {"route": "2LP ~ 2LP", "verified": True, "guard": "after_first_hit",
+                       "success_rate_final_timing": 1.0, "damage": 600, "position": "midscreen"}}
+    st = {}
+    book = rb.build("Ken", _mined_ds(tmp_path, lab), stats=st)
+    assert "mined" not in st and book and not any(e.get("mined") for e in book)

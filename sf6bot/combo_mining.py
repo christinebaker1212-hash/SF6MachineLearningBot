@@ -264,7 +264,8 @@ def lab_candidates(ds_root: Path, character: str, capcom: dict, min_seen: int = 
             toks.append((f" {conn} " if conn else "") + key)
         if not toks:
             continue
-        out.append({"route": "".join(toks), "source": "mined", "position": "Corner" if e["corner"] else "Anywhere",
+        out.append({"route": "".join(toks), "source": "mined", "seen": e["seen"], "damage_max": e.get("damage_max"),
+                    "position": "Corner" if e["corner"] else "Anywhere",
                     "hit_type": None, "controls": "classic", "difficulty": None, "damage": e["damage"],
                     "drive_bars": round(e["drive"] / 10000, 1), "super_bars": round(e["super"] / 10000, 1),
                     "notes": f"found in recordings ({e['seen']}x, {e['damage']}-{e['damage_max']} dmg): "

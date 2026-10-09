@@ -6104,6 +6104,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 book_stats_: dict = {}
                 book = build_book(summary["character"], ds_root, stats=book_stats_)
                 mcfg, cfg_banned_ = route_bans.apply_to_config(fcfg, bans_, summary["character"], ds_root)
+                if book_stats_.get("mined") is not None:
+                    # 0.45.1: no combo lab results for this character: the combos found in recordings stand in until K
+                    n_mined_ = sum(1 for e_ in book if e_.get("mined"))
+                    summary["combo_source"] = {"mined": n_mined_}
+                    sess.narrate(f"No combo lab results for {summary['character']} yet: using {n_mined_} combos found in "
+                                 "recordings (unproven; replaced once K verifies this character's routes).",
+                                 source="learned")
                 if bans_:
                     summary["operator_skips"] = {"combos": len(bans_), "book_left_out": book_stats_.get("banned", 0),
                                                  "config_left_out": cfg_banned_}
