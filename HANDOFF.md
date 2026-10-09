@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.49.1**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (784).*
+*State as of 2026-10-09: code version **0.50.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (791).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.50.0 is pushed** (CLAUDE.md "0.50.0"): corner Drive Impacts: 36% of corner DIs since 0.24 found the bot burned out (midscreen 10%). With the back to the wall and 3 bars or fewer it keeps its Drive for the DI-back, walks out, jumps out when burned out; no late DI-backs. Every character.
 
 **State:** **0.49.1 is pushed** (CLAUDE.md "0.49.1"): multi-hit moves blocked hit by hit (Terry's Quick Burn overhead, E. Honda's Sumo Smash); no pressure moment while another hit is coming; attack phase from Capcom's last active frame.
 

@@ -862,6 +862,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.reversal_stats = {"moments": 0, "reversal": 0, "held": 0}
         # 0.44.0 my turn after a block / gap checks / the corner Drive Reversal
         self.turn_stats = {"moments": 0, "checks_offered": 0, "corner_dr": 0}
+        self._di_late_for = None
+        self.corner_drive_stats: dict = {}   # 0.50.0: Drive kept for the DI-back in the corner, escapes, burnout corner
         self._turn_mine: int | None = None
         self._turn_gap = 3
         self._thrown_for = None
@@ -955,8 +957,43 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return False
         if self.in_burnout:
             return False          # 0.41.0: the gauge refilling after a burnout is not spendable (no DI-back, OD or rush)
+        if not lethal and not (action == "drive_impact" and reserve == 0) and self._corner_save(me):
+            # 0.50.0: back to the wall with 3 bars or fewer: the Drive is kept for the DI-back (rule 3)
+            self.corner_drive_stats["refused"] = self.corner_drive_stats.get("refused", 0) + 1
+            self.corner_drive_stats.setdefault("by_action", {})
+            self.corner_drive_stats["by_action"][action] = self.corner_drive_stats["by_action"].get(action, 0) + 1
+            return False
         res = self.c.get("drive_reserve", 0) if reserve is None else reserve
         return drive - cost > res or lethal
+
+    def _corner_save(self, me: dict, op: dict | None = None) -> bool:
+        """0.50.0 (user, 2026-10-09: "No matter what version of the bot we create, it ALWAYS has trouble reacting to DI with
+        its back to the corner. Why?"). MEASURED (722 opponent Drive Impacts since 0.24): in the corner the bot was
+        BURNED OUT at 106 of 291 (36%; midscreen 44 of 431, 10%), and a burned-out character cannot DI back; a blocked DI
+        then wall-splats it into a stun. Blocking strings drains the Drive there. So with its back within `wall` of its
+        wall and `max_drive` (3 bars) or less, every optional Drive spend is refused (parries, OD moves, Drive Rush, Drive
+        Reversal, the bot's own Drive Impacts, Drive in combos): what is left is for the DI-back."""
+        cs = self.c.get("corner_drive") or {}
+        if not cs.get("enabled", True):
+            return False
+        d = _num(me.get("drive"))
+        if d is None or d > float(cs.get("max_drive", 30000)):
+            return False
+        b = self._my_back(me, op)
+        return b is not None and b <= float(cs.get("wall", 2.0))
+
+    def _low_drive(self, me: dict) -> bool:
+        """0.50.0: 3 Drive bars or fewer (`corner_drive.max_drive`), or burned out."""
+        d = _num(me.get("drive"))
+        return self.in_burnout or (d is not None and d <= float((self.c.get("corner_drive") or {}).get("max_drive", 30000)))
+
+    def spend_reserve(self, me: dict, op: dict | None = None) -> float:
+        """The Drive a combo / punish plan must leave unspent: `drive_reserve`, or all of it while _corner_save holds (a
+        verified kill may still spend: route_book.affordable)."""
+        base = float(self.c.get("drive_reserve", 0) or 0)
+        if self._corner_save(me, op):
+            return max(base, float(_num(me.get("drive")) or 0))
+        return base
 
     def _landing_side(self, me: dict, op: dict) -> Facing | None:
         if not self.vel_ok:
@@ -1944,7 +1981,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if land is None or land < free_at - 1:
             return None                                                 # not yet: it must come out on the free frame
         if ((_num(me.get("hp")) or 0) <= self._di_back_risk(op) and not self._di_splat_risk(me, op)) \
-                or not self._di_react_ready():
+                or not self._di_react_ready(cap=int((self.c.get("di_reaction") or {}).get("late_max", 25))):
             return None
         self.di_handled_id = a
         self.di_stats["di_back"] += 1
@@ -1961,7 +1998,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         return self._now - self.op_onset + 1 + self.stale + self.lead
 
-    def _di_react_ready(self) -> bool:
+    def _di_react_ready(self, cap: int | None = None) -> bool:
         """0.39.0 (user: "the instant DI reaction is ... far too much of a tell"): the DI-back goes out once its input would
         reach the game on a frame drawn from the setting's range (a human seeing the DI, then pressing), never later than
         the safe limit (`di_reaction_setting`). A DI first seen later than the drawn frame goes out at once. Off: the old
@@ -1977,7 +2014,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             self._di_rx_target = self.rng.randint(lo, hi)
             if land > self._di_rx_target:
                 self.di_rx_stats["seen_late"] += 1
-        if land >= self._di_rx_target:
+        if land >= self._di_rx_target or (cap is not None and land >= cap):
+            # 0.50.0: `cap` = the latest frame the DI-back still works (`di_reaction.late_max`, their frame 25); the drawn
+            # human delay never pushes it past that
             fr = self.di_rx_stats["frames"]
             fr.append(land)
             del fr[:-200]
@@ -2141,7 +2180,17 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 self.di_stats["di_back_skipped_lethal"] += 1
                 return Decision("hold", direction=4, rule="di_back_skipped",
                                 reason=f"opponent Drive Impact: losing the exchange ({risk:,} hp) would kill me; blocking")
-            if not self._di_react_ready():
+            land_ = self._di_since()
+            late_max = int((self.c.get("di_reaction") or {}).get("late_max", 25))
+            if land_ is not None and land_ > late_max:
+                # 0.50.0: a DI-back landing after their frame 25 is hit before its armor is out (MEASURED since 0.39: 3 of
+                # the corner DI-backs out of blockstun pressed 29-35 frames in). Block it instead; no Drive spent
+                if self._di_late_for != self.op_onset:
+                    self._di_late_for = self.op_onset
+                    self.di_stats["too_late"] = self.di_stats.get("too_late", 0) + 1
+                return Decision("hold", direction=1, rule="di_block",
+                                reason=f"opponent Drive Impact: a DI-back would land on their frame {land_}, too late")
+            if not self._di_react_ready(cap=late_max):
                 # 0.39.0: still "seeing" it; guard meanwhile and start nothing else
                 return Decision("hold", direction=1, rule="di_wait",
                                 reason="opponent Drive Impact: reacting (human reaction time)")
@@ -2321,7 +2370,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 # 0.20.5 (user: routes ending in SA3 do over 6700): a true combo worth more than a plain SA3 is the punish
                 from .route_book import choose
                 alt = choose(self.book, me, op, frames=-adv, hit_types=PUNISH_HIT_TYPES, denjin=self.denjin_stock,
-                             learned=self.exp.routes() if self.exp else None, reserve=self.c.get("drive_reserve", 0))
+                             learned=self.exp.routes() if self.exp else None, reserve=self.spend_reserve(me, op))
                 if self._route_beats_sa3(alt):
                     if self._sa3_cmp_for != ("block", self.blocked_id):
                         self._sa3_cmp_for = ("block", self.blocked_id)
@@ -2342,7 +2391,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 e = choose(self.book, me, op, frames=-adv, hit_types=PUNISH_HIT_TYPES,
                            denjin=self.denjin_stock,
                            learned=self.exp.routes() if self.exp else None,
-                           reserve=self.c.get("drive_reserve", 0))
+                           reserve=self.spend_reserve(me, op))
                 if e is not None:
                     self.punished = True
                     self.punish_stats["taken"] += 1
@@ -2394,6 +2443,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         bd = self._burnout_di(me, op, dist, t)
         if bd is not None:
             return bd
+        # 6b''. 0.50.0 burned out with the wall behind: jump out over the opponent now and then, not only block strings
+        jo = self._burnout_jump_out(me, op, dist, t)
+        if jo is not None:
+            return jo
         # 6c. Drive Impact against an opponent with its back to the wall (0.19.0)
         dw = self._di_wall(me, op, dist, t)
         if dw is not None:
@@ -2820,7 +2873,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         e = None
         if self.composer is not None:
             self._price_bars(me)
-            e = self.composer.best_after_jump(name_, me, op, reserve=self.c.get("drive_reserve", 0), adopt_air=True)
+            e = self.composer.best_after_jump(name_, me, op, reserve=self.spend_reserve(me, op), adopt_air=True)
         air = (e["plan"]["steps"][0] if e else None) or {}
         su = air.get("startup") if isinstance(air.get("startup"), int) else int(cc.get("jump_attack_startup", 9))
         t_land = landing_frames(y, vy, float((self.c.get("anti_air") or {}).get("gravity", 0.0123)))
@@ -3327,7 +3380,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         comp.bar_value = 0.0
         try:
             for name in list(comp.starters):
-                e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0), hit_ok=("normal",), min_ev=0)
+                e = comp.best_from(name, me, op, reserve=self.spend_reserve(me, op), hit_ok=("normal",), min_ev=0)
                 if e is None or not isinstance(e.get("startup"), int):
                     continue
                 reach = self._pe_reach(e.get("starter_id"), self._reach_fb(e.get("starter")))
@@ -3438,7 +3491,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._price_bars(me)
         best = None
         for name in jc.get("attacks") or ["Jumping Heavy Punch", "Jumping Heavy Kick"]:
-            e = comp.best_after_jump(name, me, op, reserve=self.c.get("drive_reserve", 0), neutral=neutral)
+            e = comp.best_after_jump(name, me, op, reserve=self.spend_reserve(me, op), neutral=neutral)
             if e is not None and (best is None or (e.get("ev") or 0) > (best.get("ev") or 0)):
                 best = e
         if best is not None:
@@ -3469,7 +3522,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         from .route_book import choose_jump_in, cornered, neutral_jump, value
         e = choose_jump_in(self.book, me, op, learned=self.exp.routes() if self.exp else None,
-                           reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+                           reserve=self.spend_reserve(me, op), denjin=self.denjin_stock)
         # 0.33.0: a jump-in is a ground combo with a jump attack in front (user): the composer's best one competes (in the
         # corner only, as the book's: 0.24.2); built from a neutral jump when the opponent is close
         nj = dist < float(jc.get("neutral_jump_below", 1.2))
@@ -3729,6 +3782,39 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.di_stats["burnout_di"] = self.di_stats.get("burnout_di", 0) + 1
         return Decision("seq", di["name"], di["seq"], rule="burnout_di",
                         reason=f"opponent in burnout {dist:.2f} away, {room:.2f} from its wall: Drive Impact")
+
+    def _burnout_jump_out(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
+        """0.50.0 (user's pick: "Burned out in the corner"). Burned out, a blocked Drive Impact with the wall behind is a
+        stun, and blocked hits keep the gauge from refilling. With the bot free and grounded, its back within
+        `jump_out.wall` and the opponent close enough to cross (`min_dist`-`max_dist`, Ryu's forward jump travels ~1.9,
+        MEASURED), grounded and not attacking: a forward jump over it, one roll per `roll_every_s` at `chance`, `cooldown_s`
+        between jumps (ESTIMATES). Never against a charged anti-air (Flash Kick) or in safe mode; the jump's results are
+        counted (`corner_drive.jump_out`)."""
+        jc = (self.c.get("corner_drive") or {}).get("jump_out") or {}
+        if not jc.get("enabled", True) or not self.in_burnout or self.safe:
+            return None
+        if t < getattr(self, "_jump_out_next", -99.0):
+            return None
+        back = self._my_back(me, op)
+        if back is None or back > float(jc.get("wall", 1.5)):
+            return None
+        if not float(jc.get("min_dist", 0.5)) <= dist <= float(jc.get("max_dist", 1.5)):
+            return None
+        oa = op.get("action_id")
+        if (_num(op.get("y")) or 0.0) > 0.05 or (_num(me.get("y")) or 0.0) > 0.05 or self._attack(oa) \
+                or not self._free_now(me) or self.busy(me) is not None:
+            return None
+        if self.charged_anti_air(ahead=20):
+            return None
+        if t - getattr(self, "_jump_out_roll_t", -99.0) < float(jc.get("roll_every_s", 0.5)):
+            return None
+        self._jump_out_roll_t = t
+        if self.rng.random() > float(jc.get("chance", 0.25)):
+            return None
+        self._jump_out_next = t + float(jc.get("cooldown_s", 3.0))
+        self.corner_drive_stats["jump_out"] = self.corner_drive_stats.get("jump_out", 0) + 1
+        return Decision("seq", "jump out of the corner", str(jc.get("seq", "9@3")), rule="corner_jump_out",
+                        reason=f"burned out, back {back:.2f} from the wall, opponent {dist:.2f} away: forward jump over")
 
     def _di_wall(self, me: dict, op: dict, dist: float, t: float) -> Decision | None:
         """0.19.0 (user: "will not attempt to DI stun enemies who are close in proximity to the corner"). A Drive Impact
@@ -4057,6 +4143,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 mtc = (self.c.get("defense") or {}).get("my_turn") or {}
                 for k_, v_ in (mtc.get("corner_bonus") or {}).items():
                     bonus[k_] = bonus.get(k_, 0.0) + float(v_)
+            cdc = self.c.get("corner_drive") or {}
+            if back_ is not None and back_ <= float(cdc.get("wall", 2.0)) and self._low_drive(me):
+                # 0.50.0: low on Drive with the wall behind: take the turn to walk out rather than block the next string
+                for k_, v_ in (cdc.get("my_turn_bonus") or {}).items():
+                    bonus[k_] = bonus.get(k_, 0.0) + float(v_)
+                self.corner_drive_stats["escape_turns"] = self.corner_drive_stats.get("escape_turns", 0) + 1
             return ex, bonus, f"my turn ({mine:+d}; their fastest button here {their}F)"
         if sit in ("after_block", "after_rush_block", "after_hit", "wakeup"):
             adv = self._block_adv(op.get("action_id")) if sit in ("after_block", "after_rush_block") else None
@@ -4358,7 +4450,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         a["composed"] = True
         self._price_bars(me)
-        e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0), travel_done=a.get("hit_t") is not None)
+        e = comp.best_from(name, me, op, reserve=self.spend_reserve(me, op), travel_done=a.get("hit_t") is not None)
         if e is None:
             return None
         self.compose_stats["live"] = self.compose_stats.get("live", 0) + 1
@@ -4427,7 +4519,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if not name:
             return None
         self._price_bars(me)
-        e = comp.best_after_jump(name, me, op, reserve=self.c.get("drive_reserve", 0), adopt_air=True, fallback=True)
+        e = comp.best_after_jump(name, me, op, reserve=self.spend_reserve(me, op), adopt_air=True, fallback=True)
         if e is None:
             self.jump_combo_stats["no_route"] += 1
             return None
@@ -4694,7 +4786,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
 
     def _assess(self, me: dict, op: dict) -> None:
         from .assess import damage, line, threat
-        dmg = damage(self.book, me, op, self.c.get("drive_reserve", 0))
+        dmg = damage(self.book, me, op, self.spend_reserve(me, op))
         thr = threat(op, me, self.opp_combos, self.opp_supers)
         self.assessment = {"damage": dmg, "threat": thr, "line": line(dmg, thr)}
         if dmg["lethal"] and not self._was_lethal:
@@ -4821,7 +4913,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 from .route_book import choose
                 e = choose(self.book, me, op, starter=m["name"], hit_types=PUNISH_HIT_TYPES,
                            denjin=self.denjin_stock,
-                           learned=None, reserve=self.c.get("drive_reserve", 0))
+                           learned=None, reserve=self.spend_reserve(me, op))
                 if e is not None and isinstance(e.get("damage"), (int, float)):
                     dmg = max(dmg, e["damage"])
             key = (dmg, -m["startup"])
@@ -4850,7 +4942,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             from .route_book import choose
             e = choose(self.book, me, op, starter=m["name"], hit_types=PUNISH_HIT_TYPES,
                            denjin=self.denjin_stock,
-                       learned=self.exp.routes() if self.exp else None, reserve=self.c.get("drive_reserve", 0))
+                       learned=self.exp.routes() if self.exp else None, reserve=self.spend_reserve(me, op))
             if e is not None:
                 return Decision("route", e["route"], route=e, rule="whiff_punish", reason=why + f" -> {e['route']}")
         return Decision("seq", m["name"], m["seq"], rule="whiff_punish", reason=why)
@@ -4869,7 +4961,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             if r is None or dist > r + float(wc.get("reach_margin", 0.0)) or m["startup"] + self.lead + 1 > remaining:
                 continue
             e = choose(self.book, me, op, starter=m["name"], hit_types=PUNISH_HIT_TYPES, denjin=self.denjin_stock,
-                       learned=learned, reserve=self.c.get("drive_reserve", 0))
+                       learned=learned, reserve=self.spend_reserve(me, op))
             if e is not None:
                 v = value(e, learned) + (1e6 if e.get("lethal") else 0.0)
                 if v > best_v:
@@ -4898,7 +4990,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.hit_switch[kind if kind in ("normal", "counter", "punish_counter") else "other"] += 1
         new, verdict = after_first_hit(self.book or [], e, kind, me, op,
                                        learned=self.exp.routes() if self.exp else None,
-                                       reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock)
+                                       reserve=self.spend_reserve(me, op), denjin=self.denjin_stock)
         if verdict == "switch" and new is not None and not switch_motion_ok(e, new):
             new, verdict = None, "keep" if e.get("hit_type") in HIT_OK.get(kind or "", ("normal",)) else "stop"
             self.hit_switch["refused_motion"] = self.hit_switch.get("refused_motion", 0) + 1
@@ -4908,7 +5000,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             self._price_bars(me)
             # "stop": the route's own continuation would drop after this hit; compare with ending here
             ext = self.composer.best_tail(cur if verdict != "stop" else dict(e, edges=[]), 0, me, op,
-                                          reserve=self.c.get("drive_reserve", 0),
+                                          reserve=self.spend_reserve(me, op),
                                           hit_ok=HIT_OK.get(kind or "", ("normal",)), travel_done=True)
             if ext is not None and switch_motion_ok(cur, ext):
                 new, verdict = ext, "switch"
@@ -4945,7 +5037,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         from .combo_compose import REF_LEAD, shift_fixed
         self._price_bars(raw.get(me_key) or {}, raw.get(op_key) or {})
         new = self.composer.best_tail(e, k, raw.get(me_key) or {}, raw.get(op_key) or {},
-                                      reserve=self.c.get("drive_reserve", 0))
+                                      reserve=self.spend_reserve(raw.get(me_key) or {}, raw.get(op_key) or {}))
         if new is None:
             return None
         self.compose_stats["replans"] += 1
@@ -5052,6 +5144,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.policy.op_projectile = bool((self.opp.get(op.get("action_id")) or {}).get("projectile")) or self.pt.flight is not None \
             or self._zn_box_live(raw)
         self.policy.op_burnout = self.op_in_burnout(op)
+        self.policy.low_drive = self._low_drive(me)
         # 0.48.0: keep out of the opponent's command-grab reach while it is free on the ground (not in its own move or a stun)
         free_ = (_num(op.get("y")) or 0) <= 0.05 and not (_num(op.get("hitstun")) or 0) \
             and not (_num(op.get("blockstun")) or 0) and not self._attack(op.get("action_id"))
@@ -5820,6 +5913,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["adapt"] = fighter.memory.summary()           # 0.40.0: what this opponent beat
                 summary["drive_meter"] = fighter.memory.drive.summary()  # 0.44.0: where the Drive went
                 summary["turns"] = dict(fighter.turn_stats)                # 0.44.0: my turns, gap checks, corner DR
+                summary["corner_drive"] = dict(fighter.corner_drive_stats)  # 0.50.0
                 cur["memory"] = (summary.get("opponent"), clock.now(), fighter.memory)
                 summary["anti_air"] = dict(fighter.aa_stats)
                 summary["parry_throws"] = dict(fighter.parry_throw_stats)

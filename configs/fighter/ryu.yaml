@@ -250,6 +250,20 @@ drive_costs:
   od_move: 20000
   drive_reversal: 20000
 drive_reserve: 10000     # 0.20.0 (user's pick: Drive discipline): optional spends keep a bar back; DI-back exempt
+# 0.50.0 (user, 2026-10-09: "it ALWAYS has trouble reacting to DI with its back to the corner"). MEASURED (722 opponent
+# Drive Impacts since 0.24): with the bot's back within 2.0 of its wall it was burned out at 106 of 291 (36%; midscreen 44
+# of 431, 10%) and a burned-out character cannot DI back; when free the corner DI-back rate was 46 of 95. So, with the back
+# within `wall` and `max_drive` or less (the user's pick: 3 bars): no optional Drive spend (parries, OD, Drive Rush, Drive
+# Reversal, the bot's own Drive Impacts, Drive inside combos; a verified kill may still spend), only the DI-back; the
+# neutral policy walks out (neutral_policy.LOW_DRIVE_OUT), "my turn" leans to stepping out; burned out with the wall behind
+# it jumps out over a close opponent now and then (ESTIMATES)
+corner_drive:
+  enabled: true
+  wall: 2.0
+  max_drive: 30000
+  my_turn_bonus: {step: 0.4, press: 0.2, block: -0.3}
+  jump_out: {enabled: true, wall: 1.5, min_dist: 0.5, max_dist: 1.5, chance: 0.25, roll_every_s: 0.5, cooldown_s: 3.0,
+             seq: "9@3"}
 # 0.26.0 (user: "it should know that it can drive rush cancel to make some moves that might whiff on followup from long
 # range hit up close, and extend into a combo ender. For example, a max range 5HP"). MEASURED 0.25.0 ranked (35
 # recordings): a special cancelled from one of the bot's normals that hit, by the distance when it started: H Shoryuken
@@ -917,7 +931,7 @@ parry_throw:
 # margin (input-delay jitter, a DI first seen a line late): safe_max 22 is the most it allows, min is at least 4 (the
 # old instant reaction). min / max are ESTIMATES of a human's reaction to a DI (~0.25-0.35 s); `fight --di-delay`, the
 # panel's "DI reaction" box, or off.
-di_reaction: {enabled: true, min: 15, max: 21, safe_max: 22, buffer_max: 25}   # 0.41.0 buffer_max: the latest free frame a DI-back out of blockstun is tried on
+di_reaction: {enabled: true, min: 15, max: 21, safe_max: 22, buffer_max: 25, late_max: 25}   # 0.41.0 buffer_max: the latest free frame a DI-back out of blockstun is tried on; 0.50.0 late_max: no DI-back landing after their frame 25
 di_rules:
   opp_super_min: 10000
   di_hit: 1000

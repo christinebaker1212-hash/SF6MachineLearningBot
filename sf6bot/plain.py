@@ -26,6 +26,7 @@ RULES = {
     "di_wait": "Their Drive Impact: waiting to DI back", "di_back_skipped": "Their Drive Impact would kill on a trade: blocking",
     "di_burnout_jump": "Burned out, their Drive Impact: jumping it", "di_burnout_srk": "Burned out, their Drive Impact: Shoryuken through it",
     "di_burnout_super": "Burned out, their Drive Impact: Super Art through it",
+    "corner_jump_out": "Burned out in the corner: jumping out",
     "aa_ready": "They jumped: anti-air ready", "anti_air": "Anti-air: {name}", "anti_air_a2a": "Air-to-air: {name}",
     "wakeup_anti_air": "Reversal Shoryuken on their jump", "block_crossup": "Blocking the cross-up",
     "block_overhead": "Blocking the jump: landing on top", "block_air": "Blocking their air attack",
@@ -57,7 +58,7 @@ ACTION_RULES = {"punish", "whiff_punish", "interrupt", "reversal", "throw_tech",
                 "anti_air_a2a", "wakeup_anti_air", "burnout_di", "move_answer", "operator_answer", "rush_check",
                 "drive_rush_in", "cmd_grab_jump", "cmd_grab_punish", "crumple_followup", "stun_jump_in", "compose_live",
                 "jump_attack_combo", "fireball_clash", "fireball_jump", "fireball_sa1", "di_burnout_jump", "di_burnout_srk",
-                "di_burnout_super", "denjin"}
+                "di_burnout_super", "denjin", "corner_jump_out"}
 DEFENSE_SITUATIONS = {"after_block": "After blocking", "after_hit": "After getting hit", "wakeup": "Getting up",
                       "approach": "They walk in", "their_wakeup": "They're getting up", "my_turn": "My turn",
                       "after_rush_block": "After their Drive Rush", "corner": "Corner pressure", "fireball": "Fireball"}

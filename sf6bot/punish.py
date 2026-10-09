@@ -521,7 +521,7 @@ class PunishEngine:
         meter, drive = num(me.get("super")) or 0, num(me.get("drive")) or 0
         opp_hp = num(op.get("hp"))
         learned = self.exp.routes() if self.exp else None
-        reserve = self.c.get("drive_reserve", 0)
+        reserve = self.spend_reserve(me, op)
         out: list[dict] = []
         k = w["know"]
         if k.get("punish_with") and k["punish_with"] in (self.c.get("moves") or {}):
@@ -650,7 +650,7 @@ class PunishEngine:
             if not name.startswith(("Standing ", "Crouching ")):
                 continue
             try:
-                e = comp.best_from(name, me, op, reserve=self.c.get("drive_reserve", 0), hit_ok=PUNISH_HIT_TYPES,
+                e = comp.best_from(name, me, op, reserve=self.spend_reserve(me, op), hit_ok=PUNISH_HIT_TYPES,
                                    min_ev=0.0)
             except Exception:                           # noqa: BLE001 - optional: the book's own routes still punish
                 e = None

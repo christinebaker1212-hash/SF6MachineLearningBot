@@ -144,6 +144,10 @@ ADVANCE_ROOM = 2.5                                       # ... the opponent's ro
 ADVANCE_MARGIN = 0.6                                     # ... and this far outside its poke (0.20.0 hovers just outside)
 CHASE = {"walk_fwd": 2.0, "walk_back": 0.3, "dash_back": 0.3, "jump_back": 0.3, "idle": 0.6}   # behind, late in the round
 CHASE_SECONDS = 30.0
+# 0.50.0 (user, 2026-10-09: corner Drive Impacts): the bot's back within LOW_DRIVE_OUT[0] of its wall with 3 Drive bars or
+# fewer, or burned out: get out before the opponent's next blockstring drains the rest (36% of the corner DIs since 0.24
+# found it burned out, 10% midscreen). Walk out and press more, crouch-block and stand still less (ESTIMATES)
+LOW_DRIVE_OUT = (2.5, {"walk_fwd": 1.8, "idle": 0.5, "crouch": 0.6, "poke": 1.2})
 BURNOUT_PRESS = {"walk_fwd": 1.8, "walk_back": 0.4, "dash_back": 0.4, "poke": 1.3, "idle": 0.6}
 OPP_POKE_DEFAULT = 1.5        # ESTIMATE: an opponent without a measured poke (most characters' longest normals ~1.3-1.6)
 THEIR_RANGE_MARGIN = 0.25     # they can step in as they press
@@ -274,6 +278,7 @@ class NeutralPolicy:
         self.no_fireball = False              # 0.38.0: the opponent has the bars for a super that goes through it (fighter)
         self.op_projectile = False            # the opponent's move is a projectile / one is in flight (0.20.5, fighter)
         self.op_burnout = False               # 0.37.0: the opponent is in burnout (fighter)
+        self.low_drive = False                # 0.50.0: the bot has 3 bars or fewer, or is burned out (fighter)
         # 0.37.0 (user: "Shinku Hadoken being used often in situations where it would be blocked"): no Super Art from
         # neutral; supers come from punishes, confirms and combos
         self.neutral_super = bool(c.get("neutral_super", False))
@@ -402,6 +407,9 @@ class NeutralPolicy:
                     break
             if behind <= CORNER_OUT[0]:
                 for n, k in CORNER_OUT[1].items():
+                    f[it.INTENTS.index(n)] *= k
+            if self.low_drive and behind <= LOW_DRIVE_OUT[0]:
+                for n, k in LOW_DRIVE_OUT[1].items():
                     f[it.INTENTS.index(n)] *= k
         return f
 

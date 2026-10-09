@@ -312,7 +312,7 @@ class ZoningMixin:
         if self.book:
             from .route_book import choose_jump_in
             e = choose_jump_in(self.book, me, op, learned=self.exp.routes() if self.exp else None,
-                               reserve=self.c.get("drive_reserve", 0), denjin=self.denjin_stock, over_fireball=True)
+                               reserve=self.spend_reserve(me, op), denjin=self.denjin_stock, over_fireball=True)
         # 0.33.0: a jump-in is a ground combo with a jump attack in front (user): the composer's best one competes
         e = self._better_jump_in(e, self._composed_jump_in(me, op))
         if e is not None:

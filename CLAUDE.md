@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.50.0 (2026-10-09): corner Drive Impacts: with the back to the wall and 3 Drive bars or fewer the bot keeps its Drive for the DI-back, walks out of the corner, jumps out when burned out, and never sends a DI-back that would land after the hit.**
 - **0.49.1 (2026-10-09): multi-hit moves blocked hit by hit (Terry's Quick Burn: the overhead second hit is stood for); no "my turn" after a hit with another hit coming.**
 - **0.49.0 (2026-10-09): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card; the arcade panel is the optional clickable pad) and the control panel cleaned up and fitted to 1024 x 176 (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed.**
 - **0.48.0 (2026-10-09): every grappler's command-grab reach measured from its throw boxes (Zangief's L SPD ~1.95 centre to centre); the bot keeps out of it in neutral, learns new reach live, and the walk-in moment uses it.**
@@ -5307,6 +5308,37 @@ offline matches. Perhaps merge them with the controller overlay?")
   the second hit an overhead: 9,400 damage in the 0.26.0 run), Chun-Li's Lotus Fist, Akuma's Skull Splitter, Elena's
   j.HK, Terry's OD Quick Burn.
 - Tests `tests/test_0491.py`. Not verified in game.
+
+## 0.50.0: corner Drive Impacts (user, 2026-10-09)
+- User: "No matter what version of the bot we create, it ALWAYS has trouble reacting to DI with its back to the corner.
+  Why?"
+- **MEASURED** (722 opponent Drive Impacts in the user's recordings since 0.24; the bot's burnout from its own Drive
+  reaching 0 until the gauge is full again):
+  - burned out when the DI started: corner (back within 2.0) 106 of 291 (36%), midscreen 44 of 431 (10%); a burned-out
+    character cannot DI back, and a blocked DI in the corner wall-splats it into a stun
+  - bot free: DI-backs 46 of 95 in the corner, 154 of 244 midscreen
+  - since 0.39: in blockstun with 2+ bars 20 corner DIs, DI-back 3, HP+HK pressed 29-35 frames in (after the hit) 3,
+    nothing 12
+  - So the corner problem is mostly burnout (blocking strings there drains the Drive, Full dataset analysed), not the
+    reaction.
+- **The user's picks (all four, every character, from 3 bars):**
+  - **Keep the Drive for the DI-back** (`fighter._corner_save`, `can_spend`, `spend_reserve`; config `corner_drive`):
+    with the back within `wall` 2.0 of its wall and `max_drive` 30000 or less, every optional spend is refused (parries,
+    OD moves, Drive Rush, Drive Reversal, the bot's own Drive Impacts) and combo / punish plans get no Drive (their
+    reserve = all of it); the DI-back (drive_impact with reserve 0) and a verified kill still spend.
+  - **Leave before burnout:** the neutral policy with the back within 2.5 and low Drive (3 bars or fewer, or burned
+    out): walk forward x1.8, idle x0.5, crouch x0.6, poke x1.2 (`neutral_policy.LOW_DRIVE_OUT`); "my turn" after a
+    block there: step +0.4, press +0.2, block -0.3 (`corner_drive.my_turn_bonus`). ESTIMATES.
+  - **Burned out in the corner** (`fighter._burnout_jump_out`, rule 6b''): free, grounded, back within 1.5, the opponent
+    0.5-1.5 away, grounded and not attacking, no charged Flash Kick-style anti-air: a forward jump over it, a roll every
+    0.5 s at 25%, 3 s cooldown (ESTIMATES). Reversal supers were already reactive (0.23.0) and need no Drive.
+  - **DI-back timing:** the drawn human delay is capped at their frame 25 (`di_reaction.late_max`,
+    `_di_react_ready(cap=)`), out of blockstun and in it; a DI-back that would still land after frame 25 (first seen too
+    late) is not sent: the bot blocks (`di_stats.too_late`). The delay itself is kept (a first cap at the bot's first
+    free frame made early DI-backs instant: caught by the 0.37.0 test).
+- Replay of 35 Ryu matches of 0.41-0.43 through `decide()` (open loop): corner-save on 11% of lines; spends refused there
+  1,430 lines (OD moves 1,009, parries 362, Drive Reversals 59), jump-outs 1, late DI-backs blocked 5.
+- Summary `corner_drive` {refused, by_action, escape_turns, jump_out}. Tests `tests/test_0500.py`. Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
