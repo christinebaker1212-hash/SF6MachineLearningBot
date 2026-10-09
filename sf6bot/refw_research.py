@@ -23,7 +23,11 @@ import shutil
 import zipfile
 from pathlib import Path
 
-MARKER = re.compile(rb"SF6BOT-RESEARCH-BUILD until=(\d{4}-\d{2}-\d{2}) exporter=([0-9a-f]{16})")
+MARKER = re.compile(rb"SF6BOT-RESEARCH-BUILD until=(\d{4}-\d{2}-\d{2}) exporter=([0-9a-f]{16})((?: also=[a-z0-9_]+:[0-9a-f]{16})*)")
+ALSO = re.compile(r"also=([a-z0-9_]+):([0-9a-f]{16})")
+# 0.43.1: scripts the build allows besides the exporter (refw_research/allowed), pinned to their exact bytes
+ALLOWED_DIR = Path(__file__).resolve().parent.parent / "refw_research" / "allowed"
+EDITOR_SCRIPT = "sf6editor_live"   # the SF6 Mod Editor's live costume-colour preview (it installs this file itself)
 DLL = "dinput8.dll"
 BACKUP = "dinput8.dll.official"
 
@@ -40,7 +44,8 @@ def dll_info(data: bytes | None) -> dict:
         return {"kind": "official", "online_lua": False}
     until = m.group(1).decode()
     open_ = dt.datetime.now(dt.timezone.utc).date() < dt.date.fromisoformat(until)
-    return {"kind": "research", "until": until, "exporter": m.group(2).decode(), "online_lua": open_}
+    also = dict(ALSO.findall(m.group(3).decode()))
+    return {"kind": "research", "until": until, "exporter": m.group(2).decode(), "online_lua": open_, "also": also}
 
 
 def status(game_dir: Path | None) -> dict:
@@ -63,6 +68,8 @@ def status(game_dir: Path | None) -> dict:
     d = out["dll"]
     if d["kind"] == "research":
         out["exporter_matches_build"] = out["installed_exporter"] == d["exporter"]
+        ed = game_dir / "reframework" / "autorun" / f"{EDITOR_SCRIPT}.lua"
+        out["installed_editor_preview"] = exporter_id(ed.read_bytes()) if ed.is_file() else None
     return out
 
 
@@ -87,6 +94,16 @@ def describe(st: dict) -> list[str]:
         else:
             lines.append(f"Exporter: {st.get('installed_exporter') or 'missing'} but the build allows "
                          f"{d['exporter']}: it will NOT run. Reinstall (menu R) or rebuild after an exporter update.")
+        ed = d.get("also", {}).get(EDITOR_SCRIPT)
+        if ed:
+            have = st.get("installed_editor_preview")
+            lines.append("SF6 Mod Editor live preview: allowed by this build"
+                         + ("; installed and it matches (it will run)." if have == ed else
+                            "; not installed yet (the editor installs it on its first 'Send to game')." if not have else
+                            f"; the installed copy ({have}) differs from the allowed one ({ed}): it will NOT run "
+                            "(the editor and this build come from different versions)."))
+        else:
+            lines.append("SF6 Mod Editor live preview: not allowed by this build (older build).")
     lines.append("Official dll kept as backup: " + ("yes (dinput8.dll.official)" if st["backup_of_official"] else "no"))
     return lines
 

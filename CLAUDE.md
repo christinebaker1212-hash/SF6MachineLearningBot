@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.43.1 (2026-10-09): the research build also runs the SF6 Mod Editor's live costume-colour preview (`refw_research/allowed/sf6editor_live.lua`, pinned to its exact bytes like the exporter; online included). Capcom approved this change as purely cosmetic, per the user (2026-10-09). Bot behaviour unchanged.**
 - **0.43.0 (2026-10-09): other characters get their own Drive Rush check (start-ups, ids, measured reach) and Shoryuken / Drive Impact hitboxes from their own catalog boxes; their rush check learns its timing by trial and error. Ryu unchanged.**
 - **0.42.0 (2026-10-08): human limits vary the reactions instead of making them instant: delay tech 2-6 frames after the connect, reaction DIs and answer Shoryukens on drawn frames, no reaction DI twice in a row on the same move.**
 - **0.41.0 (2026-10-08): corner Drive Impacts answered out of blockstun (a 0.25.0 guard-hold bug held block through them); the DI crumple cash-out no longer loses its timing; whiffed DIs punished; combos and punishes vary; no OD High Blade Kick follow-up near the wall; the rush check is an adaptive mix; buttons beaten by a poke from a distance are dropped there.**
@@ -138,6 +139,9 @@ welcomes for variance against weaker or erratic players. No alt account will be 
   - A follow-up email confirms that REFramework and memory reading are within the disclosed
     method. Material additions need Capcom's OK before ranked use. No data goes to Capcom until
     the data and the transfer method are agreed. Details are in HANDOFF.md §2.
+  - **2026-10-09 (user):** Capcom approved the research build also running the SF6 Mod Editor's live costume-colour
+    preview script, online included, "as it is entirely cosmetic, and does not affect the game experience or
+    research". Built into 0.43.1 (see "0.43.1"); it stays pinned to its exact bytes, so nothing else runs.
 
 **Requirement: opponent assessment (planned for M2–M4, recorded here so it isn't lost).**
 The agent should notice opponent mistakes and judge whether the opponent is below its level.
@@ -5042,3 +5046,21 @@ in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing valid
   - Frozen checkpoints, both sides, held-out opponents, with confidence intervals.
   - "Competitive with Master players" is reported separately from "achieved Master rank".
 - **Ranked:** started by the user (2026-10-03) at Platinum 1 (see constraints).
+
+## 0.43.1: the research build also runs the SF6 Mod Editor's live preview
+- **Why (user, 2026-10-09):** the editor's "Send to game" costume-colour preview could not run with the research build
+  (it runs only the exporter), so previewing meant closing SF6, swapping to the official dll, and swapping back. The user
+  asked for the build to allow the editor's script, without an online block; Capcom approved it as purely cosmetic
+  (user's statement).
+- `tools/refw_research_patch.py` takes extra allowed scripts after the exporter (the workflow passes every
+  `refw_research/allowed/*.lua`). Each is embedded and compared byte for byte (line endings ignored), like the exporter:
+  `is_sf6bot_allowed_script()` replaces `is_sf6bot_exporter()` in `ScriptState::run_script`. Any other script is still
+  skipped and logged. The REFramework window names the allowed files.
+- Marker: `SF6BOT-RESEARCH-BUILD until=... exporter=<id> also=sf6editor_live:<id>`. `refw-research status` reports
+  whether the editor's preview is allowed and whether the installed copy matches (the editor installs
+  `reframework/autorun/sf6editor_live.lua` itself on its first "Send to game").
+- `refw_research/allowed/sf6editor_live.lua` is a copy of `reframework/autorun/sf6editor_live.lua` from
+  christinebaker1212-hash/SF6Editor. **Changing it needs a rebuild of the research dll** (the workflow starts on its own),
+  and the editor must ship the same bytes; the editor tells the user when they differ.
+- The bot's exporter, its id (bca17bb85832acbe) and the bot's behaviour are unchanged.
+

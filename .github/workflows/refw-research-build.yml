@@ -1,6 +1,8 @@
 # The sf6bot research build of REFramework (see tools/refw_research_patch.py for exactly what changes).
 # Started by a change to refw_research/request.json (any branch) or by hand (Actions -> Run workflow).
 # Output: the artifact "sf6bot-refw-research" = dinput8.dll + BUILD_INFO.txt + the patch + REFramework's LICENSE.
+# Allowed besides the exporter: every refw_research/allowed/*.lua, pinned to its exact bytes (0.43.1: the SF6 Mod
+# Editor's live costume-colour preview).
 name: REFramework research build
 on:
   push:
@@ -8,6 +10,7 @@ on:
       - "refw_research/request.json"
       - "tools/refw_research_patch.py"
       - "reframework/autorun/sf6bot_state.lua"
+      - "refw_research/allowed/**"
       - ".github/workflows/refw-research-build.yml"
   workflow_dispatch:
 
@@ -46,8 +49,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Patch (research window + exporter-only)
-        run: python sf6bot/tools/refw_research_patch.py refw ${{ steps.req.outputs.until }} sf6bot/reframework/autorun/sf6bot_state.lua
+      - name: Patch (research window + the exporter and refw_research/allowed scripts only)
+        shell: pwsh
+        run: |
+          $allowed = @(Get-ChildItem sf6bot/refw_research/allowed -Filter *.lua -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.FullName })
+          python sf6bot/tools/refw_research_patch.py refw ${{ steps.req.outputs.until }} sf6bot/reframework/autorun/sf6bot_state.lua @allowed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Configure CMake (as REFramework's own dev release)
         run: cmake -S refw -B refw/build -G "Visual Studio 18 2026" -A x64 -DCMAKE_BUILD_TYPE=Release -DDEVELOPER_MODE=ON "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
@@ -67,7 +74,7 @@ jobs:
             "sf6bot research build of REFramework",
             "REFramework commit: ${{ steps.req.outputs.ref }}",
             "Research period ends: ${{ steps.req.outputs.until }} 00:00 UTC (after that: stock behaviour, Lua off online)",
-            "Only reframework/autorun/sf6bot_state.lua from sf6bot commit ${{ github.sha }} runs.",
+            "Only reframework/autorun/sf6bot_state.lua and refw_research/allowed/*.lua from sf6bot commit ${{ github.sha }} run.",
             "Install: sf6bot refw-research install <this zip>  (keeps the official dinput8.dll as a backup)"
           )
           $info | Set-Content out/BUILD_INFO.txt

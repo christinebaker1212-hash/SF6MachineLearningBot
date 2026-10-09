@@ -4,12 +4,17 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.43.0**, REFramework exporter script **v11**, branch
+*State as of 2026-10-09: code version **0.43.1**, REFramework exporter script **v11**, branch
 `claude/admiring-mccarthy-uyyay4`, all tests passing (727).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.43.1** (CLAUDE.md "0.43.1"): the research build also runs the SF6 Mod Editor's live costume-colour preview
+(`refw_research/allowed/sf6editor_live.lua`, pinned to its exact bytes; online included, approved by Capcom as cosmetic per
+the user, 2026-10-09). Rebuilt and bundled in `refw_research/dist/`; install with TOOLS → "Online build: install" (SF6
+closed). If that file changes, rebuild the dll. The bot itself is unchanged.
 
 **State:** **0.43.0 is pushed** (CLAUDE.md "0.43.0"): for characters other than Ryu, the Drive Rush check is built from the character's own 5MP / 2LP (start-ups, ids, so its measured reach is used; Ken's profile had Ryu's 6F / ids 605, 622), the Shoryuken / Drive Impact hitboxes come from its own catalog boxes (C on 0.43.0+, else Ryu's as an estimate, noted), and its rush check learns its meeting point and button per opponent (`rush_learn.py`, `datasets/learning/<Bot>_rushcheck.json`). **Ryu is unchanged** (user: "his Drive Rush check is already perfect"). A guard test fails when a ryu.yaml section naming Ryu's moves is not rebuilt for other characters. When C is next run as Ryu, compare the generated L Shoryuken box with ryu.yaml's hand-measured `srk_hitbox` (verifies the own-frame counting). Check `rush_learn` in summaries when the bot plays another character.
 
