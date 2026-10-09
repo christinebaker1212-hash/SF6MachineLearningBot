@@ -5217,10 +5217,22 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     # 0.31.0: the character the bot plays (fight --character, configs/local.yaml, else Ryu). Ryu = configs/fighter/ryu.yaml
     # as always; anyone else = a profile generated from that character's Capcom data (fighter_profile.py)
     from . import fighter_profile as fprof
-    from .bot_character import playing
+    from .bot_character import DEFAULT as _DEFAULT_CHAR, is_random, playing
     cfg_dir = cfg.get("fighter", {}).get("config_dir", "configs/fighter")
-    fcfg = fprof.profile(playing(cfg), cfg_dir, ds_root)
-    if (fcfg.get("profile") or {}).get("generated"):
+    # 0.45.0 (user): Random Select. The character is read at each match start; until then Ryu's profile stands in (it is
+    # never used to fight: the side and the character are known before "Fight!" is acted on)
+    random_pick = is_random(playing(cfg))
+    fcfg = fprof.profile(_DEFAULT_CHAR if random_pick else playing(cfg), cfg_dir, ds_root)
+    profiles = {fcfg.get("character"): fcfg}
+
+    def _profile(ch_):
+        if ch_ not in profiles:
+            profiles[ch_] = fprof.profile(ch_, cfg_dir, ds_root)
+        return profiles[ch_]
+    if random_pick:
+        print("Random Select: the bot reads its character at each match start and plays that character's rules and "
+              "data (pick Random in SF6 too).")
+    elif (fcfg.get("profile") or {}).get("generated"):
         print("Playing as " + fprof.summary_line(fcfg))
     # 0.39.0 (user): the DI-back reaction delay (configs/fighter/ryu.yaml di_reaction; `fight --di-delay`, the panel)
     di_rx0 = di_reaction_setting(fcfg.get("di_reaction"), di_delay)
@@ -5243,7 +5255,32 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             print("Win model: " + (f"trust {w_.trust:.2f} (trained {w_.meta.get('trained')} on {w_.meta.get('samples')} "
                                    "decisions)" if w_.net is not None else (w_.problem or "not trained yet")))
         return b_, w_
-    brain, win = _models(fcfg.get("character"))
+    models_cache: dict = {}
+
+    def _char_models(ch_):
+        """A character's networks, loaded once a session (Random Select switches between characters); loaded again when
+        a retrain has replaced the files since."""
+        from .bot_character import model_dir
+        d_ = model_dir(ds_root, ch_)
+        mt_ = (_mtime(d_ / "intent_net.npz"), _mtime(d_ / "counts.json"), _mtime(d_ / "win_net.npz"))
+        hit_ = models_cache.get(ch_)
+        if hit_ is not None and hit_[2] == mt_:
+            return hit_[0], hit_[1]
+        b_, w_ = _models(ch_)
+        models_cache[ch_] = (b_, w_, mt_)
+        return b_, w_
+    brain, win = _char_models(fcfg.get("character"))
+    prewarmed: set = set()
+
+    def _use_character(ch_, why_):
+        """Play `ch_` from now on: its rules (Ryu = configs/fighter/ryu.yaml, others generated) and its own networks."""
+        nonlocal fcfg, brain, win
+        fcfg = _profile(ch_)
+        print("Playing as " + fprof.summary_line(fcfg) + (f" ({why_})" if why_ else ""))
+        if brain is not None:
+            brain, win = _char_models(ch_)
+            brain_mtime[0] = None
+        retrainer.character = ch_
     # 0.16.0: long sessions retrain in the background every N matches; new models are loaded at a match start
     from .retrain import Retrainer
     pc = fcfg.get("policy") or {}
@@ -5488,6 +5525,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         print(f"[menu] {what_} on screen (try {mwatch.tries}): pressed {keys_}")
         sess.narrate(f"{what_.capitalize()}: pressed {keys_}" + (" (searching again)." if "ESC" in keys_ else "."),
                      source="scripted")
+
+    def _side_known() -> None:
+        tracker.self_index = side["i"]
+        me_k = keys()[0]
+        summary["player"] = me_k
+        summary["side_detection"] = {"side": me_k, "how": side["how"], "input_delay_frames": side["lag"]}
+        sess.narrate(f"I am {me_k.upper()} ({side['how']}).", source="measured")
 
     def finish_match() -> None:
         nonlocal summary, tracker, fighter, pending, match_end_t, was_active, exp, meter_n0, learner
@@ -5948,15 +5992,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 status(f"fighting as {keys()[0].upper()}", detail)
             # which side is the bot? (Versus Human / auto): by character, else the crouch probe at "Fight!"
             if side["i"] is None:
-                i_ = by_character(st.raw, fcfg.get("character"))
+                i_ = None if random_pick else by_character(st.raw, fcfg.get("character"))
                 if i_ is not None:
                     side.update(i=i_, how="character")
                 elif side_by_name and ladder is not None and ladder.side_of(side_names) is not None:
                     # 0.37.0 (user: no crouch probe in mirrors; read the bot's name on the VS screen instead)
                     side.update(i=ladder.side_of(side_names), how="my name on the VS screen")
                 elif fight_on and c.armed:
-                    status("finding my side: backdash + crouch probe (neither or both players are "
-                           f"{fcfg.get('character')})", detail)
+                    status("finding my side: backdash + crouch probe (" + ("Random Select" if random_pick else
+                           f"neither or both players are {fcfg.get('character')}") + ")", detail)
                     res = probe(sess, reader)
                     summary["side_probe"] = res
                     if res["player"] is None:
@@ -5967,10 +6011,25 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     else:
                         side.update(i=1, how="probe unclear: assumed P2")
                         sess.narrate("Could not tell which side I am; assuming P2.", source="measured")
+                    _side_known()          # 0.45.0: before, a side from the probe never reached the summary / tracker
                     continue
                 else:
                     set_panel(False)
                     p1c_, p2c_ = (st.raw.get("p1") or {}).get("chara"), (st.raw.get("p2") or {}).get("chara")
+                    if random_pick and fighter is None and not fight_on and isinstance(p1c_, int) and isinstance(p2c_, int):
+                        # 0.45.0: Random Select: the bot is one of the two characters on screen. Load both characters'
+                        # rules and networks during the intro, so the setup after the side probe at "Fight!" is quick
+                        # (0.22.2: a slow setup there left ~1.8 s with nothing pressed); a mirror is set up now
+                        for c_ in {p1c_, p2c_}:
+                            n_ = character_name(c_)
+                            if n_ in CHARACTERS.values() and n_ not in prewarmed:
+                                prewarmed.add(n_)
+                                _profile(n_)
+                                if brain is not None:
+                                    _char_models(n_)
+                        n1_ = character_name(p1c_)
+                        if p1c_ == p2c_ and n1_ in CHARACTERS.values() and fcfg.get("character") != n1_:
+                            _use_character(n1_, "Random Select")
                     # 0.22.2: a mirror (both players the bot's character) can only be told apart at "Fight!" (the crouch
                     # probe), and the fighter was set up after it: ~1.8 s with nothing pressed at the start of every
                     # mirror round 1 (0.22.1 ranked recordings, hit both times). The setup is the same for either side,
@@ -5979,15 +6038,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                             and character_name(p1c_) == fcfg.get("character")):
                         continue
                 if side["i"] is not None:
-                    tracker.self_index = side["i"]
-                    me_key, op_key = keys()
-                    summary["player"] = me_key
-                    summary["side_detection"] = {"side": me_key, "how": side["how"], "input_delay_frames": side["lag"]}
-                    sess.narrate(f"I am {me_key.upper()} ({side['how']}).", source="measured")
+                    _side_known()
             # 0.18.11: a battle's first lines can still carry the previous match's characters; at "Fight!" they are
             # current, so a side found by character is checked again there
             recheck_ = (by_character(st.raw, fcfg.get("character")) if fight_on and side["how"] == "character"
-                        and side["i"] is not None else None)
+                        and side["i"] is not None and not random_pick else None)
             wrong_ = side_check is not None and side["i"] is not None and side_check.wrong()
             if (recheck_ is not None and recheck_ != side["i"]) or wrong_:
                 # the characters at "Fight!", or the bot's presses showing on the other player's inputs: other side
@@ -6021,14 +6076,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         and side["i"] is not None):
                     # 0.31.0: the game shows the bot on another character than it was set to play: that character's
                     # profile and models (Ryu's own stay untouched)
-                    sess.narrate(f"I am playing {summary['character']}, not {fcfg.get('character')}: using "
-                                 f"{summary['character']}'s rules and data.", source="measured")
-                    fcfg = fprof.profile(summary["character"], cfg_dir, ds_root)
-                    print("Playing as " + fprof.summary_line(fcfg))
-                    if brain is not None:
-                        brain, win = _models(fcfg.get("character"))
-                        brain_mtime[0] = None
-                    retrainer.character = fcfg.get("character")
+                    if random_pick:
+                        sess.narrate(f"Random Select gave me {summary['character']}: using {summary['character']}'s "
+                                     "rules and data.", source="measured")
+                    else:
+                        sess.narrate(f"I am playing {summary['character']}, not {fcfg.get('character')}: using "
+                                     f"{summary['character']}'s rules and data.", source="measured")
+                    _use_character(summary["character"], None)
                 summary["opponent"] = character_name(op["chara"])
                 summary["opponent_kind"] = "human" if versus else "cpu"
                 if is_unknown_character(op["chara"]):    # 0.30.0: a character released after this build
@@ -6101,12 +6155,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 from .reach import load as load_reach
                 own_reach, opp_reach = load_reach(ds_root, summary["character"]), load_reach(ds_root, summary["opponent"])
                 from .reach import LiveReach
-                if cur.get("live_reach") is None:        # one per session: what it learned carries to the next match
-                    cur["live_reach"] = LiveReach(own_reach)
+                # one per session and character (0.45.0: Random Select changes the character; move ids overlap across
+                # characters): what it learned carries to the next match as the same character
+                lr_all_ = cur.setdefault("live_reach", {})
+                if lr_all_.get(summary["character"]) is None:
+                    lr_all_[summary["character"]] = LiveReach(own_reach)
                 else:
-                    cur["live_reach"].base = dict(own_reach)
+                    lr_all_[summary["character"]].base = dict(own_reach)
                 if policy is not None:
-                    policy.reach = cur["live_reach"]
+                    policy.reach = lr_all_[summary["character"]]
                 summary["reach_known"] = {"own": len(own_reach), "opponent": len(opp_reach)}
                 fighter = ScriptedFighter(mcfg, opp_moves, policy=policy, book=book, experience=exp,
                                           own=own_moves(summary["character"], ds_root), own_reach=own_reach,
@@ -6155,7 +6212,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     fighter.op_answers = cur["answers"]
                     sess.narrate(f"Your answers against {summary['opponent']}: {cur['answers'].usable()} ready "
                                  "(from rounds you won).", source="learned")
-                fighter.live_reach = cur["live_reach"]
+                fighter.live_reach = cur["live_reach"][summary["character"]]
                 # 0.23.0: the opponent's move timing learned from recordings (move_timing.py: menu B, else the shipped
                 # table), for ids without a catalog / Capcom name, follow-through ids and doubted inferred names
                 try:

@@ -5,11 +5,13 @@ evidence, measurements, every verified/unverified claim. This file is the short 
 the project stands, how to work with the user, and what to do next.
 
 *State as of 2026-10-09: code version **0.44.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (744).*
+`claude/admiring-mccarthy-uyyay4`, all tests passing (748).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.45.0 is pushed** (CLAUDE.md "0.45.0"): Random Select (`play-as Random`): character read at each match start, side from the input probe, that character's rules / data; nothing filed under "Random". Also fixed: a probe-found side never reached the match summary. Ken reached Master, Akuma about to (user, 2026-10-09; not yet measured).
 
 **State:** **0.44.0 is pushed** (CLAUDE.md "Full dataset analysed" and "0.44.0"): **Ryu reached GRAND MASTER (1704 MR) on
 0.41.0 / 0.42.0.** The user's full dataset showed the bot gives its turn back after blocks (plus by 2+: blocked again 45-56%,

@@ -247,7 +247,7 @@ goto done
 :playas
 %BOT% play-as
 set "PAN="
-set /p PAN=Character for the bot (e.g. Ryu, Ken, Chun-Li; Enter = keep): 
+set /p PAN=Character for the bot (e.g. Ryu, Ken, Chun-Li, Random; Enter = keep): 
 if "%PAN%"=="" goto menu
 %BOT% play-as "%PAN%"
 goto done

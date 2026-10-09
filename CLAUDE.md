@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.45.0 (2026-10-09): Random Select (`play-as Random`): the bot reads which character it got at each match start, finds its side with the input probe and plays that character's rules and data.**
 - **0.44.0 (2026-10-09): less passive defence after the full-dataset analysis (612 recordings): the bot takes its turn when it is plus after a block (press / throw / step / shimmy, learned per opponent), checks gaps valued by each opponent's own gaps, prices Drive by what is left (no OD High Blade Kick route from 4 bars down), escapes the corner (Drive Reversal, walk out), and stops full-screen / losing parries.**
 - **GRAND MASTER (user, 2026-10-09): Ryu reached 1704 MR on 0.41.0 / 0.42.0 (ladder history; 1606 -> 1704 MR in one evening).**
 - **0.43.1 (2026-10-09): the research build also runs the SF6 Mod Editor's live costume-colour preview (`refw_research/allowed/sf6editor_live.lua`, pinned to its exact bytes like the exporter; online included). Capcom approved this change as purely cosmetic, per the user (2026-10-09). Bot behaviour unchanged.**
@@ -5068,6 +5069,28 @@ is verified in game. ESTIMATE = a config guess.
   match, taken %" (0.41.0: 21.4: 9.0 / 6.6 / 2.7; 0.92 / 0.60; 14.5, 25%).
 - Other characters' generated profiles rebuild the turn buttons with their own start-ups.
 - `tests/test_refw_research.py`: a backslash inside an f-string (the 0.43.1 session's) moved out so it parses on Python < 3.12.
+
+## 0.45.0: Random Select (user, 2026-10-09: "Let's see just how well the bot's fundamentals hold up, eh?")
+- `sf6bot play-as Random` (also "random select"; menu PA; panel FIGHT -> Play as -> Random Select; `fight --character
+  Random`). Pick Random in SF6 too.
+- Each match: the characters are read from the game state during the intro. The side never comes from the characters
+  (either could be the bot): the input probe at "Fight!" decides (0.37.3: a tap, a backdash and a crouch), as in a
+  mirror; `SideCheck` still swaps a wrong side on the bot's presses.
+- Then that character's rules (Ryu = configs/fighter/ryu.yaml; others generated, 0.31.0) and its own networks (Ryu's
+  read-only when it has none). Everything is filed under the character actually played: recordings' `bot_character`,
+  learning files, ladder and progress rows, scorecard tables; never "Random". Until the first match Ryu's profile stands
+  in; it is never used to fight.
+- Setup speed: both characters' profiles and networks are loaded during the intro (cached for the session; networks
+  reloaded when a retrain replaced the files), so the setup after the probe is quick (0.22.2 measured ~1.8 s idle when it
+  was slow). A Random mirror is set up during the intro.
+- The session's live reach learning is kept per character (move ids overlap across characters).
+- `train --character Random` trains every character played.
+- **Bug fixed on the way:** a side found by the input probe (every mirror since 0.12.0) never reached the match summary
+  (`player`, `side_detection`) or the tracker's `self_index`, and the "I am P1/P2" line was not narrated. Results and the
+  recorded bot side were not affected (they use the side itself).
+- Characters without a catalog (C) use the move ids learned from recordings (X); their hitboxes are Ryu's estimates
+  (0.43.0).
+- Tests `tests/test_0450.py` (MOCK sessions over the real CPU fight, the probe saying either side). Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

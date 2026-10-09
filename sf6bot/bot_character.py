@@ -13,12 +13,18 @@ ability to play different characters other than Ryu without hurting Ryu or affec
   per bot character (datasets/learning/<Bot>_vs_<Opponent>.json ...). The progress report, ladder history and
   scorecard are per character (ranked LP is per character in SF6).
 - Shared on purpose: what is known about each OPPONENT character (move maps, move timing, reach, command grabs), which is
-  the same whoever plays against it."""
+  the same whoever plays against it.
+- Random Select (0.45.0; user, 2026-10-09): `play-as Random`. The bot does not know its character before a match: at
+  each match start it reads the characters in the game state, finds its side (the input probe at "Fight!", or a mirror
+  set up during the intro) and plays that character's rules and data. Every recording, the ladder and the learning are
+  filed under the character it actually played, never "Random"."""
 from __future__ import annotations
 
 from pathlib import Path
 
 DEFAULT = "Ryu"
+RANDOM = "Random"
+_RANDOM_KEYS = {"random", "randomselect", "rand"}
 
 
 def of_meta(meta: dict | None) -> str:
@@ -29,6 +35,11 @@ def of_meta(meta: dict | None) -> str:
 def playing(cfg: dict | None) -> str:
     """The character the bot is set to play (CLI / configs/local.yaml), else Ryu."""
     return ((cfg or {}).get("fighter") or {}).get("character") or DEFAULT
+
+
+def is_random(character: str | None) -> bool:
+    """Random Select: the character is only known at each match's start."""
+    return character == RANDOM
 
 
 def is_default(character: str | None) -> bool:
@@ -64,6 +75,8 @@ def resolve(text: str | None) -> str | None:
     if not text:
         return None
     key = file_stem(str(text)).replace("-", "").lower()
+    if key.replace("_", "") in _RANDOM_KEYS:
+        return RANDOM
     names = list(CHARACTERS.values()) + list(learned_characters().values())
     for n in names:
         if file_stem(n).replace("-", "").lower() == key:

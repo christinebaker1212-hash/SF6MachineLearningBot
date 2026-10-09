@@ -652,6 +652,8 @@ def cmd_train(args, cfg):
     from .bot_character import fight_characters, model_dir, resolve
     from .game_state import file_stem
     only = resolve(getattr(args, "character", None)) if getattr(args, "character", None) else None
+    if only == "Random":                  # 0.45.0: Random Select trains every character the bot has played
+        only = None
     chars = [only] if only else ["Ryu"] + sorted(c for c in fight_characters(root) if c != "Ryu")
     reps: dict = {}
     for ch in chars:
@@ -732,6 +734,12 @@ def cmd_play_as(args, cfg):
         return
     from .config import set_local
     p = set_local(["fighter", "character"], ch)
+    from .bot_character import is_random
+    if is_random(ch):
+        print(f"The bot now plays Random Select (saved in {p}). Pick Random in SF6 too: at each match start the bot "
+              "reads which character it got, finds its side and plays that character's rules and data. Characters "
+              "without a catalog (C) use the move ids learned from recordings (X).")
+        return
     print(f"The bot now plays {ch} (saved in {p}). Pick {ch} in SF6 too.")
     if ch != "Ryu":
         from pathlib import Path as _P
@@ -941,8 +949,8 @@ def main(argv=None):
                    "agreed beforehand): human limits on, the participant's guess asked after each match")
     p.add_argument("--pad", action="store_true", help="vs a human: the bot is P2 on its own virtual "
                    "controller and the overlay buttons press that controller (default: P1's keys)")
-    p.add_argument("--character", default=None, help="the character the bot plays (default: play-as, else Ryu); "
-                   "pick the same character in SF6")
+    p.add_argument("--character", default=None, help="the character the bot plays (default: play-as, else Ryu; "
+                   "'Random' = Random Select: read at each match start); pick the same in SF6")
     p.set_defaults(fn=cmd_fight)
 
     p = sub.add_parser("play-as", help="the character the bot plays from now on (saved); no argument: show it")
