@@ -5063,4 +5063,8 @@ in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing valid
   christinebaker1212-hash/SF6Editor. **Changing it needs a rebuild of the research dll** (the workflow starts on its own),
   and the editor must ship the same bytes; the editor tells the user when they differ.
 - The bot's exporter, its id (bca17bb85832acbe) and the bot's behaviour are unchanged.
+- **Built and bundled:** run 37871242946 (sha256 365c8851... = GitHub's digest); the dll marker says
+  `until=2033-10-01 exporter=bca17bb85832acbe also=sf6editor_live:fd7ab2fd1be14662` (= the allowed file), and its
+  patch.diff uses `is_sf6bot_allowed_script`. Copied to `refw_research/dist/` (update.bat brings it). All tests pass
+  here (722 passed, 7 skipped). Not run in game yet.
 
