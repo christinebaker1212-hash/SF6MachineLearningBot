@@ -756,6 +756,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         from .adapt import MatchMemory
         self.memory = MatchMemory(self.c.get("adapt"))
         self.rush_learn = None                          # 0.43.0: rush_learn.RushLearner (generated profiles only)
+        self.grab_range = None                          # 0.48.0: grab_range.GrabRange (the opponent's command-grab reach)
         self.aa_learn = None                            # 0.47.0: aa_learn.AntiAirLearner (option-table profiles only)
         self.memory.rush_ids = set(RUSH_IDS)              # set_opponent_rush narrows them per character
         self.memory.names = {m["id"]: m.get("name") for m in self.own if isinstance(m.get("id"), int)}
@@ -1508,6 +1509,27 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.thrown_ambiguous = ambiguous_for(opponent) - self.thrown_ids
         if getattr(self, "grab_watch", None) is not None and hasattr(self.grab_watch, "reaction_ids"):
             self.grab_watch.reaction_ids = set(self.hit_ids) | set(self.thrown_ids)
+
+    def set_grab_range(self, opponent: str | None, ds_root=None) -> None:
+        """0.48.0: the opponent character's throw boxes (grab_range.py: shipped + this PC's + learned live). Command grabs
+        the bot answers on reaction (measured to connect SLOW_CONTACT+ frames after they start, grabs.py, or listed slow
+        in configs/grab_ranges.json) are left out of the zone it keeps out of."""
+        from .grab_range import SLOW_CONTACT, GrabRange, load, shipped_slow
+        if not (self.c.get("grab_zone") or {}).get("enabled", True) or not opponent:
+            self.grab_range = None
+            return
+        slow = set(shipped_slow(opponent))
+        book = getattr(self, "grabs", None)
+        if book is not None:
+            for a in set(getattr(book, "ids", {})) | set(getattr(book, "seeds", {}) or {}):
+                c = sorted(book.contact(a))
+                if c and c[len(c) // 2] >= SLOW_CONTACT:
+                    slow.add(str(a))
+        self.grab_range = GrabRange(opponent, load(ds_root, opponent), slow_ids=slow, ds_root=ds_root)
+
+    def grab_zone(self, me: dict, op: dict) -> float | None:
+        """The centre distance inside which the opponent's farthest instant ground command grab connects (+ a margin)."""
+        return self.grab_range.zone(me, op) if self.grab_range is not None else None
 
     def being_thrown(self, me: dict) -> bool:
         """The bot in a thrown state. 0.31.1: some characters' throws put the bot in an id that is also one of its OWN
@@ -2612,12 +2634,17 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if self.defense is None or not dc.get("approach", True):
             return None
         reset_ = dc.get("approach_reset_cmd_grab", 2.0) if self.cmd_grab_ids() else dc.get("approach_reset", 1.6)
+        z_ = self.grab_zone(me, op)                  # 0.48.0: the measured command-grab reach replaces the estimates
+        if z_ is not None:
+            reset_ = max(float(reset_), z_ + 0.4)
         if dist > float(reset_):
             self._approach_fired = False
             return None
         mx, ox = _num(me.get("x")), _num(op.get("x"))
         # 0.18.4: a grappler's command grab reaches farther than a throw (an ESTIMATE in the config, not measured)
         reach_ = dc.get("approach_dist_cmd_grab", 1.6) if self.cmd_grab_ids() else dc.get("approach_dist", 1.15)
+        if z_ is not None:
+            reach_ = max(float(dc.get("approach_dist", 1.15)), z_)
         if (self._approach_fired or mx is None or ox is None or dist > float(reach_)
                 or (_num(op.get("y")) or 0.0) > 0.05 or self.busy(me) is not None or not self.vel_ok):
             return None
@@ -4505,6 +4532,16 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                 self.rush_stats["learn"][out_] = self.rush_stats["learn"].get(out_, 0) + 1
         if self.aa_learn is not None:                  # 0.47.0: how the last option anti-air turned out
             self.aa_learn.observe(me, op, tmr)
+        gr_ = self.grab_range
+        if gr_ is not None:                            # 0.48.0: the opponent's throw boxes, and time spent inside its grab
+            bx_ = raw.get("bx")
+            gr_.observe(op, me, fresh=isinstance(bx_, dict) and op_key in bx_)
+            z_ = gr_.zone(me, op)
+            d_ = player_distance(me, op)
+            if z_ is not None and d_ is not None and (_num(op.get("y")) or 0) <= 0.05:
+                gr_.stats["lines"] += 1
+                if d_ < z_:
+                    gr_.stats["inside_lines"] += 1
         ev_ = self.grab_watch.on_line(raw, me_key, op_key) if self.grab_watch is not None else None
         if ev_:
             st_ = self.cmd_grab_stats
@@ -4945,6 +4982,10 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.policy.op_projectile = bool((self.opp.get(op.get("action_id")) or {}).get("projectile")) or self.pt.flight is not None \
             or self._zn_box_live(raw)
         self.policy.op_burnout = self.op_in_burnout(op)
+        # 0.48.0: keep out of the opponent's command-grab reach while it is free on the ground (not in its own move or a stun)
+        free_ = (_num(op.get("y")) or 0) <= 0.05 and not (_num(op.get("hitstun")) or 0) \
+            and not (_num(op.get("blockstun")) or 0) and not self._attack(op.get("action_id"))
+        self.policy.grab_zone = self.grab_zone(me, op) if free_ else None
         self.policy.no_fireball = self.fireball_beaten(op) is not None
         self.policy.chasing = self._chasing(raw, me, op)
         ch = self.policy.choose(me, op, prev.get(mk), prev.get(ok), t1, lambda a: self.can_spend(me, a), dt=dt)
@@ -5734,6 +5775,14 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                             summary["command_grabs"]["saved"] = str(saved_)
                     except OSError as e:
                         summary["command_grabs"]["saved"] = f"not saved: {e}"
+                if fighter.grab_range is not None:      # 0.48.0
+                    summary["grab_zone"] = fighter.grab_range.summary()
+                    try:
+                        sv_ = fighter.grab_range.save()
+                        if sv_ is not None:
+                            summary["grab_zone"]["saved"] = str(sv_)
+                    except OSError as e:
+                        summary["grab_zone"]["saved"] = f"not saved: {e}"
                 if fighter.aa_learn is not None:        # 0.47.0
                     summary["aa_learn"] = fighter.aa_learn.summary()
                     try:
@@ -6341,6 +6390,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter.op_charge_revs = opponent_charge_reversals(summary["opponent"], ds_root)
                 fighter.op_fb_beaters = opponent_fireball_beaters(summary["opponent"], ds_root, fcfg)
                 fighter.set_opponent_throws(summary["opponent"])
+                fighter.set_grab_range(summary["opponent"], ds_root)
                 fighter.set_opponent_rush(summary["opponent"])
                 # 0.43.0: the Drive Rush check learns its timing by trial and error, for characters other than Ryu (the
                 # generated profiles set rush_check.learn; Ryu's check is left as it is)

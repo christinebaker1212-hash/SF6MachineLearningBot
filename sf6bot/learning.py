@@ -483,6 +483,13 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
                     else "on the planned spot")
             parts_.append(f"{b_} {', '.join(f'{k} {v}' for k, v in res_.items())} -> {how_} ({sh_:+.2f})")
         out.append(("learned", f"Drive Rush checks vs {rl_.get('opponent')}: " + "; ".join(parts_) + "."))
+    gz_ = summary.get("grab_zone") or {}
+    if gz_.get("grab_front") is not None:             # 0.48.0: the opponent's command-grab reach, from its throw boxes
+        out.append(("measured", f"{gz_.get('opponent')}'s command grab reaches {gz_['grab_front']:.2f} ahead of it (throw "
+                                f"boxes, ids {', '.join(gz_.get('grab_ids') or [])}): I stood inside its reach "
+                                f"{gz_.get('inside_s', 0)} s of {round((gz_.get('lines') or 0) / 60, 1)} s"
+                                + (f"; new reach seen this match: {', '.join(gz_['learned'])}" if gz_.get("learned") else "")
+                                + "."))
     al_ = summary.get("aa_learn") or {}
     if al_.get("this_match"):                         # 0.47.0: option anti-airs learned by range (not Ryu)
         parts_ = [f"{k_} {', '.join(f'{o_} {v_}' for o_, v_ in r_.items())}" for k_, r_ in al_["this_match"].items()]

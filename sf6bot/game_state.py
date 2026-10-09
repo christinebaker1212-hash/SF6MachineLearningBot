@@ -468,11 +468,19 @@ def fix_action_frames(rows: list[dict]) -> list[dict]:
     return rows
 
 
-def read_recording(path: str | Path) -> list[dict]:
-    """The rows of a recording (.jsonl.gz), with frozen move frames repaired."""
+def read_recording(path: str | Path, boxes: bool = False) -> list[dict]:
+    """The rows of a recording (.jsonl.gz), with frozen move frames repaired. `boxes` (0.48.0): carry the exporter's
+    collision boxes forward onto every row (p1 / p2 "boxes", "projectiles"), as the live reader does; off by default,
+    since some callers write rows back out (merged replays) and recordings have no in_battle flag the tracker checks."""
     import gzip
     with gzip.open(path, "rt", encoding="utf-8") as f:
-        return fix_action_frames([json.loads(line) for line in f if line.strip()])
+        rows = fix_action_frames([json.loads(line) for line in f if line.strip()])
+    if boxes:
+        from .boxes import BoxTracker
+        bt = BoxTracker()
+        for r in rows:
+            bt.feed(r, recorded=True)
+    return rows
 
 
 class StateReader:

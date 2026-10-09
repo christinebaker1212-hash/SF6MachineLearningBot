@@ -5,11 +5,13 @@ evidence, measurements, every verified/unverified claim. This file is the short 
 the project stands, how to work with the user, and what to do next.
 
 *State as of 2026-10-09: code version **0.44.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (762).*
+`claude/admiring-mccarthy-uyyay4`, all tests passing (769).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.48.0 is pushed** (CLAUDE.md "0.48.0"): every grappler's command-grab reach measured from throw boxes (configs/grab_ranges.json; Zangief's 930 ~1.95 centre to centre); the bot keeps out of it in neutral and learns new reach live. Open: which of Zangief's 930 / 935 / 940 / 945 is L / M / H / OD.
 
 **State:** **0.47.0 is pushed** (CLAUDE.md "0.47.0"): the option anti-airs of the 17 characters with no 623 anti-air special learn by range what works (hit / trade / beaten / blocked / early / whiff), per opponent, pooled by body class; Ryu unchanged (user: "Ryu works already").
 

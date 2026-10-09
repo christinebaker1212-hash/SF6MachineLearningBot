@@ -1,0 +1,700 @@
+{
+ "_about": "0.48.0, MEASURED: each character's throw boxes ('t') from the user's 910 recordings (414 with boxes, 2026-10-09): per action id, 'front' = the box's farthest edge ahead of the grabber's centre, 'y0'/'y1' its heights, 'n' sightings, 'connect_d' the farthest centre distance at which it overlapped the other player's throw hurtbox. Ids 700-729 are normal throws. 'slow' = command grabs answered on reaction, left out of the zone the bot keeps out of: A.K.I. 1000 (Entrapment, Capcom start-up 23), Blanka 1014 (Wild Hunt, 32+), Zangief 917 / 923 (Siberian Express close, measured contact 24-28 frames). sf6bot/grab_range.py; menu B adds this PC's recordings (datasets/grab_ranges).",
+ "slow": {
+  "A.K.I.": [
+   "1000"
+  ],
+  "Blanka": [
+   "1014"
+  ],
+  "Zangief": [
+   "917",
+   "923"
+  ]
+ },
+ "characters": {
+  "A.K.I.": {
+   "715": {
+    "front": 0.849,
+    "n": 27,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.023
+   },
+   "717": {
+    "front": 0.8,
+    "n": 14,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.083
+   },
+   "1000": {
+    "front": 1.23,
+    "n": 8,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Akuma": {
+   "715": {
+    "front": 0.8,
+    "n": 24,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.991
+   },
+   "717": {
+    "front": 0.849,
+    "n": 11,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.998
+   },
+   "1087": {
+    "front": 0.828,
+    "n": 50,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.574
+   }
+  },
+  "Alex": {
+   "715": {
+    "front": 0.854,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.806
+   },
+   "717": {
+    "front": 0.85,
+    "n": 5,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "910": {
+    "front": 1.24,
+    "n": 8,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.323
+   },
+   "912": {
+    "front": 0.9,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "913": {
+    "front": 1.14,
+    "n": 8,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.389
+   },
+   "988": {
+    "front": 1.02,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "993": {
+    "front": 0.945,
+    "n": 45,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Blanka": {
+   "715": {
+    "front": 0.9,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "717": {
+    "front": 0.9,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "1014": {
+    "front": 1.12,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Cammy": {
+   "715": {
+    "front": 0.849,
+    "n": 22,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.054
+   },
+   "720": {
+    "front": 0.8,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "970": {
+    "front": 0.56,
+    "n": 9,
+    "y0": 0.591,
+    "y1": 2.354,
+    "connect_d": 0.6
+   }
+  },
+  "Chun-Li": {
+   "715": {
+    "front": 0.846,
+    "n": 13,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.856
+   },
+   "717": {
+    "front": 0.8,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Dee Jay": {
+   "715": {
+    "front": 0.8,
+    "n": 6,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.927
+   }
+  },
+  "E. Honda": {
+   "993": {
+    "front": 0.99,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "998": {
+    "front": 1.19,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.376
+   }
+  },
+  "Ed": {
+   "715": {
+    "front": 0.8,
+    "n": 8,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.992
+   },
+   "717": {
+    "front": 0.8,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.995
+   }
+  },
+  "Elena": {
+   "715": {
+    "front": 0.8,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.87
+   }
+  },
+  "Guile": {
+   "700": {
+    "front": 0.8,
+    "n": 7,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "701": {
+    "front": 0.8,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.7
+   }
+  },
+  "Ingrid": {
+   "715": {
+    "front": 0.8,
+    "n": 8,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.946
+   },
+   "717": {
+    "front": 0.8,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.937
+   }
+  },
+  "JP": {
+   "715": {
+    "front": 0.8,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.78
+   }
+  },
+  "Jamie": {
+   "715": {
+    "front": 0.8,
+    "n": 13,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.961
+   },
+   "717": {
+    "front": 0.8,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "982": {
+    "front": 0.66,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.753
+   },
+   "984": {
+    "front": 0.66,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "989": {
+    "front": 0.66,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Juri": {
+   "715": {
+    "front": 0.8,
+    "n": 6,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.868
+   },
+   "717": {
+    "front": 0.8,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Ken": {
+   "715": {
+    "front": 0.826,
+    "n": 20,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.115
+   },
+   "717": {
+    "front": 0.8,
+    "n": 10,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.7
+   }
+  },
+  "Kimberly": {
+   "715": {
+    "front": 0.8,
+    "n": 6,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.752
+   },
+   "720": {
+    "front": 0.8,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "920": {
+    "front": 0.225,
+    "n": 5,
+    "y0": 1.11,
+    "y1": 2.082,
+    "connect_d": null
+   }
+  },
+  "Lily": {
+   "715": {
+    "front": 0.8,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "717": {
+    "front": 0.8,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "1012": {
+    "front": 1.38,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "1216": {
+    "front": 1.142,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.7
+   }
+  },
+  "Luke": {
+   "715": {
+    "front": 0.832,
+    "n": 18,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.129
+   },
+   "717": {
+    "front": 0.8,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "M. Bison": {
+   "715": {
+    "front": 0.8,
+    "n": 5,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.009
+   }
+  },
+  "Mai": {
+   "715": {
+    "front": 0.811,
+    "n": 10,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.95
+   },
+   "717": {
+    "front": 0.8,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.727
+   }
+  },
+  "Manon": {
+   "715": {
+    "front": 0.8,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "717": {
+    "front": 0.8,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "901": {
+    "front": 0.86,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "902": {
+    "front": 0.791,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.112
+   },
+   "913": {
+    "front": 0.901,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.85
+   },
+   "939": {
+    "front": 0.902,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "941": {
+    "front": 0.782,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "952": {
+    "front": 0.902,
+    "n": 9,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.004
+   },
+   "954": {
+    "front": 0.782,
+    "n": 6,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Marisa": {
+   "715": {
+    "front": 0.9,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.231
+   },
+   "717": {
+    "front": 0.9,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "964": {
+    "front": 0.72,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Rashid": {
+   "715": {
+    "front": 0.8,
+    "n": 6,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.94
+   },
+   "717": {
+    "front": 0.8,
+    "n": 4,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.776
+   }
+  },
+  "Ryu": {
+   "715": {
+    "front": 0.803,
+    "n": 95,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.216
+   },
+   "716": {
+    "front": 0.846,
+    "n": 10,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.995
+   }
+  },
+  "Sagat": {
+   "717": {
+    "front": 0.85,
+    "n": 2,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Terry": {
+   "715": {
+    "front": 0.826,
+    "n": 10,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.365
+   },
+   "717": {
+    "front": 0.8,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "990": {
+    "front": 0.66,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Viper": {
+   "715": {
+    "front": 0.8,
+    "n": 5,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.7
+   },
+   "717": {
+    "front": 0.8,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   }
+  },
+  "Yasmine": {
+   "715": {
+    "front": 0.8,
+    "n": 16,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.032
+   },
+   "717": {
+    "front": 0.8,
+    "n": 3,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 0.917
+   }
+  },
+  "Zangief": {
+   "710": {
+    "front": 1.02,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "715": {
+    "front": 1.02,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "717": {
+    "front": 1.02,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "917": {
+    "front": 1.13,
+    "n": 5,
+    "y0": 0.0,
+    "y1": 1.46,
+    "connect_d": null
+   },
+   "923": {
+    "front": 1.13,
+    "n": 6,
+    "y0": 0.0,
+    "y1": 1.46,
+    "connect_d": null
+   },
+   "930": {
+    "front": 1.62,
+    "n": 10,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.715
+   },
+   "935": {
+    "front": 1.47,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.37
+   },
+   "940": {
+    "front": 1.22,
+    "n": 5,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.384
+   },
+   "945": {
+    "front": 1.58,
+    "n": 5,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": 1.847
+   },
+   "950": {
+    "front": 1.46,
+    "n": 1,
+    "y0": 2.692,
+    "y1": 4.172,
+    "connect_d": null
+   },
+   "1015": {
+    "front": 1.14,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.3,
+    "connect_d": null
+   },
+   "1222": {
+    "front": 1.1,
+    "n": 1,
+    "y0": 0.0,
+    "y1": 1.64,
+    "connect_d": null
+   }
+  }
+ }
+}

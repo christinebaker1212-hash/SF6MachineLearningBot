@@ -124,6 +124,16 @@ STYLE_IN_RANGE_MAX_STARTUP = 8
 # ZONER_DIST, retreating is rarer and walking in more common between projectiles. ESTIMATES.
 ZONER_DIST = 2.5
 ZONER_FACTOR = {"walk_back": 0.3, "dash_back": 0.3, "jump_back": 0.3, "walk_fwd": 1.8, "idle": 0.6}
+# 0.48.0 (user: "make sure the bot stays out of command grab range - Zangief is a huge problem because his LP SPD hitbox
+# extends so far forward"): NeutralPolicy.grab_zone (set by the fighter from grab_range.py: the opponent's farthest ground
+# command grab, MEASURED from its throw boxes, + the bot's throw hurtbox + a margin) is the centre distance inside which an
+# instant command grab connects. Inside it: get out (walk / dash back), never stand, crouch-block or walk in (a block loses
+# to a grab); a step in that would end inside it (an 8-frame walk ~0.38, MEASURED walk 0.047 a frame) or a forward dash
+# from GRAB_DASH_EDGE is rarer. Fast pokes stay (a strike beats a grab's start-up). ESTIMATES.
+GRAB_IN = {"walk_back": 2.5, "dash_back": 1.5, "walk_fwd": 0.1, "dash_fwd": 0.05, "idle": 0.35, "crouch": 0.35}
+GRAB_WALK_EDGE = 0.4
+GRAB_EDGE = {"walk_fwd": 0.25}
+GRAB_DASH_EDGE = 1.3
 # 0.37.0 (user: "Ryu needs to stay out of range, but also slowly approach his opponents to corner them"; "Several times an
 # opponent has learned that they can time Ryu out by zoning because he does not approach"; "When the enemy is in burnout,
 # pressure should increase"). MEASURED (0.36.1, 171 ranked matches): cornered 17% of the time vs the opponent 7% (in-game
@@ -254,6 +264,7 @@ class NeutralPolicy:
         self.safe: str | None = None          # fighter._safe_mode: "near death" / "protecting a lead" (0.20.0)
         self.opp_poke: float | None = None    # the opponent's longest measured poke (0.20.0 spacing)
         self.zoner = False                    # 0.25.0: the opponent throws many projectiles this match
+        self.grab_zone: float | None = None   # 0.48.0: the opponent's command-grab reach (fighter, grab_range.py)
         self.max_startup = int(c.get("neutral_max_startup", NEUTRAL_MAX_STARTUP))
         self.in_range_max_startup = int(c.get("in_range_max_startup", IN_RANGE_MAX_STARTUP))
         self.style_in_range_max_startup = int(c.get("style_in_range_max_startup", STYLE_IN_RANGE_MAX_STARTUP))
@@ -371,6 +382,17 @@ class NeutralPolicy:
             # the bot was > 3.0 apart 32% of the time and walked back as much as forward (10% / 11% of frames)
             for n, k in ZONER_FACTOR.items():
                 f[it.INTENTS.index(n)] *= k
+        if self.grab_zone and mx is not None and ox is not None:
+            d_, z_ = abs(ox - mx), self.grab_zone
+            if d_ < z_:
+                for n, k in GRAB_IN.items():
+                    f[it.INTENTS.index(n)] *= k
+            else:
+                if d_ < z_ + GRAB_WALK_EDGE:
+                    for n, k in GRAB_EDGE.items():
+                        f[it.INTENTS.index(n)] *= k
+                if d_ < z_ + GRAB_DASH_EDGE:
+                    f[it.INTENTS.index("dash_fwd")] *= 0.1
         if mx is not None and ox is not None:
             behind = it.WALL - mx if mx > ox else mx + it.WALL      # room between the bot and the wall behind it
             for lim, fac in WALL_STEPS:

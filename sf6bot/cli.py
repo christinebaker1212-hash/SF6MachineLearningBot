@@ -640,7 +640,7 @@ def cmd_train(args, cfg):
     # result per recording is cached (file_cache.py): after the first run only new recordings are read.
     from .eta import Steps
     steps = Steps(["merge repeat replays", "read new recordings once", "copy-a-player network", "move reach",
-                   "move timing", "win model", "combos found in recordings", "style table"])
+                   "move timing", "win model", "combos found in recordings", "style table", "grab ranges"])
     steps.start("merge repeat replays")
     if (root / "replays").exists():
         summarize(root)          # merge repeat recordings of the same replay first
@@ -695,6 +695,13 @@ def cmd_train(args, cfg):
                 print(f"Style table saved: {_style.save(st, root)}")
         except Exception as e:                   # noqa: BLE001
             print(f"Style table failed ({ch}): {e}")
+    # 0.48.0: every character's throw and command-grab boxes (how far each grab reaches), from the recordings with boxes
+    steps.start("grab ranges")
+    try:
+        from .grab_range import build as build_grabs
+        wrep["grab_ranges"] = build_grabs(root, log=print)
+    except Exception as e:                       # noqa: BLE001 - the shipped table stays in use
+        print(f"Grab ranges failed: {e}")
     if bg:
         out = model_dir(root, chars[0])
         out.mkdir(parents=True, exist_ok=True)

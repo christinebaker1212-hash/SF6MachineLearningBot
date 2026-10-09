@@ -59,7 +59,7 @@ class BoxTracker:
         self.pj = None
         self.seen = False
 
-    def feed(self, raw: dict) -> dict:
+    def feed(self, raw: dict, recorded: bool = False) -> dict:
         if not isinstance(raw, dict):
             return raw
         bx = raw.get("bx")
@@ -71,7 +71,7 @@ class BoxTracker:
             if "pj" in bx:
                 self.pj = [(o[0], o[1], o[2], parse_rects(o[3])) for o in (bx["pj"] or [])
                            if isinstance(o, list) and len(o) >= 4]
-        if not raw.get("in_battle") or not raw.get("ready", True):
+        if not recorded and (not raw.get("in_battle") or not raw.get("ready", True)):
             return raw
         if self.seen:
             for k in ("p1", "p2"):

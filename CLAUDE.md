@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.48.0 (2026-10-09): every grappler's command-grab reach measured from its throw boxes (Zangief's L SPD ~1.95 centre to centre); the bot keeps out of it in neutral, learns new reach live, and the walk-in moment uses it.**
 - **0.47.0 (2026-10-09): the 17 characters' anti-air options learn by range what worked and what didn't (per opponent, pooled by body class); one that keeps losing from a range is dropped there (block if none is left), and each option's timing moves earlier / later. Ryu unchanged.**
 - **0.46.0 (2026-10-09): the user's anti-airs for the 17 characters with no invincible 623 special (normals, specials, charge moves, supers), chosen by the landing's timing, distance, charge and resources.**
 - **0.45.1 (2026-10-09): characters with no combo lab results use the combos found in recordings (B) until K verifies theirs.**
@@ -4466,7 +4467,8 @@ heavily for whiffing a super, or getting it blocked. Same with command grabs, an
   d96ed1970f6979c0 = the v10 Lua) and the zip is in `refw_research/dist/`. Install it with TOOLS -> "Online build: install" (SF6 closed,
   administrator); offline-only setups use R.
 - **Python** (`sf6bot/boxes.py`):
-  - `BoxTracker` carries the change-only boxes forward on every line (live reader, recordings via `read_recording`):
+  - `BoxTracker` carries the change-only boxes forward on every line (live reader; recordings only with
+    `read_recording(path, boxes=True)` since 0.48.0, before which saved recordings never got them):
     `p1["boxes"]`, `p2["boxes"]`, `projectiles`. Recordings keep the raw `bx`.
   - Geometry ASSUMPTION: OffsetX / OffsetY = the rect's centre, SizeX / SizeY = its half size, world units (as the
     viewer draws them). **state-check (menu G) now verifies it in Training Mode:** boxes present; each pushbox contains
@@ -5173,6 +5175,39 @@ is verified in game. ESTIMATE = a config guess.
 - This also decides A.K.I.'s Serpent Lash split from her results. All values are ESTIMATES (PRIOR 0.6, K 3, bands,
   thresholds). Tests `tests/test_0470.py` (outcomes from lines, pooling, a Flash Kick that loses giving way to 2HP,
   blocking when all lost, a MOCK match as Guile saving the file). Not verified in game.
+
+## 0.48.0: command-grab reach from throw boxes; the bot keeps out of it (user, 2026-10-09)
+- User: "We need to make sure the bot stays out of command grab range - Zangief is a huge problem because his LP SPD
+  hitbox extends so far forward. We have the hitboxes, but our bot doesn't have the awareness yet, does it?"; "Let's make
+  sure to snag ALL the grapplers command grab ranges." Before: no. The only grab range was an ESTIMATE (1.6) for the
+  walk-in pressure moment; nothing in neutral kept the bot out of a grab, and no box was used.
+- **MEASURED** (the user's 910 recordings, 414 with boxes; `sf6bot/grab_range.py`): a throw box ("t") is out for the
+  frame or two a grab is active. Its front edge ahead of the grabber's centre: normal throws 0.80 (Marisa / Blanka 0.90,
+  Zangief 1.02); Zangief id 930 (Screw Piledriver, 5-frame contact) **1.62**, 945 1.58, 935 1.47, 940 1.22, Siberian
+  Express close 917 / 923 1.13; Lily 1012 1.38; Alex 910 1.24 / 913 1.14; A.K.I. 1000 1.23; E. Honda 998 1.19; Blanka 1014
+  1.12; Manon 0.76-0.90; Akuma (Oboro) 0.83; Marisa (Enfold) 0.72. The defender's throw hurtbox reaches 0.30-0.36 from its
+  centre toward the grabber, so Zangief's 930 connects up to ~1.95 centre to centre (24 learned connects went to 1.93).
+  Not seen in the boxes: JP's Embrace (a ranged grab: grabs.py handles it), Kimberly's Nue Twister, Akuma's CA. Ids 930 /
+  935 / 940 / 945 are spaced like L / M / H / OD; which is which is not confirmed.
+- **In 38 recorded matches against Zangief** the bot stood within 2.10 of a free, grounded Zangief 28% of the time, and
+  140 of his 147 Screw Piledriver attempts started with the bot inside that range.
+- `configs/grab_ranges.json` ships the table (30 characters, per action id: front, heights, sightings, farthest overlap);
+  menu B adds this PC's recordings (`datasets/grab_ranges/`, cached per recording, erased with "training"); a match
+  learns a farther reach from the opponent's own throw boxes (`GrabRange.observe`) and saves it.
+- **The zone** (`GrabRange.zone`): the opponent's farthest GROUND command grab (box from y <= 0.3; reaching 0.05+ past its
+  normal throw) + the bot's own live throw hurtbox toward it (else 0.36) + `MARGIN` 0.12 (ESTIMATE). Grabs the bot answers
+  on reaction are left out (`slow`: A.K.I. 1000 Entrapment, Blanka 1014 Wild Hunt, Zangief 917 / 923 Siberian Express close,
+  plus any grab measured to connect 20+ frames after it starts). Zangief: 2.10; Ryu / Ken etc.: none.
+- **Neutral** (`NeutralPolicy.grab_zone`, set while the opponent is free on the ground): inside the zone walk back x2.5,
+  dash back x1.5, walk forward x0.1, forward dash x0.05, standing / crouch-blocking x0.35 (a block loses to a grab); within
+  0.4 outside it walk forward x0.25 (an 8-frame step would end inside), within 1.3 forward dash x0.1. Fast pokes are not
+  changed (a strike beats a grab's start-up). ESTIMATES. The wall rules still apply on top.
+- **The walk-in pressure moment** (`_approach`) fires at the measured zone instead of the 1.6 estimate.
+- Summary `grab_zone` {grab_front, grab_ids, slow_ids, learned, lines, inside_lines, inside_s}; a `[measured]` thoughts line.
+- Also fixed: `read_recording` never carried boxes onto recording rows (the notes said it did); now opt-in with
+  `boxes=True` (merged replays write rows back, so it stays off by default).
+- Tests `tests/test_0480.py` (the scan on synthetic lines, the shipped ranges and slow grabs, live learning and saving, the
+  policy factors, the fighter's zone, read_recording, a MOCK match vs Zangief). Not verified in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.
