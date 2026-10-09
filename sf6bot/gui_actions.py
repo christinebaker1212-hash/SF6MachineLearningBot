@@ -50,7 +50,9 @@ ACTIONS: list[Action] = [
             Option("di_delay", "DI reaction", kind="text", default="",
                    hint="empty = 15-21 (config); 4-22, or off")], special="hero", menu="H 3"),
     Action("vs_cpu", "fight", "Bot vs CPU", "Start from a menu; the bot takes over at FIGHT! and records every match.",
-           [Option("side", "Bot side", choices=[("Left (P1)", "p1"), ("Right (P2)", "p2")], default="p1")], menu="V / N"),
+           [Option("side", "Bot side", choices=[("Left (P1)", "p1"), ("Right (P2)", "p2")], default="p1"),
+            Option("controls", "Controls", choices=[("On", "on"), ("Off", "off")], default="on",
+                   hint="click the overlay's arcade panel to press (menus between matches)")], menu="V / N"),
     Action("play_as", "fight", "Play as",
            "The character the bot plays (saved; pick the same one in SF6). Ryu = his own rules; others are generated "
            "from Capcom data. Random Select: the bot reads its character at each match start.",
@@ -65,7 +67,9 @@ ACTIONS: list[Action] = [
             Option("limits", "Human limits", choices=[("Off", "off"), ("On", "on"), ("Blind test", "blind")],
                    default="off"),
             Option("di_delay", "DI reaction", kind="text", default="",
-                   hint="empty = 15-21 (config). Frames of their DI when the DI-back lands: 4-22 safe, or off")], menu="H"),
+                   hint="empty = 15-21 (config). Frames of their DI when the DI-back lands: 4-22 safe, or off"),
+            Option("controls", "Controls", choices=[("On", "on"), ("Off", "off")], default="on",
+                   hint="click the overlay's arcade panel to press (menus between matches)")], menu="H"),
     # ---- RECORD ------------------------------------------------------------------------------------------
     Action("replay_one", "record", "One replay", "Record a replay you play back (stops 5 s after the match).",
            menu="D 1"),
@@ -184,7 +188,7 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             args += ["--human-limits"]
         return [one("play-as", str(v.get("name") or "Ryu")), one(*args)]
     if action_id == "vs_cpu":
-        return [one("fight", "--player", v["side"])]
+        return [one("fight", "--player", v["side"], *(["--no-controls"] if v.get("controls") == "off" else []))]
     if action_id == "versus":
         args = ["fight", "--versus-human", v["mode"]]
         if v["mode"] != "ranked":
@@ -209,6 +213,8 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
             args += ["--human-limits"] if v["mode"] == "ranked" else ["--blind"]
         elif lim == "on":
             args += ["--human-limits"]
+        if v.get("controls") == "off":
+            args += ["--no-controls"]
         return [one(*args)]
     if action_id == "replay_one":
         return [one("replay-record")]

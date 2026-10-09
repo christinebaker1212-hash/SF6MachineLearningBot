@@ -137,6 +137,7 @@ recording:
 overlay:
   enabled: true
   exclude_from_capture: false   # true hides it from screen capture AND from streaming apps like Parsec
+  controls: true                # 0.49.0: the arcade panel is clickable (lever, buttons, a menu row) between matches
   height: 920                   # 0.49.0: one 430-px column (inputs, gauges, NOW, problems, notes); no frame view
   fps: 30
   input_style: arcade           # arcade = ball-top lever + Vewlix 8-button panel + input history; classic = the old panel

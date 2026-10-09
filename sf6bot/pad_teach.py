@@ -52,6 +52,7 @@ class KeyboardPad:
         kb = inp.get("bindings") or {}
         self.keys = {pad: kb[lg] for pad, lg in logical_of.items() if lg in kb}
         self.keys.update({b: k for b, k in (inp.get("menu_keys") or {}).items() if k})
+        self.logical = dict(kb)            # 0.49.0: game inputs (UP, LP, ...) -> P1's keys, for the arcade panel's clicks
 
     def send(self, events: list[tuple[str, bool]]) -> None:
         ev = [(self.keys[b], down) for b, down in events if b in self.keys]
@@ -68,8 +69,10 @@ class PadPanel:
     VirtualPadBackend."""
 
     def __init__(self, backend, routine: str | None = None, grabber=None, hold_s: float = 0.10,
-                 sink=None, root: Path = ROUTINES_DIR) -> None:
+                 sink=None, root: Path = ROUTINES_DIR, pad_bindings: dict | None = None) -> None:
         self.backend = backend
+        self.pad_bindings = dict(pad_bindings or {})   # game input -> the bot's pad button (virtual pad only)
+        self.lit_inputs: set[str] = set()              # game inputs the panel is pressing (lit on the arcade panel)
         self.device = panel_device(backend)
         # keyboard: show the key on each button; unmapped buttons are greyed out
         self.keys = backend.keys if isinstance(backend, KeyboardPad) else None
@@ -187,6 +190,57 @@ class PadPanel:
         if self.keys is not None and name in self.keys:
             self.injecting.discard(str(self.keys[name]).upper())
         self.sink({"type": "pad_press", "t": t, "button": name, "hold_s": hold, "recorded": self.recording})
+
+    # ---- 0.49.0: the arcade panel's lever and buttons are clickable (game inputs, not pad names) -------
+    def input_targets(self, inputs) -> list[tuple[str, str]]:
+        """[(kind, name)]: ("key", keyboard key) on P1's keys, ("button", pad button) on the bot's pad."""
+        out = []
+        for i in inputs:
+            if isinstance(self.backend, KeyboardPad):
+                k = self.backend.logical.get(i)
+                if k:
+                    out.append(("key", str(k)))
+            elif self.pad_bindings.get(i):
+                out.append(("button", self.pad_bindings[i]))
+        return out
+
+    def click_inputs(self, inputs) -> None:
+        if self.locked or not self.input_targets(inputs):
+            return
+        threading.Thread(target=self.press_inputs, args=(list(inputs),), daemon=True).start()
+
+    def press_inputs(self, inputs, hold_s: float | None = None) -> None:
+        """Press game inputs together (a diagonal, a macro) for hold_s; while teaching, each is a step."""
+        hold = self.hold_s if hold_s is None else hold_s
+        tg = self.input_targets(inputs)
+        if not tg:
+            return
+        keys = [n for k, n in tg if k == "key"]
+        btns = [n for k, n in tg if k == "button"]
+        with self._lock:
+            t = clock.now()
+            if self.recording:
+                for j, (k, n) in enumerate(tg):
+                    after = 0.0 if (self._last_t is None or j) else round(t - self._last_t, 3)
+                    self.steps.append({k: n, "after_s": after, "hold_s": hold})
+                self._snapshot(len(self.steps))
+            self._last_t = t
+            self.lit_inputs |= set(inputs)
+            self.injecting |= {k.upper() for k in keys}
+            if keys:
+                self.backend.backend.send([(k, True) for k in keys])
+            if btns:
+                self.backend.send([(b, True) for b in btns])
+        time.sleep(hold)
+        with self._lock:
+            if keys:
+                self.backend.backend.send([(k, False) for k in keys])
+            if btns:
+                self.backend.send([(b, False) for b in btns])
+            self.lit_inputs -= set(inputs)
+        time.sleep(0.05)
+        self.injecting -= {k.upper() for k in keys}
+        self.sink({"type": "pad_press", "t": t, "inputs": list(inputs), "hold_s": hold, "recorded": self.recording})
 
     def _snapshot(self, n: int) -> None:
         fr = self.grabber.latest() if self.grabber is not None else None

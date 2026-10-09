@@ -70,6 +70,28 @@ class InputHistory:
         return out
 
 
+LEVER = (66, 116)
+LEVER_R = 54
+
+
+def hit(x: int, y: int) -> list[str] | None:
+    """0.49.0: the game inputs a click at (x, y) of the panel presses: the lever = the screen direction from its centre
+    (8-way; the middle does nothing), a button = its input (PAR = MP+MK, DI = HP+HK). None = nothing there."""
+    import math as _m
+    dx, dy = x - LEVER[0], y - LEVER[1]
+    r = _m.hypot(dx, dy)
+    if r <= LEVER_R:
+        if r < 12:
+            return None
+        sector = int(((_m.degrees(_m.atan2(-dy, dx)) + 22.5) % 360) // 45)   # 0 = right, counter-clockwise
+        return [["RIGHT"], ["UP", "RIGHT"], ["UP"], ["UP", "LEFT"], ["LEFT"], ["DOWN", "LEFT"], ["DOWN"],
+                ["DOWN", "RIGHT"]][sector]
+    for name, (bx, by) in vewlix_positions(152, 74).items():
+        if _m.hypot(x - bx, y - by) <= BUTTON_R + 5:
+            return sorted(MACROS[name]) if name in MACROS else [name]
+    return None
+
+
 def vewlix_positions(x0: int, y0: int) -> dict:
     """Centres of the eight buttons on the Vewlix curve."""
     pos = {}
@@ -97,7 +119,7 @@ def draw(img: np.ndarray, held: set, facing_right: bool, history: InputHistory |
     cv2.rectangle(p, (3, 3), (W - 4, 24), (40, 30, 160), -1)    # marquee stripe
     for x in range(3, W - 4, 16):
         cv2.line(p, (x, 24), (x + 12, 3), (60, 50, 205), 3, AA)
-    cv2.putText(p, title[:22].upper(), (10, 19), FONT, 0.5, (255, 255, 255), 1, AA)
+    cv2.putText(p, title[:28].upper(), (10, 19), FONT, 0.5, (255, 255, 255), 1, AA)
     cv2.putText(p, "ARMED" if armed else "DISARMED", (W - 92, 19), FONT, 0.45,
                 (120, 255, 120) if armed else (90, 90, 255), 1, AA)
 

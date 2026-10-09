@@ -201,3 +201,59 @@ def test_fights_capture_no_screen_and_only_measuring_tools_do():
     for name in ('"capture_bench"', '"latency_probe"', 'f"acceptance_{args.side}"'):
         assert f"_session(args, cfg, {name}, capture=True)" in src
     assert '_session(args, cfg, "watch") as s' in src
+
+
+# ---------------------------------------------------------------- clickable controls (merged into the arcade panel)
+def test_arcade_panel_clicks_press_p1_keys_and_the_menu_row(cfg):
+    import time as _t
+    from sf6bot import arcade_panel as ap
+    from sf6bot.overlay import DebugOverlay
+    from sf6bot.pad_teach import KeyboardPad, PadPanel
+    assert ap.hit(66 + 40, 116) == ["RIGHT"] and ap.hit(66, 116 - 40) == ["UP"]
+    assert ap.hit(66 - 30, 116 + 30) == ["DOWN", "LEFT"] and ap.hit(66, 116) is None
+    pos = ap.vewlix_positions(152, 74)
+    assert ap.hit(*pos["HP"]) == ["HP"] and ap.hit(*pos["PAR"]) == ["MK", "MP"]
+
+    class _B:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, ev):
+            self.sent.append(ev)
+
+    class _C:
+        armed = True
+
+        def held(self):
+            return set()
+
+        from sf6bot.actions import Facing
+        facing = Facing.RIGHT
+    b = _B()
+    pp = PadPanel(KeyboardPad(b, cfg), pad_bindings=cfg["input"]["pad_bindings"], hold_s=0.0)
+    ov = DebugOverlay(None, _C(), threading.Event(), status={"_feed": Feed()})
+    ov.pad_panel = pp
+    ov.frame()
+    kb = cfg["input"]["bindings"]
+    ov.click(66 + 40, 116)                                   # lever right
+    ov.click(*pos["HP"])
+    ov.click(10, ov._inputs_h + 10)                          # the menu row's first button: OK = menu confirm
+    _t.sleep(0.3)
+    downs = [tuple(sorted(k for k, d in ev if d)) for ev in b.sent if any(d for _, d in ev)]
+    assert (kb["RIGHT"],) in downs and (kb["HP"],) in downs and (cfg["input"]["menu_keys"]["A"],) in downs
+    pp.locked = True                                         # the bot is fighting: clicks do nothing
+    n = len(b.sent)
+    ov.click(66 + 40, 116)
+    _t.sleep(0.1)
+    assert len(b.sent) == n
+
+
+def test_controls_are_optional():
+    from sf6bot.gui_actions import build
+    assert build("vs_cpu", {"side": "p1", "controls": "off"})[0]["args"] == ["fight", "--player", "p1", "--no-controls"]
+    assert build("vs_cpu", {"side": "p2"})[0]["args"] == ["fight", "--player", "p2"]
+    assert "--no-controls" in build("versus", {"mode": "offline", "controls": "off"})[0]["args"]
+    import types
+    from sf6bot.cli import _panel
+    s = types.SimpleNamespace(overlay=object())
+    assert _panel(s, {"overlay": {"controls": False}, "input": {}}, pad=False) is None

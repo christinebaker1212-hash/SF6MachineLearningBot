@@ -327,8 +327,12 @@ def _panel(s, cfg, pad: bool, routine: str | None = None):
     from .pad_teach import KeyboardPad, PadPanel
     if s.overlay is None:
         return None
+    # 0.49.0: optional (overlay.controls; fight --no-controls); routines (pad --teach) always have them
+    if routine is None and not (cfg.get("overlay") or {}).get("controls", True):
+        return None
     backend = s.controller.backend if pad else KeyboardPad(s.controller.backend, cfg)
-    panel = PadPanel(backend, routine=routine, grabber=s.grabber, sink=s.recorder.event)
+    panel = PadPanel(backend, routine=routine, grabber=s.grabber, sink=s.recorder.event,
+                     pad_bindings=cfg["input"].get("pad_bindings"))
     s.overlay.pad_panel = panel
     return panel
 
@@ -403,6 +407,8 @@ def cmd_fight(args, cfg):
     # 0.18.0: no screen capture in fights (the bot plays from game state; capture slowed the state reader in the 0.17.5
     # ranked session); 0.49.0: no video at all
     cap = bool(cfg["capture"].get("in_fights", False))
+    if getattr(args, "no_controls", False):
+        cfg.setdefault("overlay", {})["controls"] = False
     with _session(args, cfg, name, capture=cap) as s:
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
@@ -910,6 +916,9 @@ def main(argv=None):
     p.set_defaults(fn=cmd_framedata_import)
 
     p = sub.add_parser("fight", help="the bot fights (vs CPU or a volunteer): learned neutral + reflex rules")
+    p.add_argument("--no-controls", action="store_true",
+                   help="no clickable controls on the overlay's arcade panel (they press P1's keys or the bot's pad "
+                        "between matches; locked while the bot fights)")
     p.add_argument("--player", choices=("p1", "p2", "auto"), default="p1",
                    help="which side the bot plays (auto: by character, else a crouch probe at Fight!)")
     p.add_argument("--seconds", type=float, default=3600.0, help="stop after this long (default 1 h; "
@@ -1006,7 +1015,8 @@ def main(argv=None):
         cfg["input"]["backend"] = "sendinput_keyboard"
     if args.mock:
         cfg["input"]["backend"] = "mock"
-    cfg["recording"]["record_video"] = False          # 0.49.0: video removed
+    if isinstance(cfg.get("recording"), dict):
+        cfg["recording"]["record_video"] = False      # 0.49.0: video removed
     args.fn(args, cfg)
 
 

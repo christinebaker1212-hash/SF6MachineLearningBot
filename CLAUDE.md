@@ -7,7 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
-- **0.49.0 (2026-10-09): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card) and the control panel cleaned up (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed.**
+- **0.49.0 (2026-10-09): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card; the arcade panel is the optional clickable pad) and the control panel cleaned up and fitted to 1024 x 176 (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed.**
 - **0.48.0 (2026-10-09): every grappler's command-grab reach measured from its throw boxes (Zangief's L SPD ~1.95 centre to centre); the bot keeps out of it in neutral, learns new reach live, and the walk-in moment uses it.**
 - **0.47.0 (2026-10-09): the 17 characters' anti-air options learn by range what worked and what didn't (per opponent, pooled by body class); one that keeps losing from a range is dropped there (block if none is left), and each option's timing moves earlier / later. Ryu unchanged.**
 - **0.46.0 (2026-10-09): the user's anti-airs for the 17 characters with no invincible 623 special (normals, specials, charge moves, supers), chosen by the landing's timing, distance, charge and resources.**
@@ -5262,6 +5262,23 @@ is verified in game. ESTIMATE = a config guess.
   inputs, PyTorch timing, overlay test, system info, find SF6 window, input map. Setup tiles (game-state script, online build,
   state check, release keys, new character id, arrange) stay visible.
 - Kept, as the user chose: BUTTONS tab (overlay buttons, routines), Auto / Many replays, Watch.
+### Clickable controls merged into the arcade panel (user: "we do still need optional controllable inputs so we can do
+offline matches. Perhaps merge them with the controller overlay?")
+- The separate grey button block (the old PadPanel drawing under the overlay) is gone. The arcade panel is the pad: click
+  the lever for a direction (8-way, screen directions as the lever moves), a Vewlix button for that input (PAR = MP+MK,
+  DI = HP+HK); a menu row under it has OK (A = F on the keyboard), BACK, MENU (Esc), VIEW, LB, RB, LT, RT (each with its
+  key; unset keys greyed) and REC while teaching. The pressed inputs light on the panel; the marquee says CLICKABLE,
+  LOCKED (the bot is fighting: clicks ignored) or TEACH n.
+- They press P1's keys (vs CPU, ranked: `KeyboardPad.logical` = input.bindings) or the bot's own controller (Versus Human
+  offline, `pad_bindings`). Teaching records the arcade clicks as key / button steps (`play_routine` replays them).
+- Optional: `overlay.controls` (default on), `fight --no-controls`, the panel's "Controls" On / Off on Bot vs CPU and
+  Versus Human. Routine teaching (pad --teach) always has them.
+### Sized for the strip under the game
+- SF6 at 1280x720 (client) at the top right of a 1920x1080 screen at 125% scaling leaves ~1296 x 260 physical px under it;
+  minus the Edge app title bar the page gets ~1024 x 176 CSS px. Checked at exactly that size (headless Chromium): all seven
+  tabs visible (the status word hides under 1150 px; the dot stays), START RANKED with its START / AFTER MATCH buttons in its
+  header and its options in two columns, cards with more than three options (Versus Human) in two columns, the status lights
+  in one row, the dashboard's last five matches visible (more by scrolling the card).
 - Tests `tests/test_0490.py` (plain lines, notes, card, feed timing, narration kinds and the live file, gauges and problems,
   the overlay frame, the panel's ranked card / advanced flags / dashboard / lights, capture only for measuring tools); the
   0.12.6 video test now checks video is gone. Rendered here (headless, the overlay with DejaVu fonts, the panel in Chromium at

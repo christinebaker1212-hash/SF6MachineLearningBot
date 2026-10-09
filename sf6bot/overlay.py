@@ -7,7 +7,11 @@ does not steal focus from SF6; it sits at the hard left of the screen (user pref
 superfluous ... the "thoughts" panel should be more readable - things go by too quickly, and it's not very human
 readable"). The frame view (the captured game picture) and the capture statistics are gone. One 430-px column, top to
 bottom:
-    1. the arcade input display (arcade_panel.py; "classic" = the old panel)
+    1. the arcade input display (arcade_panel.py; "classic" = the old panel). With the overlay's controls on
+       (overlay.controls, fight --no-controls) it is also the clickable pad between matches: click the lever for a
+       direction, a button for that input (PAR / DI = both buttons), and the row under it for the menu buttons (OK,
+       BACK, MENU, VIEW, LB, RB, LT, RT; REC while teaching). They press P1's keys (vs CPU, ranked) or the bot's own
+       controller (Versus Human offline); locked while the bot fights. This replaced the separate grey button block.
     2. gauges: both players' health, Drive (burnout) and Super, round score, the session's record and LP / MR
        (feed.hud, set by the fight every line); other commands (watch, catalog, lab) show their status lines here
     3. NOW: one big line of what the bot is doing, in plain words (feed.now_line)
@@ -32,6 +36,9 @@ from .overlay_text import TextLayer, width as text_w, wrap
 TITLE = "sf6bot debug"
 COL_W = 430
 HUD_H = 150
+STRIP_H = 30                                   # the clickable menu row (only with the overlay's controls on)
+MENU_ROW = [("A", "OK"), ("B", "BACK"), ("START", "MENU"), ("BACK", "VIEW"), ("LB", "LB"), ("RB", "RB"), ("LT", "LT"),
+            ("RT", "RT")]
 NOW_H = 58
 PROB_H = 30
 CHIPS = {"measured": ("SEEN", (255, 205, 40)), "learned": ("LEARNED", (0, 210, 255)), "policy": ("CHOSE", (150, 60, 255)),
@@ -67,8 +74,8 @@ class DebugOverlay:
         self.status = status if status is not None else {}
         self._thread = threading.Thread(target=self._run, name="Overlay", daemon=True)
         self.error: BaseException | None = None
-        self.pad_panel = None          # pad_teach.PadPanel: clickable bot controller (menu P)
-        self._pad_origin = (0, 0)
+        self.pad_panel = None          # pad_teach.PadPanel: the arcade panel's clicks press it (0.49.0)
+        self._inputs_h = 232
 
     PANEL_W = COL_W
 
@@ -88,13 +95,19 @@ class DebugOverlay:
 
     # ------------------------------------------------------------------ 1. inputs
     def _inputs(self, p: np.ndarray) -> int:
-        held = self.c.held()
+        held = set(self.c.held())
+        pp = self.pad_panel
+        if pp is not None:
+            held |= set(getattr(pp, "lit_inputs", ()))
         if self.input_style == "arcade":
             from . import arcade_panel as ap
             from .actions import Facing
             fr = self.c.facing is Facing.RIGHT
             self.history.update(clock.now(), ap.numpad(held, fr), ap.button_label(held))
-            ap.draw(p, held, fr, self.history, title=str(self.status.get("_title") or "SF6 BOT"), armed=self.c.armed)
+            title = str(self.status.get("_title") or "SF6 BOT")
+            if pp is not None:
+                title = ("LOCKED" if pp.locked else f"TEACH {len(pp.steps)}" if pp.routine else "CLICKABLE") + " · " + title
+            ap.draw(p, held, fr, self.history, title=title, armed=self.c.armed)
             return ap.H
         p[:150] = (30, 30, 30)
         cx, cy, s = 60, 60, 28
@@ -112,6 +125,27 @@ class DebugOverlay:
         cv2.putText(p, "ARMED" if self.c.armed else "DISARMED", (300, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0, 255, 0) if self.c.armed else (0, 0, 255), 1, cv2.LINE_AA)
         return 150
+
+    def _strip(self, p: np.ndarray, tl: TextLayer) -> None:
+        """The clickable menu row under the arcade panel (the pad's menu buttons; REC while teaching)."""
+        pp = self.pad_panel
+        p[:] = (30, 26, 26)
+        items = MENU_ROW + ([("REC", "REC")] if pp.routine else [])
+        w = (COL_W - 8) // len(items)
+        self._strip_boxes = []
+        for i, (name, label) in enumerate(items):
+            x0, x1 = 4 + i * w, 4 + (i + 1) * w - 3
+            unset = pp.keys is not None and name != "REC" and name not in pp.keys
+            on = name in pp.lit or (name == "REC" and pp.recording)
+            col = (40, 40, 210) if name == "REC" and on else (60, 170, 60) if on else (42, 40, 40) if unset or pp.locked \
+                else (78, 70, 70)
+            cv2.rectangle(p, (x0, 3), (x1, STRIP_H - 4), col, -1)
+            fg = (140, 140, 140) if unset or pp.locked else (240, 240, 240)
+            tl.text(x0 + 4, 3, label, 10, fg, bold=True)
+            if pp.keys is not None:
+                tl.text(x0 + 4, 15, str(pp.keys.get(name) or "-")[:6] if name != "REC" else "", 9, (0, 200, 255) if not unset
+                        else (110, 110, 110))
+            self._strip_boxes.append((x0, x1, name))
 
     # ------------------------------------------------------------------ 2. gauges
     @staticmethod
@@ -248,18 +282,33 @@ class DebugOverlay:
     def _on_mouse(self, event, x, y, flags, param) -> None:
         if event != cv2.EVENT_LBUTTONDOWN or self.pad_panel is None:
             return
-        name = self.pad_panel.hit(x - self._pad_origin[0], y - self._pad_origin[1])
-        if name:
-            self.pad_panel.click(name)
+        self.click(x, y)
 
-    def render(self) -> np.ndarray:
-        """One frame of the overlay (also used by tests)."""
+    def click(self, x: int, y: int) -> None:
+        """0.49.0: the arcade panel is the clickable pad (lever, buttons), the row under it the menu buttons."""
+        pp = self.pad_panel
+        if pp is None:
+            return
+        top = self._inputs_h
+        if y < top and self.input_style == "arcade":
+            from . import arcade_panel as ap
+            inputs = ap.hit(x, y)
+            if inputs:
+                pp.click_inputs(inputs)
+        elif top <= y < top + STRIP_H:
+            for x0, x1, name in getattr(self, "_strip_boxes", []):
+                if x0 <= x <= x1:
+                    pp.click(name)
+
+    def render(self):
+        """One frame of the overlay and its text layer (also used by tests)."""
         feed = self.status.get("_feed")
-        pad_h = 150 if self.pad_panel is not None else 0
-        h = self.height + pad_h
-        canvas = np.zeros((h, COL_W, 3), np.uint8)
+        canvas = np.zeros((self.height, COL_W, 3), np.uint8)
         tl = TextLayer()
-        y = self._inputs(canvas)
+        y = self._inputs_h = self._inputs(canvas)
+        if self.pad_panel is not None:
+            self._strip(canvas[y:y + STRIP_H], tl.at(0, y))
+            y += STRIP_H
         self._hud(canvas[y:y + HUD_H], tl.at(0, y), feed)
         y += HUD_H
         self._now(canvas[y:y + NOW_H], tl.at(0, y), feed)
@@ -267,9 +316,6 @@ class DebugOverlay:
         self._problems(canvas[y:y + PROB_H], tl.at(0, y), feed)
         y += PROB_H
         self._notes(canvas[y:self.height], tl.at(0, y), feed)
-        if pad_h:
-            self._pad_origin = (0, self.height)
-            self.pad_panel.draw(canvas[self.height:])
         return canvas, tl
 
     def frame(self) -> np.ndarray:

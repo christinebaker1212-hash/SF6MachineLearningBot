@@ -122,22 +122,28 @@ input.num { flex: 0 0 46px; }
 @keyframes glow { to { box-shadow: inset 0 0 0 2px #ffd40033; } }
 
 /* 0.49.0: status lights, the START RANKED card, the ranked dashboard, the Advanced drawer */
-#lights { flex: none; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 4px 0; min-width: 0; overflow: hidden; max-height: 46px; }
+#lights { flex: none; display: flex; flex-wrap: nowrap; gap: 3px; padding: 3px 4px 0; min-width: 0; overflow: hidden; }
 #lights:empty { display: none; }
 .light { display: flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; background: var(--panel2);
          font: italic 700 11px/20px var(--head); text-transform: uppercase; white-space: nowrap; color: var(--muted); flex: none; }
 .light::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
 .light.ok { color: var(--green); } .light.warn { color: var(--yellow); } .light.bad { color: #ff5b9c; }
-.light.off { color: var(--dim); } .light.info { color: var(--ink); text-transform: none; font-style: normal; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.light.off { color: var(--dim); } .light.info { color: var(--ink); text-transform: none; font-style: normal; flex: 1 1 0; min-width: 60px; overflow: hidden; text-overflow: ellipsis; display: block; line-height: 20px; }
+.light.info::before { display: inline-block; margin-right: 4px; vertical-align: middle; }
 .light.info::before { background: var(--violet); box-shadow: 0 0 6px var(--violet); }
-.card.hero { grid-row: span 3; grid-column: span 2; border-left-width: 6px; background: linear-gradient(135deg, #2a1424, var(--panel) 70%); }
-.card.hero h3 { font-size: 22px; color: var(--magenta); }
-.card.hero .bigs { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; }
-.card.hero .start { flex: 1; height: 34px; background: var(--magenta); color: var(--ink); font: italic 900 18px/34px var(--head);
-                    text-transform: uppercase; letter-spacing: .06em; box-shadow: 0 0 16px -4px var(--magenta); }
+.card.hero { grid-row: span 2; grid-column: span 2; border-left-width: 6px; background: linear-gradient(135deg, #2a1424, var(--panel) 70%); }
+.card.hero h3 { font-size: 20px; color: var(--magenta); flex: 0 1 auto; }
+.card.hero .start { flex: 1; min-width: 120px; height: 30px; background: var(--magenta); color: var(--ink); font: italic 900 17px/30px var(--head);
+                    text-transform: uppercase; letter-spacing: .05em; box-shadow: 0 0 16px -4px var(--magenta); }
 .card.hero .start:hover { background: var(--ink); color: var(--magenta); }
-.card.hero .after { height: 34px; padding: 0 12px; background: var(--panel2); font: italic 800 12px/34px var(--head); text-transform: uppercase; }
-.card.dash { grid-row: span 3; grid-column: span 2; }
+.card.hero .after { height: 30px; padding: 0 10px; background: var(--panel2); font: italic 800 11px/30px var(--head); text-transform: uppercase; flex: none; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
+.grid2 .opt.wide { grid-column: span 2; }
+.card.wide { grid-column: span 2; }
+.card.hero .grid2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
+.card.hero .grid2 .opt.wide { grid-column: span 2; }
+.card.hero p { -webkit-line-clamp: 1; }
+.card.dash { grid-row: span 2; grid-column: span 2; }
 .dash .big { display: flex; gap: 14px; align-items: baseline; margin: 2px 0 4px; font: italic 900 20px var(--head); }
 .dash .big small { font: 700 11px var(--body); color: var(--muted); text-transform: uppercase; margin-left: 3px; }
 .dash table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -162,7 +168,11 @@ input.num { flex: 0 0 46px; }
   .card:not(.big) p { display: none; }
   #logo i, #status .txt { display: none; }
 }
-@media (max-height: 200px) { .card.big p { -webkit-line-clamp: 1; } }
+@media (max-height: 200px) { .card.big p { -webkit-line-clamp: 1; } .card.hero p, .card.wide p { display: none; }
+  .grid2 .opt { margin-top: 2px; } .grid2 .opt > label { width: 52px; } }
+/* 0.49.0: the strip under a 1280x720 game on a 1920x1080 screen at 125% is ~1024 x 176 CSS px: the status word goes,
+   tabs and lights tighten (the light row and the log say what runs) */
+@media (max-width: 1150px) { #status .txt { display: none; } .tab { padding: 0 8px; font-size: 12px; } }
 @media (max-height: 150px) { .card p { display: none; } }
 </style>
 </head>
@@ -272,15 +282,22 @@ function renderCards() {
       go.onclick = () => run(a.id);
       head.appendChild(go);
     }
-    c.appendChild(head);
-    const p = el("p", null, a.desc); p.title = a.desc; c.appendChild(p);
-    for (const o of a.options) c.appendChild(optionRow(a, o));
     if (a.special === "hero") {
-      const bigs = el("div", "bigs");
-      const st = el("button", "start slant"); st.appendChild(el("span", null, "Start ranked ▶")); st.onclick = () => run(a.id);
+      const st = el("button", "start slant"); st.appendChild(el("span", null, "Start ▶")); st.onclick = () => run(a.id);
       const af = el("button", "after slant"); af.appendChild(el("span", null, "After match")); af.title = "Finish the current match, then stop (F10)";
       af.onclick = () => api("/api/stop_after", {});
-      bigs.appendChild(st); bigs.appendChild(af); c.appendChild(bigs);
+      head.appendChild(st); head.appendChild(af);
+    }
+    c.appendChild(head);
+    const p = el("p", null, a.desc); p.title = a.desc; c.appendChild(p);
+    c.title = a.desc;
+    if (a.special === "hero" || a.options.length > 3) {
+      if (a.special !== "hero") c.classList.add("wide");
+      const g = el("div", "grid2");
+      a.options.forEach((o, i) => { const r = optionRow(a, o); if (o.kind === "text" && a.special === "hero") r.classList.add("wide"); g.appendChild(r); });
+      c.appendChild(g);
+    } else {
+      for (const o of a.options) c.appendChild(optionRow(a, o));
     }
     box.appendChild(c);
   }
