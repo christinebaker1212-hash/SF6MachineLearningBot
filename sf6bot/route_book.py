@@ -113,17 +113,25 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | No
         if rec and len(rec.get("steps") or []) == len(plan["steps"]):
             plan["recorded_timing"], plan["lead"] = rec["steps"], rec.get("lead")
         s0 = plan["steps"][0]
-        book.append({"route": route, "position": v.get("position") or "midscreen",
-                     "hit_type": v.get("tested_as") or v.get("hit_type") or "normal",
-                     "situation": v.get("situation"), "damage": v.get("damage"),
-                     "drive": num(v.get("drive_spent")) or 0, "super": num(v.get("super_spent")) or 0,
-                     "rate": v.get("success_rate_final_timing") or 0.0, "plan": plan,
-                     "starter": s0.get("name"), "starter_id": s0.get("expect_id"),
-                     "startup": s0.get("startup"), "kind": _starter_kind(plan),
-                     "needs_denjin": bool(plan.get("setup")), "jump_in": bool(plan.get("jump_in"))})
-        if v.get("mined"):
-            book[-1].update(mined=True, seen=v.get("seen"))
+        # 0.51.0: a combo the user recorded for several hit types (combo_record: "all") is one book entry per type
+        for ht_ in (v.get("hit_types") or [v.get("tested_as") or v.get("hit_type") or "normal"]):
+            _add(book, v, route, plan, s0, ht_)
     return book
+
+
+def _add(book: list, v: dict, route: str, plan: dict, s0: dict, hit_type: str) -> None:
+    book.append({"route": route, "position": v.get("position") or "midscreen",
+                 "hit_type": hit_type,
+                 "situation": v.get("situation"), "damage": v.get("damage"),
+                 "drive": num(v.get("drive_spent")) or 0, "super": num(v.get("super_spent")) or 0,
+                 "rate": v.get("success_rate_final_timing") or 0.0, "plan": plan,
+                 "starter": s0.get("name"), "starter_id": s0.get("expect_id"),
+                 "startup": s0.get("startup"), "kind": _starter_kind(plan),
+                 "needs_denjin": bool(plan.get("setup")), "jump_in": bool(plan.get("jump_in"))})
+    if v.get("mined"):
+        book[-1].update(mined=True, seen=v.get("seen"))
+    if v.get("source") == "manual":
+        book[-1]["manual"] = True
 
 
 def _mined_candidates(ds_root: Path, character: str, capcom: dict) -> list[dict]:

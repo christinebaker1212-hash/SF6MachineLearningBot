@@ -126,6 +126,7 @@ echo    5  Only counter-hit routes   6  Only punish-counter routes  (set the dum
 echo    7  Community routes again, including ones that already passed or failed for a clear reason
 echo    8  Routes found in recordings (replays and matches; built by B = train)
 echo    9  Combos the bot joined from its true combos (optional: matches use them anyway)
+echo   10  RECORD MY COMBO: you play P1, the bot watches. F9, then do a combo: it joins the bot's list
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)
@@ -136,11 +137,27 @@ if "%LC%"=="6" (%BOT% combo-lab --hit-type punish_counter & goto done)
 if "%LC%"=="7" (%BOT% combo-lab --again & goto done)
 if "%LC%"=="8" (%BOT% combo-lab --source mined & goto done)
 if "%LC%"=="9" (%BOT% combo-lab --source composed & goto done)
+if "%LC%"=="10" goto comborecord
 if "%LC%"=="4" (
     set "LT="
     set /p LT=Text: 
     goto combolab_only
 )
+goto menu
+
+:comborecord
+echo.
+echo  Record my combo: Training Mode, you play P1, dummy standing, Guard = AFTER FIRST HIT.
+echo  F9 = show me a combo (get in position, then do it; nothing before your first button counts).
+echo  F9 again for the next one, F8 to stop. A combo the bot already knows is skipped, unless you
+echo  skipped it in the combo lab (F10) before: then yours replaces it.
+echo    1  Normal hit   2  Counter hit   3  Punish counter   4  All (set the dummy's counter hit to match)
+set "LH="
+set /p LH=First hit: 
+if "%LH%"=="1" (%BOT% combo-record --hit-type normal & goto done)
+if "%LH%"=="2" (%BOT% combo-record --hit-type counter_hit & goto done)
+if "%LH%"=="3" (%BOT% combo-record --hit-type punish_counter & goto done)
+if "%LH%"=="4" (%BOT% combo-record --hit-type all & goto done)
 goto menu
 
 :combolab_only

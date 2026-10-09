@@ -1773,7 +1773,7 @@ GUARDS = ("after_first_hit", "none")
 def is_true(entry: dict) -> bool:
     """A route verified against a dummy set to block after the first hit: a TRUE combo (user, 0.11.1:
     'a CRITICAL distinction'). Against a non-guarding dummy a gap can go unnoticed."""
-    return bool(entry.get("verified")) and entry.get("guard") == "after_first_hit"
+    return bool(entry.get("verified")) and entry.get("guard") in ("after_first_hit", "manual")   # 0.51.0: user-shown
 
 
 CORNER_HOLDS = (6, 3, 4, 1)     # user: right / down-right / left / down-left + reset = a corner

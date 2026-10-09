@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.50.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (791).*
+*State as of 2026-10-09: code version **0.51.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (801).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.51.0 is pushed** (CLAUDE.md "0.51.0"): the user's own combos: `combo-record` (menu K 10, panel COMBOS -> Record my combo), F9 then the combo; it joins the combo list as a true combo for the chosen hit type(s). Not run in game.
 
 **State:** **0.50.0 is pushed** (CLAUDE.md "0.50.0"): corner Drive Impacts: 36% of corner DIs since 0.24 found the bot burned out (midscreen 10%). With the back to the wall and 3 bars or fewer it keeps its Drive for the DI-back, walks out, jumps out when burned out; no late DI-backs. Every character.
 

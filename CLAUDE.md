@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.51.0 (2026-10-09): record your own combos (`combo-record`, menu K 10, panel COMBOS -> Record my combo): F9, then the combo; it joins the bot's combo list as a true combo for the chosen hit type(s); a known combo is skipped unless it was skipped (F10) in the lab, then yours replaces it.**
 - **0.50.0 (2026-10-09): corner Drive Impacts: with the back to the wall and 3 Drive bars or fewer the bot keeps its Drive for the DI-back, walks out of the corner, jumps out when burned out, and never sends a DI-back that would land after the hit.**
 - **0.49.1 (2026-10-09): multi-hit moves blocked hit by hit (Terry's Quick Burn: the overhead second hit is stood for); no "my turn" after a hit with another hit coming.**
 - **0.49.0 (2026-10-09): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card; the arcade panel is the optional clickable pad) and the control panel cleaned up and fitted to 1024 x 176 (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed.**
@@ -312,6 +313,7 @@ python -m sf6bot --mock --no-overlay acceptance   # MOCK pipeline run, writes ru
 | `run --policy idle\|random\|probe --seconds 60` | Live loop |
 | `report runs/<dir>` | Rebuild a report |
 | `release-all` | Send key-up for all bound keys, for a stuck key after a hard kill |
+| `combo-record --hit-type normal\|counter_hit\|punish_counter\|all` | Show the bot your own combos (F9, then the combo) |
 
 ## M1 acceptance procedure (user, on the game PC)
 1. **Game settings:**
@@ -5339,6 +5341,46 @@ offline matches. Perhaps merge them with the controller overlay?")
 - Replay of 35 Ryu matches of 0.41-0.43 through `decide()` (open loop): corner-save on 11% of lines; spends refused there
   1,430 lines (OD moves 1,009, parries 362, Drive Reversals 59), jump-outs 1, late DI-backs blocked 5.
 - Summary `corner_drive` {refused, by_action, escape_turns, jump_out}. Tests `tests/test_0500.py`. Not verified in game.
+
+## 0.51.0: the user's own combos (user, 2026-10-09)
+- User: "I would like to add manual combo recording to the bot's repertoire. For example, I press a button, then show it a
+  combo, then it adds it to the combo list to build other combos from. If the combo is the same as another, it is skipped,
+  UNLESS that combo was previously skipped in a prior training run, then it overwrites it. There should be intelligent
+  input blocking - the player getting into position or getting ready shouldn't be recorded, only from the first input
+  that have a button should it be counted. Since we don't do jump ins other than jumping in with a heavy then going into a
+  combo, we don't need to account for those." Then: "The combo type should be selectable - for example, normal hit,
+  punish counter, or counter hit, or optionally, all."
+- `sf6bot combo-record [--hit-type normal|counter_hit|punish_counter|all] [--player p1|p2]` (menu K -> 10 with the hit
+  type, panel COMBOS -> "Record my combo"; `sf6bot/combo_record.py`). Training Mode, the user plays P1, the bot presses
+  nothing (no key is sent).
+- **F9 arms** (F9 while waiting turns it off; mid-combo it starts over); one combo per F9; F8 / STOP ends.
+- **What counts:** nothing before the user's first new BUTTON press after F9 (walking in, crouching, dashing up). From
+  there combo mining's own rules (`combo_mining.mine`): from the hit on a free dummy while it stays in hit reaction, moves
+  named from the catalog / move map, ">" cancel / chain, "," link, 2+ attacks. A Parry Drive Rush starter counts from the
+  parry ("PDR"); a Drive Rush cancel mid-combo is "DRC"; a forward dash "66"; a jump-in heavy is "j.HP" (as move 1).
+  No hit within 120 frames of the button: discarded, still armed.
+- **True combo check:** the dummy must never be free between the first and last hit (`gaps`); else not kept. The dummy on
+  "Block after first hit" (the lab's setting) makes a gap show as a block.
+- **Hit type:** the first hit's kind (hits.py: x1.0 normal, x1.2 counter, + a Drive drop = punish counter) must match the
+  chosen type; a counter hit passes for punish counter (the dummy's infinite Drive hides the drop), noted; "all" takes
+  any and counts the combo for all three.
+- **Stored** in the combo lab file `datasets/combo_lab/<Character>.json` as a verified TRUE combo: `source: manual`,
+  `guard: manual` (`combo_lab.is_true` accepts it), `hit_types`, `moves`, measured damage / Drive / Super, success rate
+  `MANUAL_RATE` 0.75 (ESTIMATE; the matches' own results move it). The lab's parser and planner must read it
+  (`combos.resolve`, `plan_route`), else it is not saved and the reason is shown. The route book makes one entry per hit
+  type (`route_book._add`), so punishes, confirms, the crumple cash-out and the composer's joined combos use it at once.
+- **The user's dedupe rule** (same = the same moves, by the lab's own names, and the same position):
+  - already in the combo list (a verified true combo or an earlier recording) for the chosen type(s): **skipped**, with
+    the existing route's text; chosen types it lacked are added to it (`extended`)
+  - skipped with F10 in the lab before (`operator_skips` or `skipped_by_operator` on the same moves): the skip is lifted
+    (`lift_operator_skips`) and the recording **overwrites** it
+  - a lab route with the same text that was never verified (failed, untested): overwritten (the user just showed it works)
+  - a recording that CONTAINS a skipped combo: saved, but kept out of matches by route_bans; the message says so
+- Not built: the user's own timing is not stored as the lab's `recorded_timing` (the executor plans from frame data as for
+  any lab route); K can still test the recorded routes like any other.
+- Tests `tests/test_0510.py` (the walk-in ignored, a true combo added and in the book, the same combo skipped, "all" as
+  three book entries, an F10 skip overwritten, a gap rejected, the hit type checked, PDR / DRC notation, the live loop
+  from F9). Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

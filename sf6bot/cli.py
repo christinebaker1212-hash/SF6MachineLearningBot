@@ -267,6 +267,22 @@ def cmd_catalog(args, cfg):
     _print_report(s)
 
 
+def cmd_combo_record(args, cfg):
+    """0.51.0: the user shows the bot combos (F9 then the combo); they join the combo list."""
+    from .combo_record import parse_hit_types, run
+    try:
+        types = parse_hit_types(args.hit_type)
+    except ValueError as e:
+        print(e)
+        return
+    cfg["recording"]["record_video"] = False
+    with _session(args, cfg, "combo_record") as s:
+        res = run(s, cfg, types, player=args.player, seconds=args.seconds)
+    added = [r for r in res if r.get("status") in ("added", "overwrote_skip", "extended")]
+    print(f"Combos shown: {len(res)}; added or extended: {len(added)}")
+    _print_report(s)
+
+
 def cmd_combo_lab(args, cfg):
     from .combo_lab import run_combo_lab
     with _session(args, cfg, "combo_lab") as s:
@@ -909,6 +925,16 @@ def main(argv=None):
     p.add_argument("--limit", type=int, default=None, help="at most this many routes")
     p.add_argument("--again", action="store_true", help="also re-test routes already verified")
     p.set_defaults(fn=cmd_combo_lab)
+
+    p = sub.add_parser("combo-record", help="show the bot your own combos (F9, then the combo) in Training Mode; they "
+                                            "join its combo list (the bot presses nothing)")
+    p.add_argument("--hit-type", dest="hit_type", default="normal",
+                   choices=["normal", "counter_hit", "punish_counter", "all"],
+                   help="what the combo's first hit must be (set the dummy's counter-hit setting to match); all = it "
+                        "works on any hit and is used for all three")
+    p.add_argument("--player", choices=["p1", "p2"], default="p1", help="the side you play")
+    p.add_argument("--seconds", type=float, default=3 * 3600.0)
+    p.set_defaults(fn=cmd_combo_record)
 
     p = sub.add_parser("framedata-import",
                        help="import Capcom frame data pages saved from your browser (no game needed)")

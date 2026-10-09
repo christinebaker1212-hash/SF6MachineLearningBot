@@ -103,6 +103,12 @@ ACTIONS: list[Action] = [
                                               ("Counter-hit only", "counter_hit"), ("Punish-counter only", "punish_counter"),
                                               ("Everything again", "again")], default="community"),
             Option("text", "Text", kind="text", default="", hint="for 'Containing text', e.g. DRC")], menu="K"),
+    Action("combo_record", "combos", "Record my combo",
+           "Training Mode, you play P1, dummy guard AFTER FIRST HIT. F9, then do the combo: it joins the bot's list.",
+           [Option("hit", "First hit", choices=[("Normal", "normal"), ("Counter hit", "counter_hit"),
+                                                ("Punish counter", "punish_counter"), ("All", "all")],
+                   default="normal"),
+            Option("player", "You play", choices=[("P1", "p1"), ("P2", "p2")], default="p1")], menu="K 10"),
     Action("combos_import", "combos", "Community combos",
            "SuperCombo Combos pages for every character (saved from your browser if the wiki blocks).", menu="T A"),
     Action("framedata", "combos", "Capcom frame data", "Pages saved from your browser (Ctrl+S).", menu="T F"),
@@ -259,6 +265,11 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
                 raise BadInput("Type the text the routes must contain (e.g. DRC).")
             return [one("combo-lab", "--source", "both", "--only", text)]
         return [one(*table[w])]
+    if action_id == "combo_record":
+        args_ = ["combo-record", "--hit-type", str(v.get("hit") or "normal")]
+        if (v.get("player") or "p1") == "p2":
+            args_ += ["--player", "p2"]
+        return [one(*args_)]
     if action_id == "combos_import":
         return [one("combos-import")]
     if action_id == "framedata":
