@@ -123,19 +123,119 @@ class Panel:
                                f"RUNNING: {self.title.upper()}" if running else "READY"),
                     "command": "sf6bot " + " ".join(self.current.get("args") or []) if running else "",
                     "action": self.current.get("action") if running else None,
-                    "prompt": bool(self.prompt and running), "ask": self.ask, "video": self.video()}
+                    "prompt": bool(self.prompt and running), "ask": self.ask, "lights": self.lights(running)}
 
-    def video(self) -> str:
+    # ---- 0.49.0: status lights and the ranked dashboard ----------------------------------------------------
+    def _cfg(self) -> dict:
+        from .config import load_config
+        return load_config()
+
+    def live(self, running: bool) -> dict | None:
+        """What the running command shows (Session._live_writer: armed, side, the Now line), if it is fresh."""
+        if not running:
+            return None
         try:
-            from .config import load_config
-            return "ON" if load_config()["recording"].get("record_video", True) else "OFF"
-        except Exception:                            # noqa: BLE001
-            return "?"
+            p = self.root / "runs" / ".live.json"
+            if time.time() - p.stat().st_mtime > 3.0:
+                return None
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def _game_lights(self) -> list[dict]:
+        """Game state (the exporter's heartbeat) and the REFramework build, refreshed every few seconds."""
+        now = time.monotonic()
+        cache = getattr(self, "_glc", None)
+        if cache and now - cache[0] < 4.0:
+            return cache[1]
+        out = []
+        try:
+            from .game_state import read_exporter_info, remembered_sf6_dir
+            cfg = self._cfg()
+            gd = remembered_sf6_dir(cfg)
+            info = read_exporter_info(gd) if gd else None
+            age = (info or {}).get("age_s")
+            out.append({"key": "game", "label": "Game state",
+                        "state": "ok" if isinstance(age, (int, float)) and age < 5 else
+                                 "off" if gd is None or info is None else "warn",
+                        "tip": "SF6's folder not known yet (start SF6 once with the bot)" if gd is None else
+                               "no exporter heartbeat (REFramework / the game-state script)" if info is None else
+                               f"exporter heartbeat {age:.0f} s old" + ("" if age < 5 else " (SF6 closed or in a menu?)")})
+            bcache = getattr(self, "_blc", None)
+            if not bcache or now - bcache[0] > 60.0:
+                from .refw_research import status as rstatus
+                st = rstatus(gd)
+                d = st.get("dll") or {}
+                ok = d.get("kind") == "research" and d.get("online_lua") and st.get("exporter_matches_build")
+                b = {"key": "build", "label": "Online build",
+                     "state": "ok" if ok else "off" if st.get("problem") else "warn",
+                     "tip": "research build: the bot sees online matches" if ok else
+                            st.get("problem") or f"REFramework: {d.get('kind') or '?'} (offline only)"}
+                self._blc = (now, b)
+            out.append(self._blc[1])
+        except Exception as e:                       # noqa: BLE001 - a light, never an error
+            out.append({"key": "game", "label": "Game state", "state": "off", "tip": f"not checked: {e}"})
+        self._glc = (now, out)
+        return out
+
+    def lights(self, running: bool) -> list[dict]:
+        out = list(self._game_lights())
+        lv = self.live(running)
+        if lv is not None:
+            hud = lv.get("hud") or {}
+            probs = lv.get("problems") or []
+            out.append({"key": "armed", "label": "Armed" if lv.get("armed") else "Not armed",
+                        "state": "ok" if lv.get("armed") else "warn",
+                        "tip": "the bot can press keys" if lv.get("armed") else "click into SF6 (inputs start when it is focused)"})
+            if hud.get("side"):
+                out.append({"key": "side", "label": f"Side {hud['side']}", "state": "warn" if hud["side"] == "?" else "ok",
+                            "tip": "which player the bot is"})
+            if probs:
+                out.append({"key": "problem", "label": probs[0][:40], "state": "bad", "tip": " · ".join(probs)})
+            if lv.get("now"):
+                out.append({"key": "now", "label": str(lv["now"])[:60], "state": "info", "tip": "what the bot is doing"})
+        return out
+
+    def dashboard(self) -> dict:
+        """Today's ranked record, MR / LP and the last matches, from datasets/ladder (progress.py)."""
+        from .progress import load_ladder, load_lp, with_lp
+        try:
+            root = Path((self._cfg().get("datasets") or {}).get("root", "datasets"))
+            if not root.is_absolute():
+                root = self.root / root
+            rows = with_lp([r for r in load_ladder(root, last=400) if r.get("mode") == "ranked"], load_lp(root))
+        except Exception as e:                       # noqa: BLE001
+            return {"error": str(e)}
+        if not rows:
+            return {"empty": True}
+        day = str(rows[-1].get("time") or "")[:10]
+        today = [r for r in rows if str(r.get("time") or "").startswith(day)]
+        fin = [r for r in today if r.get("finished") and not r.get("disconnect")]
+        won = sum(1 for r in fin if r.get("won"))
+
+        def first_last(key):
+            vals = [r.get(f"bot_{key}_after") for r in today if isinstance(r.get(f"bot_{key}_after"), (int, float))]
+            before = [r.get(f"bot_{key}_before") for r in today if isinstance(r.get(f"bot_{key}_before"), (int, float))]
+            if not vals:
+                return None
+            start = before[0] if before else vals[0] - (today[0].get(f"{key}_delta") or 0)
+            return {"now": vals[-1], "change": vals[-1] - start}
+        last = []
+        for r in reversed(rows[-10:]):
+            last.append({"time": str(r.get("time") or "")[11:16], "character": r.get("character"),
+                         "opponent": r.get("opponent"),
+                         "result": "W" if r.get("won") else "L" if r.get("finished") and not r.get("disconnect") else "-",
+                         "score": f"{r.get('rounds_won', 0)}-{max(0, (r.get('rounds') or 0) - (r.get('rounds_won') or 0))}",
+                         "mr": r.get("bot_mr_after"), "mr_delta": r.get("mr_delta"), "lp_delta": r.get("lp_delta"),
+                         "opp_mr": r.get("opp_mr")})
+        return {"day": day, "won": won, "lost": len(fin) - won, "unfinished": len(today) - len(fin),
+                "mr": first_last("mr"), "lp": first_last("lp"), "last": last}
 
     def init(self) -> dict:
         return {"version": __version__, "tab": self.state.get("tab", "fight"), "values": self.state.get("values", {}),
                 "tabs": [{"label": l, "key": k, "color": TAB_COLORS[k]} for l, k in TABS],
                 "actions": [{"id": a.id, "tab": a.tab, "title": a.title, "desc": a.desc, "special": a.special,
+                             "advanced": a.advanced,
                              "options": [{"key": o.key, "label": o.label, "kind": o.kind,
                                           "choices": [list(c) for c in o.choices], "default": o.default,
                                           "hint": o.hint} for o in a.options]} for a in ACTIONS]}
@@ -145,6 +245,8 @@ class Panel:
         with self.lock:
             if aid not in BY_ID:
                 return {"ok": False, "error": "unknown action"}
+            if aid == "dashboard":
+                return {"ok": True}
             if aid in ("arrange", "open_runs"):
                 self.on_special(aid)
                 return {"ok": True}
@@ -356,6 +458,8 @@ def make_handler(panel: Panel):
                 self.wfile.write(data)
             elif u.path == "/api/init":
                 self._json(panel.init())
+            elif u.path == "/api/dashboard":
+                self._json(panel.dashboard())
             elif u.path == "/api/poll":
                 try:
                     since = int((parse_qs(u.query).get("since") or ["0"])[0] or 0)

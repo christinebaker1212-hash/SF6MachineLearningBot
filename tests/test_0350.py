@@ -65,7 +65,7 @@ def test_the_overlay_uses_the_arcade_panel_by_default_and_classic_on_request():
 
     ov = DebugOverlay(_G(), _C(), threading.Event())
     assert ov.input_style == "arcade" and ov.PANEL_W == ap.W
-    p = ov._panel(420)
-    assert p.shape == (420, ap.W, 3)
+    p = ov.frame()                                  # 0.49.0: one column, no frame view
+    assert p.shape == (ov.height, ap.W, 3)
     old = DebugOverlay(_G(), _C(), threading.Event(), input_style="classic")
-    assert old.PANEL_W == 260 and old._panel(420).shape == (420, 260, 3)
+    assert old.frame().shape == (old.height, ap.W, 3)

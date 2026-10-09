@@ -7,6 +7,7 @@ import platform
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import clock, win32
 from .actions import Facing
@@ -35,18 +36,23 @@ def _version() -> str:
 
 class Session:
     def __init__(self, cfg: dict, name: str, side: str = "left", mock: bool = False,
-                 overlay: bool | None = None, extra_meta: dict | None = None, capture: bool = True) -> None:
+                 overlay: bool | None = None, extra_meta: dict | None = None, capture: bool = False) -> None:
         self.cfg = cfg
         self.name = name
         self.facing = Facing.from_side(side)
         self.side = side
         self.mock = mock
         self.use_overlay = cfg["overlay"]["enabled"] if overlay is None else overlay
+        # 0.49.0: the screen is captured only by the tools that measure it (capture test, latency probe, acceptance, the
+        # policy loop, routine teaching's step screenshots); everything else plays and records from game state
         self.use_capture = capture
         self.extra_meta = extra_meta or {}
         self.stop_event = threading.Event()
         import collections
         self.status: dict = {"_thoughts": collections.deque(maxlen=12)}
+        from .feed import Feed
+        self.feed = Feed()                     # 0.49.0: the overlay's Now line, notes, match card, gauges and problems
+        self.status["_feed"] = self.feed
         self.window = None
         self.report = None
 
@@ -144,7 +150,7 @@ class Session:
             meta["WARNING"] = "MOCK session: synthetic frames, no game, no real inputs."
         rc = cfg["recording"]
         self.recorder = SessionRecorder(rc["root"], self.name + ("_MOCK" if self.mock else ""), meta,
-                                        video_width=int(rc["video_width"]), record_video=bool(rc["record_video"]))
+                                        video_width=int(rc["video_width"]), record_video=False)     # 0.49.0: no video
         self.controller = Controller(inp, bindings_for(cfg, inp.name), self.facing, sink=self.recorder.event)
         self.grabber = FrameGrabber(capture, region, on_frame=self.recorder.frame).start()
         s = cfg["safety"]
@@ -164,17 +170,38 @@ class Session:
         self.overlay = None
         if self.use_overlay:
             self.overlay = DebugOverlay(self.grabber, self.controller, self.stop_event,
-                                        width=int(cfg["overlay"]["width"]), fps=float(cfg["overlay"]["fps"]),
+                                        fps=float(cfg["overlay"]["fps"]),
                                         status=self.status,
                                         avoid_rect=None if self.window is None else self.window.client_rect,
                                         screen_rect=None if self.window is None else self.window.monitor_rect,
                                         exclude_from_capture=bool(cfg["overlay"].get("exclude_from_capture", False)),
                                         sink=self.recorder.event,
-                                        input_style=str(cfg["overlay"].get("input_style", "arcade")))
+                                        input_style=str(cfg["overlay"].get("input_style", "arcade")),
+                                        height=int(cfg["overlay"].get("height", 920)))
             if self.overlay.overlaps_game:
                 print("Note: no room beside the game for the debug overlay, so it may cover part of the game "
                       "and be captured. Move the SF6 window right, or set overlay.exclude_from_capture: true.")
             self.overlay.start()
+        # 0.49.0: the control panel's status lights read what the running command shows (armed, side, the Now line)
+        self.live_path = Path(cfg["recording"]["root"]) / ".live.json"
+        threading.Thread(target=self._live_writer, name="LiveStatus", daemon=True).start()
+
+    def live(self) -> dict:
+        snap = self.feed.snapshot(8)
+        return {"t": time.time(), "pid": os.getpid(), "name": self.name, "mock": self.mock,
+                "armed": bool(getattr(getattr(self, "controller", None), "armed", False)),
+                "title": self.status.get("_title"), **snap}
+
+    def _live_writer(self) -> None:
+        import json
+        while not self.stop_event.wait(0.5):
+            try:
+                tmp = self.live_path.with_suffix(".tmp")
+                tmp.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_text(json.dumps(self.live(), default=str), encoding="utf-8")
+                os.replace(tmp, self.live_path)
+            except Exception:                    # noqa: BLE001 - a display file never stops a session
+                pass
 
     # ------------------------------------------------------------------
     def start_inputs(self, countdown_s: float | None = None) -> bool:
@@ -210,14 +237,34 @@ class Session:
                 return False
         return True
 
-    def narrate(self, text: str, source: str = "scripted") -> None:
-        """Add a line to the overlay THOUGHTS feed and the recording. ``source`` says where the
-        statement comes from (scripted routine, measured state, policy output) so it is never
-        presented as more than it is."""
+    def narrate(self, text: str, source: str = "scripted", kind: str = "note") -> None:
+        """Add a line to the recording and the overlay. ``source`` says where the statement comes from (scripted
+        routine, measured state, policy output, learned) so it is never presented as more than it is.
+
+        0.49.0 ``kind`` (feed.py): "note" = an event for the overlay's notes (made readable by plain.note_text);
+        "decision" = a decision's debug reason (recorded only: the overlay's Now line has the plain version);
+        "status" = the fight loop's status (the Now line between fights); "detail" = recorded only (setup lines);
+        "card" = a match thought (recorded; Session.match_card puts the chosen ones on the card)."""
         line = f"[{source}] {text}"
         self.status["_thoughts"].append(line)
         if getattr(self, "recorder", None) is not None:
-            self.recorder.event({"type": "narration", "t": clock.now(), "source": source, "text": text})
+            ev = {"type": "narration", "t": clock.now(), "source": source, "text": text}
+            if kind != "note":
+                ev["kind"] = kind
+            self.recorder.event(ev)
+        if kind == "note":
+            from .plain import note_text
+            self.feed.note(note_text(text), source)
+        elif kind == "status":
+            self.feed.set_status(text[len("Status: "):].rstrip(".") if text.startswith("Status: ") else text)
+
+    def match_card(self, lines, won: bool | None = None) -> None:
+        """0.49.0: a match's thoughts [(source, text)]: every line recorded, the chosen few on the overlay's card."""
+        from .plain import card_lines
+        for s_, t_ in lines:
+            self.narrate(t_, source=s_, kind="card")
+        title, picked = card_lines(lines)
+        self.feed.set_card(title, picked, won)
 
     def check(self) -> None:
         """Raise if capture died."""
@@ -242,6 +289,12 @@ class Session:
         if wd is not None and wd.stop_reason is None:
             wd.sink({"type": "stop", "t": clock.now(), "reason": reason})
         self.stop_event.set()
+        try:
+            if getattr(self, "live_path", None) is not None:
+                time.sleep(0.01)
+                self.live_path.unlink()
+        except OSError:
+            pass
         if wd is not None:
             wd.join()
         g = getattr(self, "grabber", None)

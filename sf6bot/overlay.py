@@ -1,8 +1,21 @@
-"""Debug overlay: what the bot sees and what it is pressing.
+"""The bot's overlay: what it is pressing, both players' gauges, what it is doing and what happened.
 
-A separate OpenCV window (all cv2 GUI calls happen on this thread). On Windows
-it is made topmost + no-activate so it does not steal focus from SF6. Place it
-so it does NOT overlap the game window, or it will be captured.
+A separate OpenCV window (all cv2 GUI calls happen on this thread). On Windows it is made topmost + no-activate so it
+does not steal focus from SF6; it sits at the hard left of the screen (user preference), beside the game.
+
+0.49.0 redesign (user, 2026-10-09: "We don't actually ever record video anymore, so that part of the display is
+superfluous ... the "thoughts" panel should be more readable - things go by too quickly, and it's not very human
+readable"). The frame view (the captured game picture) and the capture statistics are gone. One 430-px column, top to
+bottom:
+    1. the arcade input display (arcade_panel.py; "classic" = the old panel)
+    2. gauges: both players' health, Drive (burnout) and Super, round score, the session's record and LP / MR
+       (feed.hud, set by the fight every line); other commands (watch, catalog, lab) show their status lines here
+    3. NOW: one big line of what the bot is doing, in plain words (feed.now_line)
+    4. problems that need you (not focused, no game state, frozen, state late, input delay high, side unknown), else OK
+    5. the match card (result + a few thoughts, from the match end until the next Fight!), then the notes: newest on
+       top, a colour chip for where each comes from (SEEN measured, LEARNED, CHOSE policy, RULE scripted), repeats
+       merged (x3), older ones fading; a divider per round
+Text is anti-aliased TrueType when Pillow is installed (overlay_text.py).
 """
 from __future__ import annotations
 
@@ -13,34 +26,43 @@ import numpy as np
 
 from . import clock
 from .actions import BUTTONS_CLASSIC
-from .capture import FrameGrabber
 from .controller import Controller
+from .overlay_text import TextLayer, width as text_w, wrap
 
 TITLE = "sf6bot debug"
+COL_W = 430
+HUD_H = 150
+NOW_H = 58
+PROB_H = 30
+CHIPS = {"measured": ("SEEN", (255, 205, 40)), "learned": ("LEARNED", (0, 210, 255)), "policy": ("CHOSE", (150, 60, 255)),
+         "scripted": ("RULE", (150, 150, 160))}
+BG = (22, 18, 18)
+
+
+def _dim(col, f: float):
+    return tuple(int(c * f) for c in col)
 
 
 class DebugOverlay:
-    def __init__(self, grabber: FrameGrabber, controller: Controller, stop_event: threading.Event,
+    def __init__(self, grabber, controller: Controller, stop_event: threading.Event,
                  width: int = 640, fps: float = 30.0, status: dict | None = None,
                  avoid_rect=None, screen_rect=None, exclude_from_capture: bool = False, sink=None,
-                 input_style: str = "arcade") -> None:
-        self.g = grabber
-        # 0.35.0 (user: "a prettier looking input display ... inspired by old arcade cabinets", "a Vewlix design for the
-        # buttons"): arcade_panel.py; "classic" = the original grey squares and circles
+                 input_style: str = "arcade", height: int = 920) -> None:
+        self.g = grabber                               # kept for older callers; the overlay no longer shows frames
         self.input_style = "classic" if str(input_style).lower() == "classic" else "arcade"
         if self.input_style == "arcade":
             from . import arcade_panel
-            self.PANEL_W = arcade_panel.W
             self.history = arcade_panel.InputHistory()
         self.exclude_from_capture = exclude_from_capture
         self.sink = sink or (lambda e: None)
         self.pos = None
         self.overlaps_game = False
         if avoid_rect is not None and screen_rect is not None:
-            width = self._place(width, avoid_rect, screen_rect)
+            self._place(avoid_rect, screen_rect)
+            height = min(int(height), max(480, int(screen_rect[3] - screen_rect[1]) - 40))
         self.c = controller
         self.stop_event = stop_event
-        self.width = width
+        self.height = int(height)
         self.period = 1.0 / fps
         self.status = status if status is not None else {}
         self._thread = threading.Thread(target=self._run, name="Overlay", daemon=True)
@@ -48,21 +70,14 @@ class DebugOverlay:
         self.pad_panel = None          # pad_teach.PadPanel: clickable bot controller (menu P)
         self._pad_origin = (0, 0)
 
-    PANEL_W = 260
-    MIN_IMG_W = 160
+    PANEL_W = COL_W
 
-    def _place(self, width, game, screen) -> int:
-        """Pin the overlay to the hard left of the screen (user preference).
-        Shrinks the frame view to fit beside the game when possible; otherwise it overlaps
-        the game on screen (it is excluded from capture, see win32). Returns image width."""
-        gl, gt, gr, gb = game
-        sl, st, sr, sb = screen
-        left = gl - sl
+    def _place(self, game, screen) -> None:
+        """Pin the overlay to the hard left of the screen (user preference)."""
+        gl = game[0]
+        sl, st = screen[0], screen[1]
         self.pos = (sl, st)
-        if left >= self.PANEL_W + self.MIN_IMG_W + 10:
-            return min(width, left - self.PANEL_W - 10)
-        self.overlaps_game = left < self.PANEL_W
-        return min(width, 320) if left < self.PANEL_W else max(0, left - self.PANEL_W - 10)
+        self.overlaps_game = gl - sl < COL_W
 
     def start(self) -> "DebugOverlay":
         self._thread.start()
@@ -71,8 +86,8 @@ class DebugOverlay:
     def join(self, timeout=2.0):
         self._thread.join(timeout)
 
-    def _panel(self, h: int) -> np.ndarray:
-        p = np.full((h, self.PANEL_W, 3), 30, np.uint8)
+    # ------------------------------------------------------------------ 1. inputs
+    def _inputs(self, p: np.ndarray) -> int:
         held = self.c.held()
         if self.input_style == "arcade":
             from . import arcade_panel as ap
@@ -80,40 +95,155 @@ class DebugOverlay:
             fr = self.c.facing is Facing.RIGHT
             self.history.update(clock.now(), ap.numpad(held, fr), ap.button_label(held))
             ap.draw(p, held, fr, self.history, title=str(self.status.get("_title") or "SF6 BOT"), armed=self.c.armed)
-            return self._status_lines(p, ap.H + 18, armed_line=False)
-        # Stick (absolute screen directions)
+            return ap.H
+        p[:150] = (30, 30, 30)
         cx, cy, s = 60, 60, 28
         vy = -1 if "UP" in held else 1 if "DOWN" in held else 0
         vx = -1 if "LEFT" in held else 1 if "RIGHT" in held else 0
         for dy in (-1, 0, 1):
             for dx in (-1, 0, 1):
                 col = (0, 200, 255) if (dx, dy) == (vx, vy) else (80, 80, 80)
-                cv2.rectangle(p, (cx + dx * s - 12, cy + dy * s - 12), (cx + dx * s + 12, cy + dy * s + 12),
-                              col, -1)
+                cv2.rectangle(p, (cx + dx * s - 12, cy + dy * s - 12), (cx + dx * s + 12, cy + dy * s + 12), col, -1)
         for i, b in enumerate(BUTTONS_CLASSIC):
             x, y = 130 + (i % 3) * 42, 40 + (i // 3) * 42
             col = (0, 220, 0) if b in held else (80, 80, 80)
             cv2.circle(p, (x, y), 16, col, -1)
             cv2.putText(p, b, (x - 12, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-        return self._status_lines(p, 130)
+        cv2.putText(p, "ARMED" if self.c.armed else "DISARMED", (300, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 255, 0) if self.c.armed else (0, 0, 255), 1, cv2.LINE_AA)
+        return 150
 
-    def _status_lines(self, p: np.ndarray, y0: int, armed_line: bool = True) -> np.ndarray:
-        g = self.g
-        iv = g.intervals[-120:]
-        fps = (len(iv) / sum(iv)) if iv and sum(iv) > 0 else 0.0
-        lines = ([f"ARMED" if self.c.armed else "DISARMED (inputs released)"] if armed_line else []) + [
-            f"facing: {self.c.facing.value}  state: {self.c.current.label()}",
-            f"capture fps: {fps:5.1f}  frames: {g.count}",
-            f"dup: {g.duplicates}  est. missed: {g.est_missed_total}",
-        ]
-        if g.recv_delays:
-            lines.append(f"present->recv: {1000 * g.recv_delays[-1]:5.1f} ms")
-        for k, v in [kv for kv in self.status.items() if not kv[0].startswith("_")][:8]:
-            lines.append(f"{k}: {v}")
-        for i, line in enumerate(lines):
-            col = (230, 230, 230) if not armed_line or i else (0, 255, 0) if self.c.armed else (0, 0, 255)
-            cv2.putText(p, line, (8, y0 + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col, 1)
-        return p
+    # ------------------------------------------------------------------ 2. gauges
+    @staticmethod
+    def _bar(p, x, y, w, h, frac, col, back=(45, 40, 40), segments=0):
+        frac = max(0.0, min(1.0, frac))
+        cv2.rectangle(p, (x, y), (x + w, y + h), back, -1)
+        if frac > 0:
+            cv2.rectangle(p, (x, y), (x + int(w * frac), y + h), col, -1)
+        for k in range(1, segments):
+            sx = x + int(w * k / segments)
+            cv2.line(p, (sx, y), (sx, y + h), (15, 12, 12), 2)
+        cv2.rectangle(p, (x, y), (x + w, y + h), (90, 85, 85), 1)
+
+    def _player(self, p, tl: TextLayer, y: int, g: dict, label: str, mine: bool) -> None:
+        name = (g.get("name") or "?").upper()
+        col = (90, 230, 120) if mine else (110, 110, 255)
+        tl.text(10, y, f"{label}  {name}", 15, col, bold=True)
+        hp, hpm = g.get("hp"), g.get("hp_max") or 10000.0
+        if hp is not None:
+            tl.text(COL_W - 10 - text_w(f"{int(hp):,}", 14), y + 1, f"{int(hp):,}", 14, (220, 220, 220))
+        frac = (hp or 0) / hpm if hp is not None else 0
+        self._bar(p, 10, y + 21, COL_W - 20, 11, frac, (60, 210, 90) if frac > 0.25 else (40, 70, 235))
+        dr, su = g.get("drive"), g.get("super")
+        dw = (COL_W - 30) * 2 // 3
+        if g.get("burnout"):
+            self._bar(p, 10, y + 36, dw, 8, 0, (0, 0, 0))
+            tl.text(12, y + 33, "BURNOUT", 11, (60, 60, 255), bold=True)
+        else:
+            self._bar(p, 10, y + 36, dw, 8, (dr or 0) / 60000.0, (40, 220, 140), segments=6)
+        self._bar(p, 20 + dw, y + 36, COL_W - 30 - dw, 8, (su or 0) / 30000.0, (0, 200, 255), segments=3)
+
+    def _hud(self, p: np.ndarray, tl: TextLayer, feed) -> None:
+        p[:] = (28, 22, 22)
+        cv2.line(p, (0, 0), (COL_W, 0), (80, 40, 160), 2)
+        hud = getattr(feed, "hud", None) or {}
+        if not hud.get("me"):
+            lines = [f"{k}: {v}" for k, v in self.status.items() if not k.startswith("_")][:7]
+            tl.text(10, 8, "STATUS", 13, (0, 200, 255), bold=True)
+            for i, line in enumerate(lines):
+                tl.text(10, 28 + i * 17, line[:62], 13, (215, 215, 215))
+            return
+        self._player(p, tl, 6, hud["me"], f"ME {hud.get('side', '')}".strip(), True)
+        self._player(p, tl, 56, hud["op"], "OPP", False)
+        bits = []
+        r = hud.get("rounds")
+        if r:
+            bits.append(f"Rounds {r[0]}-{r[1]}")
+        rec = hud.get("record")
+        if rec:
+            bits.append(f"Session {rec[0]}-{rec[1]}")
+        lad = hud.get("ladder") or {}
+        if lad.get("mr") is not None:
+            d = lad["mr"] - lad.get("mr_start", lad["mr"])
+            bits.append(f"MR {lad['mr']:,} ({d:+d})")
+        elif lad.get("lp") is not None:
+            d = lad["lp"] - lad.get("lp_start", lad["lp"])
+            bits.append(f"LP {lad['lp']:,} ({d:+d})")
+        tl.text(10, 112, "   ·   ".join(bits), 15, (235, 235, 235), bold=True)
+
+    # ------------------------------------------------------------------ 3-4. now + problems
+    def _now(self, p: np.ndarray, tl: TextLayer, feed) -> None:
+        p[:] = (40, 24, 50)
+        cv2.rectangle(p, (0, 0), (6, p.shape[0]), (140, 45, 255), -1)
+        tl.text(14, 4, "NOW", 11, (200, 150, 255), bold=True)
+        text = feed.now_line() if feed is not None else ""
+        size = 21 if len(wrap(text or "—", 21, COL_W - 26, bold=True, max_lines=3)) == 1 else 17
+        for i, line in enumerate(wrap(text or "—", size, COL_W - 26, bold=True, max_lines=2)):
+            tl.text(14, 18 + i * (size + 2), line, size, (255, 255, 255), bold=True)
+
+    def _problems(self, p: np.ndarray, tl: TextLayer, feed) -> None:
+        probs = feed.all_problems() if feed is not None else []
+        if not self.c.armed and not probs and feed is not None and feed.fighting:
+            probs = ["Inputs off"]
+        if probs:
+            p[:] = (30, 20, 90)
+            tl.text(10, 6, "! " + "  ·  ".join(probs)[:70], 14, (200, 210, 255), bold=True)
+        else:
+            p[:] = (24, 40, 24)
+            tl.text(10, 6, "OK", 14, (120, 240, 140), bold=True)
+
+    # ------------------------------------------------------------------ 5. card + notes
+    def _card(self, p: np.ndarray, tl: TextLayer, card: dict) -> int:
+        """Drawn at the top of p (tl already offset to p's origin)."""
+        lines = []
+        for s, t in card.get("lines") or []:
+            for k, w in enumerate(wrap(t, 14, COL_W - 40, max_lines=2)):
+                lines.append((s if k == 0 else None, w))
+        h = 40 + 19 * len(lines) + 8
+        won = card.get("won")
+        edge = (90, 220, 110) if won else (110, 60, 255) if won is False else (150, 150, 150)
+        cv2.rectangle(p, (6, 4), (COL_W - 6, 4 + h), (38, 30, 30), -1)
+        cv2.rectangle(p, (6, 4), (COL_W - 6, 4 + h), edge, 2)
+        tl.text(16, 12, (card.get("title") or "").upper(), 19, edge, bold=True)
+        for i, (s, w) in enumerate(lines):
+            y = 42 + i * 19
+            if s:
+                cv2.circle(p, (20, y + 8), 4, CHIPS.get(s, CHIPS["scripted"])[1], -1, cv2.LINE_AA)
+            tl.text(30, y, w, 14, (225, 225, 225))
+        return h + 12
+
+    def _notes(self, p: np.ndarray, tl: TextLayer, feed) -> None:
+        p[:] = BG
+        y = 4
+        card = getattr(feed, "card", None) if feed is not None else None
+        if card:
+            y += self._card(p, tl, card)
+        if feed is None:
+            for line in list(self.status.get("_thoughts", []))[-8:][::-1]:
+                tl.text(10, y, line[:60], 14, (220, 220, 220))
+                y += 20
+            return
+        for n in feed.visible(14):
+            if y > p.shape[0] - 22:
+                break
+            age = n.get("age", 0.0)
+            f = 1.0 if age < 20 else max(0.45, 1.0 - (age - 20) / 80.0)
+            if n["kind"] == "divider":
+                cv2.line(p, (10, y + 10), (COL_W - 10, y + 10), _dim((120, 90, 200), f), 1)
+                tw = text_w(n["text"], 13, True)
+                x0 = (COL_W - tw) // 2
+                cv2.rectangle(p, (x0 - 8, y + 2), (x0 + tw + 8, y + 19), BG, -1)
+                tl.text(x0, y + 2, n["text"], 13, _dim((200, 170, 255), f), bold=True)
+                y += 26
+                continue
+            label, col = CHIPS.get(n["src"], CHIPS["scripted"])
+            cw = text_w(label, 10, True) + 10
+            cv2.rectangle(p, (8, y + 3), (8 + cw, y + 18), _dim(col, f * 0.85), -1)
+            tl.text(13, y + 4, label, 10, (20, 20, 20), bold=True)
+            text = n["text"] + (f"  ×{n['n']}" if n.get("n", 1) > 1 else "")
+            for k, w in enumerate(wrap(text, 15, COL_W - cw - 22, max_lines=2)):
+                tl.text(16 + cw, y + k * 19, w, 15, _dim((235, 235, 235), f))
+            y += 19 * max(1, min(2, len(wrap(text, 15, COL_W - cw - 22, max_lines=2)))) + 7
 
     def _on_mouse(self, event, x, y, flags, param) -> None:
         if event != cv2.EVENT_LBUTTONDOWN or self.pad_panel is None:
@@ -122,20 +252,30 @@ class DebugOverlay:
         if name:
             self.pad_panel.click(name)
 
-    def _draw_thoughts(self, area, width) -> None:
-        """Running commentary feed (Session.narrate). In M1 it only states what the scripted
-        routine is doing; later milestones feed it from measured state and the policy's outputs."""
-        import textwrap
-        area[:] = (20, 20, 20)
-        cv2.putText(area, "THOUGHTS", (8, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
-        chars = max(20, width // 8)
-        rows = []
-        for line in reversed(list(self.status.get("_thoughts", []))):
-            rows = textwrap.wrap(line, chars) + rows
-        y = 36
-        for row in rows[-6:]:
-            cv2.putText(area, row, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1)
-            y += 19
+    def render(self) -> np.ndarray:
+        """One frame of the overlay (also used by tests)."""
+        feed = self.status.get("_feed")
+        pad_h = 150 if self.pad_panel is not None else 0
+        h = self.height + pad_h
+        canvas = np.zeros((h, COL_W, 3), np.uint8)
+        tl = TextLayer()
+        y = self._inputs(canvas)
+        self._hud(canvas[y:y + HUD_H], tl.at(0, y), feed)
+        y += HUD_H
+        self._now(canvas[y:y + NOW_H], tl.at(0, y), feed)
+        y += NOW_H
+        self._problems(canvas[y:y + PROB_H], tl.at(0, y), feed)
+        y += PROB_H
+        self._notes(canvas[y:self.height], tl.at(0, y), feed)
+        if pad_h:
+            self._pad_origin = (0, self.height)
+            self.pad_panel.draw(canvas[self.height:])
+        return canvas, tl
+
+    def frame(self) -> np.ndarray:
+        canvas, tl = self.render()
+        tl.flush(canvas)
+        return canvas
 
     def _run(self) -> None:
         made_noactivate = False
@@ -146,33 +286,7 @@ class DebugOverlay:
             cv2.setMouseCallback(TITLE, self._on_mouse)
             next_t = clock.now()
             while not self.stop_event.is_set():
-                fr = self.g.latest()
-                if fr is not None:
-                    h, w = fr.image.shape[:2]
-                    vh = int(h * self.width / w)
-                    img = cv2.resize(fr.image, (max(1, self.width), max(1, vh)), interpolation=cv2.INTER_AREA)
-                    age_ms = 1000 * (clock.now() - fr.t_recv)
-                    cv2.putText(img, f"frame #{fr.seq} age {age_ms:.0f} ms", (8, 20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                else:
-                    img = np.zeros((360, self.width, 3), np.uint8)
-                    off = getattr(self.g.backend, "name", "") == "none"
-                    cv2.putText(img, "screen capture off (plays from game state)" if off else "no frames yet", (8, 20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5 if off else 0.6, (0, 200, 255) if off else (0, 0, 255), 1)
-                ph = max(img.shape[0], 420)
-                iw = img.shape[1] if self.width > 0 else 0
-                tw = self.PANEL_W + iw
-                th = 150
-                pad_h = 150 if self.pad_panel is not None else 0
-                canvas = np.zeros((ph + th + pad_h, tw, 3), np.uint8)
-                canvas[:ph, :self.PANEL_W] = self._panel(ph)
-                if iw:
-                    canvas[:img.shape[0], self.PANEL_W:] = img
-                self._draw_thoughts(canvas[ph:ph + th], tw)
-                if pad_h:
-                    self._pad_origin = (0, ph + th)
-                    self.pad_panel.draw(canvas[ph + th:])
-                cv2.imshow(TITLE, canvas)
+                cv2.imshow(TITLE, self.frame())
                 cv2.waitKey(1)
                 if not made_noactivate:
                     from . import win32
@@ -180,9 +294,6 @@ class DebugOverlay:
                         cv2.moveWindow(TITLE, int(self.pos[0]), int(self.pos[1]))
                     made_noactivate = win32.make_window_noactivate_topmost(
                         TITLE, self.exclude_from_capture) or not win32.IS_WINDOWS
-                    if made_noactivate and win32.IS_WINDOWS:
-                        hidden = getattr(win32.make_window_noactivate_topmost, "excluded_from_capture", False)
-                        self.status["overlay in capture"] = "hidden" if hidden else "visible (keep off game)"
                 if clock.now() >= self._next_diag:
                     from . import win32
                     d = win32.window_diagnostics(TITLE)

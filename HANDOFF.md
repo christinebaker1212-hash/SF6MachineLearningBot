@@ -11,6 +11,8 @@ the project stands, how to work with the user, and what to do next.
 
 ## 0. Right now (handover, 2026-10-08)
 
+**State:** **0.49.0 is pushed** (CLAUDE.md "0.49.0"): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card) and the control panel cleaned up (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed. Not seen on the user's PC yet.
+
 **State:** **0.48.0 is pushed** (CLAUDE.md "0.48.0"): every grappler's command-grab reach measured from throw boxes (configs/grab_ranges.json; Zangief's 930 ~1.95 centre to centre); the bot keeps out of it in neutral and learns new reach live. Open: which of Zangief's 930 / 935 / 940 / 945 is L / M / H / OD.
 
 **State:** **0.47.0 is pushed** (CLAUDE.md "0.47.0"): the option anti-airs of the 17 characters with no 623 anti-air special learn by range what works (hit / trade / beaten / blocked / early / whiff), per opponent, pooled by body class; Ryu unchanged (user: "Ryu works already").

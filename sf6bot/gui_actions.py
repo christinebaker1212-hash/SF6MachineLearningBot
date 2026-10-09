@@ -27,8 +27,9 @@ class Action:
     title: str
     desc: str
     options: list = field(default_factory=list)
-    special: str | None = None            # share | open_runs | video | torch | arrange | admin
+    special: str | None = None            # share | open_runs | torch | arrange | admin | hero | dashboard
     menu: str = ""                         # the menu.bat letter it replaces (for the docs)
+    advanced: bool = False                 # 0.49.0: shown only when the TOOLS tab's Advanced drawer is open
 
 
 TABS = [("FIGHT", "fight"), ("RECORD", "record"), ("TRAIN", "train"), ("COMBOS", "combos"),
@@ -40,6 +41,14 @@ PLAY_AS = [("Ryu", "Ryu"), ("Random Select", "Random")] + sorted(
     key=lambda x: x[0].lower())
 ACTIONS: list[Action] = [
     # ---- FIGHT -------------------------------------------------------------------------------------------
+    # 0.49.0 (user: "Start Ranked card"): one big card for what the panel is mostly used for
+    Action("ranked", "fight", "Start ranked",
+           "Queue in SF6 first (pick the same character). The bot takes over at FIGHT!, finds its side, plays every "
+           "ranked match back to back and retrains as it goes. F8 / STOP ends it; AFTER MATCH finishes the current match.",
+           [Option("name", "Character", choices=PLAY_AS, default="Ryu"),
+            Option("limits", "Human limits", choices=[("Off", "off"), ("On", "on")], default="off"),
+            Option("di_delay", "DI reaction", kind="text", default="",
+                   hint="empty = 15-21 (config); 4-22, or off")], special="hero", menu="H 3"),
     Action("vs_cpu", "fight", "Bot vs CPU", "Start from a menu; the bot takes over at FIGHT! and records every match.",
            [Option("side", "Bot side", choices=[("Left (P1)", "p1"), ("Right (P2)", "p2")], default="p1")], menu="V / N"),
     Action("play_as", "fight", "Play as",
@@ -65,7 +74,7 @@ ACTIONS: list[Action] = [
     Action("replay_auto", "record", "Auto replays",
            "The bot plays the replay list itself at 8x (routines replay_play + replay_next, taught in BUTTONS).",
            [Option("count", "Replays", kind="int", default=0, hint="0 = until F8 / end of list")], menu="D 3"),
-    Action("watch", "record", "Watch you play", "Records state and video while YOU play; the bot sends nothing.",
+    Action("watch", "record", "Watch you play", "Records the game state while YOU play; the bot sends nothing.",
            menu="T W"),
     # ---- TRAIN -------------------------------------------------------------------------------------------
     Action("train", "train", "Train the brain", "Neural network + counts from every recording. No game needed.",
@@ -101,11 +110,11 @@ ACTIONS: list[Action] = [
     Action("routine", "buttons", "Run a routine", "Replays a taught routine on the device it was taught on.",
            [Option("name", "Routine", kind="text", default="", hint="name (see the list in the log)")], menu="U"),
     # ---- RESULTS -----------------------------------------------------------------------------------------
+    Action("dashboard", "results", "Ranked so far", "Today's record, MR / LP and the last matches (from the ladder history).",
+           special="dashboard"),
     Action("share", "results", "Send to Claude", "Bundles the last runs and COPIES it: paste it in the chat.",
            special="share", menu="S"),
-    Action("open_runs", "results", "Runs folder", "Reports, videos, thoughts.md.", special="open_runs", menu="0"),
-    Action("video", "results", "Video on / off", "video.mp4 in each run costs CPU and disk.",
-           special="video", menu="VID"),
+    Action("open_runs", "results", "Runs folder", "Reports, thoughts.md, progress.md.", special="open_runs", menu="0"),
     Action("erase", "results", "Erase data", "Shows what it would delete, then asks you to type yes.",
            [Option("what", "What", choices=[("Old versions", "old"), ("Runs", "runs"), ("Training data", "training"),
                                             ("Fight data", "fights")], default="old")], menu="E"),
@@ -124,24 +133,24 @@ ACTIONS: list[Action] = [
            "Close SF6 first. Puts the official REFramework back (end of the research period). Administrator.",
            special="admin"),
     Action("state_check", "tools", "Game-state check", "Training Mode, bot = P1.", menu="T G"),
-    Action("input_map", "tools", "Input map", "Which input bit each key sets (Training Mode).", menu="T I"),
-    Action("overlay_test", "tools", "Overlay test", "Shows the overlay for 15 s (no game needed).", menu="T O"),
+    Action("input_map", "tools", "Input map", "Which input bit each key sets (Training Mode).", menu="T I", advanced=True),
+    Action("overlay_test", "tools", "Overlay test", "Shows the overlay for 15 s (no game needed).", menu="T O", advanced=True),
     Action("release_all", "tools", "Release all keys", "If a key seems stuck.", menu="T 9"),
     Action("character_id", "tools", "New character id",
            "Name the in-game id of a newly released character (shown by C or a fight). Empty = list.",
            [Option("id", "Id", kind="text", default="", hint="the number the bot printed"),
             Option("name", "Character", choices=[("Arjun", "Arjun"), ("Bosch", "Bosch"), ("Tifa", "Tifa")],
                    default="Arjun")], menu="T NC"),
-    Action("sysinfo", "tools", "System info", "OS, CPU, GPU, RAM, display.", menu="T 1"),
-    Action("list_windows", "tools", "Find SF6 window", "Which window matches SF6.", menu="T 2"),
-    Action("capture_bench", "tools", "Capture test", "20 s of screen capture, no inputs.", menu="T 3"),
-    Action("walk_test", "tools", "Walk test", "Ryu should walk forward.", menu="T 4"),
+    Action("sysinfo", "tools", "System info", "OS, CPU, GPU, RAM, display.", menu="T 1", advanced=True),
+    Action("list_windows", "tools", "Find SF6 window", "Which window matches SF6.", menu="T 2", advanced=True),
+    Action("capture_bench", "tools", "Capture test", "20 s of screen capture, no inputs.", menu="T 3", advanced=True),
+    Action("walk_test", "tools", "Walk test", "Ryu should walk forward.", menu="T 4", advanced=True),
     Action("acceptance", "tools", "Acceptance", "The M1 routine.",
-           [Option("side", "Side", choices=[("Left", "left"), ("Right", "right")], default="left")], menu="T 5 / 6"),
-    Action("latency", "tools", "Latency probe", "Input -> visible change (input display ON).", menu="T 7"),
-    Action("random", "tools", "Random inputs", "30 s live loop with random inputs.", menu="T 8"),
+           [Option("side", "Side", choices=[("Left", "left"), ("Right", "right")], default="left")], menu="T 5 / 6", advanced=True),
+    Action("latency", "tools", "Latency probe", "Input -> visible change (input display ON).", menu="T 7", advanced=True),
+    Action("random", "tools", "Random inputs", "30 s live loop with random inputs.", menu="T 8", advanced=True),
     Action("torch", "tools", "PyTorch timing", "Optional; the bot does not need it.", special="torch",
-           menu="T Z"),
+           menu="T Z", advanced=True),
 ]
 BY_ID = {a.id: a for a in ACTIONS}
 ROUTINE_NAME = re.compile(r"[A-Za-z0-9_]{1,40}")
@@ -161,6 +170,19 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
 
     def one(*args, before=None):
         return {"args": list(args), "before": before}
+    if action_id == "ranked":
+        args = ["fight", "--versus-human", "ranked"]
+        dd = str(v.get("di_delay") or "").strip()
+        if dd:
+            from .fighter import di_reaction_setting
+            try:
+                di_reaction_setting({}, dd)
+            except ValueError:
+                raise BadInput("DI reaction: frames like 15-21, one number, or off")
+            args += ["--di-delay", dd]
+        if v.get("limits") == "on":
+            args += ["--human-limits"]
+        return [one("play-as", str(v.get("name") or "Ryu")), one(*args)]
     if action_id == "vs_cpu":
         return [one("fight", "--player", v["side"])]
     if action_id == "versus":
@@ -280,8 +302,6 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         return [one("run", "--policy", "random", "--seconds", "30")]
     if action_id == "share":
         return [one("share")]
-    if action_id == "video":
-        return [one("video", "toggle")]
     if action_id == "refw":
         return [one("refw-install")]
     if action_id == "refw_research_status":
@@ -294,7 +314,7 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
     if action_id == "torch":
         return [{"args": ["-m", "pip", "install", "torch"], "python": True, "before": None},
                 one("run", "--policy", "probe", "--seconds", "60")]
-    return []                                   # specials handled by the GUI (open_runs, arrange)
+    return []                                   # specials handled by the GUI (open_runs, arrange, dashboard)
 
 
 def _int(x, label: str) -> int:

@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.49.0 (2026-10-09): the overlay redesigned (no frame view; gauges, a plain-English NOW line, problems, readable notes with a match card) and the control panel cleaned up (START RANKED card, status lights, ranked dashboard, Advanced drawer); video removed.**
 - **0.48.0 (2026-10-09): every grappler's command-grab reach measured from its throw boxes (Zangief's L SPD ~1.95 centre to centre); the bot keeps out of it in neutral, learns new reach live, and the walk-in moment uses it.**
 - **0.47.0 (2026-10-09): the 17 characters' anti-air options learn by range what worked and what didn't (per opponent, pooled by body class); one that keeps losing from a range is dropped there (block if none is left), and each option's timing moves earlier / later. Ryu unchanged.**
 - **0.46.0 (2026-10-09): the user's anti-airs for the 17 characters with no invincible 623 special (normals, specials, charge moves, supers), chosen by the landing's timing, distance, charge and resources.**
@@ -440,7 +441,7 @@ The safety tests are part of acceptance. During a run:
   it's installed on the user's PC is unknown; `refw-install` reports it.
 
 ## Milestone 2: watch mode (0.2.6)
-- `sf6bot watch` (menu W) records state and video while the USER plays. The bot never arms.
+- `sf6bot watch` (menu W) records state (video until 0.49.0) while the USER plays. The bot never arms.
 - **Purpose:** learn from evidence how SF6 behaves around rounds:
   - round starts/ends and how the `round` field changes
   - KOs (hp reaching 0)
@@ -5208,6 +5209,63 @@ is verified in game. ESTIMATE = a config guess.
   `boxes=True` (merged replays write rows back, so it stays off by default).
 - Tests `tests/test_0480.py` (the scan on synthetic lines, the shipped ranges and slow grabs, live learning and saving, the
   policy factors, the fighter's zone, read_recording, a MOCK match vs Zangief). Not verified in game.
+
+## 0.49.0: the overlay and the control panel redesigned; video removed (user, 2026-10-09)
+- User: "We don't actually ever record video anymore, so that part of the display is superfluous. There are other features
+  like this that were built early on that have no use; the UI needs work all around." Also: "the "thoughts" panel should be
+  more readable - things go by too quickly, and it's not very human readable." The user chose from a list (2026-10-09).
+### Video removed
+- The `video` command, `--video` / `--no-video`, the panel's VIDEO tile / button and menu VID are gone; `recording.record_video`
+  is forced off (an old local.yaml setting does nothing). Replay recording never had video.
+- Sessions capture the screen only for the tools that measure it (`Session(capture=False)` by default; `capture=True`:
+  capture test, latency probe, acceptance, the policy loop, routine teaching's step screenshots). Fights, watch, catalog and
+  the lab play and record from game state only (fights already captured nothing since 0.18.0).
+### The overlay (`overlay.py`, one 430-px column, `overlay.height` 920)
+- The frame view (captured game picture) and the capture statistics are gone.
+- Top to bottom:
+  1. the arcade input display (unchanged)
+  2. gauges: both players' health, Drive (6 bars, BURNOUT) and Super (3 bars), round score, the session's record and MR / LP
+     with this session's change (`fighter.hud_update` every line; other commands show their status lines here)
+  3. **NOW:** one big line of what the bot is doing in plain words (below)
+  4. problems that need the user, else a green OK: inputs off (SF6 not focused / paused), no game state, battle frozen,
+     finding / guessed side, state arriving late (> 4 frames), input delay high (> 7 frames)
+  5. the match card (title + up to 7 lines from the match's thoughts: record so far, damage, what hurt most, throws, what the
+     opponent beat), from the match end until the next Fight!; then the notes
+- Text is anti-aliased TrueType (Bahnschrift / Segoe UI on Windows) through Pillow (`overlay_text.py`, Pillow added to the
+  dependencies; update.bat installs it); without Pillow, OpenCV's font with anti-aliasing.
+### THOUGHTS: now / notes / card (`feed.py`, `plain.py`)
+- Before: every narrated line (each attack decision with its debug reason, each status change, every match-end thought) went
+  into one 12-line ticker showing its last 6 wrapped rows.
+- `Session.narrate(text, source, kind)`:
+  - "note" (default): an event, made readable (`plain.note_text`: ids, frame counts and "(1.2x listed)" taken out; "Counter
+    hit: L Hadoken (840)", "Round won (KO)", "I'm P1 (found by character)")
+  - "decision": a decision's debug reason, recorded only
+  - "status": the fight loop's status (the NOW line between fights)
+  - "detail": recorded only (match setup lines: opponent data, combo source, composer, models, grabs, result-screen keys)
+  - "card": a match thought (`Session.match_card` records them all and puts the chosen ones on the card)
+- Every decision sets the NOW line (`plain.now_text`, a sentence per rule: "Punish coming: 2MP > 623HP", "They jumped: anti-air
+  ready", "My turn after blocking (I am plus): press (2LP)", "Poke: 2MK at mid range"). A routine change (a block, a walk)
+  waits until the line has been up 0.6 s; an action (punish, anti-air, reversal, tech, DI, combo) replaces it at once.
+- Notes: newest on top; the same note within 30 s is merged ("×3"); a note stays 4 s before newer ones can push it off (they
+  wait their turn); older notes fade after 20 s; a colour chip says where each comes from (SEEN measured, LEARNED, CHOSE
+  policy, RULE scripted); a divider per round ("ROUND 2   1-0").
+- Everything is still recorded in full (events.jsonl narration events, with `kind` when not a note), thoughts.md and S.
+### Control panel (`gui.py`, `gui_actions.py`, `gui_web/index.html`)
+- **START RANKED** card first in FIGHT: character (Ryu, Random Select, anyone), human limits, DI reaction; a big START (runs
+  `play-as` then `fight --versus-human ranked`) and AFTER MATCH. The Versus Human tile is unchanged.
+- **Status lights** at the top of the log column: game state (exporter heartbeat < 5 s), online build (research build active
+  and matching), and while a command runs: armed, side, the first problem and the NOW line (the session writes
+  `runs/.live.json` every 0.5 s and removes it at the end).
+- **Ranked so far** card in RESULTS: today's record, MR (or LP) and its change today, the last 10 ranked matches (result,
+  score, characters, MR / LP change), from datasets/ladder; refreshed every 8 s.
+- **Advanced drawer** in TOOLS (first card, closed by default): capture test, latency probe, acceptance, walk test, random
+  inputs, PyTorch timing, overlay test, system info, find SF6 window, input map. Setup tiles (game-state script, online build,
+  state check, release keys, new character id, arrange) stay visible.
+- Kept, as the user chose: BUTTONS tab (overlay buttons, routines), Auto / Many replays, Watch.
+- Tests `tests/test_0490.py` (plain lines, notes, card, feed timing, narration kinds and the live file, gauges and problems,
+  the overlay frame, the panel's ranked card / advanced flags / dashboard / lights, capture only for measuring tools); the
+  0.12.6 video test now checks video is gone. Rendered here (headless, the overlay with DejaVu fonts, the panel in Chromium at
+  1024 x 208 and 1280 x 300 CSS px); not seen on the user's PC yet.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

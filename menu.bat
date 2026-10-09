@@ -38,8 +38,6 @@ echo  RESULTS
 echo    S  Send results to Claude (copies a summary)     0  Open the results folder
 echo.
 echo    T  Tools and setup      E  Erase data           Q  Quit
-%BOT% video
-echo    VID  Turn video recording on / off (video.mp4 in each run; uses CPU and disk)
 echo.
 goto ask
 
@@ -67,7 +65,7 @@ goto ask
 :erase
 cls
 echo ================ sf6bot: erase data ================
-echo    1  Clear runs           (reports, videos and logs in the runs folder)
+echo    1  Clear runs           (reports and logs in the runs folder)
 echo    2  Clear training data  (recorded replays, merged replays, learned move ids, trained brain)
 echo    3  Clear fight data     (the bot's recorded matches and what it learned from them)
 echo    4  Purge data from OLD bot versions (old runs, old fights, old combo lab results, learned
@@ -164,7 +162,6 @@ set "CH="
 set /p CH=Choose: 
 if /i "%CH%"=="v" (%BOT% fight --player p1 & goto done)
 if /i "%CH%"=="n" (%BOT% fight --player p2 & goto done)
-if /i "%CH%"=="vid" (%BOT% video toggle & goto menu)
 if /i "%CH%"=="h" goto versus
 if /i "%CH%"=="pa" goto playas
 if /i "%CH%"=="b" (%BOT% train & goto done)
@@ -229,7 +226,7 @@ echo       (the opponent plays here or joins over Parsec). A set is first to 2.
 echo    2  Online room / casual set: the bot plays as this PC's player. First to 2.
 echo    3  RANKED: start this once, then queue. The bot plays every ranked match as this PC's
 echo       player, back to back, until you stop it: F10 = stop after this match, F8 = stop now.
-echo       One run folder for the whole session (progress.md), no video, retrains every 20 matches.
+echo       One run folder for the whole session (progress.md), retrains every 20 matches.
 echo       (Also: double-click ranked.bat.)
 set "VM="
 set /p VM=Choose: 

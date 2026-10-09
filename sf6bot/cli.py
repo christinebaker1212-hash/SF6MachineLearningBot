@@ -34,7 +34,7 @@ def cmd_list_windows(args, cfg):
 
 def cmd_capture_bench(args, cfg):
     import time
-    with _session(args, cfg, "capture_bench") as s:
+    with _session(args, cfg, "capture_bench", capture=True) as s:
         print(f"Capturing {args.seconds}s, no inputs are sent. Region {s.region}.")
         end = time.perf_counter() + args.seconds
         while time.perf_counter() < end and not s.stop_event.is_set():
@@ -70,7 +70,7 @@ def cmd_input_test(args, cfg):
 
 def cmd_acceptance(args, cfg):
     from .acceptance import run_acceptance
-    with _session(args, cfg, f"acceptance_{args.side}") as s:
+    with _session(args, cfg, f"acceptance_{args.side}", capture=True) as s:
         run_acceptance(s, args.routine)
     _print_report(s)
 
@@ -82,7 +82,7 @@ def cmd_latency_probe(args, cfg):
         roi = tuple(int(v) for v in args.roi.split(","))
         if len(roi) != 4:
             sys.exit("--roi must be x,y,w,h in game-client pixels")
-    with _session(args, cfg, "latency_probe") as s:
+    with _session(args, cfg, "latency_probe", capture=True) as s:
         run_probe(s, roi, args.trials)
     _print_report(s)
 
@@ -91,7 +91,7 @@ def cmd_run(args, cfg):
     from .loop import run_policy
     from .policy import make_policy
     policy = make_policy(args.policy, cfg)
-    with _session(args, cfg, f"run_{args.policy}", extra_meta={"policy": policy.label}) as s:
+    with _session(args, cfg, f"run_{args.policy}", extra_meta={"policy": policy.label}, capture=True) as s:
         print(f"Policy: {policy.label}" + (f"  device={policy.device}" if hasattr(policy, "device") else ""))
         out = run_policy(s, policy, args.seconds)
         print(out)
@@ -358,11 +358,9 @@ def cmd_fight(args, cfg):
     seconds = args.seconds if not vh or args.seconds != 3600.0 else 6 * 3600.0
     if vh == "ranked":
         # 0.16.0: unattended ranked runs until F8 / STOP, F10 or AFTER MATCH (stop after the current match), or
-        # --matches; one run folder for the whole session. Video off unless asked for (hours of video fill the disk).
+        # --matches; one run folder for the whole session.
         if args.seconds == 3600.0:
             seconds = 365 * 24 * 3600.0
-        if args.video is None:
-            cfg["recording"]["record_video"] = False
     # Versus Human: a set is first to 2 unless the setup says otherwise (--first-to N; 0 = no limit).
     # Ranked: back-to-back single matches, no set, until F8 / --matches / 6 h.
     first_to = args.first_to
@@ -402,9 +400,9 @@ def cmd_fight(args, cfg):
             blind_ask = lambda: input("Participant's guess for that match (h = human, b = bot, Enter = none): ")  # noqa: E731
     hl = True if (args.human_limits or args.blind) else None
     name = f"fight_vs_human_{vh}" if vh else f"fight_{args.player}"
-    # 0.18.0: no screen capture in fights unless video is recorded (the bot plays from game state; capture slowed the
-    # state reader in the 0.17.5 ranked session)
-    cap = bool(cfg["recording"].get("record_video")) or bool(cfg["capture"].get("in_fights", False))
+    # 0.18.0: no screen capture in fights (the bot plays from game state; capture slowed the state reader in the 0.17.5
+    # ranked session); 0.49.0: no video at all
+    cap = bool(cfg["capture"].get("in_fights", False))
     with _session(args, cfg, name, capture=cap) as s:
         panel = _panel(s, cfg, pad=pad)
         run_fight(s, cfg, seconds, player=player, matches=args.matches or None, panel=panel,
@@ -443,7 +441,7 @@ def cmd_pad(args, cfg):
         return
     if args.p2:
         cfg = _with_pad(cfg)
-    with _session(args, cfg, f"pad_{args.teach}" if args.teach else "pad") as s:
+    with _session(args, cfg, f"pad_{args.teach}" if args.teach else "pad", capture=True) as s:
         panel = _panel(s, cfg, pad=args.p2, routine=args.teach)
         if panel is None:
             print("The clickable buttons live in the debug overlay; run without --no-overlay.")
@@ -759,21 +757,6 @@ def cmd_play_as(args, cfg):
                   "until then it uses the ids learned from recordings (menu X).")
 
 
-def cmd_video(args, cfg):
-    """Video recording on / off, saved in configs/local.yaml (user, 2026-10-03). Replay recording never records
-    video. The state recordings, reports and datasets are kept either way."""
-    from .config import set_local
-    if args.mode in ("on", "off"):
-        p = set_local(["recording", "record_video"], args.mode == "on")
-        print(f"Video recording is now {args.mode.upper()} (saved in {p}).")
-    elif args.mode == "toggle":
-        new = not bool(cfg["recording"].get("record_video", True))
-        p = set_local(["recording", "record_video"], new)
-        print(f"Video recording is now {'ON' if new else 'OFF'} (saved in {p}).")
-    else:
-        print(f"Video recording: {'ON' if cfg['recording'].get('record_video', True) else 'OFF'}")
-
-
 def cmd_share(args, cfg):
     from .share import build
     p = build(cfg["recording"]["root"], last=args.last, include_mock=args.include_mock,
@@ -799,11 +782,6 @@ def main(argv=None):
     ap.add_argument("--mock", action="store_true",
                     help="MOCK mode: synthetic frames + no real inputs (pipeline testing only, not the game)")
     ap.add_argument("--no-overlay", action="store_true")
-    vg = ap.add_mutually_exclusive_group()
-    vg.add_argument("--video", dest="video", action="store_true", default=None,
-                    help="record video.mp4 for this run (overrides the saved setting)")
-    vg.add_argument("--no-video", dest="video", action="store_false",
-                    help="no video for this run (overrides the saved setting)")
     from . import __version__
     ap.add_argument("--version", action="version", version=f"sf6bot {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -861,7 +839,7 @@ def main(argv=None):
     side(p)
     p.set_defaults(fn=cmd_state_check)
 
-    p = sub.add_parser("watch", help="record game state + video while YOU play (bot sends no inputs)")
+    p = sub.add_parser("watch", help="record game state while YOU play (bot sends no inputs)")
     p.add_argument("--seconds", type=float, default=300)
     p.set_defaults(fn=cmd_watch)
 
@@ -964,9 +942,6 @@ def main(argv=None):
     p.add_argument("name", nargs="?", default=None)
     p.set_defaults(fn=cmd_play_as)
 
-    p = sub.add_parser("video", help="video recording on / off / toggle (saved); no argument: show it")
-    p.add_argument("mode", nargs="?", choices=("on", "off", "toggle"), default=None)
-    p.set_defaults(fn=cmd_video)
 
     sub.add_parser("gui", help="the control panel window (same functions as menu.bat)").set_defaults(
         fn=lambda args, cfg: __import__("sf6bot.gui", fromlist=["main"]).main([]))
@@ -1031,8 +1006,7 @@ def main(argv=None):
         cfg["input"]["backend"] = "sendinput_keyboard"
     if args.mock:
         cfg["input"]["backend"] = "mock"
-    if args.video is not None:
-        cfg["recording"]["record_video"] = bool(args.video)
+    cfg["recording"]["record_video"] = False          # 0.49.0: video removed
     args.fn(args, cfg)
 
 

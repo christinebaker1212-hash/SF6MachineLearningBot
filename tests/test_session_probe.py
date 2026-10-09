@@ -63,7 +63,7 @@ def test_policy_loop_report(cfg):
     assert out["ticks"] > 30
     assert s.report["loop"]["ticks"] == out["ticks"]
     assert s.report["end_reason"] == "completed"
-    assert (s.recorder.dir / "video.mp4").exists()
+    assert not (s.recorder.dir / "video.mp4").exists()          # 0.49.0: no video
 
 
 def test_probe_diagnoses_inputs_not_reaching_game(cfg):

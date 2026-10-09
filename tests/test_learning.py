@@ -233,20 +233,22 @@ def test_versus_human_defaults_to_first_to_2_and_ranked_runs_back_to_back(cfg, m
     assert ("measured", "Ranked session so far: 3 won, 1 lost.") in lines
 
 
-def test_video_switch_saves_and_flags_override(cfg, monkeypatch, capsys):
-    """User, 2026-10-03: "give me an option whether or not to record video"."""
+def test_video_is_gone(cfg, monkeypatch):
+    """0.49.0 (user, 2026-10-09: "We don't actually ever record video anymore"): no video command, no --video flag,
+    and the recorder never writes video whatever an old local.yaml says."""
+    import pytest
     import sf6bot.cli as cli
-    import sf6bot.config as config
-    saved = {}
-    monkeypatch.setattr(config, "set_local", lambda keys, value, local=None: saved.update({tuple(keys): value}) or "local.yaml")
-    cfg["recording"]["record_video"] = True
-    cli.cmd_video(type("A", (), {"mode": "toggle"})(), cfg)
-    assert saved[("recording", "record_video")] is False and "now OFF" in capsys.readouterr().out
-    cli.cmd_video(type("A", (), {"mode": "on"})(), cfg)
-    assert saved[("recording", "record_video")] is True
+    assert not hasattr(cli, "cmd_video")
+    with pytest.raises(SystemExit):
+        cli.main(["--video", "sysinfo"])
+    with pytest.raises(SystemExit):
+        cli.main(["video", "on"])
     seen = {}
-    monkeypatch.setattr(cli, "load_config", lambda *a, **k: cfg, raising=False)
-    monkeypatch.setattr(cli, "cmd_video", lambda args, c: seen.update(v=c["recording"]["record_video"]))
+    cfg["recording"]["record_video"] = True
+    monkeypatch.setattr(cli, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(cli, "cmd_sysinfo", lambda args, c: seen.update(v=c["recording"]["record_video"]))
+    cli.main(["sysinfo"])
+    assert seen["v"] is False
 
 
 def test_teaching_records_real_keyboard_keys_and_replays_them(tmp_path):

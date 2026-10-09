@@ -28,7 +28,7 @@ from pathlib import Path
 
 import yaml
 
-from . import clock
+from . import clock, plain
 from .actions import Facing, InputState
 from .dataset import DatasetBuilder
 from .episodes import FIGHT_START_FRAME, EpisodeTracker
@@ -5470,7 +5470,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         print(f"Screen reading (for communication errors on Fighting Ground): "
               + (note_ if eng_ else f"NOT available ({note_}); such errors will need you"))
         sess.narrate("Screen reading: " + (note_ if eng_ else "not available, communication errors will need you."),
-                     source="scripted")
+                     source="scripted", kind="detail")
         if eng_:
             screen_reader = lambda: screen_text.read_game_screen(cfg)          # noqa: E731
     if screen_reader is None and mwatch is not None and getattr(sess, "screen_text", None) is not None:
@@ -5569,6 +5569,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     t_start = clock.now()
     wait = {"status": None, "log": [], "last_line": clock.now(), "last_beat": 0.0}
     record = {"won": 0, "lost": 0, "first_to": first_to}
+    ladder_now: dict = {}                     # 0.49.0: the bot's newest LP / MR and this session's change (overlay)
     thoughts_path = sess.recorder.dir / "thoughts.md"
     session_rows: list = []          # progress.py: one compact line per match (progress.md, datasets/ladder)
     # 0.16.0: "stop after this match" (F10, or the control panel's AFTER MATCH button): long unattended ranked
@@ -5611,8 +5612,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             del wait["log"][:-200]
             if changed:
                 print(f"[status {entry['t']:.0f}s] {text}" + (f" {detail}" if detail else ""))
-                sess.narrate(f"Status: {text}.", source="measured")
+                sess.narrate(f"Status: {text}.", source="measured", kind="status")
             sess.status["fighter"] = text
+            sess.feed.set_status(text)
 
     def set_panel(locked: bool) -> None:
         if panel is not None and panel.locked != locked:
@@ -5628,6 +5630,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             try:
                 from .progress import record_lp
                 record_lp(ds_root, sess.recorder.dir, rec_, session_rows)
+                for k_ in ("lp", "mr", "rank"):
+                    if rec_.get(k_) is not None:
+                        ladder_now.setdefault(k_ + "_start", rec_[k_] - (rec_.get(k_ + "_delta") or 0)
+                                              if k_ != "rank" else rec_[k_])
+                        ladder_now[k_] = rec_[k_]
                 if rec_.get("lp_delta") is not None or rec_.get("lp") is not None:
                     msg_ = (f"LP {rec_['lp_delta']:+d}" if rec_.get("lp_delta") is not None else "LP")
                     msg_ += f" -> {rec_['lp']:,}" if rec_.get("lp") is not None else ""
@@ -5865,7 +5872,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
             print("\n" + title)
             for s_, t_ in lines_:
                 print(f"  [{s_}] {t_}")
-                sess.narrate(t_, source=s_)
+            sess.match_card(lines_, won=(summary.get("match") or {}).get("bot_won"))
             if data.rows:
                 data.extra_meta["bot_character"] = fcfg.get("character")
                 if summary.get("partial"):
@@ -5924,7 +5931,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         set_panel(False)
         if not sess.start_inputs(countdown_s=0.0 if versus else None):
             return {}
-        sess.narrate("Waiting for a match: the bot takes over at \"Fight!\".", source="scripted")
+        sess.narrate("Waiting for a match: the bot takes over at \"Fight!\".", source="scripted", kind="status")
         t_end = clock.now() + seconds
         stop_all = False
         parry_held = False
@@ -6023,7 +6030,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         if rmenu is not None:
                             rmenu.match_ended(clock.now(), st.raw.get("round"), st.raw.get("stage_timer"))
                     elif e["event"] == "fight_start":
-                        sess.narrate("Fight!", source="measured")
+                        sess.narrate("Fight!", source="measured", kind="detail")
+                        # 0.49.0: a divider per round on the overlay; the last match's card goes at the next Fight!
+                        won_ = sum(1 for r_ in summary["rounds"] if r_.get("bot_won"))
+                        sess.feed.divider(f"ROUND {len(summary['rounds']) + 1}   {won_}-{len(summary['rounds']) - won_}")
+                        sess.feed.clear_card()
                         if rmenu is not None:
                             rmenu.new_match()
                 if split_:
@@ -6092,7 +6103,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     print(f"Session ended after the match, as asked: {record['won']} won, {record['lost']} lost.")
                     break
                 sess.narrate("Waiting for the next match (rematch / menus: the controller is yours).",
-                             source="scripted")
+                             source="scripted", kind="status")
                 continue
             st = batch[-1]
             t = st.t_recv
@@ -6126,7 +6137,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                               **rmenu.log[-1]}
                     wait["log"].append(entry_)
                     print(f"[menu] pressed {menu_key} {rmenu.log[-1]['after_s']} s after the match: {why_}")
-                    sess.narrate(f"Result screen: pressed {menu_key} ({why_}).", source="scripted")
+                    sess.narrate(f"Result screen: pressed {menu_key} ({why_}).", source="scripted", kind="detail")
             detail = {"stage_timer": st.raw.get("stage_timer"), "round": st.raw.get("round"),
                       "chara": [p1d.get("chara"), p2d.get("chara")], "hp": [p1d.get("hp"), p2d.get("hp")],
                       "actions": [p1d.get("action_id"), p2d.get("action_id")], "armed": c.armed,
@@ -6245,12 +6256,19 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                              "switched.", source="measured")
             me_key, op_key = keys() if side["i"] is not None else ("p1", "p2")    # a mirror's setup: either side
             me, op = st.raw.get(me_key) or {}, st.raw.get(op_key) or {}
+            try:
+                hud_update(sess, summary, me, op, me_key, record=record if (first_to or versus == "ranked") else None,
+                           ladder_now=ladder_now, fighting=fight_on, armed=c.armed, frozen=frozen_, side_how=side["how"],
+                           side_known=side["i"] is not None, stale=getattr(fighter, "stale", None),
+                           lead=getattr(fighter, "lead", None))
+            except Exception:                        # noqa: BLE001 - the display never stops a fight
+                pass
             if (fighter is not None and isinstance(op.get("chara"), int) and not summary["rounds"]
                     and not summary["decisions"] and character_name(op["chara"]) != summary.get("opponent")):
                 # 0.18.1: the character id read at a match's start can still be the previous opponent's (0.18.0 ranked:
                 # an Ed match was set up, learned and reported as Zangief): set up again for the real opponent
                 sess.narrate(f"Opponent is {character_name(op['chara'])}, not {summary.get('opponent')}: setting up again.",
-                             source="measured")
+                             source="measured", kind="detail")
                 fighter = None
             if fighter is None and isinstance(op.get("chara"), int):
                 summary["character"] = character_name(me.get("chara"))
@@ -6293,13 +6311,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     summary["combo_source"] = {"mined": n_mined_}
                     sess.narrate(f"No combo lab results for {summary['character']} yet: using {n_mined_} combos found in "
                                  "recordings (unproven; replaced once K verifies this character's routes).",
-                                 source="learned")
+                                 source="learned", kind="detail")
                 if bans_:
                     summary["operator_skips"] = {"combos": len(bans_), "book_left_out": book_stats_.get("banned", 0),
                                                  "config_left_out": cfg_banned_}
                     sess.narrate(f"Combos you skipped in the combo lab (F10): {len(bans_)}, never used here ("
                                  f"{book_stats_.get('banned', 0)} lab routes and {len(cfg_banned_)} of my own routes left "
-                                 f"out{': ' + ', '.join(cfg_banned_) if cfg_banned_ else ''}).", source="scripted")
+                                 f"out{': ' + ', '.join(cfg_banned_) if cfg_banned_ else ''}).", source="scripted", kind="detail")
                 # 0.24.0: longer combos spliced from the book's verified transitions, by resources (combo_compose.py)
                 composer = None
                 try:
@@ -6310,7 +6328,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if composer is not None and composer.entries:
                     book = book + composer.entries
                     sess.narrate(f"Combo composer: {len(composer.entries)} combos joined from {len(composer.trans)} "
-                                 f"verified transitions (estimates until they are tried).", source="learned")
+                                 f"verified transitions (estimates until they are tried).", source="learned", kind="detail")
                 from .learning import DECAY, DECAY_RANKED
                 exp = Experience(ds_root, summary["character"], summary["opponent"],
                                  decay=DECAY_RANKED if versus == "ranked" else DECAY)
@@ -6320,11 +6338,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     mt_ = _mtime(brain.dir / "intent_net.npz"), _mtime(brain.dir / "counts.json")
                     if brain_mtime[0] is not None and mt_ != brain_mtime[0]:
                         brain = Brain(ds_root, fcfg.get("character"))
-                        sess.narrate("Using the copy-a-player network retrained during this session.", source="learned")
+                        sess.narrate("Using the copy-a-player network retrained during this session.", source="learned", kind="detail")
                     brain_mtime[0] = mt_
                     if win is not None and win.reload() and win.net is not None:
                         sess.narrate(f"Win model (re)loaded: trust {win.trust:.2f}, {win.meta.get('samples')} decisions.",
-                                     source="learned")
+                                     source="learned", kind="detail")
                         summary["win_model"] = {k: win.meta.get(k) for k in ("trained", "samples", "trust")}
                     for rep_ in ("win_report.md", "brain_report.md"):
                         try:
@@ -6407,7 +6425,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if cur["answers"].usable():
                     fighter.op_answers = cur["answers"]
                     sess.narrate(f"Your answers against {summary['opponent']}: {cur['answers'].usable()} ready "
-                                 "(from rounds you won).", source="learned")
+                                 "(from rounds you won).", source="learned", kind="detail")
                 fighter.live_reach = cur["live_reach"][summary["character"]]
                 # 0.23.0: the opponent's move timing learned from recordings (move_timing.py: menu B, else the shipped
                 # table), for ids without a catalog / Capcom name, follow-through ids and doubted inferred names
@@ -6430,7 +6448,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         sess.narrate(f"{summary['opponent']}'s command grabs I know: {len(gb_.onsets())} start ids"
                                      + (f", {len(slow_)} slow enough to jump on reaction "
                                         + ", ".join((fighter.opp.get(a) or {}).get("name") or str(a) for a in slow_)
-                                        if slow_ else "") + ".", source="learned")
+                                        if slow_ else "") + ".", source="learned", kind="detail")
                 except Exception as e:                   # noqa: BLE001 - the grab book is optional
                     print(f"(command grab book unavailable: {e})")
                 from .catalog import perfect_parry_ids
@@ -6483,7 +6501,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 sess.narrate(f"Opponent {summary['opponent']}: "
                              + (f"move data: {label} (punishes and DI reactions on)." if label
                                 else "no move catalog or inferred map: no punishes; DI reactions from the shared "
-                                     "system-move ids.") + f" {len(book)} true combos ready.", source="scripted")
+                                     "system-move ids.") + f" {len(book)} true combos ready.", source="scripted", kind="detail")
             if fighter is None:
                 fighter = ScriptedFighter(fcfg, _common_moves(fcfg))
             # resolve outcomes of earlier actions
@@ -6554,9 +6572,12 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 ch = fighter.policy.last
                 exp.decided(t, ch.get("zone"), d.intent, ch.get("move") if d.kind in ("seq", "route") else None,
                             me.get("hp"), op.get("hp"), ch.get("source", "?"))
+            # 0.49.0: the overlay's Now line says what the bot is doing in plain words (every decision); the debug reason
+            # is recorded as before (attack decisions), never shown as a note
+            sess.feed.set_now(plain.now_text(d), action=plain.is_action(d))
             if d.kind in ("seq", "route"):
                 if d.kind == "route" or d.intent in itn.ATTACK_INTENTS or d.rule in ("punish", "anti_air"):
-                    sess.narrate(f"{d.name}: {d.reason}", source="policy" if d.intent else "scripted")
+                    sess.narrate(f"{d.name}: {d.reason}", source="policy" if d.intent else "scripted", kind="decision")
                 pending.append((d.rule, t, ohp))
                 if not c.armed and not sess.wait_armed(timeout=10):
                     stop_all = True
@@ -6801,6 +6822,48 @@ def _count_hits(prev: dict, cur: dict, me_key: str, op_key: str, self_moves: dic
             if h["kind"] in ("counter", "punish_counter"):
                 sess.narrate(f"{h['kind'].replace('_', ' ').title()}: {info.get('name')} did {h['damage']} "
                              f"({h.get('ratio')}x listed), opponent drive -{h['drive_drop']}", source="measured")
+
+
+def _gauges(pl: dict, name) -> dict:
+    hp, hpm = _num(pl.get("hp")), _num(pl.get("hp_max"))
+    dr, su = _num(pl.get("drive")), _num(pl.get("super"))
+    return {"name": name, "hp": hp, "hp_max": hpm or 10000.0, "drive": dr, "super": su,
+            "burnout": dr is not None and dr <= 0 and (hp or 0) > 0}
+
+
+def hud_update(sess, summary: dict, me: dict, op: dict, me_key: str, *, record=None, ladder_now=None, fighting=False,
+               armed=True, frozen=False, side_how=None, side_known=True, stale=None, lead=None) -> None:
+    """0.49.0: the overlay's gauges and the problems that need the user (feed.py), from the newest state line."""
+    feed = getattr(sess, "feed", None)
+    if feed is None:
+        return
+    rounds = summary.get("rounds") or []
+    won = sum(1 for r in rounds if r.get("bot_won"))
+    me_name = summary.get("character") or (character_name(me.get("chara")) if isinstance(me.get("chara"), int) else None)
+    op_name = summary.get("opponent") or (character_name(op.get("chara")) if isinstance(op.get("chara"), int) else None)
+    hud = {"me": _gauges(me, me_name), "op": _gauges(op, op_name), "side": me_key.upper() if side_known else "?",
+           "rounds": [won, len(rounds) - won]}
+    if record and (record.get("won") or record.get("lost")):
+        hud["record"] = [record.get("won", 0), record.get("lost", 0)]
+    if ladder_now:
+        hud["ladder"] = dict(ladder_now)
+    problems = []
+    if fighting and not armed:
+        problems.append("Inputs off: SF6 not focused (or paused)")
+    if frozen:
+        problems.append("Battle frozen: pressing nothing")
+    if fighting and not side_known:
+        problems.append("Finding my side")
+    elif side_how and "assum" in str(side_how):
+        problems.append("Side guessed (P2): could not tell")
+    if fighting and stale is not None and stale > 4:
+        problems.append(f"Game state arriving late ({stale:.0f} frames)")
+    if fighting and lead is not None and lead > 7:
+        problems.append(f"Input delay high ({lead:.0f} frames)")
+    with feed.lock:
+        feed.hud = hud
+        feed.problems = problems
+    feed.fighting = bool(fighting)
 
 
 def tracker_in_match(summary: dict) -> bool:

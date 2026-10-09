@@ -36,7 +36,6 @@ MENU = {
     "L": ("teach", {"name": "replay_play"}, [["pad", "--teach", "replay_play"]]),
     "U": ("routine", {"name": "replay_play"}, [["routine", "replay_play"]]),
     "S": ("share", {}, [["share"]]),
-    "VID": ("video", {}, [["video", "toggle"]]),
     "E 1": ("erase", {"what": "runs"}, [["erase", "runs"]]),
     "E 2": ("erase", {"what": "training"}, [["erase", "training"]]),
     "E 3": ("erase", {"what": "fights"}, [["erase", "fights"]]),
@@ -75,7 +74,7 @@ def test_every_gui_action_builds_or_is_a_window_special():
         except BadInput:
             assert a.id == "teach"                 # needs a routine name: explained, not run
             continue
-        assert steps or a.special in ("open_runs", "arrange"), a.id
+        assert steps or a.special in ("open_runs", "arrange", "dashboard"), a.id
     assert BY_ID["open_runs"].special == "open_runs" and BY_ID["arrange"].special == "arrange"
 
 

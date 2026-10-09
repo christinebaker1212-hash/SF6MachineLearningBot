@@ -121,6 +121,31 @@ input.num { flex: 0 0 46px; }
 #ans.waiting { box-shadow: inset 0 0 0 2px var(--yellow); animation: glow 1s infinite alternate; }
 @keyframes glow { to { box-shadow: inset 0 0 0 2px #ffd40033; } }
 
+/* 0.49.0: status lights, the START RANKED card, the ranked dashboard, the Advanced drawer */
+#lights { flex: none; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 4px 0; min-width: 0; overflow: hidden; max-height: 46px; }
+#lights:empty { display: none; }
+.light { display: flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; background: var(--panel2);
+         font: italic 700 11px/20px var(--head); text-transform: uppercase; white-space: nowrap; color: var(--muted); flex: none; }
+.light::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.light.ok { color: var(--green); } .light.warn { color: var(--yellow); } .light.bad { color: #ff5b9c; }
+.light.off { color: var(--dim); } .light.info { color: var(--ink); text-transform: none; font-style: normal; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.light.info::before { background: var(--violet); box-shadow: 0 0 6px var(--violet); }
+.card.hero { grid-row: span 3; grid-column: span 2; border-left-width: 6px; background: linear-gradient(135deg, #2a1424, var(--panel) 70%); }
+.card.hero h3 { font-size: 22px; color: var(--magenta); }
+.card.hero .bigs { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; }
+.card.hero .start { flex: 1; height: 34px; background: var(--magenta); color: var(--ink); font: italic 900 18px/34px var(--head);
+                    text-transform: uppercase; letter-spacing: .06em; box-shadow: 0 0 16px -4px var(--magenta); }
+.card.hero .start:hover { background: var(--ink); color: var(--magenta); }
+.card.hero .after { height: 34px; padding: 0 12px; background: var(--panel2); font: italic 800 12px/34px var(--head); text-transform: uppercase; }
+.card.dash { grid-row: span 3; grid-column: span 2; }
+.dash .big { display: flex; gap: 14px; align-items: baseline; margin: 2px 0 4px; font: italic 900 20px var(--head); }
+.dash .big small { font: 700 11px var(--body); color: var(--muted); text-transform: uppercase; margin-left: 3px; }
+.dash table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.dash td { padding: 1px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+.dash td.w { color: var(--green); font-weight: 700; } .dash td.l { color: #ff5b9c; font-weight: 700; } .dash td.m { color: var(--muted); }
+.card.adv { cursor: pointer; justify-content: center; border-left-style: dashed; }
+.card.adv h3 { color: var(--muted); }
+
 /* modal (a step that needs an OK first, e.g. "set the dummy's guard to ALL") */
 #modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: #000c; z-index: 9; }
 #modal.on { display: flex; }
@@ -153,7 +178,8 @@ input.num { flex: 0 0 46px; }
 <div id="main">
   <div id="cards"></div>
   <div id="side">
-    <div id="loghead"><b>Live log</b><span id="running"></span><button id="video" title="Record video.mp4 in each run (costs CPU and disk); click to switch">Video ?</button><button id="clear">Clear</button></div>
+    <div id="lights"></div>
+    <div id="loghead"><b>Live log</b><span id="running"></span><button id="clear">Clear</button></div>
     <pre id="log"></pre>
     <div id="ans">
       <input type="text" id="answer" placeholder="answer here when the log asks a question" autocomplete="off">
@@ -165,7 +191,7 @@ input.num { flex: 0 0 46px; }
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
-let INIT = null, TAB = "fight", VALUES = {}, SINCE = 0, RUNNING = false, SAVE_T = null, ASKED = null;
+let INIT = null, TAB = "fight", VALUES = {}, SINCE = 0, RUNNING = false, SAVE_T = null, ASKED = null, ADV = false, DASH_T = null;
 const COLORS = {magenta: "var(--magenta)", yellow: "var(--yellow)", cyan: "var(--cyan)", violet: "var(--violet)", green: "var(--green)"};
 const GO = {share: "Copy", open_runs: "Open"};
 
@@ -189,47 +215,117 @@ function renderTabs() {
 function setVal(aid, key, v) { (VALUES[aid] = VALUES[aid] || {})[key] = v; saveSoon(); }
 function getVal(aid, o) { const v = (VALUES[aid] || {})[o.key]; return v == null ? (o.default == null ? "" : String(o.default)) : String(v); }
 
+function optionRow(a, o) {
+  const row = el("div", "opt"); row.appendChild(el("label", null, o.label));
+  if (o.kind === "choice" && o.choices.length <= 3) {
+    const seg = el("div", "seg");
+    const paint = () => seg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === getVal(a.id, o)));
+    for (const [shown, val] of o.choices) {
+      const b = el("button", null, shown); b.dataset.v = String(val);
+      b.onclick = () => { setVal(a.id, o.key, String(val)); paint(); };
+      seg.appendChild(b);
+    }
+    paint(); row.appendChild(seg);
+  } else if (o.kind === "choice") {
+    const s = el("select");
+    for (const [shown, val] of o.choices) { const op = el("option", null, shown); op.value = String(val); s.appendChild(op); }
+    s.value = getVal(a.id, o); s.onchange = () => setVal(a.id, o.key, s.value); row.appendChild(s);
+  } else {
+    const i = el("input"); i.type = "text"; i.value = getVal(a.id, o); i.placeholder = o.hint || "";
+    if (o.kind === "int") i.className = "num";
+    i.oninput = () => setVal(a.id, o.key, i.value); row.appendChild(i);
+    if (o.hint && o.kind === "int") { const hn = el("span", "hint", o.hint); hn.title = o.hint; row.appendChild(hn); }
+  }
+  return row;
+}
+
 function renderCards() {
   const box = $("#cards"); box.innerHTML = "";
+  clearTimeout(DASH_T);
   const color = COLORS[INIT.tabs.find(t => t.key === TAB).color];
   box.style.setProperty("--c", color);
-  for (const a of INIT.actions.filter(a => a.tab === TAB)) {
-    const c = el("div", "card" + (a.options.length ? " big" : ""));
-    c.style.setProperty("--c", color);
+  const acts = INIT.actions.filter(a => a.tab === TAB);
+  const nAdv = acts.filter(a => a.advanced).length;
+  if (nAdv) {
+    const c = el("div", "card adv"); c.style.setProperty("--c", color);
+    c.appendChild(el("h3", null, (ADV ? "▾ Hide advanced" : "▸ Advanced") + " (" + nAdv + ")"));
+    c.appendChild(el("p", null, ADV ? "Hide the setup checks and old tests." : "Setup checks and old tests: capture, latency, acceptance, input map, system info ..."));
+    c.onclick = () => { ADV = !ADV; renderCards(); };
+    box.appendChild(c);
+  }
+  for (const a of acts.filter(a => !a.advanced || ADV)) {
+    const kind = a.special === "hero" ? " hero" : a.special === "dashboard" ? " dash" : (a.options.length ? " big" : "");
+    const c = el("div", "card" + kind);
+    c.style.setProperty("--c", a.special === "hero" ? "var(--magenta)" : color);
     c.dataset.id = a.id;
     const head = el("div", "head");
     const h = el("h3", null, a.title); h.title = a.title; head.appendChild(h);
-    const go = el("button", "go slant"); go.appendChild(el("span", null, (GO[a.special] || "Go") + " ▶"));
-    go.onclick = () => run(a.id);
-    head.appendChild(go); c.appendChild(head);
+    if (a.special === "dashboard") {
+      const go = el("button", "go slant"); go.appendChild(el("span", null, "Refresh"));
+      go.onclick = () => loadDash(c); head.appendChild(go); c.appendChild(head);
+      c.appendChild(el("div", "body"));
+      box.appendChild(c); loadDash(c);
+      continue;
+    }
+    if (a.special !== "hero") {
+      const go = el("button", "go slant"); go.appendChild(el("span", null, (GO[a.special] || "Go") + " ▶"));
+      go.onclick = () => run(a.id);
+      head.appendChild(go);
+    }
+    c.appendChild(head);
     const p = el("p", null, a.desc); p.title = a.desc; c.appendChild(p);
-    for (const o of a.options) {
-      const row = el("div", "opt"); row.appendChild(el("label", null, o.label));
-      if (o.kind === "choice" && o.choices.length <= 3) {
-        const seg = el("div", "seg");
-        const paint = () => seg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === getVal(a.id, o)));
-        for (const [shown, val] of o.choices) {
-          const b = el("button", null, shown); b.dataset.v = String(val);
-          b.onclick = () => { setVal(a.id, o.key, String(val)); paint(); };
-          seg.appendChild(b);
-        }
-        paint(); row.appendChild(seg);
-      } else if (o.kind === "choice") {
-        const s = el("select");
-        for (const [shown, val] of o.choices) { const op = el("option", null, shown); op.value = String(val); s.appendChild(op); }
-        s.value = getVal(a.id, o); s.onchange = () => setVal(a.id, o.key, s.value); row.appendChild(s);
-      } else {
-        const i = el("input"); i.type = "text"; i.value = getVal(a.id, o); i.placeholder = o.hint || "";
-        if (o.kind === "int") i.className = "num";
-        i.oninput = () => setVal(a.id, o.key, i.value); row.appendChild(i);
-        if (o.hint && o.kind === "int") { const hn = el("span", "hint", o.hint); hn.title = o.hint; row.appendChild(hn); }
-      }
-      c.appendChild(row);
+    for (const o of a.options) c.appendChild(optionRow(a, o));
+    if (a.special === "hero") {
+      const bigs = el("div", "bigs");
+      const st = el("button", "start slant"); st.appendChild(el("span", null, "Start ranked ▶")); st.onclick = () => run(a.id);
+      const af = el("button", "after slant"); af.appendChild(el("span", null, "After match")); af.title = "Finish the current match, then stop (F10)";
+      af.onclick = () => api("/api/stop_after", {});
+      bigs.appendChild(st); bigs.appendChild(af); c.appendChild(bigs);
     }
     box.appendChild(c);
   }
   box.scrollLeft = 0;
   markRunning();
+}
+
+function renderLights(list) {
+  const box = $("#lights"); box.innerHTML = "";
+  for (const l of list) { const e = el("span", "light " + l.state, l.label); e.title = l.tip || ""; box.appendChild(e); }
+}
+
+async function loadDash(card) {
+  clearTimeout(DASH_T);
+  if (!document.body.contains(card)) return;
+  const body = card.querySelector(".body"); body.innerHTML = "";
+  let d = {};
+  try { d = await api("/api/dashboard"); } catch (e) { d = {error: "panel server not reachable"}; }
+  if (d.error || d.empty) {
+    body.appendChild(el("p", null, d.error ? "Could not read the ladder history: " + d.error : "No ranked matches recorded yet."));
+  } else {
+    const big = el("div", "big");
+    const rec = el("span", null, d.won + "-" + d.lost); rec.appendChild(el("small", null, "today"));
+    big.appendChild(rec);
+    for (const k of ["mr", "lp"]) {
+      if (!d[k]) continue;
+      const sp = el("span", null, k.toUpperCase() + " " + d[k].now.toLocaleString());
+      sp.appendChild(el("small", null, (d[k].change >= 0 ? "+" : "") + d[k].change));
+      big.appendChild(sp);
+      break;
+    }
+    body.appendChild(big);
+    const t = el("table");
+    for (const r of d.last) {
+      const tr = el("tr");
+      tr.appendChild(el("td", "m", r.time));
+      tr.appendChild(el("td", r.result === "W" ? "w" : r.result === "L" ? "l" : "m", r.result + " " + r.score));
+      tr.appendChild(el("td", null, (r.character || "?") + " vs " + (r.opponent || "?")));
+      const delta = r.mr_delta != null ? "MR " + (r.mr_delta >= 0 ? "+" : "") + r.mr_delta : r.lp_delta != null ? "LP " + (r.lp_delta >= 0 ? "+" : "") + r.lp_delta : "";
+      tr.appendChild(el("td", "m", delta));
+      t.appendChild(tr);
+    }
+    body.appendChild(t);
+  }
+  DASH_T = setTimeout(() => loadDash(card), 8000);
 }
 function markRunning() {
   document.querySelectorAll(".card").forEach(c => c.classList.toggle("running", RUNNING && c.dataset.id === (INIT.current || "")));
@@ -259,7 +355,7 @@ async function poll(once) {
     st.querySelector(".txt").textContent = r.stopping ? "Stopping" : RUNNING ? "Running" : "Ready";
     st.title = r.status;
     $("#running").textContent = RUNNING ? r.status.replace("RUNNING: ", "") + " · " + r.command : "";
-    $("#video").textContent = "Video " + r.video;
+    renderLights(r.lights || []);
     $("#ans").classList.toggle("waiting", !!r.prompt);
     $("#stop").classList.toggle("idle", !RUNNING);
     $("#after").classList.toggle("idle", !RUNNING);
@@ -283,7 +379,6 @@ async function main() {
   $("#stop").onclick = () => api("/api/stop", {});
   $("#after").onclick = () => api("/api/stop_after", {});
   $("#arrange").onclick = () => run("arrange");
-  $("#video").onclick = () => run("video");
   $("#clear").onclick = () => { $("#log").innerHTML = ""; };
   $("#answer").addEventListener("keydown", e => { if (e.key === "Enter") send($("#answer").value); });
   document.querySelectorAll("#ans button").forEach(b => b.onclick = () => send(b.dataset.v != null ? b.dataset.v : $("#answer").value));
