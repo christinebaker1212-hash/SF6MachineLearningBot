@@ -106,7 +106,7 @@ ACTIONS: list[Action] = [
     Action("combo_record", "combos", "Record my combo",
            "Training Mode, you play P1, dummy guard AFTER FIRST HIT. F9, then do the combo: it joins the bot's list.",
            [Option("hit", "First hit", choices=[("Normal", "normal"), ("Counter hit", "counter_hit"),
-                                                ("Punish counter", "punish_counter"), ("All", "all")],
+                                                ("Punish counter", "punish_counter"), ("Any situation", "all")],
                    default="normal"),
             Option("player", "You play", choices=[("P1", "p1"), ("P2", "p2")], default="p1")], menu="K 10"),
     Action("combos_import", "combos", "Community combos",

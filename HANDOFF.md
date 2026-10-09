@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.51.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (801).*
+*State as of 2026-10-09: code version **0.51.1**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (802).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.51.1 is pushed**: a combo recorded as "all" = usable in any situation (any hit type, any position).
 
 **State:** **0.51.0 is pushed** (CLAUDE.md "0.51.0"): the user's own combos: `combo-record` (menu K 10, panel COMBOS -> Record my combo), F9 then the combo; it joins the combo list as a true combo for the chosen hit type(s). Not run in game.
 

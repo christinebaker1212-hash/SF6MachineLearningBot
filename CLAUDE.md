@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.51.1 (2026-10-09): a combo recorded as "all" = "this combo can be used in any situation" (user): any hit type and any position.**
 - **0.51.0 (2026-10-09): record your own combos (`combo-record`, menu K 10, panel COMBOS -> Record my combo): F9, then the combo; it joins the bot's combo list as a true combo for the chosen hit type(s); a known combo is skipped unless it was skipped (F10) in the lab, then yours replaces it.**
 - **0.50.0 (2026-10-09): corner Drive Impacts: with the back to the wall and 3 Drive bars or fewer the bot keeps its Drive for the DI-back, walks out of the corner, jumps out when burned out, and never sends a DI-back that would land after the hit.**
 - **0.49.1 (2026-10-09): multi-hit moves blocked hit by hit (Terry's Quick Burn: the overhead second hit is stood for); no "my turn" after a hit with another hit coming.**
@@ -5364,6 +5365,9 @@ offline matches. Perhaps merge them with the controller overlay?")
 - **Hit type:** the first hit's kind (hits.py: x1.0 normal, x1.2 counter, + a Drive drop = punish counter) must match the
   chosen type; a counter hit passes for punish counter (the dummy's infinite Drive hides the drop), noted; "all" takes
   any and counts the combo for all three.
+- **0.51.1 (user: 'By all, I mean "This combo can be used in any situation."'):** "all" also drops the position: the
+  combo is stored as a midscreen route (used everywhere; a corner route is only used with the opponent cornered), even
+  when recorded with the dummy in the corner. Menu / panel say "Any situation".
 - **Stored** in the combo lab file `datasets/combo_lab/<Character>.json` as a verified TRUE combo: `source: manual`,
   `guard: manual` (`combo_lab.is_true` accepts it), `hit_types`, `moves`, measured damage / Drive / Super, success rate
   `MANUAL_RATE` 0.75 (ESTIMATE; the matches' own results move it). The lab's parser and planner must read it

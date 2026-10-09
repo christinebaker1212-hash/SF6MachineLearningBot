@@ -151,7 +151,8 @@ echo  Record my combo: Training Mode, you play P1, dummy standing, Guard = AFTER
 echo  F9 = show me a combo (get in position, then do it; nothing before your first button counts).
 echo  F9 again for the next one, F8 to stop. A combo the bot already knows is skipped, unless you
 echo  skipped it in the combo lab (F10) before: then yours replaces it.
-echo    1  Normal hit   2  Counter hit   3  Punish counter   4  All (set the dummy's counter hit to match)
+echo    1  Normal hit   2  Counter hit   3  Punish counter   (set the dummy's counter hit to match)
+echo    4  Any situation: any hit type, midscreen or corner
 set "LH="
 set /p LH=First hit: 
 if "%LH%"=="1" (%BOT% combo-record --hit-type normal & goto done)

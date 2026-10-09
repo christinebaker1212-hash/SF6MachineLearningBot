@@ -264,6 +264,10 @@ def analyse(rows: list[dict], atk: str, dfn: str, character: str, ds_root: Path,
         note = "counter hit read as punish counter (the dummy's infinite Drive hides the Drive drop)"
     last = rows[-1]
     position = "corner" if cornered(last.get(dfn) or {}, last.get(atk) or {}) else "midscreen"
+    if set(hit_types) == set(HIT_TYPES):
+        # 0.51.1 (user: 'By all, I mean "This combo can be used in any situation."'): any hit type AND any position (a
+        # "midscreen" route is used everywhere, a "corner" one only with the opponent cornered: route_book.choose)
+        position = "midscreen"
     catalog = None
     p = Path(ds_root) / "catalog" / f"{file_stem(character)}_movelist.json"
     if p.exists():

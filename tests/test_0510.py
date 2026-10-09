@@ -148,3 +148,18 @@ def test_the_live_loop_arms_on_f9_and_records_one_combo(ds):
     from sf6bot import clock
     res = cr._loop(sess, q, WD, 0, "p1", "p2", ds, ["normal"], None, [], clock.now() + 5)
     assert len(res) == 1 and res[0]["status"] == "added" and res[0]["route"] == "2MK > 623HP"
+
+
+def test_all_means_any_situation_including_the_corner(ds):
+    rows = _combo()
+    for r in rows:                                       # recorded with the dummy in the corner
+        r["p1"]["x"], r["p2"]["x"] = 5.9, 7.0
+    res = cr.analyse(rows, "p1", "p2", "Ryu", ds, ["normal"])
+    assert res["position"] == "corner"
+    rows2 = _combo()
+    for r in rows2:
+        r["p1"]["x"], r["p2"]["x"] = -5.9, -7.0
+    res = cr.analyse(rows2, "p1", "p2", "Ryu", ds, cr.parse_hit_types("all"))
+    assert res["position"] == "midscreen" and res["status"] == "added"
+    book = [e for e in route_book.build("Ryu", ds, mined_fallback=False) if e["position"] == "midscreen"]
+    assert sorted(e["hit_type"] for e in book) == ["counter_hit", "normal", "punish_counter"]

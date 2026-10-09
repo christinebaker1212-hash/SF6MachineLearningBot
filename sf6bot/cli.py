@@ -930,8 +930,8 @@ def main(argv=None):
                                             "join its combo list (the bot presses nothing)")
     p.add_argument("--hit-type", dest="hit_type", default="normal",
                    choices=["normal", "counter_hit", "punish_counter", "all"],
-                   help="what the combo's first hit must be (set the dummy's counter-hit setting to match); all = it "
-                        "works on any hit and is used for all three")
+                   help="what the combo's first hit must be (set the dummy's counter-hit setting to match); all = the "
+                        "combo can be used in any situation (any hit type, midscreen or corner)")
     p.add_argument("--player", choices=["p1", "p2"], default="p1", help="the side you play")
     p.add_argument("--seconds", type=float, default=3 * 3600.0)
     p.set_defaults(fn=cmd_combo_record)
