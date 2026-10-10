@@ -270,6 +270,15 @@ function renderCards() {
     c.dataset.id = a.id;
     const head = el("div", "head");
     const h = el("h3", null, a.title); h.title = a.title; head.appendChild(h);
+    if (a.special === "my_combos") {
+      const go = el("button", "go slant"); go.appendChild(el("span", null, "Refresh"));
+      go.onclick = () => loadCombos(c); head.appendChild(go); c.appendChild(head);
+      const p = el("p", null, a.desc); p.title = a.desc; c.appendChild(p);
+      c.appendChild(el("div", "body"));
+      c.classList.add("dash");
+      box.appendChild(c); loadCombos(c);
+      continue;
+    }
     if (a.special === "dashboard") {
       const go = el("button", "go slant"); go.appendChild(el("span", null, "Refresh"));
       go.onclick = () => loadDash(c); head.appendChild(go); c.appendChild(head);
@@ -343,6 +352,30 @@ async function loadDash(card) {
     body.appendChild(t);
   }
   DASH_T = setTimeout(() => loadDash(card), 8000);
+}
+async function loadCombos(card) {
+  const body = card.querySelector(".body"); body.innerHTML = "";
+  let d = {};
+  try { d = await api("/api/my_combos"); } catch (e) { d = {error: "panel server not reachable"}; }
+  if (d.error || !(d.combos || []).length) {
+    body.appendChild(el("p", null, d.error ? "Could not read the combo list: " + d.error : "No recorded combos yet: Record my combo first."));
+    return;
+  }
+  const t = el("table");
+  for (const x of d.combos) {
+    const tr = el("tr");
+    const td = el("td");
+    const b = el("button", "go slant"); b.appendChild(el("span", null, "Play ▶"));
+    b.title = "Pick this combo; then F10 in the game plays it";
+    b.onclick = () => { api("/api/run", {id: "my_combos", values: {character: x.character, key: x.key}}).then(() => poll(true)); };
+    td.appendChild(b); tr.appendChild(td);
+    tr.appendChild(el("td", "m", x.character + " #" + x.index));
+    const r = el("td", null, x.route); r.title = x.route + " (" + x.position + ", " + (x.hit_types || []).join(", ").replace(/_/g, " ") + ")";
+    tr.appendChild(r);
+    tr.appendChild(el("td", "m", x.damage ? String(x.damage) : ""));
+    t.appendChild(tr);
+  }
+  body.appendChild(t);
 }
 function markRunning() {
   document.querySelectorAll(".card").forEach(c => c.classList.toggle("running", RUNNING && c.dataset.id === (INIT.current || "")));

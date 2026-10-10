@@ -231,6 +231,19 @@ class Panel:
         return {"day": day, "won": won, "lost": len(fin) - won, "unfinished": len(today) - len(fin),
                 "mr": first_last("mr"), "lp": first_last("lp"), "last": last}
 
+    def my_combos(self) -> dict:
+        """0.52.0: the combos the user recorded (combo_play.recorded), for the COMBOS tab's PLAY buttons."""
+        from .combo_play import recorded
+        try:
+            root = Path((self._cfg().get("datasets") or {}).get("root", "datasets"))
+            if not root.is_absolute():
+                root = self.root / root
+            items = recorded(root)
+        except Exception as e:                       # noqa: BLE001
+            return {"error": str(e)}
+        return {"combos": [{k: x.get(k) for k in ("character", "index", "key", "route", "position", "hit_types", "damage")}
+                           for x in items]}
+
     def init(self) -> dict:
         return {"version": __version__, "tab": self.state.get("tab", "fight"), "values": self.state.get("values", {}),
                 "tabs": [{"label": l, "key": k, "color": TAB_COLORS[k]} for l, k in TABS],
@@ -460,6 +473,8 @@ def make_handler(panel: Panel):
                 self._json(panel.init())
             elif u.path == "/api/dashboard":
                 self._json(panel.dashboard())
+            elif u.path == "/api/my_combos":
+                self._json(panel.my_combos())
             elif u.path == "/api/poll":
                 try:
                     since = int((parse_qs(u.query).get("since") or ["0"])[0] or 0)

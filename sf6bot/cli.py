@@ -283,6 +283,27 @@ def cmd_combo_record(args, cfg):
     _print_report(s)
 
 
+def cmd_combo_play(args, cfg):
+    """0.52.0: play back a combo the user recorded; F10 plays it (Training Mode, the bot as P1)."""
+    from pathlib import Path
+    from .combo_play import describe, pick, print_list, recorded, run
+    items = recorded(Path(cfg.get("datasets", {}).get("root", "datasets")), args.character)
+    item = None if args.list else pick(items, args.character, args.index, args.key, args.route)
+    if item is None:
+        if not args.list and (args.index is not None or args.key or args.route):
+            print("That combo was not found among your recorded combos.")
+        print_list(items)
+        if not args.list and items and args.index is None and not args.key and not args.route:
+            print("Pick one: --character NAME --index N (or the panel's COMBOS -> My combos, PLAY).")
+        return
+    cfg["recording"]["record_video"] = False
+    with _session(args, cfg, "combo_play") as s:
+        res = run(s, cfg, item, seconds=args.seconds)
+    ok = sum(1 for r in res if r.get("success"))
+    print(f"{describe(item)}: played {len(res)} time(s), every move hit {ok} time(s)")
+    _print_report(s)
+
+
 def cmd_combo_lab(args, cfg):
     from .combo_lab import run_combo_lab
     with _session(args, cfg, "combo_lab") as s:
@@ -935,6 +956,16 @@ def main(argv=None):
     p.add_argument("--player", choices=["p1", "p2"], default="p1", help="the side you play")
     p.add_argument("--seconds", type=float, default=3 * 3600.0)
     p.set_defaults(fn=cmd_combo_record)
+
+    p = sub.add_parser("combo-play", help="play back a combo you recorded (combo-record): pick one, then F10 in "
+                                          "Training Mode plays it (the bot as P1); F10 again plays it again")
+    p.add_argument("--list", action="store_true", help="list your recorded combos and stop")
+    p.add_argument("--character", default=None, help="the combo's character (the list is numbered per character)")
+    p.add_argument("--index", type=int, default=None, help="the combo's number in that character's list")
+    p.add_argument("--key", default=None, help="the combo's key in the combo lab file (the panel uses it)")
+    p.add_argument("--route", default=None, help="the combo's text (exact, else the first containing it)")
+    p.add_argument("--seconds", type=float, default=3 * 3600.0)
+    p.set_defaults(fn=cmd_combo_play)
 
     p = sub.add_parser("framedata-import",
                        help="import Capcom frame data pages saved from your browser (no game needed)")

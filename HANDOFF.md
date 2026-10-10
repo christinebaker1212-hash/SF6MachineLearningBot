@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.51.1**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (802).*
+*State as of 2026-10-09: code version **0.52.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (808).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.52.0 is pushed** (CLAUDE.md "0.52.0"): combo playback: `combo-play` (menu K 11, panel COMBOS -> My combos, PLAY per combo); pick a recorded combo, F10 in Training Mode makes the bot (P1) do it, F10 again repeats. Not run in game.
 
 **State:** **0.51.1 is pushed**: a combo recorded as "all" = usable in any situation (any hit type, any position).
 

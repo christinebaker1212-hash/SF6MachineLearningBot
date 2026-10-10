@@ -127,6 +127,7 @@ echo    7  Community routes again, including ones that already passed or failed 
 echo    8  Routes found in recordings (replays and matches; built by B = train)
 echo    9  Combos the bot joined from its true combos (optional: matches use them anyway)
 echo   10  RECORD MY COMBO: you play P1, the bot watches. F9, then do a combo: it joins the bot's list
+echo   11  PLAY MY COMBO: pick one of your recorded combos; F10 makes the bot (P1) do it
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)
@@ -138,6 +139,7 @@ if "%LC%"=="7" (%BOT% combo-lab --again & goto done)
 if "%LC%"=="8" (%BOT% combo-lab --source mined & goto done)
 if "%LC%"=="9" (%BOT% combo-lab --source composed & goto done)
 if "%LC%"=="10" goto comborecord
+if "%LC%"=="11" goto comboplay
 if "%LC%"=="4" (
     set "LT="
     set /p LT=Text: 
@@ -160,6 +162,20 @@ if "%LH%"=="2" (%BOT% combo-record --hit-type counter_hit & goto done)
 if "%LH%"=="3" (%BOT% combo-record --hit-type punish_counter & goto done)
 if "%LH%"=="4" (%BOT% combo-record --hit-type all & goto done)
 goto menu
+
+:comboplay
+echo.
+%BOT% combo-play --list
+echo  Training Mode, that character as P1. After you pick, F10 = play it (reset, walk to where you
+echo  started it, then the combo); F10 again = again; F8 = stop.
+set "PC="
+set /p PC=Character (as listed): 
+if "%PC%"=="" goto menu
+set "PN="
+set /p PN=Number: 
+if "%PN%"=="" goto menu
+%BOT% combo-play --character "%PC%" --index %PN%
+goto done
 
 :combolab_only
 if "%LT%"=="" goto menu

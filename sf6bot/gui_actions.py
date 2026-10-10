@@ -27,7 +27,7 @@ class Action:
     title: str
     desc: str
     options: list = field(default_factory=list)
-    special: str | None = None            # share | open_runs | torch | arrange | admin | hero | dashboard
+    special: str | None = None            # share | open_runs | torch | arrange | admin | hero | dashboard | my_combos
     menu: str = ""                         # the menu.bat letter it replaces (for the docs)
     advanced: bool = False                 # 0.49.0: shown only when the TOOLS tab's Advanced drawer is open
 
@@ -109,6 +109,9 @@ ACTIONS: list[Action] = [
                                                 ("Punish counter", "punish_counter"), ("Any situation", "all")],
                    default="normal"),
             Option("player", "You play", choices=[("P1", "p1"), ("P2", "p2")], default="p1")], menu="K 10"),
+    Action("my_combos", "combos", "My combos",
+           "Your recorded combos. PLAY picks one; then in Training Mode (that character as P1) F10 makes the bot do it, "
+           "F10 again repeats it.", special="my_combos"),
     Action("combos_import", "combos", "Community combos",
            "SuperCombo Combos pages for every character (saved from your browser if the wiki blocks).", menu="T A"),
     Action("framedata", "combos", "Capcom frame data", "Pages saved from your browser (Ctrl+S).", menu="T F"),
@@ -270,6 +273,12 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         if (v.get("player") or "p1") == "p2":
             args_ += ["--player", "p2"]
         return [one(*args_)]
+    if action_id == "my_combos":
+        # 0.52.0: a combo's PLAY button (character + its key in the lab file); without one, the list goes to the log
+        key, ch = str(v.get("key") or ""), str(v.get("character") or "")
+        if key and ch:
+            return [one("combo-play", "--character", ch, "--key", key)]
+        return [one("combo-play", "--list")]
     if action_id == "combos_import":
         return [one("combos-import")]
     if action_id == "framedata":

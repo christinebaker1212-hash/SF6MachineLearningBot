@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.52.0 (2026-10-09): play back your recorded combos (`combo-play`, menu K 11, panel COMBOS -> My combos, a PLAY button per combo): pick one, then F10 in Training Mode makes the bot (P1) do it; F10 again repeats it.**
 - **0.51.1 (2026-10-09): a combo recorded as "all" = "this combo can be used in any situation" (user): any hit type and any position.**
 - **0.51.0 (2026-10-09): record your own combos (`combo-record`, menu K 10, panel COMBOS -> Record my combo): F9, then the combo; it joins the bot's combo list as a true combo for the chosen hit type(s); a known combo is skipped unless it was skipped (F10) in the lab, then yours replaces it.**
 - **0.50.0 (2026-10-09): corner Drive Impacts: with the back to the wall and 3 Drive bars or fewer the bot keeps its Drive for the DI-back, walks out of the corner, jumps out when burned out, and never sends a DI-back that would land after the hit.**
@@ -315,6 +316,7 @@ python -m sf6bot --mock --no-overlay acceptance   # MOCK pipeline run, writes ru
 | `report runs/<dir>` | Rebuild a report |
 | `release-all` | Send key-up for all bound keys, for a stuck key after a hard kill |
 | `combo-record --hit-type normal\|counter_hit\|punish_counter\|all` | Show the bot your own combos (F9, then the combo) |
+| `combo-play --list` / `--character NAME --index N` | Play back a combo you recorded: F10 plays it (Training Mode, the bot as P1) |
 
 ## M1 acceptance procedure (user, on the game PC)
 1. **Game settings:**
@@ -5385,6 +5387,32 @@ offline matches. Perhaps merge them with the controller overlay?")
 - Tests `tests/test_0510.py` (the walk-in ignored, a true combo added and in the book, the same combo skipped, "all" as
   three book entries, an F10 skip overwritten, a gap rejected, the hit type checked, PDR / DRC notation, the live loop
   from F9). Not run in game.
+
+## 0.52.0: playback of the user's recorded combos (user, 2026-10-09)
+- User: "a combo playback button - choosing any combos for any characters that I've recorded, and adding a playback
+  option for each one ... triggered by an F key, perhaps F10 since it won't be in use"; "Once selected, playback is
+  triggered with F10."
+- `sf6bot combo-play` (`sf6bot/combo_play.py`):
+  - `--list` shows every combo recorded with `combo-record` (`source: manual` in `datasets/combo_lab/<Character>.json`),
+    numbered per character in the order recorded
+  - one is chosen with `--character NAME --index N` (or `--key KEY`, `--route TEXT`); nothing is pressed until F10
+- **F10** (`safety.skip_key`, the combo lab's skip; nothing else reads it outside the lab and ranked) makes the bot, as P1
+  on the keyboard in Training Mode, do the following:
+  - reset to the combo's position ("/" with the lab's hold-direction resets: midscreen or corner)
+  - walk to contact, then to the spacing the user started from (`start_distance`, now stored by combo-record at the
+    first button's line; recordings from 0.51.x have none: contact)
+  - do the route's setup (Denjin Charge) and perform it with the lab's executor (`combo_lab.perform_route`, every input on
+    the game's clock; input delay calibrated over the plays like the lab's)
+  - print what happened ("all moves came out and hit", or the move it stopped at and why)
+- F10 again plays it again; an F10 pressed during a play is not queued; F8 / STOP ends. The first play learns the idle /
+  movement ids first (a few seconds of resets, as the lab).
+- P1 must be the combo's character (from the game state); otherwise F10 says so and plays nothing.
+- Playback changes nothing: not the combo list, not the success rates, not what the fighter learned.
+- Panel: COMBOS -> "My combos" lists every recorded combo with a PLAY button (character, number, route, damage;
+  `/api/my_combos`); PLAY starts `combo-play` for that combo, then F10 in the game. Another PLAY while one runs needs STOP
+  first. Menu: K -> 11 lists them, then asks for the character and the number.
+- Tests `tests/test_0520.py` (the list, picking, the plan; F10 plays and plays again, a press during a play not queued, the
+  reset and the walk to the start spacing; another character as P1 plays nothing; the panel and CLI). Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

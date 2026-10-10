@@ -205,7 +205,8 @@ def save(ds_root: Path, character: str, route: str, position: str, hit_types: li
         "drive_spent": measured.get("drive", 0), "super_spent": measured.get("super", 0),
         "success_rate_final_timing": MANUAL_RATE, "successes": 1, "tries": 1,
         "recorded_by_user": time.strftime("%Y-%m-%d %H:%M:%S"), "first_hit": measured.get("first_hit"),
-        "mined_route": measured.get("mined_route"), "sf6bot_version": sf6bot.__version__}
+        "mined_route": measured.get("mined_route"), "start_distance": measured.get("start_distance"),
+        "sf6bot_version": sf6bot.__version__}
     _write(ds_root, character, lab)
     return {"status": status, "why": "", "key": key, "moves": list(moves)}
 
@@ -235,7 +236,11 @@ def analyse(rows: list[dict], atk: str, dfn: str, character: str, ds_root: Path,
     i0 = first_button(rows, atk)
     if i0 is None:
         return {"status": "rejected", "why": "no button pressed after F9"}
+    b0 = rows[i0]
     rows = rows[max(0, i0 - 1):]
+    # 0.52.0: where the user started (the first button's line): combo playback walks to the same spacing
+    bx, dx = num((b0.get(atk) or {}).get("x")), num((b0.get(dfn) or {}).get("x"))
+    start_distance = round(abs(dx - bx), 3) if bx is not None and dx is not None else None
     names, totals = _names(character, Path(ds_root), fcfg)
     found = mine(rows, atk, dfn, names, totals)
     if not found:
@@ -277,7 +282,8 @@ def analyse(rows: list[dict], atk: str, dfn: str, character: str, ds_root: Path,
             catalog = None
     res = save(Path(ds_root), character, route, position, hit_types,
                {"damage": c.get("damage"), "drive": c.get("drive", 0), "super": c.get("super", 0), "first_hit": kind,
-                "mined_route": c.get("route") if "route" in c else " ".join(c["moves"])}, capcom, catalog)
+                "mined_route": c.get("route") if "route" in c else " ".join(c["moves"]),
+                "start_distance": start_distance}, capcom, catalog)
     res.update(route=route, position=position, damage=c.get("damage"), first_hit=kind, note=note)
     if res["status"] in ("added", "overwrote_skip", "extended"):
         inside = contains_skipped(Path(ds_root), character, res.get("moves") or [])
