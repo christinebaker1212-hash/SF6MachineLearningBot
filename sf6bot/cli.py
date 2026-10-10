@@ -529,6 +529,13 @@ def cmd_sf6lab_import(args, cfg):
     from pathlib import Path
     from . import sf6lab
     root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    if getattr(args, "auto", False):
+        # 0.53.1: what is due only (pages older than a week, a newer reader, new Capcom data); the fight sessions run this
+        res = sf6lab.auto_update(root)
+        n = sum(v.get("combos", 0) for v in res["parsed"].values())
+        if res["parsed"]:
+            print(f"SF6 Lab: {n} combos read for {len(res['parsed'])} characters.")
+        return
     if not args.no_fetch:
         print(f"Downloading SF6 Lab's combo pages (one every {sf6lab.DELAY_S:.0f} s; pages saved in the last "
               f"{sf6lab.MAX_AGE_DAYS} days are kept{' unless --refresh' if not args.refresh else ''}) ...")
@@ -1061,6 +1068,8 @@ def main(argv=None):
                                              "(downloaded politely, with the site owner's permission)")
     p.add_argument("--refresh", action="store_true", help="download every page again")
     p.add_argument("--no-fetch", action="store_true", help="only re-read the pages already saved")
+    p.add_argument("--auto", action="store_true",
+                   help="only what is due (pages older than a week, new reader / Capcom data); quiet when up to date")
     p.set_defaults(fn=cmd_sf6lab_import)
 
     p = sub.add_parser("combos-import", help="community combo routes for every character (SuperCombo, every tab)")

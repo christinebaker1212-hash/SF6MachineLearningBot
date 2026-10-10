@@ -66,6 +66,10 @@ input:
 # 0.18.8 / 0.18.9: ranked only. After a match the result screen's only option is "Return to Previous Mode" (user): F
 # (input.menu_keys.A) from first_s after the match ended, then every retry_every_s, until the game reports no battle
 # (back on Fighting Ground, which keeps searching by itself) or a new battle loads. Nothing is pressed outside a battle.
+# 0.53.1: SF6 Lab (sf6-lab.net, the site owner's permission): combos and okizeme, updated on their own when due (pages
+# older than a week, a newer reader, new Capcom data) in a low-priority background process at each fight session's start
+sf6lab:
+  auto: true
 result_menu:
   enabled: true
   first_s: 5          # seconds after the match ended (pressing F during the win pose / quote only skips them)

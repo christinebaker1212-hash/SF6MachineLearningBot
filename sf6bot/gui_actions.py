@@ -116,7 +116,8 @@ ACTIONS: list[Action] = [
     Action("combos_import", "combos", "Community combos",
            "SuperCombo Combos pages for every character (saved from your browser if the wiki blocks).", menu="T A"),
     Action("sf6lab", "combos", "SF6 Lab combos & oki",
-           "sf6-lab.net (with the site owner's permission): combos for the lab, okizeme after knockdowns.",
+           "sf6-lab.net (with the site owner's permission): combos for the lab, okizeme after knockdowns. Automatic: every "
+           "fight session updates it when due; this is only to force a refresh.",
            [Option("refresh", "Pages", choices=[("New only", "new"), ("Download all again", "all")], default="new")],
            menu="T SL"),
     Action("framedata", "combos", "Capcom frame data", "Pages saved from your browser (Ctrl+S).", menu="T F"),

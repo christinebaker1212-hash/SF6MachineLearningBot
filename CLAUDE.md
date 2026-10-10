@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.53.1 (2026-10-10): SF6 Lab updates itself, no user step: every fight session (ranked included) downloads / re-reads what is due in a low-priority background process (the next match uses it); update.bat and the combo lab's SF6 Lab source do it too; a refused or failed download keeps the old data and waits.**
 - **0.53.0 (2026-10-10): SF6 Lab (sf6-lab.net, the site owner's permission): `sf6lab-import` (menu T SL, panel COMBOS -> SF6 Lab combos & oki) takes every character's combo routes and okizeme; characters without combo lab results use those routes (before mined ones), K 12 tests them, and after a listed knockdown ender the bot dashes in and meaties as the site says.**
 - **0.52.0 (2026-10-09): play back your recorded combos (`combo-play`, menu K 11, panel COMBOS -> My combos, a PLAY button per combo): pick one, then F10 in Training Mode makes the bot (P1) do it; F10 again repeats it.**
 - **0.51.1 (2026-10-09): a combo recorded as "all" = "this combo can be used in any situation" (user): any hit type and any position.**
@@ -318,7 +319,7 @@ python -m sf6bot --mock --no-overlay acceptance   # MOCK pipeline run, writes ru
 | `release-all` | Send key-up for all bound keys, for a stuck key after a hard kill |
 | `combo-record --hit-type normal\|counter_hit\|punish_counter\|all` | Show the bot your own combos (F9, then the combo) |
 | `combo-play --list` / `--character NAME --index N` | Play back a combo you recorded: F10 plays it (Training Mode, the bot as P1) |
-| `sf6lab-import [--refresh] [--no-fetch]` | SF6 Lab combo routes and okizeme for every character (sf6-lab.net, the owner's permission; kept under datasets/sf6lab) |
+| `sf6lab-import [--auto] [--refresh] [--no-fetch]` | SF6 Lab combo routes and okizeme for every character (sf6-lab.net, the owner's permission; kept under datasets/sf6lab). Automatic since 0.53.1; `--auto` = only what is due |
 
 ## M1 acceptance procedure (user, on the game PC)
 1. **Game settings:**
@@ -5456,6 +5457,25 @@ offline matches. Perhaps merge them with the controller overlay?")
   - Ryu's 4 enders: H Shoryuken +37 (dash, Solar Plexus Strike meaty), L / M / Aerial Tatsumaki.
 - Summary `setplay` {knockdowns, dashes, meaty_chosen, by_ender}; `combo_source` {"sf6lab": n}.
 - Tests `tests/test_0530.py` (synthetic pages; the real Ryu Capcom data). Nothing here has run in game.
+
+## 0.53.1: SF6 Lab updates itself (user, 2026-10-10)
+- User: "I'd rather you automate the entire process with no user interaction."
+- **What is due** (`sf6lab.due`): a page not saved or older than 7 days -> download; a saved page whose result is
+  missing, from an older reader (`IMPORT_V`) or made from other files (the page's and the Capcom data's size and time,
+  `from_files`) -> read again, no download. Characters without Capcom data (menu F) are left out.
+- **Where it runs, with nothing to press:**
+  - every fight session (ranked, Versus Human, vs CPU; not MOCK): when something is due, `sf6bot sf6lab-import --auto`
+    starts as a separate process at below-normal priority (`BackgroundUpdate`, like the background retrain; log
+    `sf6lab_update.log` in the run). The route book and the okizeme are read at each match's setup, so the match after
+    it finishes uses the new data. Narrated when it starts and ends. `configs/default.yaml: sf6lab.auto` (true).
+  - update.bat, after the packages (only what is due, so after an update the data is ready before ranked starts)
+  - the combo lab with source SF6 Lab (K 12) or both, before it reads the routes
+- **Failures:** the old data stays in use. After a failed download the automatic update waits 6 h; after the site
+  refuses (HTTP 403 / 429 / 503) it stops at once (no further page that time) and waits 24 h (`_state.json`). Never worked
+  around. Results and pages are written atomically (a match setup may read them meanwhile).
+- The manual command (menu T SL, panel) stays, only to force a full refresh.
+- Tests `tests/test_0531.py` (due / re-read / refusal / failure back-off, the background process, the CLI). On the real
+  saved pages: 0.53.0's results are re-read (no reader version) without a download, then nothing is due.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

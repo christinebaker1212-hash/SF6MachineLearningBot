@@ -5713,6 +5713,20 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
     retrainer = Retrainer(pc.get("retrain_every", 20) if (versus == "ranked" or pc.get("retrain_in_all_modes"))
                           else 0, sess.recorder.dir, enabled=not sess.mock and brain is not None,
                           character=fcfg.get("character"))
+    # 0.53.1 (user: "automate the entire process with no user interaction"): SF6 Lab's combos and okizeme are updated
+    # when due, in a separate low-priority process; the route book and the okizeme are read at each match's setup
+    sf6lab_bg = None
+    if not sess.mock and (cfg.get("sf6lab") or {}).get("auto", True):
+        try:
+            from . import sf6lab as sl_
+            if sl_.needs_update(Path(cfg.get("datasets", {}).get("root", "datasets"))):
+                sf6lab_bg = sl_.BackgroundUpdate(sess.recorder.dir)
+                msg_ = sf6lab_bg.start()
+                if msg_:
+                    print(msg_)
+                    sess.narrate(msg_, source="scripted", kind="detail")
+        except Exception as e:                    # noqa: BLE001 - optional data, never stops a session
+            print(f"(SF6 Lab update not started: {e})")
     # 0.18.8: ranked runs on their own between matches: the result screen's first option (rematch, or back to Fighting
     # Ground) is confirmed from the game state; nothing is ever pressed outside a battle (result_menu.py)
     from .result_menu import MenuWatch, ResultMenu
@@ -6142,6 +6156,11 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                                    f"bot={keys()[0]}, {who}, learned policy" if brain else
                                                    f"bot={keys()[0]}, {who}, scripted rules"))
             done.append(summary)
+            if sf6lab_bg is not None:
+                m_ = sf6lab_bg.poll()
+                if m_:
+                    print(m_)
+                    sess.narrate(m_, source="scripted", kind="detail")
             msg_ = retrainer.match_done()
             if msg_:
                 print("  " + msg_)

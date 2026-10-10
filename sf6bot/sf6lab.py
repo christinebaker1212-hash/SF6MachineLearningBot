@@ -42,6 +42,10 @@ PAGE = SITE + "/en/fighters/{slug}/combo"
 DELAY_S = 3.0                 # between downloads (polite, one at a time)
 MAX_AGE_DAYS = 7              # a saved page older than this is downloaded again
 SOURCE = "sf6-lab.net (Iori), with the site owner's permission (user, 2026-10-09)"
+IMPORT_V = 1                  # the reader's version: a change re-reads the saved pages (no download)
+REFUSED_CODES = (403, 429, 503)
+RETRY_FAILED_H = 6.0          # 0.53.1: after a failed download, the automatic update waits this long
+RETRY_REFUSED_H = 24.0        # ... and this long after the site refused
 # the site's slugs are the same as Capcom's (framedata.SLUGS); new characters are not on it yet
 SLUGS = [s for s in fd.SLUGS if s not in fd.NEW_SLUGS]
 
@@ -88,6 +92,12 @@ def fetch_all(ds_root: Path, slugs: list[str] | None = None, refresh: bool = Fal
         try:
             text = get(PAGE.format(slug=slug))
         except Exception as e:                                   # noqa: BLE001 - one failed page stops nothing
+            code = getattr(e, "code", None)
+            if code in REFUSED_CODES:
+                # 0.53.1: the site refused (rate limit, block): stop here, never work around it; auto_update backs off
+                status[slug] = f"refused: HTTP {code}"
+                log(f"  {fd.SLUGS[slug]}: the site refused (HTTP {code}): no more downloads this time")
+                break
             status[slug] = f"failed: {e}"
             log(f"  {fd.SLUGS[slug]}: download failed ({e})")
             fetched += 1
@@ -97,7 +107,9 @@ def fetch_all(ds_root: Path, slugs: list[str] | None = None, refresh: bool = Fal
             status[slug] = "no combo routes on the page"
             log(f"  {fd.SLUGS[slug]}: the page has no combo routes (layout changed?): not saved")
             continue
-        p.write_text(text, encoding="utf-8")
+        tmp = p.with_suffix(".html.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(p)
         status[slug] = "downloaded"
         log(f"  {fd.SLUGS[slug]}: downloaded ({i + 1} of {len(todo)})")
     return status
@@ -576,14 +588,177 @@ def import_all(ds_root: Path, slugs: list[str] | None = None, log=print) -> dict
             continue
         page = parse_page(p.read_text(encoding="utf-8"))
         data = combos_for(page, capcom, name)
-        data.update(source=SOURCE, page_updated=page["updated"], imported_by=sf6bot.__version__,
+        data.update(source=SOURCE, page_updated=page["updated"], imported_by=sf6bot.__version__, import_v=IMPORT_V,
+                    from_files=_sigs(root, slug),
                     oki=oki_book(page, capcom))
-        out_path(root, slug).write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
+        out = out_path(root, slug)                          # atomic: a match setup may read it meanwhile (0.53.1)
+        tmp = out.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(out)
         summary[name] = {"combos": len(data["combos"]), "dropped": len(data["dropped"]),
                          "setplay_lines": data["setplay_lines"], "oki_enders": len(data["oki"])}
         log(f"  {name}: {len(data['combos'])} combos ({len(data['dropped'])} not readable), "
             f"okizeme for {len(data['oki'])} enders")
     return summary
+
+
+
+# ---- 0.53.1: automatic, no user interaction ------------------------------------------------------------------------
+# User, 2026-10-10: "I'd rather you automate the entire process with no user interaction." Every fight session (and
+# update.bat, and the combo lab's SF6 Lab source) checks what is due and updates it: fight sessions in a separate process
+# at low priority (BackgroundUpdate), so the match loop never waits; the route book and the okizeme are read from disk at
+# each match's setup, so the next match uses the new data.
+
+def _state_path(ds_root: Path) -> Path:
+    return Path(ds_root) / "sf6lab" / "_state.json"
+
+
+def _read_state(ds_root: Path) -> dict:
+    try:
+        return json.loads(_state_path(ds_root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _capcom_file(ds_root: Path, slug: str) -> Path:
+    return Path(ds_root) / "framedata" / f"{slug}.json"
+
+
+def _sigs(root: Path, slug: str) -> list:
+    """The saved page's and the Capcom data's size and modified time: a result made from other files is read again."""
+    out = []
+    for f in (raw_dir(root) / f"{slug}_combo.html", _capcom_file(root, slug)):
+        try:
+            st = f.stat()
+            out.append([st.st_size, int(st.st_mtime)])
+        except OSError:
+            out.append(None)
+    return out
+
+
+def due(ds_root: Path, now: float | None = None) -> dict:
+    """What an update would do now: {"fetch": [slugs], "parse": [slugs], "wait_until": t or None}.
+    fetch = a page not saved or older than MAX_AGE_DAYS; parse = a saved page whose result is missing, from an older
+    reader (IMPORT_V), older than the page, or older than the character's Capcom data. Characters without Capcom data
+    (menu F) are left out (nothing to translate with). After a failed or refused download, fetching waits
+    RETRY_FAILED_H / RETRY_REFUSED_H."""
+    now = time.time() if now is None else now
+    root = Path(ds_root)
+    fetch, parse = [], []
+    for slug in SLUGS:
+        cap = _capcom_file(root, slug)
+        if not cap.exists():
+            continue
+        page = raw_dir(root) / f"{slug}_combo.html"
+        if not page.exists() or now - page.stat().st_mtime >= MAX_AGE_DAYS * 86400:
+            fetch.append(slug)
+        if not page.exists():
+            continue
+        out = out_path(root, slug)
+        try:
+            got = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+            ok = got.get("import_v") == IMPORT_V and got.get("from_files") == _sigs(root, slug)
+        except (OSError, ValueError):
+            ok = False
+        if not ok:
+            parse.append(slug)
+    st = _read_state(root)
+    wait = None
+    if st.get("result") in ("failed", "refused") and isinstance(st.get("at"), (int, float)):
+        t = st["at"] + 3600 * (RETRY_REFUSED_H if st["result"] == "refused" else RETRY_FAILED_H)
+        if now < t:
+            wait = t
+    return {"fetch": [] if wait else fetch, "parse": parse, "wait_until": wait, "fetch_due": fetch}
+
+
+def needs_update(ds_root: Path, now: float | None = None) -> bool:
+    d = due(ds_root, now)
+    return bool(d["fetch"] or d["parse"])
+
+
+def auto_update(ds_root: Path, log=print, get=None, sleep=time.sleep, now: float | None = None) -> dict:
+    """Download what is due, re-read what changed, remember how it went (datasets/sf6lab/_state.json)."""
+    get = get or _get
+    root = Path(ds_root)
+    d = due(root, now)
+    res: dict = {"downloaded": 0, "failed": 0, "refused": False, "parsed": {}}
+    if d["wait_until"] and d["fetch_due"]:
+        log(f"SF6 Lab: the last download did not work; next try after "
+            f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(d['wait_until']))}.")
+    if d["fetch"]:
+        log(f"SF6 Lab: downloading {len(d['fetch'])} combo page(s), one every {DELAY_S:.0f} s ...")
+        st = fetch_all(root, slugs=d["fetch"], log=log, get=get, sleep=sleep)
+        res["downloaded"] = sum(1 for v in st.values() if v == "downloaded")
+        res["failed"] = sum(1 for v in st.values() if v.startswith("failed") or v.startswith("no combo"))
+        res["refused"] = any(v.startswith("refused") for v in st.values())
+        result = "refused" if res["refused"] else "failed" if res["failed"] and not res["downloaded"] else "ok"
+        _state_path(root).parent.mkdir(parents=True, exist_ok=True)
+        _state_path(root).write_text(json.dumps({"result": result, "at": time.time() if now is None else now,
+                                                 "downloaded": res["downloaded"], "failed": res["failed"]}),
+                                     encoding="utf-8")
+    todo = due(root, now)["parse"]
+    if todo:
+        res["parsed"] = import_all(root, slugs=todo, log=log)
+    if not d["fetch"] and not todo:
+        log("SF6 Lab: up to date.")
+    return res
+
+
+class BackgroundUpdate:
+    """`sf6bot sf6lab-import --auto` as a separate process at below-normal priority (the fight session's way)."""
+
+    def __init__(self, run_dir: Path, command: list | None = None):
+        import sys
+        self.run_dir = Path(run_dir)
+        self.command = command or [sys.executable, "-m", "sf6bot", "sf6lab-import", "--auto"]
+        self.proc = None
+        self.fh = None
+        self.started = None
+        self.result: dict | None = None
+
+    def start(self) -> str | None:
+        import os
+        import subprocess
+        env = dict(os.environ, PYTHONUNBUFFERED="1")
+        env.pop("SF6BOT_STOP_FILE", None)
+        kw: dict = {}
+        if os.name == "nt":
+            kw["creationflags"] = 0x00004000 | 0x08000000  # BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW
+        else:
+            kw["preexec_fn"] = lambda: os.nice(10)
+        log = self.run_dir / "sf6lab_update.log"
+        try:
+            self.fh = open(log, "w", encoding="utf-8")
+            self.proc = subprocess.Popen(self.command, stdout=self.fh, stderr=subprocess.STDOUT, env=env, **kw)
+        except OSError as e:
+            self.proc = None
+            return f"SF6 Lab update could not start: {e}"
+        self.started = time.monotonic()
+        return "Updating SF6 Lab's combos and okizeme in the background (low priority); used from the next match."
+
+    def poll(self) -> str | None:
+        if self.proc is None:
+            return None
+        code = self.proc.poll()
+        if code is None:
+            return None
+        self.proc = None
+        secs = time.monotonic() - (self.started or 0)
+        try:
+            self.fh.close()
+        except Exception:                  # noqa: BLE001
+            pass
+        self.result = {"exit": code, "seconds": round(secs, 1)}
+        if code != 0:
+            return f"SF6 Lab update ended with exit code {code} (sf6lab_update.log); the data from before stays in use."
+        return f"SF6 Lab update finished in {secs:.0f} s; the next match uses it."
+
+    def stop(self) -> None:
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+            except OSError:
+                pass
 
 
 def load(character: str, ds_root: Path) -> dict | None:
