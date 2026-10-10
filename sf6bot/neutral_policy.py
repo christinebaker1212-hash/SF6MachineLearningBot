@@ -24,6 +24,13 @@ MACROS = {      # movement intents: short macro actions (decided again right aft
 }
 AIR_ATTACK_MAX_Y = 1.3     # jump attacks only below this height on the way down (apex ~2.1, measured)
 REACH_MARGIN = 0.1        # a move is chosen up to this far beyond its measured reach
+# 0.54.0 (own_hitboxes.py): with the bot's hit profile for a move and the opponent's live hurtboxes, the boxes decide
+# reach both ways: a poke whose first hitbox front falls BOX_MISS short of the nearest hittable hurtbox is not thrown
+# (MEASURED Fights_4: Random Select characters' 5MK from 2.0-2.5 -196 hp a try, 61), and one that reaches an extended
+# limb with BOX_SPARE to spare is allowed past the centre-distance reach while the opponent is in a move (Ryu missed 13
+# of 23 long whiffs, most at 2.0-2.2 with the limb still out)
+BOX_MISS = 0.15
+BOX_SPARE = 0.1
 # 0.27.0: the farthest a light poke is thrown from in NEUTRAL (centre to centre; whiff punishes and combos are not limited).
 # MEASURED (0.26.0 ranked, 33 Diamond matches, the opponent not attacking): 2LP from 1.25-1.75 -247 hp per try (6: 4
 # whiffs), 5LP -112 (9), 5LK from 1.75-2.25 -33 (12: 7 whiffs); within those distances 5LP +552, 5LK +341, 2MK +679
@@ -77,10 +84,15 @@ SPACING = (((-0.35, 0.05), {"walk_back": 1.5, "walk_fwd": 0.6, "idle": 0.8}),
 # back -375 / crouch +196 / stand -446; 1.0-1.5 walk fwd -672 (opened 0.72 a second) / back -373 / crouch -53 / stand -30;
 # 1.5-2.0 fwd -303 / back -138 / crouch -49 / stand -19; 2.0-2.5 fwd -115 / back -7 / crouch -69; 2.5+ fwd -41. The
 # approach (ADVANCE) stays beyond the opponent's reach + 0.6.
-STANCE = (((0.0, 1.0), {"walk_fwd": 0.5, "walk_back": 0.6, "idle": 0.5, "crouch": 1.5}),
-          ((1.0, 1.5), {"walk_fwd": 0.3, "walk_back": 0.4, "idle": 0.6, "crouch": 1.6}),
-          ((1.5, 2.0), {"walk_fwd": 0.4, "walk_back": 0.6, "crouch": 1.3}),
-          ((2.0, 2.5), {"walk_fwd": 0.6}))
+# 0.54.0 (Fights_4, 14 Ryu ranked matches; damage dealt - taken over the 1.5 s after each start): walking back at 1.0-1.5
+# -170 a time (61; caught by 2MP / 2LP), forward dashes from 2.5-3.5 -217 a time (31) and worse closer (-432 to -1,060
+# from 1.5-2.5): walking back there 0.4 -> 0.25, forward dashes inside 3.5 x0.3 (whiff punish step-ins are the punish
+# engine's, unchanged)
+STANCE = (((0.0, 1.0), {"walk_fwd": 0.5, "walk_back": 0.6, "idle": 0.5, "crouch": 1.5, "dash_fwd": 0.3}),
+          ((1.0, 1.5), {"walk_fwd": 0.3, "walk_back": 0.25, "idle": 0.6, "crouch": 1.6, "dash_fwd": 0.3}),
+          ((1.5, 2.0), {"walk_fwd": 0.4, "walk_back": 0.6, "crouch": 1.3, "dash_fwd": 0.3}),
+          ((2.0, 2.5), {"walk_fwd": 0.6, "dash_fwd": 0.3}),
+          ((2.5, 3.5), {"dash_fwd": 0.3}))
 # 0.20.0: when the opponent's next combo would kill, or late in a round with a lead, play safe (ESTIMATES)
 SAFE_FACTOR = {"jump_fwd": 0.0, "jump_neutral": 0.0, "jump_back": 0.2, "drive_impact": 0.0, "drive_rush": 0.0,
                "dash_fwd": 0.3, "poke": 0.6, "crouch": 1.8, "walk_back": 1.4}
@@ -297,6 +309,10 @@ class NeutralPolicy:
         # measured reach per own action id (reach.py, menu B): pokes and close specials only from where they
         # have been seen to connect (0.14.0; the FT5 had ~20 combo starters whiff from too far)
         self.reach: dict = {}
+        self.own_hit: dict = {}          # 0.54.0: the bot's hit profiles (boxes.load_own_hit_profiles)
+        self.box_ctx = None              # (me, op) of the line being decided (the fighter sets it)
+        self.box_op_moving = False       # the opponent in a move (its limb may be out)
+        self.box_closing = 0.0           # how far the opponent will close over the next ~6 frames
         # 0.21.0: the style table of the bot's character (style.py; set by the fighter): neutral is sampled from it
         self.style_table: dict | None = None
         self.style_temp = float(c.get("style_temperature", 1.0))
@@ -443,6 +459,9 @@ class NeutralPolicy:
             return False
         if dist > NEUTRAL_MAX_DIST.get(m["name"], 99.0):
             return False
+        bv = None if m.get("projectile") else self.box_verdict(m)
+        if bv is not None:
+            return bv                        # 0.54.0: the boxes decide when they are known
         r = self.reach.get(m["id"]) if self.reach else None
         return r is None or m.get("projectile") or dist <= r + REACH_MARGIN
 
@@ -631,13 +650,39 @@ class NeutralPolicy:
             return {}
         return {it.INTENTS[i]: round(float(v / self.win_n), 3) for i, v in enumerate(self.win_sum)}
 
+    def box_verdict(self, m: dict) -> bool | None:
+        """0.54.0: True / False when the bot's measured hitbox for the move (own_hit) against the opponent's hurtboxes on
+        this line (box_ctx: set by the fighter each decision) says it reaches / falls short; None without boxes."""
+        prof = (self.own_hit or {}).get(m.get("id"))
+        ctx = self.box_ctx
+        if not prof or ctx is None:
+            return None
+        me, op = ctx
+        mx = num((me or {}).get("x"))
+        if mx is None:
+            return None
+        from .boxes import hurt_gap
+        g = hurt_gap(mx, op, tuple(prof.get("first_y") or prof.get("y") or ()) or None)
+        if g is None:
+            return None
+        short = g - float(prof.get("first_front", prof.get("front", 0.0)))
+        if short - float(self.box_closing or 0.0) > BOX_MISS:      # the opponent walking in closes some of it
+            return False
+        if short <= -BOX_SPARE and self.box_op_moving:
+            return True
+        return None
+
     def in_reach(self, m: dict, dist: float | None) -> bool:
         """False when the move's reach (measured, learned this session, or the cautious default for an unmeasured
-        move) is shorter than the distance. Projectiles and air attacks pass."""
+        move) is shorter than the distance. Projectiles and air attacks pass. 0.54.0: the boxes overrule both ways
+        (box_verdict)."""
         if dist is None or m.get("projectile") or m["intent"] == "air_attack":
             return True
         if dist > NEUTRAL_MAX_DIST.get(m.get("name"), 99.0):
             return False
+        bv = self.box_verdict(m)
+        if bv is not None:
+            return bv
         r = self.reach.get(m["id"])
         if r is None:
             # 0.18.0: no measurement is no licence: a cautious default (reach.LiveReach.UNMEASURED)

@@ -48,6 +48,7 @@ PRESS_BACK = 3               # a fresh button press within this many frames = a 
 FOLLOW_SOLO_MAX = 0.1        # a follow-through id starts on its own in at most this share of its sightings
 MAX_GAP = 2                  # frames between rows for the rows to count as one stretch (8x drops frames)
 MAX_LEN = 400                # longer is a hold or a broken recording
+TRAVEL_MIN = 0.3             # 0.54.0: the attacker moved this far by the contact: a travel sample
 PROJ_MIN_DIST = 1.5          # a contact from farther than this with the attacker standing still: a projectile sample
 RUSH_IDS = {500, 501, 739, 740, 741}
 
@@ -191,6 +192,7 @@ def samples(rows: list[dict], pk: str, dk: str, follow: dict, out: dict) -> None
         e = out.setdefault(a, {"n": 0, "total": [], "on_block": [], "contact": [], "air": 0, "ids": Counter()})
         e["n"] += 1
         x0 = num(rows[k][pk].get("x"))
+        xd0 = num(rows[k][dk].get("x"))
         head, ids, cur = a, [a], a
         contact = blocked = None
         hit_after_block = False
@@ -215,6 +217,10 @@ def samples(rows: list[dict], pk: str, dk: str, follow: dict, out: dict) -> None
                     # a stun rising (not hp alone: a ranged grab's "contact" is its damage, ~80-120 frames in)
                     if None not in (x0, xa, xd) and stun_rise and abs(xa - x0) < 0.3 and abs(xd - x0) > PROJ_MIN_DIST:
                         e.setdefault("proj", []).append((round(abs(xd - x0), 3), own))
+                    # 0.54.0: a strike that closes the distance itself (E. Honda's Headbutt, Blanka's ball): when it
+                    # reaches the defender from the distance at its start (travel_fit)
+                    if None not in (x0, xa, xd0) and stun_rise and abs(xa - x0) >= TRAVEL_MIN:
+                        e.setdefault("travel", []).append((round(abs(xd0 - x0), 3), own))
                 elif contact is not None and blocked and hit:
                     hit_after_block = True
                 if blocked and rise:
@@ -292,6 +298,26 @@ def proj_fit(v: list) -> dict | None:
     return {"a": round(a, 1), "b": round(b, 2), "n": len(v), "mad": round(mad, 1)}
 
 
+def travel_fit(v: list) -> dict | None:
+    """0.54.0: for a move that travels into the defender, frames from its start to contact = a + b x distance at its start
+    (Theil-Sen, as proj_fit), or None: 4+ samples over 0.5+ of distance, 1.5-40 frames a unit, half of them within 3 frames
+    of the line. MEASURED (Fights_4): E. Honda's H Sumo Headbutt reached Ryu ~18 frames in from 2.0 apart, ~21-23 from 2.7."""
+    if len(v) < 4 or max(d for d, _ in v) - min(d for d, _ in v) < 0.5:
+        return None
+    slopes = sorted((f2 - f1) / (d2 - d1) for i, (d1, f1) in enumerate(v) for d2, f2 in v[i + 1:] if abs(d2 - d1) >= 0.3)
+    if len(slopes) < 3:
+        return None
+    b = slopes[len(slopes) // 2]
+    if not 1.5 <= b <= 40.0:
+        return None
+    a = sorted(f - b * d for d, f in v)[len(v) // 2]
+    mad = sorted(abs(f - a - b * d) for d, f in v)[len(v) // 2]
+    if mad > 3.0:
+        return None
+    return {"a": round(a, 1), "b": round(b, 2), "n": len(v), "mad": round(mad, 1),
+            "d": [round(min(d for d, _ in v), 2), round(max(d for d, _ in v), 2)]}
+
+
 def summarize(e: dict) -> dict:
     """One id's samples -> {total, on_block, startup, active_end, air, follow, n...}."""
     c = sorted(e["contact"])
@@ -306,10 +332,11 @@ def summarize(e: dict) -> dict:
             "startup": (c[min(len(c) - 1, len(c) // 10)] + 1) if len(c) >= MIN_N else None,
             "active_end": (c[int(0.9 * (len(c) - 1))] + 1) if len(c) >= MIN_N else None,
             "n_contact": len(c), "air": round(e["air"] / e["n"], 2) if e["n"] else 0.0,
-            "follow": sorted(x for x, k in e["ids"].items() if k >= 2), "proj": proj_fit(e.get("proj") or [])}
+            "follow": sorted(x for x, k in e["ids"].items() if k >= 2), "proj": proj_fit(e.get("proj") or []),
+            "travel": travel_fit(e.get("travel") or [])}
 
 
-CACHE_V = 1      # bump with VERSION-level changes to transitions() / samples()
+CACHE_V = 2      # 0.54.0: travel samples. Bump with VERSION-level changes to transitions() / samples()
 
 
 def _pass1(rows: list[dict]) -> dict:
@@ -436,6 +463,9 @@ def load(character: str | None, ds_root: Path | None = None) -> dict:
     for doc in reversed(docs):                       # shipped first, then this PC's table over it
         for a, m in (doc.get("moves") or {}).items():
             if (m.get("n") or 0) >= MIN_N:
+                old = moves.get(int(a)) or {}
+                if old.get("travel") and not m.get("travel"):
+                    m = dict(m, travel=old["travel"])     # 0.54.0: a table built before travel fits keeps the shipped one
                 moves[int(a)] = m
         for a, b in (doc.get("follow") or {}).items():
             follow.setdefault(int(a), set()).update(int(x) for x in b)

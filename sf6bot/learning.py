@@ -546,6 +546,13 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         cz = sorted((dv.get("causes") or {}).items(), key=lambda kv: -kv[1])
         out.append(("measured", f"Burnouts: {dv['burnouts']}; what drained the Drive most in the 4 s before: "
                                 + ", ".join(f"{k} x{v}" for k, v in cz[:4]) + "."))
+    dg = summary.get("disguise") or {}
+    if dg.get("holds_drawn") or dg.get("walks") or dg.get("delays"):
+        # 0.54.0 (disguise.py): human-like timing, on in every fight
+        out.append(("measured", f"Human-like timing: {dg.get('lingered', 0)} button holds lengthened (median "
+                                f"{dg.get('hold_median')} frames; {dg.get('conflicts', 0)} cut short for a re-press), "
+                                f"{dg.get('walks', 0)} walks of varied length, {dg.get('delays', 0)} timed presses sent "
+                                f"a little later (median {dg.get('delay_median')} frames, still with frames to spare)."))
     bt = summary.get("sf6lab_burnout_test") or {}
     if bt.get("started"):
         rs = sorted((bt.get("routes") or {}).items(), key=lambda kv: -kv[1].get("n", 0))[:3]

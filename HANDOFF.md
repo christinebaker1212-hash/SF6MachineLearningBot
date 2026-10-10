@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-10: code version **0.53.3**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (828).*
+*State as of 2026-10-10: code version **0.54.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (845).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.54.0 is pushed** (CLAUDE.md "Fights_4 analysed", "0.54.0"): from the Fights_4 analysis (75 ranked, 49-24; bot tells measured against the human opponents): human-like timing in every fight, human limits on or off, with nothing lost (button holds drawn from the humans' spread via controller linger, varied walks, punishes / my-turn presses up to 4 frames later only with frames to spare); Shoryuken answers timed to a travelling move's measured arrival (E. Honda's Headbutt) or a block; reach from the bot's own hitboxes measured from its recordings (B step "own hitboxes", shipped table); fewer mid-range dashes and close walk-backs. Not run in game. Open: the user's call on extra jumps (0.5/min vs humans' 4.4) and on the throw tech rate (79% vs 14%).
 
 **State:** **0.53.3 is pushed** (CLAUDE.md "0.53.3"): SF6 Lab routes may spend into burnout as a test (user); the corner Drive save and every other combo's verified-kill rule unchanged; `sf6lab.burnout_test` in ryu.yaml switches it off; results in `fight_summary.sf6lab_burnout_test` and the thoughts. Not run in game.
 

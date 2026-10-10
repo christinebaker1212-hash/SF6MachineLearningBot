@@ -158,6 +158,7 @@ class Defense:
         pick = pick or max(probs, key=probs.get)
         oc = self._set(situation)[0][pick]
         label = NICE.get(pick, pick)
+        cand = None
         if oc.get("pick"):
             cand = resolve(pick, oc)
             seq, label = cand["seq"], f"{label} ({cand.get('name', pick)})"
@@ -169,7 +170,7 @@ class Defense:
         if pad > 0:
             seq = f"1@{pad} " + seq          # every option's decisive input lands on the same frame
         self.last = {"option": pick, "seq": seq, "label": label, "probs": probs, "odds": self.odds(situation),
-                     "values": vals}
+                     "values": vals, "cand": cand}
         return self.last
 
 

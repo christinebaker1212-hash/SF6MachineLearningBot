@@ -858,16 +858,30 @@ class PunishEngine:
             else:
                 self.whiff_stats["chances"] += 1
         o = plan["opt"]
-        if plan["send_in"] > 0:
+        # 0.54.0 (disguise.py): a punish with frames to spare goes out a drawn few frames after its earliest moment, as a
+        # person's does, and still lands with `delay_keep` frames to spare (its success estimate is the same from 2 up).
+        # Drawn once per window from the first plan's margin; sent at once if the margin has come down to the keep.
+        dg_ = getattr(self, "disguise", None)
+        if c.get("dz") is None:
+            c["dz"] = dg_.delay(plan["margin"]) if dg_ is not None and plan["send_in"] >= -1 else 0
+        dz = int(c["dz"] or 0)
+        keep = int(dg_.c.get("delay_keep", 2)) if dg_ is not None else 0
+        tmr = raw.get("stage_timer")
+        waiting = False
+        if plan["send_in"] <= 0 and dz and isinstance(tmr, int):
+            if c.get("dz_t") is None:
+                c["dz_t"] = tmr                  # the first line it could have gone out
+            waiting = tmr - c["dz_t"] < dz and plan["margin"] > keep
+        if plan["send_in"] > 0 or waiting:
             if c.get("plan") != o["key"]:
                 c["plan"] = o["key"]
                 self.pe_stats["waits"] += 1
             face = block_face
             return Decision("hold", direction=block_dir, facing=face, rule="punish_wait",
-                            reason=f"{name} {w['kind']}ed: {o['name']} in {plan['send_in']}F "
+                            reason=f"{name} {w['kind']}ed: {o['name']} in {max(plan['send_in'], 0) + dz}F "
                                    f"(it can act in {w['free']}F, I can in {w['bot']}F)")
         c["done"] = True
-        if plan["send_in"] < -2:
+        if plan["send_in"] < -2 and not c.get("dz_t"):
             self.pe_stats["late"] += 1
         st["taken"] += 1
         self.pe_stats["options"][o["name"]] = self.pe_stats["options"].get(o["name"], 0) + 1

@@ -709,7 +709,8 @@ def cmd_train(args, cfg):
     # result per recording is cached (file_cache.py): after the first run only new recordings are read.
     from .eta import Steps
     steps = Steps(["merge repeat replays", "read new recordings once", "copy-a-player network", "move reach",
-                   "move timing", "win model", "combos found in recordings", "style table", "grab ranges"])
+                   "move timing", "win model", "combos found in recordings", "style table", "grab ranges",
+                   "own hitboxes"])
     steps.start("merge repeat replays")
     if (root / "replays").exists():
         summarize(root)          # merge repeat recordings of the same replay first
@@ -771,6 +772,13 @@ def cmd_train(args, cfg):
         wrep["grab_ranges"] = build_grabs(root, log=print)
     except Exception as e:                       # noqa: BLE001 - the shipped table stays in use
         print(f"Grab ranges failed: {e}")
+    # 0.54.0: the bot's own hitboxes per move (each character it played), from its fight recordings: box-to-box reach
+    steps.start("own hitboxes")
+    try:
+        from .own_hitboxes import build as build_hit
+        build_hit(root, log=print)
+    except Exception as e:                       # noqa: BLE001 - the shipped table stays in use
+        print(f"Own hitboxes failed: {e}")
     if bg:
         out = model_dir(root, chars[0])
         out.mkdir(parents=True, exist_ok=True)

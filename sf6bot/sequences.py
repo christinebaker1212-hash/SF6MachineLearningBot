@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from . import clock
 from .actions import NEUTRAL, InputState, expand_buttons
 from .controller import Controller
+from .disguise import BUTTONS, with_partners
 
 _STEP_RE = re.compile(r"^([1-9])((?:\+[A-Za-z_]+)*)(?:@(\d+))?$")
 
@@ -83,9 +84,13 @@ class SequenceRunner:
 
     def run(self, seq: Sequence, stop_event: threading.Event | None = None,
             end_neutral: bool = True, start_at: float | None = None,
-            abort=None, wait_last: bool = False) -> tuple[list[StepTiming], bool]:
+            abort=None, wait_last: bool = False, linger: bool = False,
+            keep_out=frozenset()) -> tuple[list[StepTiming], bool]:
         """Execute blocking. Returns (step timings, completed). `abort`: optional callable polled
-        while waiting (~1 ms); a truthy return stops the sequence and is kept in `self.aborted`."""
+        while waiting (~1 ms); a truthy return stops the sequence and is kept in `self.aborted`.
+        0.54.0 `linger` (fights, disguise.py): a button let go between steps may stay down a little longer, never one that
+        a later step of this sequence presses again (nor its LP+LK / MP+MK / HP+HK partner), nor one in `keep_out` (the
+        caller's later steps: a combo's next moves)."""
         t0 = start_at if start_at is not None else clock.now()
         self.aborted = None
         timings: list[StepTiming] = []
@@ -94,12 +99,27 @@ class SequenceRunner:
         self.sink({"type": "sequence_start", "t": clock.now(), "name": seq.name,
                    "notation": seq.notation(), "facing": self.controller.facing.value})
         plan = list(seq.steps) + ([Step(NEUTRAL, 0)] if end_neutral else [None] if wait_last else [])
+        later: list[set] = []
+        acc = set(keep_out)
+        for st_ in reversed(plan):           # keys pressed by the steps after each step (+ partners, + keep_out)
+            later.append(set(acc))
+            if st_ is not None:
+                acc |= with_partners(set(st_.state.buttons) & BUTTONS)
+        later.reverse()
+        lg_now = getattr(self.controller, "lingering", None)
+        if lg_now and later:
+            # 0.54.0: a button still held longer (disguise) that a later step presses again goes now, so that press is a
+            # new one with frames to spare (a conflict on the very first step costs the controller one frame)
+            self.controller.cut_linger(later[0])
         # wait_last (0.38.2): without the final neutral step the last step's own frames were not waited, so the caller's
         # next input replaced it at once (0.38.1: an 8-frame walk lasted 1-3 frames). None = wait, press nothing.
         for i, step in enumerate(plan):
             scheduled = t0 + cum * self.frame_s
             if abort is not None:
+                tick = getattr(self.controller, "tick", None)
                 while clock.now() < scheduled - 0.0015 and not (stop_event is not None and stop_event.is_set()):
+                    if tick is not None:
+                        tick()
                     why = abort()
                     if why:
                         self.aborted = why
@@ -116,7 +136,11 @@ class SequenceRunner:
             if not self.controller.armed:
                 completed = False
                 break
-            t_call, t_sent = self.controller.apply(step.state, tag=f"{seq.name}[{i}]")
+            if linger:
+                t_call, t_sent = self.controller.apply(step.state, tag=f"{seq.name}[{i}]", linger=True,
+                                                       keep_out=later[i])
+            else:
+                t_call, t_sent = self.controller.apply(step.state, tag=f"{seq.name}[{i}]")
             timings.append(StepTiming(i, step.state.label(), scheduled, t_sent, t_sent - t_call))
             cum += step.frames
         if not completed:

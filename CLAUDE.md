@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.54.0 (2026-10-10): human-like timing in every fight with nothing lost (user): button holds drawn from the human opponents' spread, varied walks, punishes / my-turn presses a few frames later only when frames are to spare; Shoryuken answers timed to a travelling move's arrival (E. Honda's Headbutt) or block; reach from the bot's own measured hitboxes; fewer mid-range dashes and close walk-backs. From the Fights_4 analysis (75 ranked, 49-24).**
 - **0.53.3 (2026-10-10): SF6 Lab routes may spend Drive into burnout, to test whether they work (user); the corner Drive save still holds, and every other combo keeps "burnout only for a verified kill". Switch: `sf6lab.burnout_test` in ryu.yaml.**
 - **0.53.2 (2026-10-10): the research build allows the editor's new live-preview script (animated costume colours: pulse / rainbow, glow and material settings; still cosmetic, pinned to its exact bytes). Capcom cleared colour animation, per the user (2026-10-10). Bot behaviour unchanged.**
 - **0.53.1 (2026-10-10): SF6 Lab updates itself, no user step: every fight session (ranked included) downloads / re-reads what is due in a low-priority background process (the next match uses it); update.bat and the combo lab's SF6 Lab source do it too; a refused or failed download keeps the old data and waits.**
@@ -5498,6 +5499,91 @@ offline matches. Perhaps merge them with the controller overlay?")
   a narrated note when one starts, and a thoughts line ("SF6 Lab combos spent into burnout (test): N, finished M").
 - Characters with lab results (Ryu, Ken, Akuma, Marisa) use no SF6 Lab routes, so this changes nothing for them.
 - Tests `tests/test_0532.py`. Not run in game.
+
+## Fights_4 analysed (user, 2026-10-10): 75 ranked matches, 49-24; what gives the bot away
+User: "Tons more data, and tons more humans who notice a bot is playing. Analyze what happened, and let's make further
+improvements. In order to make Ultimate Master, or Legend, we need to go a step beyond and find out where even tinier
+microadjustments can be made." MEASURED on the 82 uploaded recordings (75 ranked, 158 fight minutes; plus 5 old offline
+and 2 online). Analysis scripts in the session scratchpad (not kept).
+- **Record:** ranked 49-24 (+2 unfinished). Ryu 9-5 on 0.46-0.52 (Luke 6-0, Dee Jay 2-0; E. Honda 0-2 + 1 unfinished,
+  Dhalsim, A.K.I., a mirror). Random Select 40-19 (Akuma 13-0, JP 12-9, Mai 4-2; Terry 0-2, Marisa 1-2).
+- **Tells (the bot against its human opponents in the same matches):**
+  | | bot | humans |
+  |---|---|---|
+  | button presses held exactly 3 frames | 62% | 7% (mostly 4-9) |
+  | forward / back walks of exactly 8 frames | 24% / 29% | spread |
+  | time holding down-back | 47% | 27% |
+  | jumps a minute | 0.5 | 4.4 |
+  | presses within 2 frames of blockstun ending | 41% | spread, median 4 frames |
+  | 30-frame input strings repeated exactly | 46% (one 119 times) | 15% |
+  | button presses a minute | 41 | 100 (13 while knocked down / hit) |
+  | throws started within 1.0 teched | 79% | 14% |
+  DI-backs came 14-23 frames into the DI every time (the 0.39.0 setting; humans' few DI-backs 24-38).
+- **Where the damage went:** ~70% of the damage taken landed while the bot was in its own move (pokes stuffed in start-up,
+  whiffed and punished). Per press in neutral the bot did better than the humans (its buttons hit 45% vs their 11%;
+  stuffed 9% vs 16%), so pressing is not the leak in itself.
+- **Ryu's small leaks (14 matches):**
+  - hit mid-Shoryuken-motion 29 times (22k): mostly E. Honda's Headbutt (8 openings). The answer rule waited for Honda's
+    hurtbox to be seen moving, then the 9-frame motion (its first step walking forward) started; the Headbutt connects
+    13-23 frames in, so the Shoryuken only won from 2.5+
+  - long-recovery opponent whiffs (20+ frames) left unpunished 13 of 23, mostly at 2.0-2.2 with the limb still out
+  - forward dashes from 2.5-3.5 -217 hp a time (31) and worse closer; walking back at 1.0-1.5 -170 a time (61, mostly
+    2MP / 2LP into it)
+  - Random Select characters threw pokes from out of range (5MK from 2.0-2.5 -196 a try over 61, 5HK -488 over 22)
+- Not changed (the user's call, asked): jumps (0.5 a minute vs the humans' 4.4; the user's jump rules stand) and the throw
+  tech rate.
+
+## 0.54.0: human-like timing without losing anything; travelling moves; own hitboxes (user, 2026-10-10)
+User: "Yes, do so. Even without human limits on, we should still obfuscate the nature of the bot itself, without
+sacrificing efficacy." Within Capcom's written approval of 2026-10-03 (human-like inputs, "including variable reaction
+times, irregular button timing, and other behavior intended to resemble human play", in the project's ranked matches).
+All MOCK / unit-tested (`tests/test_0540.py`); nothing here is verified in game.
+### A. Human-like timing, on in every fight (`sf6bot/disguise.py`, `configs/default.yaml: disguise`)
+- **Button holds** (controller linger): a single button let go at the end of its step stays down until a total hold drawn
+  from the human opponents' measured spread (3-10 frames, median ~6). The inputs that make moves come out are unchanged:
+  - only a single button with no other button down (never a throw, parry, Drive Impact or OD press)
+  - never a key that a later step of the same sequence or combo presses again, nor its LP+LK / MP+MK / HP+HK partner
+    (`SequenceRunner.run(linger, keep_out)`, `combo_lab.perform_route(linger=...)`, re-planned combos cut it at once)
+  - never a move with a held-button version (Capcom '(Lv2)' / '(Charged)' / '(Hold)' rows of the bot's character:
+    Ryu's SA2 levels, charged normals: `disguise.hold_sensitive`)
+  - any new button press lets a lingering one go first; a press of the same key or its partner gets one game frame
+    between release and press (`Controller._settle_linger`, counted as `conflicts`); a sequence that will press a
+    lingering key later lets it go at its start
+- **Walks:** the neutral walk / crouch macros (8 frames) last 5-12 frames, drawn.
+- **Timed presses:** a punish (punish engine) or a my-turn / frame-trap press with frames to spare goes out up to 4 frames
+  later than its earliest moment, drawn, always keeping 2 frames to spare (the punish engine's success estimate is the same
+  from 2 spare frames up). Interrupts, reversals, throw techs and DI-backs keep their timing.
+- Match summary `disguise` {holds_drawn, hold_median, lingered, conflicts, kept_short, walks, delays, ...} and a thoughts
+  line. Human limits (0.17.0 / 0.42.0) still add their own reaction times when on.
+### B1. Travelling moves (`move_timing.travel_fit`, `fighter._travel_arrival`)
+- move_timing (menu B) now fits, for every move that closes the distance into its contact, frames from its start to
+  contact = a + b x the distance at its start (Theil-Sen, as the projectile fit; `travel`), and this match's own contacts
+  shift it (`_track_travel`). A PC table built before 0.54.0 keeps the shipped fit.
+- A Shoryuken answer (move_answers `anti_air`) against such a move is timed to be active 2-5 frames before the move
+  arrives (`anti_air.travel_early` 5), no longer waiting to see the opponent move; when it can't be (too close, or seen
+  late) the bot blocks (`answer_block`, counted `answer_stats.late_block`).
+- Shipped: 84 travel fits (configs/move_timing, `travel` on 82 ids + a new Rashid table) from 1,102 recordings (the user's
+  full upload of 2026-10-09 + Fights_4). E. Honda's Sumo Headbutt: H (902) 8.9 + 4.16 x distance frames (n 14; ~17 from
+  2.0, ~20 from 2.7: the traces showed 18-23), L (900) 1.8 + 8.45 x d, M (901) 7.0 + 3.91 x d.
+- Open-loop replay of the 3 Ryu vs E. Honda recordings through `decide()`: of 32 Headbutts, 14 get a Shoryuken timed to
+  their arrival, 12 are blocked as too close, 6 found the recorded bot busy (live: 8+ hit Ryu mid-motion).
+### B2. The bot's own hitboxes from its recordings (`sf6bot/own_hitboxes.py`)
+- Every fight recording since exporter v11 holds the bot's own hitboxes: per move, the first hit's hitbox front (forward
+  from where the move started) and heights, the median over its WHIFFED presses (a hitbox goes away once it connects:
+  MEASURED, Ryu's M High Blade Kick read 1.08 from hits; the catalog's dummy at contact distance cut 2MK at 1.25 where
+  its whiffs reach 1.48). Over Ryu's light normals the recordings equal the catalog exactly (5LP 1.01, 2LP 0.94, 5LK
+  1.30). Only moves started from a free state count (one cancelled into shows the previous move's hitbox on its first
+  frames: L / M / OD High Blade Kick first read as 5LK / 5MP), the first 2 lines skipped. `train` (menu B, new step
+  "own hitboxes") writes `datasets/hit_profiles/` (erased with "training"); `configs/hit_profiles/` ships 77 profiles for
+  14 characters from the user's 905 fight recordings (Ryu 17: 2MK 1.48, 5HP 1.55, sweep 1.79, 5MK 1.57, L Shoryuken
+  0.98). These win over a catalog's profile.
+- Used by the punish engine (box to box, as 0.36.0 with a catalog) and now by the neutral policy
+  (`NeutralPolicy.box_verdict`): a poke whose hitbox falls 0.15+ short of the opponent's nearest hittable hurtbox (less
+  what a walk-in closes in 6 frames) is not thrown; one that reaches an extended limb with 0.1 to spare is allowed past the
+  measured reach while the opponent is in a move.
+### B3. Neutral factors (`neutral_policy.STANCE`)
+- Walking back at 1.0-1.5 x0.4 -> x0.25; forward dashes x0.3 everywhere inside 3.5 (the punish engine's step-in dashes
+  unchanged).
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

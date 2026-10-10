@@ -257,16 +257,22 @@ def own_hitbox_frames(boxes: dict | None, first: int | None = None, last: int | 
 
 
 def load_own_hit_profiles(ds_root, character: str) -> dict:
-    """The bot's own hit profiles from its move catalog (datasets/catalog/<Character>_movelist.json), {} without one."""
+    """The bot's own hit profiles: the ones measured from its whiffs in its fight recordings (0.54.0, own_hitboxes.py:
+    menu B, else the shipped table) over its move catalog's (datasets/catalog/<Character>_movelist.json: the dummy at
+    contact distance ends a hitbox early, MEASURED Ryu 2MK 1.25 vs 1.48 on whiffs); {} without either."""
     import json
     from pathlib import Path
     from .game_state import file_stem
+    from .own_hitboxes import load as rec_load
+    rec = rec_load(character, ds_root)
     try:
         cat = json.loads((Path(ds_root) / "catalog" / f"{file_stem(character or '')}_movelist.json").read_text(
             encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
-    return own_hit_profiles(cat)
+        cat = None
+    out = own_hit_profiles(cat) if cat else {}
+    out.update(rec)
+    return out
 
 
 def own_hit_profiles(catalog: dict) -> dict:

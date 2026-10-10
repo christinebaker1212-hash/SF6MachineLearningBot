@@ -2600,7 +2600,7 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                   gravity: float | None = None, fixed: list | None = None, learned: dict | None = None,
                   confirm: bool = False, on_first_hit=None, fixed_lead: int | None = None, on_step=None,
                   adopt: dict | None = None, precharge: bool | None = None, charged: set | None = None,
-                  reach: dict | None = None, block_ok: bool = False) -> dict:
+                  reach: dict | None = None, block_ok: bool = False, linger=None) -> dict:
     """Perform one planned route against the live state stream: every input is sent when the game's
     own clock says so, never before its floor (plan_route). Shared by the combo lab and the fighter.
     `abort()` (fighter) is polled between lines; a truthy value stops the route. `confirm` (fighter): each
@@ -2609,7 +2609,8 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     verdict): "switch" continues with those steps (same starter), "stop" ends the route after the hit, else keep.
     `on_step(k, raw)` (fighter, 0.24.0): called once when step k >= 1 has started; it returns (steps, fixed) to go on
     with steps k+1.. of another route with the same first k+1 moves (the combo composer), or None. `adopt` (fighter,
-    0.24.0): step 0 is the move the bot is already doing (ComboRun)."""
+    0.24.0): step 0 is the move the bot is already doing (ComboRun). `linger(name)` (fighter, 0.54.0, disguise.py): may
+    that move's button be held longer (human-like); never a key a later step presses again (or its partner)."""
     if precharge is None:
         precharge = not confirm and adopt is None
     cut = None
@@ -2636,6 +2637,8 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                    end_neutral=False)
         run.extra["precharge"] = hold_frames() + 2
     q = reader.subscribe()
+    if linger is not None:
+        _cut_linger(sess.controller, run.steps[1:] if adopt is not None else run.steps)
     side = None
     deadline = clock.now() + timeout
     aborted = None
@@ -2652,6 +2655,10 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                 continue
             if not st.ready:
                 continue
+            if linger is not None:
+                tick_ = getattr(sess.controller, "tick", None)
+                if tick_ is not None:
+                    tick_()                       # 0.54.0: a lengthened button hold ends on time
             k = run.feed(st.raw)
             if on_first_hit is not None and run.first_hit is not None and not run.done \
                     and "hit_switch" not in run.extra:
@@ -2685,6 +2692,8 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
                         new = None
                     if new and new[0] and run.replace_tail(j + 1, new[0], new[1]):
                         run.extra.setdefault("replans", []).append({"at": j, "to": len(new[0])})
+                        if linger is not None:
+                            _cut_linger(sess.controller, run.steps[j + 1:])
                         # the step due before may be gone or another one now: decide again on the new steps
                         k = run._due(st.raw.get("stage_timer"), st.raw.get(me) or {}, run._land_est)
                         break
@@ -2720,10 +2729,15 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
             run.sent(k, facing="right" if side == Facing.RIGHT else "left" if side == Facing.LEFT else None)
             # a Parry Drive Rush's parry stays held until its dash (0.20.5)
             # 0.28.0: a move held through for a later charge move ends still holding the charge (apply_charge)
+            lg_kw = {}
+            if linger is not None and linger(run.steps[k]["name"]):
+                # 0.54.0: the button may stay down a little longer, never a key the rest of the combo presses again
+                lg_kw = {"linger": True, "keep_out": _later_keys(run.steps[k + 1:])}
             _, ok = runner.run(parse_sequence(seq, run.steps[k]["name"]), stop_event=sess.stop_event,
                                end_neutral=not (run.steps[k].get("pdr") or run.steps[k].get("charge_hold")
                                                 # 0.37.0: down stays held into a super motion that leaves out its '2'
-                                                or (k + 1 < len(run.steps) and run.steps[k + 1].get("tightened"))))
+                                                or (k + 1 < len(run.steps) and run.steps[k + 1].get("tightened"))),
+                               **lg_kw)
             if not ok:
                 break
         if run.super_connected is not None and not confirm:
@@ -2752,6 +2766,24 @@ def perform_route(sess, reader, runner, steps, offsets, neutral_a, neutral_d, mo
     if aborted:
         res["aborted"] = aborted
     return res
+
+
+def _later_keys(steps) -> set:
+    """0.54.0: the button keys (and their LP+LK / MP+MK / HP+HK partners) the given route steps press."""
+    from .disguise import keys_of, with_partners
+    out: set = set()
+    for s_ in steps or []:
+        out |= keys_of(s_.get("sequence"))
+        if s_.get("pdr_dash"):
+            out |= keys_of(s_["pdr_dash"])
+    return with_partners(out)
+
+
+def _cut_linger(controller, steps) -> None:
+    """0.54.0: a re-planned combo's new steps press these keys: a button still held longer for disguise goes now."""
+    cut = getattr(controller, "cut_linger", None)
+    if cut is not None and getattr(controller, "lingering", None):
+        cut(_later_keys(steps))
 
 
 def motion_part(seq: str) -> str:

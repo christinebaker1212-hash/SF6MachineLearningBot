@@ -834,7 +834,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self._prev_me_stun = 0
         # 0.17.0 human limits (human_limits.py): reactive rules wait for a sampled human reaction time
         self.human = None
+        self.disguise = None          # 0.54.0 disguise.Disguise (set by the fight session): human-like timing
         self.op_onset = None                 # game frame the opponent's current action began
+        self._onset_dist = None              # 0.54.0: the distance then (travelling moves: _travel_arrival)
+        self._travel_seen = False
+        self._travel_prev = None
+        self._travel_live: dict = {}
         self._op_char, self.op_rush, self.op_rush_ids = None, None, set(RUSH_IDS)   # 0.37.1: set_opponent_rush
         self._rc_ans = (None, None, 0.0)                 # 0.41.0: (rush onset, check / block, meeting-point offset)
         self._rc_seen, self._rc_x0 = None, None
@@ -854,6 +859,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.op_fb_beaters: list = []        # 0.38.0 opponent_fireball_beaters
         self.op_rev_supers: list = []        # 0.25.0 opponent_reversal_supers: invincible Super Arts / Critical Arts
         self._ma_for = None                  # 0.25.0 move answers: the opponent action (onset) already answered
+        self._ma_block = None                # 0.54.0: the onset blocked for being too late to answer (counted once)
         self.answer_stats: dict = {"sent": 0, "by_move": {}, "skipped_unless": 0, "late": 0, "too_far": 0,
                                    "super_cancel_risk": 0}
         self._now = None
@@ -1404,6 +1410,21 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             hi = min(ans.get("airborne_to") or 999, ans["active_end"]) if air_active else hit - 1
             lo = min(lo, hi)
             land = fr + L + pre + su - 1               # the move's own frame when the Shoryuken's first active frame lands
+            arr = self._travel_arrival(oa)
+            if arr is not None:
+                # 0.54.0: a move that travels into the bot: the Shoryuken active 2-5 frames before it arrives (its hitbox
+                # meets the incoming hurtbox: MEASURED Fights_4, the Shoryukens that beat the Headbutt from 2.5+ were
+                # active 1-5 frames before it would have arrived), else block it (-1 to -3 on block: nothing lost)
+                lo, hi = arr - int(self.c.get("anti_air", {}).get("travel_early", 5)), arr - 2
+                if land > arr - 2:
+                    if fr + L > arr:
+                        return None
+                    if self._ma_block != self.op_onset:
+                        self._ma_block = self.op_onset
+                        self.answer_stats["late_block"] = self.answer_stats.get("late_block", 0) + 1
+                    g_ = self._guard_now(op)
+                    return Decision("hold", direction=4 if g_ == "overhead" else 1, rule="answer_block",
+                                    reason=f"{name} reaches me on its frame {arr}: too late for a Shoryuken, blocking")
             if land > hi + (4 if ans.get("airborne_from") is None or not air_active else 0) and land > hit + 4:
                 self._ma_for = self.op_onset           # too late
                 self.answer_stats["late"] += 1
@@ -1419,9 +1440,11 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
                                     reason=f"{name}: Shoryuken in {tgt - land} frames (varied)")
             if md is not None and dist > float(md):
                 return None
-            if not ans.get("teleport"):
+            if not ans.get("teleport") and arr is None:
                 # 0.37.0: the Shoryuken's hitbox frames (MEASURED, catalog boxes) against where the opponent's hurtbox will
-                # be in them; not yet = decide again on the next line (a teleport's position jumps: frames only)
+                # be in them; not yet = decide again on the next line (a teleport's position jumps: frames only). 0.54.0:
+                # not for a move whose arrival is known (_travel_arrival): it has not started moving when the motion must
+                # start, and waiting for it to move was what made the Shoryuken late
                 srb = (self.c.get("anti_air") or {}).get("srk_hitbox") or []
                 if srb and self._hitbox_meets(me, op, L + pre + 1, srb) is None:
                     return None
@@ -1947,12 +1970,54 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return f"own move {aid}"
         return None
 
-    def _note_onset(self, oa, tmr) -> None:
+    def _note_onset(self, oa, tmr, dist=None) -> None:
         if oa != self._onset_act:
             self._prev2_op_act, self._prev_op_blocked = self._prev_op_act, self._cur_op_blocked
             self._prev_op_act = self._onset_act
             self._onset_act, self.op_onset = oa, tmr if isinstance(tmr, int) else None
             self._cur_op_blocked = False
+            self._onset_dist, self._travel_seen = dist, False
+
+    def _travel_arrival(self, oa) -> int | None:
+        """0.54.0: the opponent's move's own frame when it reaches the bot, for a move that travels into it (E. Honda's
+        Sumo Headbutt): frames = a + b x the distance at its start, from move_timing's `travel` fit (recordings; menu B,
+        else the shipped table), shifted by this match's own contacts of it (their median residual, 2+). MEASURED
+        (Fights_4): the user's Shoryuken answer started once Honda was visibly moving, too late for a 9-frame motion: 29
+        hits on Ryu mid-motion in 14 matches (8 of them the Headbutt), the Shoryuken won only from 2.5+ away."""
+        d0 = self._onset_dist
+        if d0 is None:
+            return None
+        fit = (self.mt_moves.get(oa) or {}).get("travel") if hasattr(self, "mt_moves") else None
+        live = self._travel_live.get(oa) or []
+        if fit:
+            a, b = float(fit["a"]), float(fit["b"])
+            if len(live) >= 2:
+                res = sorted(f - a - b * d for d, f in live)
+                a += res[len(res) // 2]
+            return int(round(a + b * d0))
+        if len(live) >= 4:
+            from .move_timing import travel_fit
+            f_ = travel_fit(live)
+            if f_:
+                return int(round(f_["a"] + f_["b"] * d0))
+        return None
+
+    def _track_travel(self, me: dict, op: dict, tmr) -> None:
+        """0.54.0: this match's contacts of the opponent's travelling moves (distance at the start, own frame)."""
+        if self._travel_seen or self._onset_dist is None or not isinstance(tmr, int) or self.op_onset is None:
+            return
+        hp, bs = _num(me.get("hp")), _num(me.get("blockstun")) or 0
+        prev = self._travel_prev
+        self._travel_prev = (hp, bs)
+        if prev is None or hp is None or prev[0] is None:
+            return
+        if hp < prev[0] or bs > prev[1]:
+            self._travel_seen = True
+            oa = op.get("action_id")
+            if (self.mt_moves.get(oa) or {}).get("travel") if hasattr(self, "mt_moves") else False:
+                lst = self._travel_live.setdefault(oa, [])
+                lst.append((round(float(self._onset_dist), 3), int(tmr - self.op_onset)))
+                del lst[:-12]
 
     def _note_blocked(self, me: dict) -> None:
         """0.37.0: the opponent's current action has put the bot in blockstun (for answers that depend on a blocked move)."""
@@ -2037,7 +2102,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return Decision("release", reason="no positions")
         self._now = raw.get("stage_timer")
         self._cur = (raw, me)
-        self._note_onset(op.get("action_id"), self._now)
+        self._note_onset(op.get("action_id"), self._now, dist)
         self._track(raw, op)
         self.facing(me, op)
         mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
@@ -4103,6 +4168,16 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if orig_ is not None and opt == "meaty":
             ch["label"] = f"meaty {mt['name']} (setplay)"
             self.setplay_stats["meaty_chosen"] += 1
+        cand_ = ch.get("cand") or {}
+        dg_ = getattr(self, "disguise", None)
+        if dg_ is not None and opt in ("press", "frame_trap") and isinstance(cand_.get("startup"), int):
+            # 0.54.0 (disguise.py): a press that beats the opponent's fastest button with frames to spare goes out a drawn
+            # few frames later (MEASURED Fights_4: 41% of the bot's presses after a block came on the first free frame,
+            # the humans' spread), still at least `delay_keep` frames inside the frame trap
+            gap_ = self._turn_gap if sit == "my_turn" else int(cand_.get("gap", 3))
+            dz_ = dg_.delay(int(self._frame_trap_adv or 0) + int(gap_) - int(cand_["startup"]))
+            if dz_ > 0:
+                ch["seq"] = f"1@{dz_} " + ch["seq"]
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
         # did 58% of the user's damage against a crouch block)
         g = self._guard_now(op)
@@ -4756,7 +4831,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         me, op = raw.get(me_key) or {}, raw.get(op_key) or {}
         oa = op.get("action_id")
         tmr = raw.get("stage_timer")
-        self._note_onset(oa, tmr)
+        self._note_onset(oa, tmr, player_distance(me, op))
+        self._track_travel(me, op, tmr)
         self._note_blocked(me)
         self._track(raw, op)                         # 0.32.0: the opponent's speed from every line
         self._pe_track(raw, me, op)
@@ -5245,6 +5321,13 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.policy.grab_zone = self.grab_zone(me, op) if free_ else None
         self.policy.no_fireball = self.fireball_beaten(op) is not None
         self.policy.chasing = self._chasing(raw, me, op)
+        # 0.54.0: the boxes of this line for the policy's reach check (own_hitboxes.py; NeutralPolicy.box_verdict)
+        self.policy.box_ctx = (me, op)
+        oa_ = op.get("action_id")
+        self.policy.box_op_moving = isinstance(oa_, int) and oa_ >= 600 and not 715 <= oa_ < 730
+        mx_, ox_ = _num(me.get("x")), _num(op.get("x"))
+        side_ = 1.0 if (mx_ is not None and ox_ is not None and ox_ > mx_) else -1.0
+        self.policy.box_closing = max(0.0, -self.op_vx * side_ * 6.0)
         ch = self.policy.choose(me, op, prev.get(mk), prev.get(ok), t1, lambda a: self.can_spend(me, a), dt=dt)
         intent = ch["intent"]
         probs = " · ".join(f"{k.replace('_', ' ')} {v:.0%}" for k, v in ch["top"])
@@ -5784,6 +5867,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
               "(recorded in every match summary).")
     c = sess.controller
     runner = SequenceRunner(c, sink=sess.recorder.event)
+    # 0.54.0 human-like input timing, on whether or not human limits are (user: "Even without human limits on, we should
+    # still obfuscate the nature of the bot itself, without sacrificing efficacy"; disguise.py)
+    from .disguise import Disguise, hold_sensitive
+    dg_cfg = {**(cfg.get("disguise") or {}), **(fcfg.get("disguise") or {})}
+    disg = Disguise(dg_cfg) if dg_cfg.get("enabled", True) else None
+    if hasattr(c, "disguise"):
+        c.disguise = disg
     # 0.22.0 operator takeover: a real controller input (or F11) hands the match to the user; rounds they win teach the
     # bot their answers (takeover.py). The controller doesn't count where the bot is a virtual controller itself, and
     # there is no takeover in a blind test.
@@ -5995,6 +6085,10 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 if human is not None:
                     summary["human_limits"] = human.summary()
                     human.reset_stats()
+                if disg is not None:
+                    summary["disguise"] = disg.summary()
+                    disg.stats = {"holds": {}, "walks": {}, "delays": {}, "lingered": 0, "conflicts": 0,
+                                  "kept_short": 0}
                 if blind_ask is not None:
                     try:
                         g_ = (blind_ask() or "").strip().lower()[:1]
@@ -6240,6 +6334,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     batch.append(lines.get_nowait())
                 except queue.Empty:
                     break
+            if disg is not None and hasattr(c, "tick"):
+                c.tick()                       # 0.54.0: a lengthened button hold ends on time
             match_over, end_i = False, len(batch)
             me_key, op_key = keys()
             ev_ = tk.poll(fight_on, batch[-1].raw.get("round") if batch else None)
@@ -6664,6 +6760,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter = ScriptedFighter(mcfg, opp_moves, policy=policy, book=book, experience=exp,
                                           own=own_moves(summary["character"], ds_root), own_reach=own_reach,
                                           opp_reach=opp_reach)
+                fighter.disguise = disg
+                if disg is not None:
+                    # 0.54.0: the bot character's moves with a held-button version keep their exact button holds
+                    try:
+                        from . import framedata as fd_
+                        disg.sensitive = hold_sensitive(
+                            (fd_.load(summary["character"], ds_root / "framedata") or {}).get("moves"))
+                    except Exception:          # noqa: BLE001 - optional data
+                        disg.sensitive = set()
                 try:                               # 0.53.0: SF6 Lab's okizeme for this character (menu T, SL)
                     from .sf6lab import setplay_table
                     fighter.setplay = setplay_table(summary["character"], ds_root, fighter.own)
@@ -6693,6 +6798,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     fighter.di_rx = di_reaction_setting(fcfg.get("di_reaction"), di_delay)
                 from .boxes import load_own_hit_profiles
                 fighter.own_hit = load_own_hit_profiles(ds_root, summary["character"])
+                if fighter.policy is not None:
+                    fighter.policy.own_hit = fighter.own_hit       # 0.54.0: box-to-box reach in neutral too
                 summary["hitbox_profiles"] = len(fighter.own_hit)
                 fighter.composer = composer
                 fighter.variety = bool(((fcfg.get("punish") or {}).get("variety") or {}).get("enabled", True))
@@ -6804,6 +6911,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                      "system-move ids.") + f" {len(book)} true combos ready.", source="scripted", kind="detail")
             if fighter is None:
                 fighter = ScriptedFighter(fcfg, _common_moves(fcfg))
+                fighter.disguise = disg
             # resolve outcomes of earlier actions
             ohp = _num(op.get("hp"))
             for p in list(pending):
@@ -6980,7 +7088,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                                         # 0.24.0: the combo composer re-plans the rest whenever a move starts
                                         on_step=(lambda j_, raw_: fighter.route_on_step(
                                             j_, raw_, me_key, op_key, fighter._route_basis))
-                                        if d.kind == "route" and fighter.composer is not None else None)
+                                        if d.kind == "route" and fighter.composer is not None else None,
+                                        # 0.54.0: human-like button holds where nothing later in the combo needs the key
+                                        linger=disg.holds_ok if disg is not None else None)
                     c.apply(InputState(), tag="fighter_route_end")
                     lt_ = reader.latest()
                     # 0.33.1: a jump attack inside a route performed whole is not continued again afterwards
@@ -7022,6 +7132,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         summary["interrupted"][res["aborted"]] = summary["interrupted"].get(res["aborted"], 0) + 1
                     continue
                 seq_ = human.jitter(d.seq) if human is not None else d.seq
+                if disg is not None and d.intent in ("walk_fwd", "walk_back", "crouch"):
+                    seq_ = disg.walk(seq_)         # 0.54.0: a walk / crouch macro of varied length (A2)
+                lg_ = disg is not None and disg.holds_ok(d.name)
                 since = None if c.forward_t is None else clock.now() - c.forward_t
                 seq_, guard_wait = motion_guard(seq_, since, int((fcfg.get("inputs") or {}).get("motion_clear_frames", 12)))
                 if guard_wait:
@@ -7036,7 +7149,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     dgs_[dg_] = dgs_.get(dg_, 0) + 1
                 held_ = d.rule in PARRY_HOLD_RULES
                 _, ok = runner.run(parse_sequence(seq_, d.name), stop_event=sess.stop_event,
-                                   abort=stop_check, end_neutral=False, wait_last=True)
+                                   abort=stop_check, end_neutral=False, wait_last=True, linger=lg_)
                 if held_:
                     parry_held = True    # 0.38.0: MP+MK stay down into the next decision (a projectile's next hit)
                 elif d.rule == "reversal_arm":
@@ -7052,7 +7165,7 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     walk_out_ = d.intent == "walk_fwd" and fighter.policy is not None \
                         and not fighter.policy.in_their_range(_latest_dist(reader.latest(), side["i"]))
                     c.apply(InputState() if jumped_ or walk_out_ else end_guard(reader.latest(), side["i"], fcfg),
-                            tag="fighter_seq_end")
+                            tag="fighter_seq_end", **({"linger": True} if lg_ else {}))
                 if runner.aborted:
                     summary["interrupted"][runner.aborted] = summary["interrupted"].get(runner.aborted, 0) + 1
                     continue
@@ -7072,6 +7185,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
         except Exception:
             pass
         c.release_all("fighter end")
+        if hasattr(c, "disguise"):
+            c.disguise = None                    # 0.54.0: no lengthened holds outside a fight
         if meter is not None and meter.on_press in c.on_press:
             c.on_press.remove(meter.on_press)
         reader.stop()

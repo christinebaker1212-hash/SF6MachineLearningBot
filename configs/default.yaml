@@ -70,6 +70,19 @@ input:
 # older than a week, a newer reader, new Capcom data) in a low-priority background process at each fight session's start
 sf6lab:
   auto: true
+# 0.54.0 human-like input timing in every fight, human limits on or off (user: "Even without human limits on, we should
+# still obfuscate the nature of the bot itself, without sacrificing efficacy"; disguise.py): button holds drawn from the
+# human opponents' measured spread (3-10 frames), walks 5-12 frames, timed presses with frames to spare up to 4 frames
+# later (always 2 to spare). Capcom's 2026-10-03 letter approves human-like inputs in the project's ranked matches.
+disguise:
+  enabled: true
+  holds: true
+  walks: true
+  delays: true
+  max_hold: 10
+  walk_range: [5, 12]
+  delay_max: 4
+  delay_keep: 2
 result_menu:
   enabled: true
   first_s: 5          # seconds after the match ended (pressing F during the win pose / quote only skips them)
