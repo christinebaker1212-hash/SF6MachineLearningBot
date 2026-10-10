@@ -47,6 +47,9 @@ Drive. Next ranked run: compare the scorecard's new rows (Drive lost by cause, b
 `fight_summary.turns` / `drive_meter`; watch whether frame-trap players punish the checks (`adapt.gaps`). The goal set by
 the user: **Ultimate Master** (an aim, not a promise).
 
+**State:** **0.53.2** (CLAUDE.md "0.53.2"): the research build allows the editor's new preview script (animated costume
+colours, glow; Capcom cleared colour animation per the user, 2026-10-10). Rebuilt and bundled; reinstall the online build.
+
 **State:** **0.43.1** (CLAUDE.md "0.43.1"): the research build also runs the SF6 Mod Editor's live costume-colour preview
 (`refw_research/allowed/sf6editor_live.lua`, pinned to its exact bytes; online included, approved by Capcom as cosmetic per
 the user, 2026-10-09). Rebuilt and bundled in `refw_research/dist/`; install with TOOLS → "Online build: install" (SF6

@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.53.2 (2026-10-10): the research build allows the editor's new live-preview script (animated costume colours: pulse / rainbow, glow and material settings; still cosmetic, pinned to its exact bytes). Capcom cleared colour animation, per the user (2026-10-10). Bot behaviour unchanged.**
 - **0.53.1 (2026-10-10): SF6 Lab updates itself, no user step: every fight session (ranked included) downloads / re-reads what is due in a low-priority background process (the next match uses it); update.bat and the combo lab's SF6 Lab source do it too; a refused or failed download keeps the old data and waits.**
 - **0.53.0 (2026-10-10): SF6 Lab (sf6-lab.net, the site owner's permission): `sf6lab-import` (menu T SL, panel COMBOS -> SF6 Lab combos & oki) takes every character's combo routes and okizeme; characters without combo lab results use those routes (before mined ones), K 12 tests them, and after a listed knockdown ender the bot dashes in and meaties as the site says.**
 - **0.52.0 (2026-10-09): play back your recorded combos (`combo-play`, menu K 11, panel COMBOS -> My combos, a PLAY button per combo): pick one, then F10 in Training Mode makes the bot (P1) do it; F10 again repeats it.**
@@ -157,6 +158,8 @@ welcomes for variance against weaker or erratic players. No alt account will be 
   - **2026-10-09 (user):** Capcom approved the research build also running the SF6 Mod Editor's live costume-colour
     preview script, online included, "as it is entirely cosmetic, and does not affect the game experience or
     research". Built into 0.43.1 (see "0.43.1"); it stays pinned to its exact bytes, so nothing else runs.
+  - **2026-10-10 (user):** "I have cleared the animation with Capcom": the editor's preview script also animates costume
+    colours (pulse / rainbow) and sets glow / material values, still cosmetic. Built into 0.53.2 (see "0.53.2").
 
 **Requirement: opponent assessment (planned for M2–M4, recorded here so it isn't lost).**
 The agent should notice opponent mistakes and judge whether the opponent is below its level.
@@ -5546,4 +5549,13 @@ in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing valid
   `until=2033-10-01 exporter=bca17bb85832acbe also=sf6editor_live:fd7ab2fd1be14662` (= the allowed file), and its
   patch.diff uses `is_sf6bot_allowed_script`. Copied to `refw_research/dist/` (update.bat brings it). All tests pass
   here (722 passed, 7 skipped). Not run in game yet.
+
+## 0.53.2: the editor's animated-colour preview in the research build (user, 2026-10-10)
+- User: "I have cleared the animation with Capcom." The SF6 Mod Editor's live preview (`sf6editor_live.lua`) now also
+  plays animated costume colours (pulse between two colours, rainbow hue cycle; written every 2 frames, never saved to
+  the game's files) and glow / material settings, re-applies them when a new fighter loads, and restores the originals
+  on stop. Cosmetic only, like 0.43.1.
+- `refw_research/allowed/sf6editor_live.lua` = the editor's new file (id dd87f6fda3012a91, was fd7ab2fd1be14662); the
+  research dll is rebuilt by the workflow and bundled in `refw_research/dist/` (TOOLS -> "Online build: install", SF6
+  closed). The exporter (bca17bb85832acbe) and the bot are unchanged.
 

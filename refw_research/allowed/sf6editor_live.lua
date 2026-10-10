@@ -12,12 +12,20 @@
 -- The technique follows the open-source SF6 Color Mod (Wael3rd/SF6-ModSuite,
 -- MIT). Originals are kept and restored with "Stop preview".
 --
+-- Animated colours: the payload's "anim" list is played here (colour data
+-- itself can't change over time): every few frames the colours are worked
+-- out and the fighters re-dressed. The preview (and its animations) is
+-- applied again whenever the fighters on screen change (new round, new
+-- match), until the editor sends "stop".
+--
 -- Payload:
 -- {
 --   "stamp": 123,
 --   "side": "both" | "p1" | "p2",
 --   "clusters": ["Cluster_Gi", ...],       -- only data whose clusters match is touched
---   "values": { "Parts/0/Clusters/1/CustomizeColors/0/Color": [r,g,b,a], ".../_Value": 0.5, ".../Enable": true }
+--   "values": { "Parts/0/Clusters/1/CustomizeColors/0/Color": [r,g,b,a], ".../_Value": 0.5, ".../Enable": true },
+--   "anim": [ { "path": ".../Color", "mode": "pulse" | "rainbow", "a": [r,g,b,a], "b": [r,g,b,a], "period": 2.0 } ],
+--   "anim_every": 2                         -- frames between animation steps (optional)
 -- }
 -- or { "stamp": 124, "stop": true } to put the game's colours back,
 -- or { "stamp": 125, "dump": true } to list the colour controllers in dump.json.
@@ -38,7 +46,11 @@ local state = {
     status = "waiting for the editor",
     frame = 0,
     check_every = 15,
-    saved = {},          -- { obj, offset, kind, old }
+    rescan_every = 60,
+    anim_every = 2,
+    saved = {},          -- { obj, off, kind, old, type }
+    targets = {},        -- fighters the payload was applied to: { ctrl, data, num }
+    signature = "",      -- which controllers are on screen (to notice new fighters)
 }
 
 -- tells the editor what happened with its last request
@@ -68,6 +80,21 @@ end
 local function go_name(obj)
     local ok, n = pcall(function() return obj:call("get_GameObject"):call("get_Name") end)
     return ok and n or ""
+end
+
+local function type_name(obj)
+    local ok, n = pcall(function() return obj:get_type_definition():get_full_name() end)
+    return ok and n or nil
+end
+
+-- an object we touched earlier may be gone (a match ended): only write into
+-- it while it is still a live object of the same type
+local function still_valid(obj, tname)
+    if type(sdk.is_managed_object) == "function" then
+        local ok, live = pcall(sdk.is_managed_object, obj)
+        if ok and not live then return false end
+    end
+    return tname == nil or type_name(obj) == tname
 end
 
 -- 1 = P1, 2 = P2, 3 = menu preview, 0 = unknown (parent names from the SF6 Color Mod)
@@ -158,18 +185,28 @@ local function field_offsets(obj, name)
     return out
 end
 
-local function write_value(obj, name, value)
+local function clamp_byte(x)
+    x = math.floor((x or 0) + 0.5)
+    if x < 0 then return 0 end
+    if x > 255 then return 255 end
+    return x
+end
+
+-- writes one field; `nosave` = don't remember the old value (animation steps:
+-- the first, still write already saved the game's original)
+local function write_value(obj, name, value, nosave)
     local offs = field_offsets(obj, name)
+    local tname = (not nosave) and type_name(obj) or nil
     for _, off in ipairs(offs) do
         if type(value) == "boolean" then
-            table.insert(state.saved, { obj = obj, off = off, kind = "b", old = obj:read_byte(off) })
+            if not nosave then table.insert(state.saved, { obj = obj, off = off, kind = "b", old = obj:read_byte(off), type = tname }) end
             obj:write_byte(off, value and 1 or 0)
         elseif type(value) == "table" then
-            local r, g, b, a = value[1] or 0, value[2] or 0, value[3] or 0, value[4] or 255
-            table.insert(state.saved, { obj = obj, off = off, kind = "d", old = obj:read_dword(off) })
+            local r, g, b, a = clamp_byte(value[1]), clamp_byte(value[2]), clamp_byte(value[3]), clamp_byte(value[4] or 255)
+            if not nosave then table.insert(state.saved, { obj = obj, off = off, kind = "d", old = obj:read_dword(off), type = tname }) end
             obj:write_dword(off, ((a * 256 + b) * 256 + g) * 256 + r)
         elseif type(value) == "number" then
-            table.insert(state.saved, { obj = obj, off = off, kind = "f", old = obj:read_float(off) })
+            if not nosave then table.insert(state.saved, { obj = obj, off = off, kind = "f", old = obj:read_float(off), type = tname }) end
             obj:write_float(off, value)
         end
     end
@@ -177,7 +214,7 @@ local function write_value(obj, name, value)
 end
 
 -- walk "Parts/0/Clusters/1/CustomizeColors/0/Color" through the live objects
-local function apply_path(data, path, value)
+local function apply_path(data, path, value, nosave)
     local segs = {}
     for s in string.gmatch(path, "[^/]+") do segs[#segs + 1] = s end
     local obj = data
@@ -194,25 +231,41 @@ local function apply_path(data, path, value)
         if not child then return 0 end
         obj = child
     end
-    return write_value(obj, segs[#segs], value)
+    return write_value(obj, segs[#segs], value, nosave)
 end
 
 local function restore()
     for k = #state.saved, 1, -1 do
         local s = state.saved[k]
-        pcall(function()
-            if s.kind == "b" then s.obj:write_byte(s.off, s.old)
-            elseif s.kind == "d" then s.obj:write_dword(s.off, s.old)
-            else s.obj:write_float(s.off, s.old) end
-        end)
+        if still_valid(s.obj, s.type) then
+            pcall(function()
+                if s.kind == "b" then s.obj:write_byte(s.off, s.old)
+                elseif s.kind == "d" then s.obj:write_dword(s.off, s.old)
+                else s.obj:write_float(s.off, s.old) end
+            end)
+        end
     end
     state.saved = {}
+    state.targets = {}
+end
+
+-- which colour controllers are on screen, as one string (new fighters = new string)
+local function signature(list)
+    local parts = {}
+    for _, ctrl in ipairs(list) do
+        local ok, addr = pcall(function() return ctrl:get_address() end)
+        parts[#parts + 1] = ok and tostring(addr) or "?"
+    end
+    table.sort(parts)
+    return table.concat(parts, ",")
 end
 
 local function apply(payload)
     restore()
-    local touched, written = 0, 0
-    for _, ctrl in ipairs(controllers()) do
+    local touched = 0
+    local list = controllers()
+    state.signature = signature(list)
+    for _, ctrl in ipairs(list) do
         local side = side_of(ctrl)
         local want = payload.side or "both"
         local side_ok = want == "both" or (want == "p1" and (side == 1 or side == 3)) or (want == "p2" and side == 2)
@@ -220,19 +273,91 @@ local function apply(payload)
             local data, num = current_data(ctrl)
             if data and matches(data, payload.clusters) then
                 for path, value in pairs(payload.values or {}) do
-                    local ok, n = pcall(apply_path, data, path, value)
-                    if ok and n then written = written + n end
+                    pcall(apply_path, data, path, value)
                 end
                 pcall(function() ctrl:call("SetColor(System.Int32)", num) end)
                 touched = touched + 1
+                state.targets[#state.targets + 1] = { ctrl = ctrl, data = data, num = num, ctrl_type = type_name(ctrl), data_type = type_name(data) }
             end
         end
     end
+    local animated = payload.anim and #payload.anim or 0
     state.status = touched > 0
-        and string.format("colours applied to %d fighter model(s)", touched)
+        and string.format("colours applied to %d fighter model(s)%s", touched, animated > 0 and string.format(", %d animated", animated) or "")
         or "no matching fighter on screen - pick the same fighter, costume and colour in game"
     return touched
 end
+
+-- ---- animation ----------------------------------------------------------
+
+local function rgb_to_hsv(r, g, b)
+    local mx, mn = math.max(r, g, b), math.min(r, g, b)
+    local d = mx - mn
+    local h = 0
+    if d > 0 then
+        if mx == r then h = ((g - b) / d) % 6
+        elseif mx == g then h = (b - r) / d + 2
+        else h = (r - g) / d + 4 end
+        h = h / 6
+    end
+    return h, (mx > 0) and d / mx or 0, mx
+end
+
+local function hsv_to_rgb(h, s, v)
+    local i = math.floor(h * 6)
+    local f = h * 6 - i
+    local p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+    i = i % 6
+    if i == 0 then return v, t, p
+    elseif i == 1 then return q, v, p
+    elseif i == 2 then return p, v, t
+    elseif i == 3 then return p, q, v
+    elseif i == 4 then return t, p, v
+    else return v, p, q end
+end
+
+-- colour of one animation at time t (seconds)
+local function anim_color(a, t)
+    local period = tonumber(a.period) or 2
+    if period < 0.05 then period = 0.05 end
+    local phase = (t % period) / period
+    local A = a.a or { 255, 255, 255, 255 }
+    if a.mode == "rainbow" then
+        local h, s, v = rgb_to_hsv((A[1] or 0) / 255, (A[2] or 0) / 255, (A[3] or 0) / 255)
+        -- a grey or dark base still shows a rainbow
+        if s < 0.6 then s = 0.85 end
+        if v < 0.45 then v = 0.85 end
+        local r, g, b = hsv_to_rgb((h + phase) % 1, s, v)
+        return { r * 255, g * 255, b * 255, A[4] or 255 }
+    end
+    -- pulse: smoothly there and back
+    local B = a.b or A
+    local k = 0.5 - 0.5 * math.cos(phase * 2 * math.pi)
+    local out = {}
+    for i = 1, 4 do
+        local x, y = A[i] or 255, B[i] or (A[i] or 255)
+        out[i] = x + (y - x) * k
+    end
+    return out
+end
+
+local function animate()
+    local anims = state.payload and state.payload.anim
+    if not anims or #anims == 0 or #state.targets == 0 then return end
+    local t = state.frame / 60
+    local colors = {}
+    for i, a in ipairs(anims) do colors[i] = anim_color(a, t) end
+    for _, tg in ipairs(state.targets) do
+        if still_valid(tg.data, tg.data_type) and still_valid(tg.ctrl, tg.ctrl_type) then
+            for i, a in ipairs(anims) do
+                pcall(apply_path, tg.data, a.path, colors[i], true)
+            end
+            pcall(function() tg.ctrl:call("SetColor(System.Int32)", tg.num) end)
+        end
+    end
+end
+
+-- -------------------------------------------------------------------------
 
 local function stop()
     restore()
@@ -240,6 +365,7 @@ local function stop()
         pcall(function() ctrl:call("SetColor(System.Int32)", ctrl:get_field("ColorNum")) end)
     end
     state.payload = nil
+    state.signature = ""
     state.status = "stopped — original colours restored"
 end
 
@@ -261,6 +387,21 @@ end
 re.on_frame(function()
     if not state.enabled then return end
     state.frame = state.frame + 1
+
+    if state.payload and state.frame % state.anim_every == 0 then
+        local ok, err = pcall(animate)
+        if not ok then state.status = "animation error: " .. tostring(err) end
+    end
+
+    -- new fighters on screen (next round / match): apply the preview to them too
+    if state.payload and state.frame % state.rescan_every == 0 then
+        local ok, sig = pcall(function() return signature(controllers()) end)
+        if ok and sig ~= state.signature then
+            local aok, res = pcall(apply, state.payload)
+            if not aok then state.status = "error: " .. tostring(res) end
+        end
+    end
+
     if state.frame % state.check_every ~= 0 then return end
     local ok, data = pcall(json.load_file, LIVE_FILE)
     if ok and data and data.stamp ~= state.last_stamp then
@@ -274,6 +415,7 @@ re.on_frame(function()
             report(data.stamp, 0)
         else
             state.payload = data
+            state.anim_every = math.max(1, math.floor(tonumber(data.anim_every) or 2))
             local aok, res = pcall(apply, data)
             if not aok then state.status = "error: " .. tostring(res); res = 0 end
             report(data.stamp, res)
