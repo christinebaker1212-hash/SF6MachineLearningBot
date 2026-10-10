@@ -5558,4 +5558,6 @@ in **game frames**, not wall-clock time. It's a cheap win for M1/M2 timing valid
 - `refw_research/allowed/sf6editor_live.lua` = the editor's new file (id dd87f6fda3012a91, was fd7ab2fd1be14662); the
   research dll is rebuilt by the workflow and bundled in `refw_research/dist/` (TOOLS -> "Online build: install", SF6
   closed). The exporter (bca17bb85832acbe) and the bot are unchanged.
+- **Built and bundled:** run 38013003215 (sha256 683dc568... = GitHub's digest); the dll marker says
+  `until=2033-10-01 exporter=bca17bb85832acbe also=sf6editor_live:dd87f6fda3012a91` (= the allowed file). Not run in game yet.
 
