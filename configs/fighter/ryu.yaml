@@ -1014,6 +1014,14 @@ di_wall:
   roll_every_s: 0.5
   cooldown_s: 4.0
 # 0.18.3: after knocking the opponent down, walk in so their get-up is a pressure moment of the bot's (above)
+# 0.53.0: SF6 Lab's okizeme per ender (menu T, SL; sf6lab.setplay_table): after the bot's combo knocks down with a listed
+# ender, the forward dashes it prescribes, then its meaty (in place of 2MK) at the opponent's wake-up moment. dash_travel
+# MEASURED (0.20.0: 1.25 a dash); min_after an ESTIMATE (no dash that would end closer than this).
+setplay:
+  enabled: true
+  dash_travel: 1.25
+  min_after: 0.45
+  dash_seq: "6@3 5@3 6@3"
 oki:
   enabled: true
   walk_until: 0.9          # stop walking in at this distance

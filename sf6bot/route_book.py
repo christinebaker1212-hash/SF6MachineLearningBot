@@ -87,9 +87,15 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | No
     book = []
     verified = verified_routes(ds_root, character, min_rate=min_rate)
     if not verified and mined_fallback:
-        verified = _mined_candidates(ds_root, character, capcom)
-        if stats is not None:
-            stats["mined"] = len(verified)
+        # 0.53.0: SF6 Lab's routes first (written by a strong player; menu T, SL), else the combos found in recordings
+        verified = _sf6lab_candidates(ds_root, character)
+        if verified:
+            if stats is not None:
+                stats["sf6lab"] = len(verified)
+        else:
+            verified = _mined_candidates(ds_root, character, capcom)
+            if stats is not None:
+                stats["mined"] = len(verified)
     for v in verified:
         route = v.get("route") or ""
         r = resolve(route, capcom["moves"])
@@ -130,8 +136,33 @@ def _add(book: list, v: dict, route: str, plan: dict, s0: dict, hit_type: str) -
                  "needs_denjin": bool(plan.get("setup")), "jump_in": bool(plan.get("jump_in"))})
     if v.get("mined"):
         book[-1].update(mined=True, seen=v.get("seen"))
+    if v.get("sf6lab"):
+        book[-1]["sf6lab"] = True
     if v.get("source") == "manual":
         book[-1]["manual"] = True
+
+
+SF6LAB_RATE = 0.55            # ESTIMATE: a route written by a strong player, its timing not yet tried by the bot
+
+
+def _sf6lab_candidates(ds_root: Path, character: str) -> list[dict]:
+    """SF6 Lab's combos for `character`, shaped like the lab's verified routes (0.53.0). Damage: the page's number, else
+    the estimate from Capcom's damage and the scaling table (combo_gen.estimate_damage)."""
+    try:
+        from .sf6lab import load
+        data = load(character, ds_root) or {}
+    except Exception:                           # noqa: BLE001 - optional data
+        return []
+    out = []
+    for c in data.get("combos") or []:
+        if not c.get("route"):
+            continue
+        out.append({"route": c["route"], "position": c.get("position") or "midscreen",
+                    "hit_type": c.get("hit_type") or "normal",
+                    "damage": c.get("damage") or c.get("damage_estimate"),
+                    "drive_spent": int((c.get("drive_bars") or 0) * 10000), "super_spent": int((c.get("super_bars") or 0) * 10000),
+                    "success_rate_final_timing": SF6LAB_RATE, "sf6lab": True})
+    return out
 
 
 def _mined_candidates(ds_root: Path, character: str, capcom: dict) -> list[dict]:
@@ -171,7 +202,8 @@ def affordable(e: dict, me: dict, opp_hp: float | None, reserve: float = 0) -> t
     """(can pay for it, it kills). Drive into burnout only when it kills."""
     drive, sup = num(me.get("drive")) or 0, num(me.get("super")) or 0
     # 0.45.1: a combo found in recordings is not a verified kill: never into burnout for it (user rule, 0.10.0)
-    lethal = bool(e.get("damage") and opp_hp is not None and e["damage"] >= opp_hp and not e.get("mined"))
+    lethal = bool(e.get("damage") and opp_hp is not None and e["damage"] >= opp_hp and not e.get("mined")
+                  and not e.get("sf6lab"))         # 0.53.0: nor one from SF6 Lab the lab has not verified
     if e["super"] > sup:
         return False, lethal
     if e["drive"] and (drive - e["drive"] <= reserve and not lethal) or e["drive"] > drive:

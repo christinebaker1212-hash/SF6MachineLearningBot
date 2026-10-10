@@ -634,6 +634,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         self.thrown_ambiguous: set = set()   # 0.31.1: victim ids that are also the bot's own throw connects
         self._approach_fired = False
         self._their_wake_fired = None
+        # 0.53.0: SF6 Lab's okizeme per ender (sf6lab.setplay_table, set by the fight session) and the knockdown in hand
+        self.setplay: dict = {}
+        self._kd: dict | None = None
+        self._my_last_atk: tuple | None = None
+        self._op_prev_act = None
+        self.setplay_stats = {"knockdowns": 0, "dashes": 0, "meaty_chosen": 0, "by_ender": {}}
         self._crumple_t0, self._crumple_done = None, False
         self._crumple_opts = None
         # 0.22.0: the operator's answers against this opponent (takeover.AnswerBook), learned from rounds the user won
@@ -2435,8 +2441,8 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return Decision("hold", direction=block_dir, facing=block_face, reason="holding block", rule="block")
         # 6b. the opponent getting up next to the bot, or walking into throw range (0.18.0)
         ap = (self._their_wakeup(raw, me, op, dist, t) or self._corner_pressure(raw, me, op, dist, t)
-              or self._approach(raw, me, op, dist, t) or self._denjin_knockdown(me, op, dist, t)
-              or self._oki_walk(me, op, dist))
+              or self._approach(raw, me, op, dist, t) or self._setplay_dash(me, op, dist)
+              or self._denjin_knockdown(me, op, dist, t) or self._oki_walk(me, op, dist))
         if ap is not None:
             return ap
         # 6b'. 0.37.0 a Drive Impact at a burned-out opponent (user)
@@ -4049,7 +4055,12 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if self._their_wake_fired == self.op_onset or dist > float(dc.get("max_dist", 1.4)):
             return None
         rem = int(wf) - (tmr - self.op_onset)
-        if rem > self.lead + self.stale + self.defense.pad + 1 or rem < 0 or self.busy(me) is not None:
+        pad = self.defense.pad
+        mt = self._setplay_meaty()
+        if mt is not None:
+            from .defense import _prefix
+            pad = max(pad, _prefix(mt["seq"]) + int(mt["early"]))
+        if rem > self.lead + self.stale + pad + 1 or rem < 0 or self.busy(me) is not None:
             return None
         self._their_wake_fired = self.op_onset
         return self._commit_defense("their_wakeup", raw, me, op, dist, t, rem=rem)
@@ -4075,10 +4086,23 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             # 0.37.0 (user: "I saw it wakeup DI while the opponent had meter"): landing after the get-up it is a Drive
             # Impact. MEASURED (0.36.1 ranked): 54 wake-up Drive Reversals and 14 forward Drive Impacts out of get-ups
             exclude.add("drive_reversal")
-        ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
-                                 lambda name, oc: self._resolve_option(me, op, oc, name), wait=wait,
-                                 exclude=exclude, bonus=bonus)
+        mt = self._setplay_meaty() if sit == "their_wakeup" else None
+        opts_ = self.defense._set(sit)[0] if mt is not None else None
+        orig_ = opts_.get("meaty") if opts_ is not None else None
+        if orig_ is not None:
+            # 0.53.0: the ender's setplay meaty (SF6 Lab) in place of the default one, for this wake-up
+            opts_["meaty"] = {**orig_, "seq": mt["seq"], "early": int(mt["early"])}
+        try:
+            ch = self.defense.choose(sit, lambda a: self.can_spend(me, a),
+                                     lambda name, oc: self._resolve_option(me, op, oc, name), wait=wait,
+                                     exclude=exclude, bonus=bonus)
+        finally:
+            if orig_ is not None:
+                opts_["meaty"] = orig_
         opt = ch["option"]
+        if orig_ is not None and opt == "meaty":
+            ch["label"] = f"meaty {mt['name']} (setplay)"
+            self.setplay_stats["meaty_chosen"] += 1
         # hold the right height while waiting: stand against an overhead or a jump attack (0.9.0: Gorai Axe Kick
         # did 58% of the user's damage against a crouch block)
         g = self._guard_now(op)
@@ -4193,6 +4217,9 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         elif sit == "their_wakeup":
             mid_ = tc.get("meaty_id", 640)          # 0.31.0: null for a character without a measured 2MK id
             meaty = self.own_reach.get(int(mid_)) if mid_ is not None else None
+            mt_ = self._setplay_meaty()
+            if mt_ is not None:
+                meaty = self._meaty_reach(mt_)      # 0.53.0: the setplay's own meaty
             if dist > float(meaty if isinstance(meaty, (int, float)) else tc.get("meaty_max_dist", 1.25)) + 0.05:
                 ex.add("meaty")
             if dist > float(tc.get("oki_throw_max", 0.9)):
@@ -4363,7 +4390,73 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
             return None
         if not float(oc.get("walk_until", 0.9)) < dist <= float(oc.get("max_dist", 3.2)):
             return None
+        mt = self._setplay_meaty()
+        if mt is not None and dist <= self._meaty_reach(mt):
+            return None                                  # 0.53.0: the setplay's meaty reaches from here: keep the spacing
         return Decision("hold", direction=6, reason=f"opponent knocked down at {dist:.2f}: walking in", rule="oki:walk")
+
+    # ---- 0.53.0 setplay after a knockdown (SF6 Lab's okizeme, sf6lab.setplay_table) ----------------------------------
+    KD_IDS = range(230, 350)              # airborne knockdowns, grounded knockdowns and get-ups
+    SETPLAY_ATK_WINDOW = 120              # the bot's attack that knocked down: at most this many ticks before
+
+    def _track_setplay(self, me: dict, op: dict, tmr) -> None:
+        """Which of the bot's own moves knocked the opponent down (its last attack before the knockdown began), and the
+        setplay for it while the opponent is down."""
+        if not self.setplay:
+            return
+        if not hasattr(self, "_own_names"):
+            self._own_names = {m["id"]: m["name"] for m in self.own if isinstance(m.get("id"), int) and m.get("name")}
+        aid, oa = me.get("action_id"), op.get("action_id")
+        if isinstance(aid, int) and isinstance(tmr, int):
+            nm = self._own_names.get(aid)
+            if nm is None and aid >= 900:                  # a special's / super's variant ids (0.11.14: SA3 1233 / 1234)
+                nm = next((self._own_names[a_] for a_ in range(aid - 5, aid) if a_ in self._own_names
+                           and a_ >= 900), None)
+            if nm is not None:
+                self._my_last_atk = (nm, tmr)
+        down = isinstance(oa, int) and oa in self.KD_IDS
+        was = isinstance(self._op_prev_act, int) and self._op_prev_act in self.KD_IDS
+        self._op_prev_act = oa
+        if down and not was and isinstance(tmr, int):
+            self._kd = None
+            la = self._my_last_atk
+            if la and tmr - la[1] <= self.SETPLAY_ATK_WINDOW and la[0] in self.setplay:
+                sp = self.setplay[la[0]]
+                self._kd = {"ender": la[0], "plan": sp, "dashes_left": int(sp.get("dashes") or 0), "t0": tmr}
+                self.setplay_stats["knockdowns"] += 1
+                be = self.setplay_stats["by_ender"].setdefault(la[0], 0)
+                self.setplay_stats["by_ender"][la[0]] = be + 1
+        elif not down and was:
+            self._kd = None                                # the get-up is over: the plan ends with it
+
+    def _setplay_meaty(self) -> dict | None:
+        return ((self._kd or {}).get("plan") or {}).get("meaty")
+
+    def _meaty_reach(self, mt: dict) -> float:
+        return float(self._pe_reach(mt.get("id"), self._reach_fb(mt.get("name")) or 1.3) or 1.3)
+
+    def _setplay_dash(self, me: dict, op: dict, dist: float) -> Decision | None:
+        """The forward dashes the ender's setplay prescribes (SF6 Lab: 'H Shoryuken ender: forward dash > Solar Plexus
+        Strike meaty'), while the opponent is down. A dash that would end too close (`min_after`) is not made: the walk-in
+        and the wake-up moment take over."""
+        kd = self._kd
+        sc = self.c.get("setplay") or {}
+        if kd is None or not sc.get("enabled", True) or kd["dashes_left"] <= 0:
+            return None
+        oa = op.get("action_id")
+        if not (isinstance(oa, int) and 300 <= oa < 350) or (_num(op.get("y")) or 0.0) > 0.05:
+            return None
+        if self.busy(me) is not None:
+            return None
+        travel = float(sc.get("dash_travel", 1.25))
+        if dist < travel + float(sc.get("min_after", 0.45)):
+            kd["dashes_left"] = 0
+            return None
+        kd["dashes_left"] -= 1
+        self.setplay_stats["dashes"] += 1
+        return Decision("seq", "forward dash (setplay)", sc.get("dash_seq", "6@3 5@3 6@3"), rule="setplay:dash",
+                        reason=f"{kd['ender']} knocked down: forward dash"
+                               + (f", then {kd['plan']['meaty']['name']} meaty" if kd["plan"].get("meaty") else ""))
 
     def _track_self(self, me: dict, op: dict, tmr) -> None:
         """When the bot's current action began (game clock) and the opponent's action when the latest hit landed.
@@ -4678,6 +4771,7 @@ class ScriptedFighter(PunishEngine, ZoningMixin):
         if d_ is not None and isinstance(tmr, int) and (not self._dist_hist or self._dist_hist[-1][0] != tmr):
             self._dist_hist = (self._dist_hist + [(tmr, d_)])[-8:]
         self._track_own_attack(me, op)
+        self._track_setplay(me, op, tmr)
         self._track_lights(me, op, tmr)
         self._track_air_attack(me, op, tmr)
         self._track_damage_taken(me, op)
@@ -5914,6 +6008,8 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 summary["drive_meter"] = fighter.memory.drive.summary()  # 0.44.0: where the Drive went
                 summary["turns"] = dict(fighter.turn_stats)                # 0.44.0: my turns, gap checks, corner DR
                 summary["corner_drive"] = dict(fighter.corner_drive_stats)  # 0.50.0
+                if fighter.setplay:
+                    summary["setplay"] = {**fighter.setplay_stats, "enders": len(fighter.setplay)}   # 0.53.0
                 cur["memory"] = (summary.get("opponent"), clock.now(), fighter.memory)
                 summary["anti_air"] = dict(fighter.aa_stats)
                 summary["parry_throws"] = dict(fighter.parry_throw_stats)
@@ -6469,6 +6565,13 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 book_stats_: dict = {}
                 book = build_book(summary["character"], ds_root, stats=book_stats_)
                 mcfg, cfg_banned_ = route_bans.apply_to_config(fcfg, bans_, summary["character"], ds_root)
+                if book_stats_.get("sf6lab") is not None:
+                    # 0.53.0: no combo lab results: SF6 Lab's routes stand in (before the combos found in recordings)
+                    n_lab_ = sum(1 for e_ in book if e_.get("sf6lab"))
+                    summary["combo_source"] = {"sf6lab": n_lab_}
+                    sess.narrate(f"No combo lab results for {summary['character']} yet: using {n_lab_} SF6 Lab combos "
+                                 "(not yet verified by the lab; replaced once K verifies this character's routes).",
+                                 source="learned", kind="detail")
                 if book_stats_.get("mined") is not None:
                     # 0.45.1: no combo lab results for this character: the combos found in recordings stand in until K
                     n_mined_ = sum(1 for e_ in book if e_.get("mined"))
@@ -6540,6 +6643,18 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 fighter = ScriptedFighter(mcfg, opp_moves, policy=policy, book=book, experience=exp,
                                           own=own_moves(summary["character"], ds_root), own_reach=own_reach,
                                           opp_reach=opp_reach)
+                try:                               # 0.53.0: SF6 Lab's okizeme for this character (menu T, SL)
+                    from .sf6lab import setplay_table
+                    fighter.setplay = setplay_table(summary["character"], ds_root, fighter.own)
+                except Exception as e_:            # noqa: BLE001 - optional data
+                    fighter.setplay = {}
+                    summary.setdefault("errors", []).append({"where": "setplay", "error": str(e_)})
+                if fighter.setplay:
+                    sess.narrate(f"SF6 Lab okizeme for {len(fighter.setplay)} enders ("
+                                 + ", ".join(f"{k}: {v['dashes']} dash{'es' if v['dashes'] != 1 else ''}"
+                                             + (f" > {v['meaty']['name']}" if v.get('meaty') else "")
+                                             for k, v in list(fighter.setplay.items())[:4]) + ").",
+                                 source="scripted", kind="detail")
                 # 0.40.0: a rematch (same character, soon after) keeps what that opponent beat (adapt.MatchMemory)
                 mem_ = cur.get("memory")
                 carry_ = float((fcfg.get("adapt") or {}).get("carry_s", 180))

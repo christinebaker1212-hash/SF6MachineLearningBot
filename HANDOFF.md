@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-09: code version **0.52.0**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (808).*
+*State as of 2026-10-10: code version **0.53.0**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (819).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.53.0 is pushed** (CLAUDE.md "0.53.0"): SF6 Lab (the site owner's permission): `sf6lab-import` (menu T SL, panel COMBOS -> SF6 Lab combos & oki) brings every character's combo routes and okizeme (kept under datasets/sf6lab, never in the repo); characters without lab results use them in matches, K 12 tests them, and after a listed knockdown ender the bot dashes and meaties as the site says. Not run in game; the user must run the import once.
 
 **State:** **0.52.0 is pushed** (CLAUDE.md "0.52.0"): combo playback: `combo-play` (menu K 11, panel COMBOS -> My combos, PLAY per combo); pick a recorded combo, F10 in Training Mode makes the bot (P1) do it, F10 again repeats. Not run in game.
 

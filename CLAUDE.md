@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.53.0 (2026-10-10): SF6 Lab (sf6-lab.net, the site owner's permission): `sf6lab-import` (menu T SL, panel COMBOS -> SF6 Lab combos & oki) takes every character's combo routes and okizeme; characters without combo lab results use those routes (before mined ones), K 12 tests them, and after a listed knockdown ender the bot dashes in and meaties as the site says.**
 - **0.52.0 (2026-10-09): play back your recorded combos (`combo-play`, menu K 11, panel COMBOS -> My combos, a PLAY button per combo): pick one, then F10 in Training Mode makes the bot (P1) do it; F10 again repeats it.**
 - **0.51.1 (2026-10-09): a combo recorded as "all" = "this combo can be used in any situation" (user): any hit type and any position.**
 - **0.51.0 (2026-10-09): record your own combos (`combo-record`, menu K 10, panel COMBOS -> Record my combo): F9, then the combo; it joins the bot's combo list as a true combo for the chosen hit type(s); a known combo is skipped unless it was skipped (F10) in the lab, then yours replaces it.**
@@ -317,6 +318,7 @@ python -m sf6bot --mock --no-overlay acceptance   # MOCK pipeline run, writes ru
 | `release-all` | Send key-up for all bound keys, for a stuck key after a hard kill |
 | `combo-record --hit-type normal\|counter_hit\|punish_counter\|all` | Show the bot your own combos (F9, then the combo) |
 | `combo-play --list` / `--character NAME --index N` | Play back a combo you recorded: F10 plays it (Training Mode, the bot as P1) |
+| `sf6lab-import [--refresh] [--no-fetch]` | SF6 Lab combo routes and okizeme for every character (sf6-lab.net, the owner's permission; kept under datasets/sf6lab) |
 
 ## M1 acceptance procedure (user, on the game PC)
 1. **Game settings:**
@@ -5413,6 +5415,47 @@ offline matches. Perhaps merge them with the controller overlay?")
   first. Menu: K -> 11 lists them, then asks for the character and the number.
 - Tests `tests/test_0520.py` (the list, picking, the plan; F10 plays and plays again, a press during a play not queued, the
   reset and the walk to the start spacing; another character as P1 plays nothing; the panel and CLI). Not run in game.
+
+## 0.53.0: SF6 Lab combos and okizeme (user, 2026-10-09/10)
+- User: "We can supercharge our bot's knowledge base with this website. https://sf6-lab.net/"; then "I emailed the site
+  creator with the reason for scraping, and he gave us the go ahead."
+- **What the site adds:** the moves and frame pages repeat Capcom's data, and the matchup page is prose. Only the 31
+  combo pages ("/en/fighters/<slug>/combo") are used. They have routes for every character, with damage, Drive / Super
+  cost, midscreen / corner and hit type, plus setplay after each knockdown ender: the knockdown advantage, how many
+  forward dashes, the meaty, throw / strike / shimmy, safe jumps, Drive Rush and frame-kill setups.
+- **The site's content stays on the user's PC.** Its disclaimer forbids redistribution and bulk automated collection,
+  and the owner's permission covers collecting it for the bot. Pages are saved to `datasets/sf6lab/raw/` and results
+  to `datasets/sf6lab/<slug>.json` (datasets/ is not in git). Nothing from the site is in the repo; the tests use
+  synthetic pages in the site's layout.
+- **Fetching** (`sf6bot/sf6lab.py`, `sf6bot sf6lab-import`): one page at a time, 3 s apart, a user agent naming the
+  bot and the permission; a saved page is reused for 7 days (`--refresh` downloads again, `--no-fetch` only re-reads).
+  New characters (Arjun, Bosch, Tifa) are not fetched until released.
+- **Routes in lab notation** (`translate`): the site writes Capcom's English names and abbreviations (st. / cr. / j.,
+  numpad, CDR, DR = Parry Drive Rush, DI, "X PC", "dl.", "xN", "fully charged", follow-up buttons, Ken's "ｰ" target
+  combo mark). Each move is mapped to the character's Capcom row, the route is read back by the lab's own parser and
+  planner, and kept only if the planned moves are exactly the ones the site names. Real pages (2026-10-09): Ryu 24
+  routes kept (3 dropped), Ken 27 (13), Guile 22 (17), Zangief 15 (20). Dropped ones are listed with the reason
+  (e.g. Ken's Emergency Stop, which the lab reads as 5LK). Over the 31 pages, 2,192 route lines parse.
+- **Combo lab:** `combo-lab --source sf6lab` (menu K -> 12, panel Combo lab -> SF6 Lab) tests them like community routes.
+- **Matches** (`route_book.build`): a character with no TRUE combo from the lab uses the SF6 Lab routes, then combos
+  found in recordings (0.45.1) only if there are none. Success rate `SF6LAB_RATE` 0.55 (ESTIMATE) until the matches'
+  own results; performed hit-confirmed; never spent into burnout (not a verified kill). Characters with lab results
+  (Ryu, Ken, Akuma, Marisa) are unchanged.
+- **Setplay after a knockdown** (`oki_book`, `setplay_table`, `fighter._track_setplay` / `_setplay_dash` /
+  `_setplay_meaty`; `configs/fighter/ryu.yaml: setplay`): the knockdown advantage comes from a bare "+N" under a
+  route or "Ender > +NF" / "After X: approximately +N" lines; at least `MIN_KD_ADV` 10 (smaller numbers follow
+  later moves). When the bot's own attack (within 120 ticks) puts the opponent in a knockdown (230-349) and that move
+  is a listed ender:
+  - the listed forward dashes (at most 2) go out while the opponent is grounded, each only with 1.25 to travel and
+    0.45 left after it (ESTIMATES)
+  - at the opponent's wake-up the defence game's meaty option becomes the site's meaty (its own Capcom row, timed so
+    its active frames cover the first free frame; "late" meaties use their last active frames), and the moment opens
+    early enough for its input. Throw / shimmy / block and their per-opponent learning are unchanged. The oki walk-in
+    does not fire when the meaty already reaches.
+  - Not used yet (recorded only): safe jumps, Drive Rush and frame-kill setups.
+  - Ryu's 4 enders: H Shoryuken +37 (dash, Solar Plexus Strike meaty), L / M / Aerial Tatsumaki.
+- Summary `setplay` {knockdowns, dashes, meaty_chosen, by_ender}; `combo_source` {"sf6lab": n}.
+- Tests `tests/test_0530.py` (synthetic pages; the real Ryu Capcom data). Nothing here has run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

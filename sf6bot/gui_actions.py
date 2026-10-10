@@ -96,7 +96,8 @@ ACTIONS: list[Action] = [
     # ---- COMBOS ------------------------------------------------------------------------------------------
     Action("combo_lab", "combos", "Combo lab",
            "Training Mode, dummy guard AFTER FIRST HIT, gauges max. F9 = that try worked, F10 = skip route.",
-           [Option("what", "Routes", choices=[("Community", "community"), ("Own routes", "generated"),
+           [Option("what", "Routes", choices=[("Community", "community"), ("SF6 Lab", "sf6lab"),
+                                              ("Own routes", "generated"),
                                               ("Found in recordings", "mined"),
                                               ("Joined from true combos", "composed"),
                                               ("Explore x3", "explore"), ("Containing text", "only"),
@@ -114,6 +115,10 @@ ACTIONS: list[Action] = [
            "F10 again repeats it.", special="my_combos"),
     Action("combos_import", "combos", "Community combos",
            "SuperCombo Combos pages for every character (saved from your browser if the wiki blocks).", menu="T A"),
+    Action("sf6lab", "combos", "SF6 Lab combos & oki",
+           "sf6-lab.net (with the site owner's permission): combos for the lab, okizeme after knockdowns.",
+           [Option("refresh", "Pages", choices=[("New only", "new"), ("Download all again", "all")], default="new")],
+           menu="T SL"),
     Action("framedata", "combos", "Capcom frame data", "Pages saved from your browser (Ctrl+S).", menu="T F"),
     # ---- BUTTONS -----------------------------------------------------------------------------------------
     Action("pad", "buttons", "Overlay buttons", "Clickable buttons in the overlay press P1's keys (menus).", menu="P"),
@@ -256,7 +261,8 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         return [one("catalog", "--guard", g)]
     if action_id == "combo_lab":
         w = v["what"]
-        table = {"community": ["combo-lab"], "generated": ["combo-lab", "--source", "generated"],
+        table = {"community": ["combo-lab"], "sf6lab": ["combo-lab", "--source", "sf6lab"],
+                 "generated": ["combo-lab", "--source", "generated"],
                  "mined": ["combo-lab", "--source", "mined"],
                  "composed": ["combo-lab", "--source", "composed"],
                  "explore": ["combo-lab", "--source", "generated", "--rounds", "3"],
@@ -279,6 +285,8 @@ def build(action_id: str, values: dict | None = None) -> list[dict]:
         if key and ch:
             return [one("combo-play", "--character", ch, "--key", key)]
         return [one("combo-play", "--list")]
+    if action_id == "sf6lab":
+        return [one("sf6lab-import", *(["--refresh"] if v.get("refresh") == "all" else []))]
     if action_id == "combos_import":
         return [one("combos-import")]
     if action_id == "framedata":

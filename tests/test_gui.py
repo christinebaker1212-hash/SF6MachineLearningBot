@@ -33,6 +33,8 @@ MENU = {
     "K 8": ("combo_lab", {"what": "mined"}, [["combo-lab", "--source", "mined"]]),
     "K 9": ("combo_lab", {"what": "composed"}, [["combo-lab", "--source", "composed"]]),
     "K 10": ("combo_record", {"hit": "normal"}, [["combo-record", "--hit-type", "normal"]]),
+    "K 12": ("combo_lab", {"what": "sf6lab"}, [["combo-lab", "--source", "sf6lab"]]),
+    "T SL": ("sf6lab", {}, [["sf6lab-import"]]),
     "P": ("pad", {}, [["pad"]]),
     "L": ("teach", {"name": "replay_play"}, [["pad", "--teach", "replay_play"]]),
     "U": ("routine", {"name": "replay_play"}, [["routine", "replay_play"]]),

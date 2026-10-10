@@ -51,6 +51,7 @@ echo  DATA (no game needed)
 echo    Y  Training data summary (merges repeat recordings of a replay)
 echo    X  Learn move ids from recordings
 echo    A  Import community combo routes for every character (SuperCombo wiki)
+echo    SL SF6 Lab combos and okizeme for every character (sf6-lab.net, owner's permission)
 echo  CHECKS (Training Mode)
 echo    G  Game-state check         I  Input map         W  Watch while YOU play
 echo    O  Overlay test (no game)   9  Release all keys (a key seems stuck)
@@ -128,6 +129,7 @@ echo    8  Routes found in recordings (replays and matches; built by B = train)
 echo    9  Combos the bot joined from its true combos (optional: matches use them anyway)
 echo   10  RECORD MY COMBO: you play P1, the bot watches. F9, then do a combo: it joins the bot's list
 echo   11  PLAY MY COMBO: pick one of your recorded combos; F10 makes the bot (P1) do it
+echo   12  SF6 Lab routes (import them first: T, then SL)
 set "LC="
 set /p LC=Choose: 
 if "%LC%"=="1" (%BOT% combo-lab & goto done)
@@ -140,6 +142,7 @@ if "%LC%"=="8" (%BOT% combo-lab --source mined & goto done)
 if "%LC%"=="9" (%BOT% combo-lab --source composed & goto done)
 if "%LC%"=="10" goto comborecord
 if "%LC%"=="11" goto comboplay
+if "%LC%"=="12" (%BOT% combo-lab --source sf6lab & goto done)
 if "%LC%"=="4" (
     set "LT="
     set /p LT=Text: 
@@ -231,6 +234,7 @@ if /i "%CH%"=="7" goto probe
 if /i "%CH%"=="8" (%BOT% run --policy random --seconds 30 & goto done)
 if /i "%CH%"=="9" (%BOT% release-all & goto done)
 if /i "%CH%"=="nc" goto newchar
+if /i "%CH%"=="sl" (%BOT% sf6lab-import & goto done)
 if /i "%CH%"=="z" goto torch
 goto menu
 

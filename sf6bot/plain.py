@@ -48,7 +48,7 @@ RULES = {
     "crumple_followup": "They're crumpled: {name}", "crumple_walk": "They're crumpled: walking in",
     "crumple_wait": "They're crumpled: timing the cash-out", "stun_jump_in": "They're stunned: jump-in {name}",
     "compose_live": "Combo: {name}", "jump_attack_combo": "Jump-in hit: {name}", "denjin": "Denjin Charge",
-    "oki:walk": "They're down: walking in", "fireball_block": "Blocking the fireball", "fireball_walk": "Walking in on the fireball",
+    "oki:walk": "They're down: walking in", "setplay:dash": "They're down: setplay dash ({name})", "fireball_block": "Blocking the fireball", "fireball_walk": "Walking in on the fireball",
     "fireball_jump": "Jumping in over the fireball", "fireball_jump_over": "Jumping the fireball", "fireball_clash": "Fireball clash: {name}",
     "fireball_sa1": "Super through the fireball", "fireball_air": "Fireball: in the air", "fireball_charge": "They're charging a fireball: blocking",
     "perfect_parry": "Parrying the fireball", "parry_keep": "Holding the parry (more hits coming)",

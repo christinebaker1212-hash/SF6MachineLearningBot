@@ -524,6 +524,27 @@ def cmd_routine(args, cfg):
         s.recorder.write_json("routine_run.json", {"routine": args.name, "steps_done": n, "pad": pad})
 
 
+def cmd_sf6lab_import(args, cfg):
+    """0.53.0: SF6 Lab (sf6-lab.net) combo pages -> combos for the lab and okizeme per ender (site owner's permission)."""
+    from pathlib import Path
+    from . import sf6lab
+    root = Path(cfg.get("datasets", {}).get("root", "datasets"))
+    if not args.no_fetch:
+        print(f"Downloading SF6 Lab's combo pages (one every {sf6lab.DELAY_S:.0f} s; pages saved in the last "
+              f"{sf6lab.MAX_AGE_DAYS} days are kept{' unless --refresh' if not args.refresh else ''}) ...")
+        st = sf6lab.fetch_all(root, refresh=args.refresh)
+        got = sum(1 for v in st.values() if v == "downloaded")
+        print(f"  downloaded {got}, already saved {sum(1 for v in st.values() if v == 'saved')}, "
+              f"failed {sum(1 for v in st.values() if v.startswith('failed'))}")
+    print("Reading the pages ...")
+    summary = sf6lab.import_all(root)
+    n = sum(v.get("combos", 0) for v in summary.values())
+    k = sum(v.get("oki_enders", 0) for v in summary.values())
+    print(f"SF6 Lab: {n} combos for {sum(1 for v in summary.values() if 'combos' in v)} characters, okizeme for {k} "
+          f"enders. The combo lab tests them with K (source 'SF6 Lab'); characters without lab results use them in "
+          f"matches; the okizeme is used after the bot's knockdowns.")
+
+
 def cmd_combos_import(args, cfg):
     """Community combo routes for every character (SuperCombo Combos pages, every tab)."""
     import time as _time
@@ -930,9 +951,11 @@ def main(argv=None):
     p.add_argument("--rounds", type=int, default=1,
                    help="generated routes: test, regenerate from the results (extend what worked, drop "
                         "what was blocked), test again; this many rounds")
-    p.add_argument("--source", choices=["community", "generated", "mined", "composed", "both"], default="community",
-                   help="community routes (menu T, A), routes worked out from Capcom data, routes found in "
-                        "recordings (built by train), combos joined from verified ones (composed), or all of them")
+    p.add_argument("--source", choices=["community", "sf6lab", "generated", "mined", "composed", "both"],
+                   default="community",
+                   help="community routes (menu T, A), SF6 Lab routes (menu T, SL), routes worked out from Capcom data, "
+                        "routes found in recordings (built by train), combos joined from verified ones (composed), "
+                        "or all of them")
     p.add_argument("--position", choices=["any", "midscreen", "corner"], default="any")
     p.add_argument("--hit-type", dest="hit_type", default="all",
                    choices=["all", "normal", "counter_hit", "punish_counter"],
@@ -1033,6 +1056,12 @@ def main(argv=None):
     p = sub.add_parser("routine", help="replay a taught routine on the device it was taught on (no name: list)")
     p.add_argument("name", nargs="?", default="")
     p.set_defaults(fn=cmd_routine)
+
+    p = sub.add_parser("sf6lab-import", help="SF6 Lab (sf6-lab.net) combos and okizeme for every character "
+                                             "(downloaded politely, with the site owner's permission)")
+    p.add_argument("--refresh", action="store_true", help="download every page again")
+    p.add_argument("--no-fetch", action="store_true", help="only re-read the pages already saved")
+    p.set_defaults(fn=cmd_sf6lab_import)
 
     p = sub.add_parser("combos-import", help="community combo routes for every character (SuperCombo, every tab)")
     p.add_argument("--no-fetch", action="store_true", help="only use pages saved in combo_pages/")
