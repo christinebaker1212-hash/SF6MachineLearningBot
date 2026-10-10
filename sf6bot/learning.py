@@ -546,6 +546,13 @@ def thoughts(summary: dict, exp: Experience | None, set_record: dict | None = No
         cz = sorted((dv.get("causes") or {}).items(), key=lambda kv: -kv[1])
         out.append(("measured", f"Burnouts: {dv['burnouts']}; what drained the Drive most in the 4 s before: "
                                 + ", ".join(f"{k} x{v}" for k, v in cz[:4]) + "."))
+    bt = summary.get("sf6lab_burnout_test") or {}
+    if bt.get("started"):
+        rs = sorted((bt.get("routes") or {}).items(), key=lambda kv: -kv[1].get("n", 0))[:3]
+        out.append(("measured", f"SF6 Lab combos spent into burnout (test): {bt['started']}, finished "
+                                f"{bt.get('completed', 0)}"
+                                + (" (" + "; ".join(f"{k} {v.get('ok', 0)}/{v.get('n', 0)}" for k, v in rs) + ")" if rs
+                                   else "") + "."))
     dj = summary.get("denjin") or {}
     if any(v for k, v in dj.items() if k != "stock_at_end"):
         out.append(("scripted", f"Denjin Charge: charged on a knockdown {dj.get('charged_knockdown', 0)}, from far away "

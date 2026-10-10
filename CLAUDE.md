@@ -7,6 +7,7 @@ Experimental ML agent for Street Fighter 6. **Long-term goal: Master rank.** Tha
 experimental outcome we're working toward, not a promised capability.
 
 ## Status
+- **0.53.3 (2026-10-10): SF6 Lab routes may spend Drive into burnout, to test whether they work (user); the corner Drive save still holds, and every other combo keeps "burnout only for a verified kill". Switch: `sf6lab.burnout_test` in ryu.yaml.**
 - **0.53.2 (2026-10-10): the research build allows the editor's new live-preview script (animated costume colours: pulse / rainbow, glow and material settings; still cosmetic, pinned to its exact bytes). Capcom cleared colour animation, per the user (2026-10-10). Bot behaviour unchanged.**
 - **0.53.1 (2026-10-10): SF6 Lab updates itself, no user step: every fight session (ranked included) downloads / re-reads what is due in a low-priority background process (the next match uses it); update.bat and the combo lab's SF6 Lab source do it too; a refused or failed download keeps the old data and waits.**
 - **0.53.0 (2026-10-10): SF6 Lab (sf6-lab.net, the site owner's permission): `sf6lab-import` (menu T SL, panel COMBOS -> SF6 Lab combos & oki) takes every character's combo routes and okizeme; characters without combo lab results use those routes (before mined ones), K 12 tests them, and after a listed knockdown ender the bot dashes in and meaties as the site says.**
@@ -5479,6 +5480,24 @@ offline matches. Perhaps merge them with the controller overlay?")
 - The manual command (menu T SL, panel) stays, only to force a full refresh.
 - Tests `tests/test_0531.py` (due / re-read / refusal / failure back-off, the background process, the CLI). On the real
   saved pages: 0.53.0's results are re-read (no reader version) without a download, then nothing is due.
+
+## 0.53.3: SF6 Lab routes may spend into burnout, as a test (user, 2026-10-10)
+- User: "Go ahead and allow spending into burnout to test whether those combos work." This relaxes the user's own rule
+  (0.10.0, kept on 2026-10-07: burnout only when the combo is a verified kill) for SF6 Lab routes only.
+- `route_book.build(sf6lab_burnout=...)` marks SF6 Lab book entries that spend Drive `burnout_ok`; `affordable` then lets
+  them spend past the usual reserve (`drive_reserve`, one bar) down to 0, never more than the gauge holds. Used wherever
+  the book is used (punish engine, confirms, crumple cash-out, choose).
+- Not relaxed:
+  - the corner Drive save (0.50.0): with the back to the wall and 3 bars or fewer, the reserve is the whole gauge, so the
+    DI-back keeps its Drive
+  - lab-verified routes, the user's recorded combos, combos found in recordings, the composer's joined combos (even when
+    joined from SF6 Lab steps): burnout only for a verified kill, as before
+  - an SF6 Lab route is still never counted as a kill
+- `configs/fighter/ryu.yaml: sf6lab.burnout_test` (true; every generated profile copies it; false turns the test off).
+- Measured per match: `fight_summary.sf6lab_burnout_test` {started, completed, routes: {route: n / ok / why it stopped}},
+  a narrated note when one starts, and a thoughts line ("SF6 Lab combos spent into burnout (test): N, finished M").
+- Characters with lab results (Ryu, Ken, Akuma, Marisa) use no SF6 Lab routes, so this changes nothing for them.
+- Tests `tests/test_0532.py`. Not run in game.
 
 ## Training Mode reset
 - The user reports that Training Mode reset is "/" on the keyboard → `training.reset_key: SLASH`.

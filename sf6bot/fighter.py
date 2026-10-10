@@ -6582,7 +6582,9 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                 from . import route_bans
                 bans_ = route_bans.load(ds_root, summary["character"])
                 book_stats_: dict = {}
-                book = build_book(summary["character"], ds_root, stats=book_stats_)
+                book = build_book(summary["character"], ds_root, stats=book_stats_,
+                                  # 0.53.3 (user): SF6 Lab routes may spend into burnout, to test whether they work
+                                  sf6lab_burnout=bool((fcfg.get("sf6lab") or {}).get("burnout_test", False)))
                 mcfg, cfg_banned_ = route_bans.apply_to_config(fcfg, bans_, summary["character"], ds_root)
                 if book_stats_.get("sf6lab") is not None:
                     # 0.53.0: no combo lab results: SF6 Lab's routes stand in (before the combos found in recordings)
@@ -6939,6 +6941,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                     fighter._live_route = d.route if d.kind == "route" else None
                     fighter._live_kind = None
                     fighter._route_basis = pl.get("lead") if isinstance(pl.get("lead"), int) else lead or 4
+                    burn_test_ = None
+                    if d.kind == "route" and (d.route or {}).get("burnout_ok"):
+                        # 0.53.3: an SF6 Lab route spending past the usual Drive reserve (into burnout): counted apart
+                        dr_ = _num((st.raw.get(me_key) or {}).get("drive")) or 0
+                        if dr_ - (d.route.get("drive") or 0) <= float(fcfg.get("drive_reserve", 0) or 0):
+                            burn_test_ = summary.setdefault("sf6lab_burnout_test", {"started": 0, "completed": 0,
+                                                                                    "routes": {}})
+                            burn_test_["started"] += 1
+                            sess.narrate(f"SF6 Lab combo into burnout (test): {d.route['route']}", source="scripted")
                     if d.kind == "route" and (d.route or {}).get("composed"):
                         fighter.compose_stats["started"] += 1
                         br = fighter.compose_stats["by_route"].setdefault(d.route["route"], {"n": 0, "ok": 0})
@@ -6985,6 +6996,15 @@ def run_fight(sess: Session, cfg: dict, seconds: float, player: int | None = 0, 
                         del tr_[:-15]
                     why = d.name if res.get("success") else f"{d.name}: {(res.get('fail') or {}).get('kind') or res.get('aborted')}"
                     summary[rk][why] = summary[rk].get(why, 0) + 1
+                    if burn_test_ is not None:
+                        r_ = burn_test_["routes"].setdefault(d.route["route"], {"n": 0, "ok": 0, "stopped": {}})
+                        r_["n"] += 1
+                        if res.get("success"):
+                            burn_test_["completed"] += 1
+                            r_["ok"] += 1
+                        else:
+                            k_ = str((res.get("fail") or {}).get("kind") or res.get("aborted"))
+                            r_["stopped"][k_] = r_["stopped"].get(k_, 0) + 1
                     live_ = fighter._live_route
                     if live_ is not None and fighter.composer is not None:
                         try:

@@ -65,7 +65,7 @@ def mined_rate(seen: int) -> float:
 
 
 def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | None = None,
-          mined_fallback: bool = True) -> list[dict]:
+          mined_fallback: bool = True, sf6lab_burnout: bool = False) -> list[dict]:
     """The book. 0.31.4: no route that performs a combo the operator skipped in the lab (F10, route_bans); `stats`
     gets the number left out (`banned`). 0.45.1: no TRUE combo from the lab -> the mined combos (`stats["mined"]`)."""
     from . import framedata as fd
@@ -122,6 +122,9 @@ def build(character: str, ds_root: Path, min_rate: float = 0.3, stats: dict | No
         # 0.51.0: a combo the user recorded for several hit types (combo_record: "all") is one book entry per type
         for ht_ in (v.get("hit_types") or [v.get("tested_as") or v.get("hit_type") or "normal"]):
             _add(book, v, route, plan, s0, ht_)
+            if sf6lab_burnout and book[-1].get("sf6lab") and book[-1]["drive"]:
+                # 0.53.3 (user: "allow spending into burnout to test whether those combos work"): affordable()
+                book[-1]["burnout_ok"] = True
     return book
 
 
@@ -199,15 +202,21 @@ def cornered(op: dict, me: dict) -> bool:
 
 
 def affordable(e: dict, me: dict, opp_hp: float | None, reserve: float = 0) -> tuple[bool, bool]:
-    """(can pay for it, it kills). Drive into burnout only when it kills."""
+    """(can pay for it, it kills). Drive into burnout only when it kills, or for an SF6 Lab route under test
+    (`burnout_ok`, 0.53.3)."""
     drive, sup = num(me.get("drive")) or 0, num(me.get("super")) or 0
     # 0.45.1: a combo found in recordings is not a verified kill: never into burnout for it (user rule, 0.10.0)
     lethal = bool(e.get("damage") and opp_hp is not None and e["damage"] >= opp_hp and not e.get("mined")
                   and not e.get("sf6lab"))         # 0.53.0: nor one from SF6 Lab the lab has not verified
     if e["super"] > sup:
         return False, lethal
-    if e["drive"] and (drive - e["drive"] <= reserve and not lethal) or e["drive"] > drive:
+    if e["drive"] > drive:
         return False, lethal
+    if e["drive"] and drive - e["drive"] <= reserve and not lethal:
+        # 0.53.3: an SF6 Lab route under test may spend past the usual reserve, into burnout, except while the corner
+        # save holds all the Drive for the DI-back (fighter.spend_reserve: reserve = the whole gauge, 0.50.0)
+        if not (e.get("burnout_ok") and reserve < drive):
+            return False, lethal
     return True, lethal
 
 

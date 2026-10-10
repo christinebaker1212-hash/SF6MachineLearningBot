@@ -4,12 +4,14 @@
 evidence, measurements, every verified/unverified claim. This file is the short version: where
 the project stands, how to work with the user, and what to do next.
 
-*State as of 2026-10-10: code version **0.53.1**, REFramework exporter script **v11**, branch
-`claude/admiring-mccarthy-uyyay4`, all tests passing (825).*
+*State as of 2026-10-10: code version **0.53.3**, REFramework exporter script **v11**, branch
+`claude/admiring-mccarthy-uyyay4`, all tests passing (828).*
 
 ---
 
 ## 0. Right now (handover, 2026-10-08)
+
+**State:** **0.53.3 is pushed** (CLAUDE.md "0.53.3"): SF6 Lab routes may spend into burnout as a test (user); the corner Drive save and every other combo's verified-kill rule unchanged; `sf6lab.burnout_test` in ryu.yaml switches it off; results in `fight_summary.sf6lab_burnout_test` and the thoughts. Not run in game.
 
 **State:** **0.53.1 is pushed** (CLAUDE.md "0.53.1"): SF6 Lab updates itself with no user step: fight sessions update what is due in a low-priority background process (next match uses it), update.bat and K 12 too; failures keep the old data and back off (6 h, 24 h after a refusal).
 

@@ -1017,6 +1017,12 @@ di_wall:
 # 0.53.0: SF6 Lab's okizeme per ender (menu T, SL; sf6lab.setplay_table): after the bot's combo knocks down with a listed
 # ender, the forward dashes it prescribes, then its meaty (in place of 2MK) at the opponent's wake-up moment. dash_travel
 # MEASURED (0.20.0: 1.25 a dash); min_after an ESTIMATE (no dash that would end closer than this).
+# 0.53.3 (user, 2026-10-10: "allow spending into burnout to test whether those combos work"): SF6 Lab routes (used
+# by characters with no combo lab results) may spend their Drive past drive_reserve, into burnout, except while the
+# corner save keeps the Drive for the DI-back (corner_drive). Lab-verified and composed combos keep the rule: burnout
+# only for a verified kill. Counted in fight_summary.sf6lab_burnout_test. Set false when the test is done.
+sf6lab:
+  burnout_test: true
 setplay:
   enabled: true
   dash_travel: 1.25
